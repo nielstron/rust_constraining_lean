@@ -198,6 +198,19 @@ example :
       assign (field x 1) (int 2), move x])
       (.tuple [.int 1, .int 2]) := by
   native_decide
+example :
+    runsTo (top [letMut "x" (tuple [int 0, int 2]), assign (field x 0) (int 1), move x])
+      (.tuple [.int 1, .int 2]) := by
+  native_decide
+example :
+    runsTo (top [letMut "x" (tuple [int 1, int 1]), assign (field x 1) (int 2), move x])
+      (.tuple [.int 1, .int 2]) := by
+  native_decide
+example :
+    runsTo (top [letMut "x" (tuple [int 1, int 2]), letMut "y" (borrow (field x 1)),
+      letMut "z" (copy (deref y)), copy x])
+      (.tuple [.int 1, .int 2]) := by
+  native_decide
 
 example :
     invalid (top [letMut "x" (tuple [box (int 1), box (int 2)]), letMut "y" (move (field x 0)), move x]) := by
@@ -213,15 +226,40 @@ example : invalid (top [letMut "x" (int 0), letMut "y" (tuple [borrowMut x, borr
 example : invalid (top [letMut "x" (int 1), letMut "y" (tuple [borrow x, borrow x]),
   letMut "z" (move (field y 0)), move (deref z)]) := by
   native_decide
+example : invalid (top [letMut "x" (int 1), letMut "y" (tuple [borrow x, borrow x]),
+  letMut "z" (move (field y 1)), move (deref z)]) := by
+  native_decide
 example : invalid (top [letMut "x" (tuple [int 1, int 2]), letMut "y" (borrow (field x 0)), move (deref y)]) := by
   native_decide
 example : invalid (top [letMut "x" (int 0), letMut "y" (tuple [borrowMut x, int 1]), letMut "z" (borrowMut x)]) := by
   native_decide
 example : invalid (top [letMut "x" (int 0), letMut "y" (tuple [int 1, borrowMut x]), letMut "z" (borrowMut x)]) := by
   native_decide
+example : invalid (top [letMut "x" (int 0), letMut "y" (tuple [borrowMut x, borrowMut x, int 1])]) := by
+  native_decide
+example : invalid (top [letMut "x" (int 0), letMut "y" (tuple [borrowMut x, int 1, borrowMut x])]) := by
+  native_decide
+example : invalid (top [letMut "x" (int 0), letMut "y" (tuple [int 1, borrowMut x, borrowMut x])]) := by
+  native_decide
 example : invalid (top [letMut "x" (tuple [int 0, int 0]), letMut "y" (borrowMut (field x 0)), move x]) := by
   native_decide
 example : invalid (top [letMut "x" (tuple [int 0, int 0]), letMut "y" (borrowMut (field x 1)), move x]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (tuple [borrowMut x, int 2]),
+      letMut "z" (move (field y 0)), move y]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (tuple [int 2, borrowMut x]),
+      letMut "z" (move (field y 1)), move y]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (tuple [int 2, borrowMut x]),
+      letMut "z" (move y), move (field y 1)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (tuple [borrowMut x, int 2]),
+      letMut "z" (move y), move (field y 1)]) := by
   native_decide
 example :
     invalid (top [letMut "x" (tuple [box (int 1), box (int 2)]), letMut "y" (move (field x 0)),
@@ -243,10 +281,37 @@ example :
     invalid (top [letMut "x1" (int 1), letMut "x2" (int 2), letMut "y" (tuple [borrowMut x1, borrowMut x2]),
       letMut "z" (move (field y 0)), letMut "w" (move (field y 1)), move (deref z)]) := by
   native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (tuple [borrowMut x, int 2]),
+      letMut "z" (move (field y 0)), move (field y 0)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (tuple [int 2, borrowMut x]),
+      letMut "z" (move (field y 1)), move (field y 1)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (tuple [int 0, int 0]), assign (field x 0) (tuple [int 1, int 2])]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (tuple [int 0, int 0]), assign (field x 1) (tuple [int 1, int 2])]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (tuple [int 1, int 2]), letMut "y" (borrowMut (field x 0)), move (field x 0)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (tuple [int 1, int 2]), letMut "y" (borrowMut (field x 1)), move (field x 1)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (tuple [box (int 1), int 2]), letMut "y" (move (field x 0)),
+      letMut "z" (borrow x)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (tuple [box (int 1), int 2]), assign (field x 0) (borrow (var "y"))]) := by
+  native_decide
 
--- TODO: Port the remaining `TupleTests.java` cases. Parser-level forms such
--- as copying a tuple expression directly, e.g. `!(x,y)`, do not yet have a
--- source AST counterpart in this Lean translation.
+-- TODO: Parser-level tuple-copy forms such as `!(x,y)` do not have a source
+-- AST counterpart in this Lean translation; the source-level tuple tests from
+-- `TupleTests.java` are represented above.
 
 end TupleTests
 
@@ -279,6 +344,18 @@ example :
 example :
     runsTo (top [letMut "x" (int 1), letMut "y" (int 1), letMut "z" (borrow y),
       ifEq condX condX (inner [assign z (borrow x)]) (alt [])]) .unit := by
+  native_decide
+
+example :
+    runsTo (top [letMut "x" (int 1), letMut "y" (int 2), letMut "z" (borrow y),
+      ifEq condX condX (inner [assign z (borrow x)]) (alt []), letMut "w" (copy (deref z)), move w])
+      (.int 1) := by
+  native_decide
+
+example :
+    runsTo (top [letMut "x" (int 1), letMut "y" (int 2), letMut "z" (borrow y),
+      ifNe condX condX (inner [assign z (borrow x)]) (alt []), letMut "w" (copy (deref z)), move w])
+      (.int 2) := by
   native_decide
 
 example :
@@ -375,6 +452,10 @@ example :
     invalid (top [letMut "x" (int 1), letMut "y" (int 2), letMut "p" (borrow x),
       ifEq condX condX (inner [assign p (borrow y)]) (block [0, 1] []),
       move (deref p)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (int 2), letMut "z" (borrow y),
+      ifEq condX condX (inner [assign z (borrow x)]) (alt []), letMut "w" (move (deref z)), move w]) := by
   native_decide
 example :
     invalid (top [letMut "x" (int 1), letMut "y" (int 2), letMut "z" (borrow y),
@@ -499,6 +580,15 @@ abbrev fnInvalid (decls : List FunctionDeclaration) (program : Term) : Prop :=
 
 def fnBody (terms : List Term) : Term := block [1] terms
 
+example :
+    Signature.abstractParamLifetimes
+      [("x", .borrow false "a" (.borrow false "b" .int)), ("y", .borrow false "a" .int)] =
+        ["a", "b"] := by
+  native_decide
+
+example : (Signature.generateBindings ["a", "b"] [[0], [0, 0]]).length = 4 := by
+  native_decide
+
 def fConst : FunctionDeclaration :=
   { name := "f", params := [], ret := .int, body := fnBody [int 1] }
 
@@ -535,6 +625,11 @@ def idMutBorrowBorrowInt : FunctionDeclaration :=
     ret := .borrow true "a" (.borrow false "b" .int),
     body := fnBody [move (var "x")] }
 
+def idMutBorrowMutBorrowInt : FunctionDeclaration :=
+  { name := "id", params := [("x", .borrow true "a" (.borrow true "b" .int))],
+    ret := .borrow true "a" (.borrow true "b" .int),
+    body := fnBody [move (var "x")] }
+
 def idBoxBorrowInt : FunctionDeclaration :=
   { name := "id", params := [("x", .box (.borrow false "a" .int))],
     ret := .box (.borrow false "a" .int),
@@ -557,6 +652,10 @@ def boxToInt : FunctionDeclaration :=
   { name := "id", params := [("x", .box .int)], ret := .int,
     body := fnBody [copy (deref (var "x"))] }
 
+def borrowToInt : FunctionDeclaration :=
+  { name := "id", params := [("x", .borrow false "a" .int)], ret := .int,
+    body := fnBody [copy (deref (var "x"))] }
+
 def boxMutBorrowToMutBorrow : FunctionDeclaration :=
   { name := "id", params := [("x", .box (.borrow true "a" .int))], ret := .borrow true "a" .int,
     body := fnBody [move (deref (var "x"))] }
@@ -569,6 +668,54 @@ def returnMutSecond : FunctionDeclaration :=
 def returnMutFirst : FunctionDeclaration :=
   { name := "f", params := [("x", .borrow true "a" .int), ("y", .borrow true "b" .int)],
     ret := .borrow true "a" .int,
+    body := fnBody [move (var "x")] }
+
+def sharedReturnMutSecond : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" .int), ("y", .borrow true "a" .int)],
+    ret := .borrow true "a" .int,
+    body := fnBody [move (var "y")] }
+
+def sharedReturnFirst : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" .int), ("y", .borrow true "a" .int)],
+    ret := .borrow false "a" .int,
+    body := fnBody [move (var "x")] }
+
+def immReturnSecond : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" .int), ("y", .borrow false "b" .int)],
+    ret := .borrow false "b" .int,
+    body := fnBody [move (var "y")] }
+
+def immReturnFirst : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" .int), ("y", .borrow false "b" .int)],
+    ret := .borrow false "a" .int,
+    body := fnBody [move (var "x")] }
+
+def retNestedImmAsOuter : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" (.borrow false "b" .int)), ("y", .borrow false "a" .int)],
+    ret := .borrow false "a" .int,
+    body := fnBody [copy (deref (var "x"))] }
+
+def retSecondImm : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" (.borrow false "b" .int)), ("y", .borrow false "a" .int)],
+    ret := .borrow false "a" .int,
+    body := fnBody [move (var "y")] }
+
+def covarImmBorrow : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" (.borrow false "b" .int))],
+    ret := .borrow false "a" (.borrow false "a" .int),
+    body := fnBody [move (var "x")] }
+
+def mutBorrowReturnInnerImm : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow true "a" (.borrow false "b" .int))],
+    ret := .borrow false "a" .int,
+    body := fnBody [copy (deref (var "x"))] }
+
+def immBorrowCovarDecl : FunctionDeclaration :=
+  { name := "f",
+    params := [("x", .borrow false "a" (.borrow false "b" .int)),
+      ("y1", .borrow false "b" (.borrow false "c" .int)),
+      ("y2", .borrow false "d" (.borrow false "b" .int))],
+    ret := .borrow false "a" (.borrow false "d" .int),
     body := fnBody [move (var "x")] }
 
 def sideEffectImmFromMut : FunctionDeclaration :=
@@ -594,6 +741,21 @@ def sideEffectMutFromMut : FunctionDeclaration :=
     ret := .unit,
     body := fnBody [] }
 
+def sideEffectMutInnerFromImm : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow true "a" (.borrow true "b" .int)), ("y", .borrow false "b" .int)],
+    ret := .unit,
+    body := fnBody [] }
+
+def sideEffectImmFromUnrelatedImm : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow true "a" (.borrow false "b" .int)), ("y", .borrow false "c" .int)],
+    ret := .unit,
+    body := fnBody [] }
+
+def sideEffectMutFromUnrelatedMut : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow true "a" (.borrow true "b" .int)), ("y", .borrow true "c" .int)],
+    ret := .unit,
+    body := fnBody [] }
+
 def assignBorrowParam : FunctionDeclaration :=
   { name := "f", params := [("x", .borrow false "a" .int), ("y", .borrow false "a" .int)],
     ret := .unit,
@@ -612,6 +774,13 @@ def writeNestedBorrowParam : FunctionDeclaration :=
 def nestedParameterWitness : FunctionDeclaration :=
   { name := "f",
     params := [("x", .borrow true "a" (.borrow false "b" .int)), ("y", .borrow false "c" .int),
+      ("z", .borrow false "b" (.borrow false "c" .int))],
+    ret := .unit,
+    body := fnBody [] }
+
+def nestedSideEffectMutWitness : FunctionDeclaration :=
+  { name := "f",
+    params := [("x", .borrow true "a" (.borrow false "b" .int)), ("y", .borrow true "c" .int),
       ("z", .borrow false "b" (.borrow false "c" .int))],
     ret := .unit,
     body := fnBody [] }
@@ -655,6 +824,53 @@ def badReturnNestedMutDifferentLifetime : FunctionDeclaration :=
 def badLocalSideEffect : FunctionDeclaration :=
   { name := "f", params := [("x", .borrow true "a" (.borrow false "b" .int))], ret := .unit,
     body := fnBody [letMut "y" (int 0), assign (deref (var "x")) (borrow (var "y"))] }
+
+def badCovarImmBorrow : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" (.borrow false "b" .int)),
+      ("y", .borrow false "a" (.borrow false "a" .int))],
+    ret := .borrow false "a" (.borrow false "b" .int),
+    body := fnBody [move (var "y")] }
+
+def badMutContravarBodyUnknown : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow true "a" (.borrow false "b" .int))],
+    ret := .borrow true "a" (.borrow false "a" .int),
+    body := fnBody [move (var "y")] }
+
+def badMutContravar : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow false "a" (.borrow false "b" .int)),
+      ("y", .borrow true "a" (.borrow false "a" .int))],
+    ret := .borrow true "a" (.borrow false "b" .int),
+    body := fnBody [move (var "y")] }
+
+def badReturnInnerFromNestedMut : FunctionDeclaration :=
+  { name := "f", params := [("x", .borrow true "a" (.borrow false "b" .int)),
+      ("y", .borrow false "b" (.borrow false "c" .int))],
+    ret := .borrow false "c" .int,
+    body := fnBody [copy (deref (var "x"))] }
+
+def badImmBorrowContravarDecl : FunctionDeclaration :=
+  { name := "f",
+    params := [("x", .borrow false "a" (.borrow false "b" .int)),
+      ("y1", .borrow false "b" (.borrow false "c" .int)),
+      ("y2", .borrow false "d" (.borrow false "b" .int))],
+    ret := .borrow false "a" (.borrow false "c" .int),
+    body := fnBody [move (var "x")] }
+
+def badMutBorrowCovarDecl : FunctionDeclaration :=
+  { name := "f",
+    params := [("x", .borrow true "a" (.borrow false "b" .int)),
+      ("y1", .borrow false "b" (.borrow false "c" .int)),
+      ("y2", .borrow false "d" (.borrow false "b" .int))],
+    ret := .borrow true "a" (.borrow false "d" .int),
+    body := fnBody [move (var "x")] }
+
+def badMutBorrowContravarDecl : FunctionDeclaration :=
+  { name := "f",
+    params := [("x", .borrow true "a" (.borrow false "b" .int)),
+      ("y1", .borrow false "b" (.borrow false "c" .int)),
+      ("y2", .borrow false "d" (.borrow false "b" .int))],
+    ret := .borrow true "a" (.borrow false "c" .int),
+    body := fnBody [move (var "x")] }
 
 def badSharedReturnMutSecond : FunctionDeclaration :=
   { name := "f", params := [("x", .borrow false "a" .int), ("y", .borrow true "a" .int)],
@@ -712,6 +928,8 @@ example :
       (.int 1) := by
   native_decide
 
+example : fnRunsTo [idMutBorrowMutBorrowInt] (top [int 1]) (.int 1) := by native_decide
+
 example : fnRunsTo [idBoxBorrowInt] (top [int 1]) (.int 1) := by native_decide
 
 example : fnRunsTo [idBoxMutBorrowInt] (top [int 1]) (.int 1) := by native_decide
@@ -723,6 +941,8 @@ example : fnRunsTo [firstTupleInt] (top [call "first" [tuple [int 1, int 2]]]) (
   native_decide
 
 example : fnRunsTo [boxToInt] (top [int 1]) (.int 1) := by native_decide
+
+example : fnRunsTo [borrowToInt] (top [int 1]) (.int 1) := by native_decide
 
 example : fnRunsTo [boxMutBorrowToMutBorrow] (top [int 1]) (.int 1) := by native_decide
 
@@ -740,6 +960,69 @@ example :
         letMut "w" (call "f" [borrowMut (var "u"), borrowMut (var "v")]),
         letMut "a" (borrowMut (var "v"))])
       .unit := by
+  native_decide
+
+example :
+    fnRunsTo [sharedReturnMutSecond]
+      (top [letMut "u" (int 1), letMut "v" (int 2),
+        letMut "w" (call "f" [borrow (var "u"), borrowMut (var "v")]),
+        letMut "a" (borrowMut (var "u"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [sharedReturnFirst]
+      (top [letMut "u" (int 1), letMut "v" (int 2),
+        letMut "w" (call "f" [borrow (var "u"), borrowMut (var "v")]),
+        letMut "a" (borrowMut (var "v"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [immReturnSecond]
+      (top [letMut "u" (int 1), letMut "v" (int 2),
+        letMut "w" (call "f" [borrow (var "u"), borrow (var "v")]),
+        letMut "a" (borrowMut (var "u"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [immReturnFirst]
+      (top [letMut "u" (int 1), letMut "v" (int 2),
+        letMut "w" (call "f" [borrow (var "u"), borrow (var "v")]),
+        letMut "a" (borrowMut (var "v"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [retNestedImmAsOuter]
+      (top [letMut "u" (int 1), letMut "v" (borrow (var "u")),
+        letMut "w" (call "f" [borrow (var "v"), copy (var "v")]), copy (deref (var "w"))])
+      (.int 1) := by
+  native_decide
+
+example :
+    fnRunsTo [retSecondImm]
+      (top [letMut "u" (int 1), letMut "v" (borrow (var "u")),
+        letMut "w" (call "f" [borrow (var "v"), copy (var "v")]), copy (deref (var "w"))])
+      (.int 1) := by
+  native_decide
+
+example : fnRunsTo [immBorrowCovarDecl] (top []) .unit := by native_decide
+
+example :
+    fnRunsTo [covarImmBorrow]
+      (top [letMut "u" (int 1), letMut "v" (borrow (var "u")),
+        letMut "w" (call "f" [borrow (var "v")]), copy (deref (deref (var "w")))])
+      (.int 1) := by
+  native_decide
+
+example :
+    fnRunsTo [mutBorrowReturnInnerImm]
+      (top [letMut "u" (int 1),
+        block [0, 0] [letMut "v" (borrow (var "u")),
+          letMut "w" (call "f" [borrowMut (var "v")]), copy (deref (var "w"))]])
+      (.int 1) := by
   native_decide
 
 example :
@@ -767,6 +1050,50 @@ example :
         block [0, 0] [letMut "v" (int 2), letMut "p" (borrow (var "u")),
           block [0, 0, 0] [letMut "q" (borrow (var "v")),
             letMut "w" (call "f" [borrowMut (var "q"), borrow (var "u"), borrow (var "p")])]]])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [sideEffectMutInnerFromImm]
+      (top [letMut "u" (int 1), letMut "v" (int 2), letMut "p" (borrowMut (var "u")),
+        letMut "w" (call "f" [borrowMut (var "p"), borrow (var "v")]),
+        letMut "a" (borrowMut (var "v"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [sideEffectImmFromUnrelatedImm]
+      (top [letMut "u" (int 1), letMut "v" (int 2), letMut "p" (borrow (var "u")),
+        letMut "w" (call "f" [borrowMut (var "p"), borrow (var "v")]),
+        letMut "a" (borrowMut (var "v"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [sideEffectMutFromUnrelatedMut]
+      (top [letMut "u" (int 1), letMut "v" (int 2), letMut "p" (borrowMut (var "u")),
+        letMut "w" (call "f" [borrowMut (var "p"), borrowMut (var "v")]),
+        letMut "a" (borrowMut (var "v"))])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [nestedParameterWitness]
+      (top [letMut "u" (int 1),
+        block [0, 0] [letMut "v" (int 2), letMut "p" (borrow (var "u")),
+          block [0, 0, 0] [letMut "q" (borrow (var "v")),
+            call "f" [borrowMut (var "q"), borrow (var "u"), borrow (var "p")]],
+          letMut "a" (borrowMut (var "v"))]])
+      .unit := by
+  native_decide
+
+example :
+    fnRunsTo [nestedSideEffectMutWitness]
+      (top [letMut "u" (int 1),
+        block [0, 0] [letMut "v" (int 2), letMut "w" (int 3), letMut "p" (borrow (var "u")),
+          block [0, 0, 0] [letMut "q" (borrow (var "v")),
+            call "f" [borrowMut (var "q"), borrowMut (var "w"), borrow (var "p")],
+            letMut "a" (borrowMut (var "w"))]]])
       .unit := by
   native_decide
 
@@ -848,6 +1175,12 @@ example : fnInvalid [badLocalMutBorrowReturn] (top []) := by native_decide
 example : fnInvalid [badReturnMutDifferentLifetime] (top []) := by native_decide
 example : fnInvalid [badReturnNestedMutDifferentLifetime] (top []) := by native_decide
 example : fnInvalid [badLocalSideEffect] (top []) := by native_decide
+example : fnInvalid [badCovarImmBorrow] (top []) := by native_decide
+example : fnInvalid [badMutContravarBodyUnknown] (top []) := by native_decide
+example : fnInvalid [badMutContravar] (top []) := by native_decide
+example : fnInvalid [badImmBorrowContravarDecl] (top []) := by native_decide
+example : fnInvalid [badMutBorrowCovarDecl] (top []) := by native_decide
+example : fnInvalid [badMutBorrowContravarDecl] (top []) := by native_decide
 
 example :
     fnInvalid [badSharedReturnMutSecond]
@@ -864,10 +1197,31 @@ example :
   native_decide
 
 example :
+    fnInvalid [immReturnSecond]
+      (top [letMut "u" (int 1), letMut "v" (int 2),
+        letMut "w" (call "f" [borrow (var "u"), borrow (var "v")]),
+        letMut "a" (borrowMut (var "v"))]) := by
+  native_decide
+
+example :
+    fnInvalid [immReturnFirst]
+      (top [letMut "u" (int 1), letMut "v" (int 2),
+        letMut "w" (call "f" [borrow (var "u"), borrow (var "v")]),
+        letMut "a" (borrowMut (var "u"))]) := by
+  native_decide
+
+example :
     fnInvalid [writeNestedBorrowParam]
       (top [letMut "x" (int 0),
         block [0, 0] [letMut "p" (borrow (var "x")),
           block [0, 0, 0] [letMut "y" (int 1), call "f" [borrowMut (var "p"), borrow (var "y")]]]]) := by
+  native_decide
+
+example :
+    fnInvalid [badReturnInnerFromNestedMut]
+      (top [letMut "u" (int 1),
+        block [0, 0] [letMut "v" (borrow (var "u")), letMut "w" (borrow (var "u")),
+          letMut "x" (call "f" [borrowMut (var "v"), borrow (var "w")]), copy (deref (var "w"))]]) := by
   native_decide
 
 example :
@@ -877,9 +1231,25 @@ example :
           block [0, 0, 0] [letMut "p" (borrow (var "x")), call "f" [borrowMut (var "p"), borrow (var "y")]]]]) := by
   native_decide
 
--- TODO: Port the remaining `FunctionTests.java` lifetime-polymorphism cases
--- after `Functions.java`'s full subtype-driven `bind`/`lift` machinery is
--- translated.
+example :
+    fnInvalid [nestedParameterWitness]
+      (top [letMut "u" (int 1),
+        block [0, 0] [letMut "v" (int 2), letMut "p" (borrow (var "u")),
+          block [0, 0, 0] [letMut "q" (borrow (var "v")), call "f" [borrowMut (var "q"), borrow (var "u"), borrow (var "p")]],
+          letMut "a" (borrowMut (var "u"))]]) := by
+  native_decide
+
+example :
+    fnInvalid [nestedParameterWitness]
+      (top [letMut "u" (int 1),
+        block [0, 0] [letMut "v" (int 2), letMut "p" (borrow (var "u")),
+          block [0, 0, 0] [letMut "q" (borrow (var "v")), call "f" [borrowMut (var "q"), borrow (var "u"), borrow (var "p")],
+            letMut "a" (borrowMut (var "v"))]]]) := by
+  native_decide
+
+-- `FunctionTests.java` is represented here at the AST level. The Java file is
+-- parser-driven, so these examples intentionally check the translated checker
+-- and evaluator rather than a source-string parser.
 
 end FunctionTests
 

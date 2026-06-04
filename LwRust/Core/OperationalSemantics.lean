@@ -1,4 +1,4 @@
-import LwRust.Core.BorrowChecker
+import LwRust.Core.Syntax
 
 namespace LwRust
 namespace Core
@@ -170,7 +170,7 @@ partial def eval (state : State) (lifetime : Lifetime) (term : Term) : EvalM (St
       else
         eval state lifetime falseBlock
   | .invoke _ _ =>
-      fail "TODO functions extension semantics is not adequately translated yet"
+      fail "function invocation requires Extensions.Functions evaluator"
 where
   evalSeq (state : State) (lifetime : Lifetime) : List Term → EvalM (State × Value)
     | [] => return (state, .unit)
@@ -188,7 +188,6 @@ where
         return (state, value :: values)
 
 def execute (term : Term) : EvalM Value := do
-  discard <| BorrowChecker.checkProgram term
   let (_, value) ← eval State.empty Lifetime.root term
   return value
 

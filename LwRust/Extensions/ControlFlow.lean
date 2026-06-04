@@ -15,9 +15,10 @@ namespace ControlFlow
 def ifEq := Core.ifEq
 def ifNe := Core.ifNe
 
--- TODO: The Java file reserves opcodes for `if`, `while`, and `do while`, but
--- does not implement typing or semantics for them. They are therefore not
--- translated beyond this note.
+-- The Java file reserves opcodes for `if`, `while`, and `do while`, but does
+-- not implement syntax, typing, or semantics classes for them. The implemented
+-- extension surface is therefore just `IfElse`, represented by core `ifEq` and
+-- `ifNe` terms.
 
 end ControlFlow
 end Extensions

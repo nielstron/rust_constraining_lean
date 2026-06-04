@@ -1,3 +1,4 @@
+import LwRust.Core.BorrowChecker
 import LwRust.Core.OperationalSemantics
 import LwRust.Core.ProgramSpace
 
@@ -36,6 +37,31 @@ def invalidBool (program : Term) : Bool :=
 abbrev invalid (program : Term) : Prop :=
   invalidBool program = true
 
+namespace PathConflictTests
+
+def isOkTrue : Except String Bool → Bool
+  | .ok true => true
+  | _ => false
+
+def isOkFalse : Except String Bool → Bool
+  | .ok false => true
+  | _ => false
+
+def isPathElementError : Except String Bool → Bool
+  | .error "cannot compare path elements!" => true
+  | _ => false
+
+example : isOkTrue (Path.conflicts? [.deref] [.index 0]) = true := by native_decide
+example : isPathElementError (Path.conflicts? [.index 0] [.deref]) = true := by
+  native_decide
+example : Path.conflicts [.index 0] [.deref] = true := by native_decide
+example : isOkFalse (Path.conflicts? [.index 0] [.index 1]) = true := by native_decide
+example : isPathElementError (LVal.conflicts? (field x 0) (deref x)) = true := by
+  native_decide
+example : isOkFalse (LVal.conflicts? (field x 0) (deref y)) = true := by native_decide
+
+end PathConflictTests
+
 namespace ProgramSpaceTests
 
 def tinyConfig : ProgramSpace.Config :=
@@ -44,15 +70,56 @@ def tinyConfig : ProgramSpace.Config :=
 def tinyDefinedConfig : ProgramSpace.Config :=
   { intCount := 1, maxVariables := 2, maxBlockDepth := 1, maxBlockWidth := 2 }
 
+def tinyWidthTwoConfig : ProgramSpace.Config :=
+  { intCount := 1, maxVariables := 1, maxBlockDepth := 1, maxBlockWidth := 2 }
+
+def tinyDefinedCountConfig : ProgramSpace.Config :=
+  { intCount := 1, maxVariables := 1, maxBlockDepth := 1, maxBlockWidth := 2 }
+
+def tinyDefinedDepthConfig : ProgramSpace.Config :=
+  { intCount := 1, maxVariables := 1, maxBlockDepth := 2, maxBlockWidth := 2 }
+
+def smallDefinedConfig : ProgramSpace.Config :=
+  { intCount := 1, maxVariables := 2, maxBlockDepth := 2, maxBlockWidth := 2 }
+
+def smallDefinedTwoIntsConfig : ProgramSpace.Config :=
+  { intCount := 2, maxVariables := 2, maxBlockDepth := 2, maxBlockWidth := 2 }
+
 def allCheckWithoutUndeclaredErrors (programs : List Term) : Bool :=
   programs.all (fun program =>
     match BorrowChecker.checkProgram program with
     | .ok _ => true
     | .error msg => msg != "variable undeclared")
 
+partial def termUsesDerefLVal : Term → Bool
+  | .val _ => false
+  | .letMut _ initialiser => termUsesDerefLVal initialiser
+  | .assign lhs rhs => lhs.path.contains .deref || termUsesDerefLVal rhs
+  | .block _ terms => terms.any termUsesDerefLVal
+  | .access _ operand => operand.path.contains .deref
+  | .borrow _ operand => operand.path.contains .deref
+  | .box operand => termUsesDerefLVal operand
+  | .tuple terms => terms.any termUsesDerefLVal
+  | .ifElse _ lhs rhs trueBlock falseBlock =>
+      termUsesDerefLVal lhs || termUsesDerefLVal rhs || termUsesDerefLVal trueBlock ||
+        termUsesDerefLVal falseBlock
+  | .invoke _ args => args.any termUsesDerefLVal
+
 example : ProgramSpace.Config.render tinyConfig = "P{1,1,1,1}" := by native_decide
+example : (ProgramSpace.lvals ["x"]).contains (deref x) = true := by native_decide
 example : (ProgramSpace.domain tinyConfig).isEmpty = false := by native_decide
+example : (ProgramSpace.domain tinyConfig).length = 54 := by native_decide
+example : (ProgramSpace.domain tinyWidthTwoConfig).length = 2970 := by native_decide
+example : (ProgramSpace.domain tinyConfig).any termUsesDerefLVal = true := by native_decide
 example : (ProgramSpace.definedVariablePrograms tinyDefinedConfig 2).isEmpty = false := by native_decide
+example : (ProgramSpace.definedVariablePrograms tinyDefinedCountConfig 2).length = 74 := by native_decide
+example : (ProgramSpace.definedVariablePrograms tinyDefinedDepthConfig 2).length = 2960 := by native_decide
+example : (ProgramSpace.definedVariablePrograms tinyDefinedDepthConfig 3).length = 8436 := by native_decide
+example : (ProgramSpace.definedVariablePrograms smallDefinedConfig 2).length = 9332 := by native_decide
+example : (ProgramSpace.definedVariablePrograms smallDefinedTwoIntsConfig 2).length = 22824 := by native_decide
+example : (ProgramSpace.definedVariablePrograms smallDefinedTwoIntsConfig 3).length = 82360 := by native_decide
+example : (ProgramSpace.definedVariablePrograms tinyDefinedConfig 2).any termUsesDerefLVal = true := by
+  native_decide
 example : allCheckWithoutUndeclaredErrors (ProgramSpace.definedVariablePrograms tinyDefinedConfig 2) = true := by
   native_decide
 
@@ -102,6 +169,18 @@ example :
   native_decide
 
 example :
+    runsTo (top [letMut "x" (box (int 123)), letMut "y" (box (int 1)),
+      assign (deref y) (int 2), move (deref x)])
+      (.int 123) := by
+  native_decide
+
+example :
+    runsTo (top [letMut "x" (box (int 123)), letMut "y" (box (int 1)),
+      assign (deref y) (int 2), copy (deref x)])
+      (.int 123) := by
+  native_decide
+
+example :
     runsTo (top [letMut "x" (box (box (int 1))), assign (deref (deref x)) (int 123), copy (deref (deref x))]) (.int 123) := by
   native_decide
 
@@ -147,6 +226,11 @@ example :
       (.int 123) := by
   native_decide
 
+example :
+    runsTo (top [letMut "x" (inner [box (int 123)]), move (deref x)])
+      (.int 123) := by
+  native_decide
+
 example : runsTo (top [letMut "x" (int 123), letMut "y" (borrow x), copy (deref y)]) (.int 123) := by
   native_decide
 
@@ -171,6 +255,13 @@ example :
 
 example :
     runsTo (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)), letMut "z" (move (deref y)), copy (deref z)])
+      (.int 123) := by
+  native_decide
+
+example :
+    runsTo (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)),
+      letMut "z" (move (deref y)), assign (deref y) (move z), letMut "w" (move (deref y)),
+      copy (deref w)])
       (.int 123) := by
   native_decide
 
@@ -253,12 +344,23 @@ example :
       assign (deref y) (borrow (deref x))]) .unit := by
   native_decide
 
+example :
+    runsTo (top [letMut "x" (int 123), letMut "p" (inner [borrow x]), copy (deref p)])
+      (.int 123) := by
+  native_decide
+
+example :
+    runsTo (top [letMut "x" (int 123), letMut "p" (inner [borrowMut x]), copy (deref p)])
+      (.int 123) := by
+  native_decide
+
 example : invalid (top [letMut "x" (int 123), letMut "y" (move x), move x]) := by native_decide
 example : invalid (top [letMut "x" (box (int 1)), letMut "y" (copy x)]) := by native_decide
 example : invalid (top [letMut "x" (int 123), letMut "y" (borrowMut x), letMut "z" (copy y)]) := by native_decide
 example : invalid (top [letMut "x" (int 123), letMut "y" (borrowMut x), assign x (int 1)]) := by native_decide
 example : invalid (top [assign x (int 123)]) := by native_decide
 example : invalid (top [letMut "x" (int 123), assign y (int 123)]) := by native_decide
+example : invalid (top [letMut "x" (int 123), letMut "y" (borrow (var "y"))]) := by native_decide
 example : invalid (top [letMut "x" (box (int 1)), move x, move x]) := by native_decide
 example : invalid (top [letMut "x" (int 123), letMut "y" (borrow x), move (deref y)]) := by native_decide
 example : invalid (top [letMut "x" (int 123), borrow x]) := by native_decide
@@ -266,6 +368,12 @@ example : invalid (top [letMut "x" (int 123), letMut "y" (borrow x), move y]) :=
 example : invalid (top [inner [letMut "x" (int 123), letMut "y" (borrow x), move y]]) := by native_decide
 example : invalid (top [letMut "x" (int 123), letMut "y" (borrow x), inner [move y]]) := by native_decide
 example : invalid (top [letMut "x" (int 123), inner [letMut "y" (int 1)], assign y (int 123)]) := by native_decide
+example : invalid (top [letMut "x" (int 1), letMut "y" (borrow x), inner [letMut "z" (int 1), assign y (borrow z)]]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (int 0)),
+      inner [letMut "z" (borrow x), assign z (borrow y)]]) := by
+  native_decide
 example : invalid (top [letMut "x" (box (int 1)), letMut "y" (move x), assign (deref x) (int 123)]) := by native_decide
 example : invalid (top [letMut "x" (int 0), assign (deref x) (int 0)]) := by native_decide
 example : invalid (top [letMut "x" (box (int 1)), letMut "y" (borrow x), move x, move (deref y)]) := by native_decide
@@ -278,6 +386,42 @@ example :
   native_decide
 example :
     invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)), letMut "z" (move (deref y)), move (deref z)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)),
+      letMut "z" (move (deref y)), assign (deref y) (move z), letMut "w" (move (deref y)),
+      move (deref w)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)), letMut "z" (copy (deref y))]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)),
+      letMut "z" (move (deref y)), assign (deref y) (copy z)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)),
+      letMut "z" (move (deref y)), letMut "w" (move (deref y))]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)),
+      letMut "z" (copy (deref y)), letMut "w" (move (deref y))]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (borrowMut x)),
+      letMut "z" (move (deref y)), letMut "w" (copy (deref y))]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (box (move x))),
+      letMut "z" (move (deref y)), letMut "w" (move (deref y))]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (box (move x))),
+      letMut "z" (copy (deref y)), letMut "w" (move (deref y))]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (box (move x))),
+      letMut "z" (move (deref y)), letMut "w" (copy (deref y))]) := by
   native_decide
 example :
     invalid (top [letMut "x" (int 123), letMut "y" (borrow x), letMut "z" (borrowMut y), move (deref (deref z))]) := by
@@ -321,6 +465,14 @@ example :
     invalid (top [letMut "x" (int 1), letMut "y" (borrowMut x), letMut "z" (borrowMut (deref y)),
       letMut "w" (borrowMut (deref z)), move (deref z)]) := by
   native_decide
+example :
+    invalid (top [letMut "x" (int 0), letMut "y" (borrowMut x), letMut "z" (borrowMut y),
+      assign (deref z) (move z)]) := by
+  native_decide
+example :
+    invalid (top [letMut "x" (int 0), letMut "y" (borrowMut x), letMut "z" (borrowMut y),
+      assign (deref z) (copy z)]) := by
+  native_decide
 
 example :
     invalid (top [letMut "x" (int 1), letMut "y" (borrowMut x), letMut "z" (borrow (deref y)),
@@ -347,10 +499,48 @@ example :
       letMut "q" (borrowMut p), assign (deref q) (borrow x2), letMut "w" (borrowMut (deref (deref q)))]) := by
   native_decide
 
+example :
+    invalid (top [letMut "x1" (int 1), letMut "x2" (int 1), letMut "p" (borrowMut x1),
+      inner [letMut "q" (borrowMut p), assign (deref q) (borrowMut x2),
+        assign (deref (deref q)) (int 123)], move x2]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x1" (int 1), letMut "x2" (int 2), letMut "x3" (int 3),
+      letMut "p" (borrowMut x1),
+      inner [letMut "q" (borrowMut p), assign (deref q) (borrowMut x2),
+        assign (deref q) (borrowMut (var "x3"))], move x2]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x1" (int 1), letMut "x2" (int 2), letMut "x3" (int 3), letMut "x4" (int 4),
+      letMut "p1" (borrowMut x1), letMut "p2" (borrowMut x2), letMut "p3" (borrowMut (var "x3")),
+      letMut "q" (borrowMut (var "p1")),
+      inner [letMut "w" (borrowMut (var "q")), assign (deref (var "w")) (borrowMut (var "p2")),
+        assign (deref (var "w")) (borrowMut (var "p3"))],
+      assign (deref (var "q")) (borrowMut (var "x4")), move (var "x4")]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x1" (int 1), letMut "x2" (int 2), letMut "x3" (int 3), letMut "x4" (int 4),
+      letMut "p1" (borrowMut x1), letMut "p2" (borrowMut x2),
+      inner [letMut "p3" (borrowMut (var "x3")), letMut "q" (borrowMut (var "p1")),
+        inner2 [letMut "w" (borrowMut (var "q")), assign (deref (var "w")) (borrowMut (var "p2")),
+          assign (deref (var "w")) (borrowMut (var "p3"))],
+        assign (deref (var "q")) (borrowMut (var "x4"))],
+      move (var "x4")]) := by
+  native_decide
+
 example : invalid (top [letMut "x" (int 0), letMut "y" (borrow x), assign y (borrow (deref y))]) := by
   native_decide
 
 example : invalid (top [letMut "x" (int 0), letMut "y" (borrowMut x), assign y (borrowMut (deref y))]) := by
+  native_decide
+
+example : invalid (top [letMut "x" (int 0), letMut "y" (borrowMut x), assign y (borrowMut x)]) := by
+  native_decide
+
+example : invalid (top [letMut "x" (int 0), inner [letMut "y" (borrowMut x), assign y (borrow y)]]) := by
   native_decide
 
 example :
@@ -361,6 +551,134 @@ example :
 example :
     invalid (top [letMut "x" (int 0), letMut "y" (borrowMut x), letMut "z" (borrowMut (deref y)),
       assign y (borrowMut (deref z))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "y" (int 13), letMut "u" (borrowMut y), letMut "x" (borrowMut (var "u")),
+      assign (deref (var "x")) (borrowMut (deref (var "u")))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (int 234),
+      letMut "bx" (box (borrowMut x)), letMut "p" (move (deref (var "bx"))),
+      letMut "q" (move (var "bx"))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (int 234),
+      letMut "bx" (box (box (move x))), letMut "p" (move (deref (var "bx"))),
+      letMut "q" (move (var "bx"))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (int 234),
+      letMut "bx" (box (borrowMut x)), letMut "by" (box (borrowMut y)),
+      letMut "p" (move (deref (var "bx"))), letMut "q" (move (var "by")),
+      assign (var "q") (move (var "bx"))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (int 234),
+      letMut "bx" (box (box (move x))), letMut "by" (box (box (move y))),
+      letMut "p" (move (deref (var "bx"))), letMut "q" (move (var "by")),
+      assign (var "q") (move (var "bx"))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (int 234),
+      letMut "bx" (box (borrowMut x)), letMut "by" (box (borrowMut y)),
+      letMut "p" (move (deref (var "bx"))), letMut "q" (box (move (var "by"))),
+      assign (deref (var "q")) (move (var "bx"))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (int 234),
+      letMut "bx" (box (box (move x))), letMut "by" (box (box (move y))),
+      letMut "p" (move (deref (var "bx"))), letMut "q" (box (move (var "by"))),
+      assign (deref (var "q")) (move (var "bx"))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (box (box (move x))),
+      letMut "z" (move (deref y)), letMut "w" (borrow y)]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 123), letMut "y" (borrow x), letMut "z" (borrowMut y),
+      assign (deref (deref z)) (int 1)]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x1" (int 1), letMut "x2" (int 123), letMut "y" (borrow x1),
+      letMut "z" (borrowMut y), assign (deref z) (borrowMut x2)]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (box (borrowMut x)),
+      assign (deref (deref y)) (int 123), move (deref (deref y))]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (box (int 1)), letMut "y" (borrowMut x),
+      assign (deref (deref y)) (int 123), move (deref (deref y))]) := by
+  native_decide
+
+example : invalid (top [letMut "x" (int 123), borrowMut x]) := by native_decide
+example : invalid (top [inner [letMut "x" (int 123), borrowMut x]]) := by native_decide
+example : invalid (top [letMut "x" (int 123), inner [borrowMut x]]) := by native_decide
+example : invalid (top [letMut "x" (int 123), letMut "y" (borrowMut x), move y]) := by native_decide
+example : invalid (top [inner [letMut "x" (int 123), letMut "y" (borrowMut x), move y]]) := by
+  native_decide
+example : invalid (top [letMut "x" (int 123), letMut "y" (borrowMut x), inner [move y]]) := by
+  native_decide
+example : invalid (top [inner [letMut "x" (int 123)], borrowMut x]) := by native_decide
+
+example :
+    invalid (top [letMut "x" (box (int 0)), inner [letMut "y" (borrowMut x), assign (deref x) (int 0)]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 0), inner [letMut "y" (borrowMut x), assign (deref y) (move x)]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 0), inner [letMut "y" (borrowMut x), assign (deref y) (copy x)]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (box (int 0)),
+      inner [letMut "y" (borrowMut x), assign (deref y) (box (move (deref x))) ]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (box (int 0)),
+      inner [letMut "y" (borrowMut x), assign (deref y) (box (copy (deref x))) ]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 0), inner [letMut "y" (box (borrowMut x)), assign x (move x)]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 0), inner [letMut "y" (box (borrowMut x)), assign x (copy x)]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 0), inner [letMut "y" (box (borrowMut x)), assign (deref y) (borrowMut y)]]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (int 1), letMut "z" (borrowMut x),
+      letMut "p" (borrowMut z), assign (deref p) (borrowMut y), move x]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 1), letMut "y" (int 1), letMut "p" (box (borrowMut x)),
+      assign (deref p) (borrowMut y), move y]) := by
+  native_decide
+
+example :
+    invalid (top [letMut "x" (int 0), inner [letMut "y" (borrow x), assign y (borrow (deref y))]]) := by
   native_decide
 
 example :

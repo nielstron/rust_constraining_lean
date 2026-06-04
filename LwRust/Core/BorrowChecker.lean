@@ -368,7 +368,7 @@ partial def checkTerm (env : Env) (lifetime : Lifetime) (term : Term) : CheckM (
         else
           return (env, ← Ty.union trueTy falseTy)
   | .invoke _ _ =>
-      fail "TODO functions extension typing is not adequately translated yet"
+      fail "function invocation requires Extensions.Functions checker"
 where
   checkSeq (env : Env) (lifetime : Lifetime) : List Term → CheckM (Env × Ty)
     | [] => return (env, .unit)

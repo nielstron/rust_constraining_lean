@@ -38,18 +38,25 @@ abbrev Path := List PathElem
 
 namespace Path
 
+def elemConflicts? : PathElem → PathElem → Except String Bool
+  | .deref, _ => .ok true
+  | .index i, .index j => .ok (i == j)
+  | .index _, .deref => .error "cannot compare path elements!"
+
+def conflicts? : Path → Path → Except String Bool
+  | [], _ => .ok true
+  | _, [] => .ok true
+  | x :: xs, y :: ys => do
+      if ← elemConflicts? x y then
+        conflicts? xs ys
+      else
+        .ok false
+
 def conflicts : Path → Path → Bool
-  | [], _ => true
-  | _, [] => true
-  | x :: xs, y :: ys =>
-      let elemConflict :=
-        match x, y with
-        | .deref, .deref => true
-        | .index i, .index j => i == j
-        -- TODO: Java throws for incomparable extension elements; the executable
-        -- Lean model treats mixed elements conservatively as conflicting.
-        | _, _ => true
-      elemConflict && conflicts xs ys
+  | lhs, rhs =>
+      match conflicts? lhs rhs with
+      | .ok result => result
+      | .error _ => true
 
 end Path
 
@@ -66,6 +73,12 @@ def index (lv : LVal) (i : Nat) : LVal := { lv with path := lv.path ++ [.index i
 
 def conflicts (lhs rhs : LVal) : Bool :=
   lhs.name == rhs.name && Path.conflicts lhs.path rhs.path
+
+def conflicts? (lhs rhs : LVal) : Except String Bool :=
+  if lhs.name == rhs.name then
+    Path.conflicts? lhs.path rhs.path
+  else
+    .ok false
 
 def traverse (lv : LVal) (p : Path) (i : Nat) : LVal :=
   { lv with path := lv.path ++ p.drop i }
