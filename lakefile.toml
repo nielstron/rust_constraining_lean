@@ -1,0 +1,10 @@
+name = "lw_rust"
+version = "0.1.0"
+defaultTargets = ["lw_rust"]
+
+[[lean_lib]]
+name = "LwRust"
+
+[[lean_exe]]
+name = "lw_rust"
+root = "Main"
