@@ -129,8 +129,9 @@ mutual
         Checks env lifetime (.val .unit) env Ty.unit
     | int {env : Env} {lifetime : Lifetime} (n : Int) :
         Checks env lifetime (.val (.int n)) env Ty.int
-    | runtimeTuple {env : Env} {lifetime : Lifetime} {fields : List Value} :
-        Checks env lifetime (.val (.tuple fields)) env (Ty.tuple (fields.map (fun _ => Ty.unit)))
+    | runtimeTuple {env : Env} {lifetime : Lifetime} {fields : List Value} {tys : List Ty} :
+        ValuesHaveTypes fields tys →
+        Checks env lifetime (.val (.tuple fields)) env (Ty.tuple tys)
     | accessCopy {env : Env} {lifetime : Lifetime} {lv : LVal} {ty : Ty} {targetLifetime : Lifetime} :
         BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
         BorrowChecker.Ty.defined ty = true →
@@ -229,6 +230,10 @@ mutual
         ChecksTerms env lifetime (term :: terms) n env₃ (ty :: tys) (("?" ++ toString n) :: names)
 end
 
+/--
+Paper Section 3 operational reduction relation, with evaluation contexts from
+Paper Definition 3.5 represented directly as congruence constructors.
+-/
 inductive Step : State → Lifetime → Term → State → Term → Prop where
   | copy {state : State} {lifetime : Lifetime} {lv : LVal} {value : Value} :
       state.readLVal lv = .ok value →
@@ -260,8 +265,22 @@ inductive Step : State → Lifetime → Term → State → Term → Prop where
   | blockValue {state : State} {lifetime blockLifetime : Lifetime} {value : Value} :
       Step state lifetime (.block blockLifetime [.val value])
         (state.dropLifetime blockLifetime) (.val value)
+  | blockSingleSub {state state' : State} {lifetime blockLifetime : Lifetime}
+      {term term' : Term} :
+      Step state blockLifetime term state' term' →
+      Step state lifetime (.block blockLifetime [term])
+        state' (.block blockLifetime [term'])
   | tupleValues {state : State} {lifetime : Lifetime} {values : List Value} :
       Step state lifetime (.tuple (values.map Term.val)) state (.val (.tuple values))
+  | tupleHeadSub {state state' : State} {lifetime : Lifetime}
+      {term term' : Term} {rest : List Term} :
+      Step state lifetime term state' term' →
+      Step state lifetime (.tuple (term :: rest)) state' (.tuple (term' :: rest))
+  | tupleTailSub {state state' : State} {lifetime : Lifetime}
+      {value : Value} {next : Term} {rest terms' : List Term} :
+      Step state lifetime (.tuple (next :: rest)) state' (.tuple terms') →
+      Step state lifetime (.tuple (.val value :: next :: rest))
+        state' (.tuple (.val value :: terms'))
   | ifTrue {state : State} {lifetime : Lifetime} {eq : Bool}
       {lhsValue rhsValue : Value} {trueBlock falseBlock : Term} :
       (lhsValue == rhsValue) = eq →
@@ -272,6 +291,16 @@ inductive Step : State → Lifetime → Term → State → Term → Prop where
       (lhsValue == rhsValue) ≠ eq →
       Step state lifetime (.ifElse eq (.val lhsValue) (.val rhsValue) trueBlock falseBlock)
         state falseBlock
+  | ifLhsSub {state state' : State} {lifetime : Lifetime} {eq : Bool}
+      {lhs lhs' rhs trueBlock falseBlock : Term} :
+      Step state lifetime lhs state' lhs' →
+      Step state lifetime (.ifElse eq lhs rhs trueBlock falseBlock)
+        state' (.ifElse eq lhs' rhs trueBlock falseBlock)
+  | ifRhsSub {state state' : State} {lifetime : Lifetime} {eq : Bool}
+      {lhsValue : Value} {rhs rhs' trueBlock falseBlock : Term} :
+      Step state lifetime rhs state' rhs' →
+      Step state lifetime (.ifElse eq (.val lhsValue) rhs trueBlock falseBlock)
+        state' (.ifElse eq (.val lhsValue) rhs' trueBlock falseBlock)
   | boxSub {state state' : State} {lifetime : Lifetime} {term term' : Term} :
       Step state lifetime term state' term' →
       Step state lifetime (.box term) state' (.box term')
@@ -291,6 +320,10 @@ inductive Step : State → Lifetime → Term → State → Term → Prop where
       Step state lifetime (.block blockLifetime (.val value :: next :: rest))
         state (.block blockLifetime (next :: rest))
 
+/--
+Paper Lemma 4.11 uses the reflexive-transitive closure of the reduction
+relation; this is that multi-step relation.
+-/
 inductive MultiStep : State → Lifetime → Term → State → Term → Prop where
   | refl {state : State} {lifetime : Lifetime} {term : Term} :
       MultiStep state lifetime term state term
@@ -299,9 +332,38 @@ inductive MultiStep : State → Lifetime → Term → State → Term → Prop wh
       MultiStep state₂ lifetime term₂ state₃ term₃ →
       MultiStep state₁ lifetime term₁ state₃ term₃
 
+/--
+Paper Lemmas 4.10 and 4.11 distinguish terminal states, represented here as
+terms already reduced to a runtime value.
+-/
 def Terminal : Term → Prop
   | .val _ => True
   | _ => False
+
+theorem terminal_iff_value (term : Term) :
+    Terminal term ↔ ∃ value, term = .val value := by
+  cases term <;> simp [Terminal]
+
+theorem value_terminal (value : Value) :
+    Terminal (.val value) := by
+  trivial
+
+theorem value_no_step {state state' : State} {lifetime : Lifetime}
+    {value : Value} {term' : Term} :
+    ¬ Step state lifetime (.val value) state' term' := by
+  intro h
+  cases h
+
+theorem multistep_value_inv {state finalState : State} {lifetime : Lifetime}
+    {value : Value} {term : Term} :
+    MultiStep state lifetime (.val value) finalState term →
+    finalState = state ∧ term = .val value := by
+  intro h
+  cases h with
+  | refl =>
+      exact ⟨rfl, rfl⟩
+  | trans hstep _ =>
+      exact False.elim (value_no_step hstep)
 
 end Paper
 end LwRust
