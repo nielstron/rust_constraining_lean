@@ -34,7 +34,7 @@ theorem progress_move_of_read_write {state state' : State} {lifetime : Lifetime}
 
 theorem progress_borrow_of_locate {state : State} {lifetime : Lifetime}
     {mutable : Bool} {lv : LVal} {ref : Reference} :
-    OperationalSemantics.locate state lv = .ok ref →
+    locate state lv = .ok ref →
     ∃ state' term', Step state lifetime (.borrow mutable lv) state' term' := by
   intro hloc
   exact ⟨state, .val (.ref ref.borrowed), Step.borrow hloc⟩
@@ -254,10 +254,18 @@ theorem progress_for_checks {state : State} {env env' : Env} {lifetime : Lifetim
     exact progress_let_mut_context (ih hwf henv)
   · intro env env₁ env₂ lifetime targetLifetime lhs rhs lhsTy rhsTy
       htype hrhs _ _ _ hwriteProhibited ih hwf henv
-    -- TODO: Finish with `progress_assign_context`; the value case requires
-    -- preservation for evaluating `rhs`, because `assign_write_progress` needs
-    -- the final state's environment abstraction, not only the initial one.
-    sorry
+    right
+    cases ih hwf henv with
+    | inr hstep =>
+        rcases hstep with ⟨state', rhs', hstep⟩
+        exact ⟨state', .assign lhs rhs', Step.assignSub hstep⟩
+    | inl hterminal =>
+        rcases (terminal_iff_value rhs).mp hterminal with ⟨value, hrhsValue⟩
+        subst hrhsValue
+        -- TODO: The terminal RHS case needs a preservation lemma showing that
+        -- the checked RHS value abstracts `rhsTy` and that the environment used
+        -- by `assign_write_progress` is the post-RHS environment.
+        sorry
   · intro env env' lifetime blockLifetime terms ty hseq _ _ ihseq hwf henv
     right
     -- TODO: This needs a weakening lemma from the ambient lifetime to the block
@@ -269,10 +277,18 @@ theorem progress_for_checks {state : State} {env env' : Env} {lifetime : Lifetim
   · intro env env₁ env₂ env₃ trueEnv falseEnv joinedEnv lifetime eq lhs rhs
       trueBlock falseBlock lhsTy rhsTy trueTy falseTy resultTy fresh _ hlhs hrhs _
       _ _ _ _ _ _ _ _ ihlhs ihrhs _ _ hwf henv
-    -- TODO: Use `progress_if_context`.  The RHS recursive hypothesis requires
-    -- `env_abstracts_put_type_only` and `well_formed_put_type_only` for the
-    -- checker-only fresh binding, plus preservation after evaluating `lhs`.
-    sorry
+    cases ihlhs hwf henv with
+    | inr hstep =>
+        right
+        rcases hstep with ⟨state', lhs', hstep⟩
+        exact ⟨state', .ifElse eq lhs' rhs trueBlock falseBlock, Step.ifLhsSub hstep⟩
+    | inl hterminal =>
+        rcases (terminal_iff_value lhs).mp hterminal with ⟨lhsValue, hlhsValue⟩
+        subst hlhsValue
+        -- TODO: The terminal LHS case needs `env_abstracts_put_type_only`,
+        -- `well_formed_put_type_only`, and preservation for the checked LHS
+        -- value before applying the RHS recursive hypothesis.
+        sorry
   · intro env lifetime hwf henv outerLifetime
     exact progress_block_empty
   · intro env env' lifetime term ty hterm ih hwf henv outerLifetime
@@ -284,10 +300,22 @@ theorem progress_for_checks {state : State} {env env' : Env} {lifetime : Lifetim
     simpa using (progress_tuple_values (state := state) (lifetime := lifetime) (values := []))
   · intro env env₁ env₂ env₃ lifetime term terms n ty tys names hterm htemp hterms
       ihterm ihterms hwf henv
-    -- TODO: If the head term steps, `progress_tuple_head_context` applies.  If
-    -- the head is a value, use `value_typing`, `env_abstracts_put_type_only`,
-    -- and `well_formed_put_type_only` to recurse on the tail.
-    sorry
+    cases ihterm hwf henv with
+    | inr hstep =>
+        exact progress_tuple_head_context hstep
+    | inl hterminal =>
+        rcases (terminal_iff_value term).mp hterminal with ⟨value, htermValue⟩
+        subst htermValue
+        cases hterms with
+        | nil =>
+            simpa using
+              (progress_tuple_values (state := state) (lifetime := lifetime) (values := [value]))
+        | cons =>
+            -- TODO: If the head is a value and the tail is nonempty, use
+            -- `value_typing`, `env_abstracts_put_type_only`, and
+            -- `well_formed_put_type_only` to recurse on the tail, then lift
+            -- with `progress_tuple_tail_context`.
+            sorry
 
 /--
 Paper Lemma 4.10 (Progress).

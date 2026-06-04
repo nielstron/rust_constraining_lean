@@ -17,7 +17,7 @@ theorem alias_preservation_value_multistep {state finalState : State} {lifetime 
     ValidState state (.val value) →
     ValidState finalState (.val finalValue) := by
   intro hmulti hvalid
-  have hinv := multistep_value_inv hmulti
+  have hinv := multistep_terminal_inv (value_terminal value) hmulti
   rcases hinv with ⟨hstate, hterm⟩
   cases hstate
   cases hterm
@@ -35,11 +35,31 @@ theorem preservation_value_multistep {state finalState : State} {lifetime : Life
     ValueAbstracts state value ty →
     finalState = state ∧ finalValue = value ∧ ValueAbstracts finalState finalValue ty := by
   intro hmulti habs
-  have hinv := multistep_value_inv hmulti
+  have hinv := multistep_terminal_inv (value_terminal value) hmulti
   rcases hinv with ⟨hstate, hterm⟩
   cases hstate
   cases hterm
   exact ⟨rfl, rfl, habs⟩
+
+/--
+Paper Lemma 9.10 (Store Preservation), value/multi-step base case.
+
+Checking a runtime value leaves the type environment unchanged, and a value
+state cannot take a nontrivial step.
+-/
+theorem store_preservation_value_multistep {state finalState : State} {lifetime : Lifetime}
+    {value finalValue : Value} {env env' : Env} {ty : Ty} :
+    MultiStep state lifetime (.val value) finalState (.val finalValue) →
+    Checks env lifetime (.val value) env' ty →
+    EnvAbstracts state env →
+    EnvAbstracts finalState env' := by
+  intro hmulti hcheck henv
+  have hinv := multistep_terminal_inv (value_terminal value) hmulti
+  have henvEq := value_typing hcheck
+  rcases hinv with ⟨hstate, _⟩
+  cases hstate
+  cases henvEq
+  exact henv
 
 /--
 Paper Lemma 9.8 (Alias Preservation).
@@ -57,8 +77,48 @@ theorem alias_preservation :
     Checks env lifetime term env' ty →
     MultiStep state lifetime term finalState (.val value) →
     ValidState finalState (.val value) := by
-  -- TODO: Port Paper Lemma 9.8 for all reduction cases.
-  sorry
+  intro state term finalState value storeTyping env env' lifetime ty
+    hvalid hstore hwf henv hcheck hsteps
+  cases hcheck with
+  | unit =>
+      exact alias_preservation_value_multistep hsteps hvalid
+  | int n =>
+      exact alias_preservation_value_multistep hsteps hvalid
+  | runtimeTuple hfields =>
+      exact alias_preservation_value_multistep hsteps hvalid
+  | accessCopy =>
+      -- TODO: Paper Lemma 9.8, read/copy case.
+      sorry
+  | accessTemp =>
+      -- TODO: Paper Lemma 9.8, read/temp case.
+      sorry
+  | accessMove =>
+      -- TODO: Paper Lemma 9.8, move case.
+      sorry
+  | borrowImm =>
+      -- TODO: Paper Lemma 9.8, immutable-borrow case.
+      sorry
+  | borrowMut =>
+      -- TODO: Paper Lemma 9.8, mutable-borrow case.
+      sorry
+  | box =>
+      -- TODO: Paper Lemma 9.8, box allocation case.
+      sorry
+  | letMut =>
+      -- TODO: Paper Lemma 9.8, local allocation case.
+      sorry
+  | assign =>
+      -- TODO: Paper Lemma 9.8, assignment/write case.
+      sorry
+  | block =>
+      -- TODO: Paper Lemma 9.8, block/drop-lifetime case.
+      sorry
+  | tuple =>
+      -- TODO: Paper Lemma 9.8, tuple evaluation-context case.
+      sorry
+  | ifElse =>
+      -- TODO: Paper Lemma 9.8, conditional case.
+      sorry
 
 /--
 Paper Lemma 9.9 (Value Preservation).
@@ -76,8 +136,54 @@ theorem value_preservation :
     Checks env lifetime term env' ty →
     MultiStep state lifetime term finalState (.val value) →
     ValueAbstracts finalState value ty := by
-  -- TODO: Port Paper Lemma 9.9 for all typing and reduction cases.
-  sorry
+  intro state term finalState value storeTyping env env' lifetime ty
+    hvalid hstore hwf henv hcheck hsteps
+  cases hcheck with
+  | unit =>
+      rcases preservation_value_multistep hsteps (ValueAbstracts.unit (state := state)) with
+        ⟨_, _, hvalue⟩
+      exact hvalue
+  | int n =>
+      rcases preservation_value_multistep hsteps (ValueAbstracts.int (state := state) n) with
+        ⟨_, _, hvalue⟩
+      exact hvalue
+  | runtimeTuple hfields =>
+      -- TODO: Paper Lemma 9.9, runtime tuple value case.  This needs the bridge
+      -- from store-free `ValuesHaveTypes` to store-aware `ValuesAbstract`.
+      sorry
+  | accessCopy =>
+      -- TODO: Paper Lemma 9.9, read/copy case.
+      sorry
+  | accessTemp =>
+      -- TODO: Paper Lemma 9.9, read/temp case.
+      sorry
+  | accessMove =>
+      -- TODO: Paper Lemma 9.9, move case.
+      sorry
+  | borrowImm =>
+      -- TODO: Paper Lemma 9.9, immutable-borrow case.
+      sorry
+  | borrowMut =>
+      -- TODO: Paper Lemma 9.9, mutable-borrow case.
+      sorry
+  | box =>
+      -- TODO: Paper Lemma 9.9, box allocation case.
+      sorry
+  | letMut =>
+      -- TODO: Paper Lemma 9.9, local allocation case.
+      sorry
+  | assign =>
+      -- TODO: Paper Lemma 9.9, assignment/write case.
+      sorry
+  | block =>
+      -- TODO: Paper Lemma 9.9, block/drop-lifetime case.
+      sorry
+  | tuple =>
+      -- TODO: Paper Lemma 9.9, tuple evaluation-context case.
+      sorry
+  | ifElse =>
+      -- TODO: Paper Lemma 9.9, conditional case.
+      sorry
 
 /--
 Paper Lemma 9.10 (Store Preservation).
@@ -95,8 +201,49 @@ theorem store_preservation :
     Checks env lifetime term env' ty →
     MultiStep state lifetime term finalState (.val value) →
     EnvAbstracts finalState env' := by
-  -- TODO: Port Paper Lemma 9.10 for all typing and reduction cases.
-  sorry
+  intro state term finalState value storeTyping env env' lifetime ty
+    hvalid hstore hwf henv hcheck hsteps
+  cases hcheck with
+  | unit =>
+      exact store_preservation_value_multistep hsteps (Checks.unit (env := env) (lifetime := lifetime)) henv
+  | int n =>
+      exact store_preservation_value_multistep hsteps (Checks.int (env := env) (lifetime := lifetime) n) henv
+  | runtimeTuple hfields =>
+      exact store_preservation_value_multistep hsteps
+        (Checks.runtimeTuple (env := env) (lifetime := lifetime) hfields) henv
+  | accessCopy =>
+      -- TODO: Paper Lemma 9.10, read/copy case.
+      sorry
+  | accessTemp =>
+      -- TODO: Paper Lemma 9.10, read/temp case.
+      sorry
+  | accessMove =>
+      -- TODO: Paper Lemma 9.10, move case.
+      sorry
+  | borrowImm =>
+      -- TODO: Paper Lemma 9.10, immutable-borrow case.
+      sorry
+  | borrowMut =>
+      -- TODO: Paper Lemma 9.10, mutable-borrow case.
+      sorry
+  | box =>
+      -- TODO: Paper Lemma 9.10, box allocation case.
+      sorry
+  | letMut =>
+      -- TODO: Paper Lemma 9.10, local allocation case.
+      sorry
+  | assign =>
+      -- TODO: Paper Lemma 9.10, assignment/write case.
+      sorry
+  | block =>
+      -- TODO: Paper Lemma 9.10, block/drop-lifetime case.
+      sorry
+  | tuple =>
+      -- TODO: Paper Lemma 9.10, tuple evaluation-context case.
+      sorry
+  | ifElse =>
+      -- TODO: Paper Lemma 9.10, conditional case.
+      sorry
 
 /--
 Paper Lemma 4.11 (Preservation).
@@ -117,9 +264,16 @@ theorem paper_preservation :
     ValidState finalState (.val value) ∧
       EnvAbstracts finalState env' ∧
       ValueAbstracts finalState value ty := by
-  -- TODO: Combine `alias_preservation`, `store_preservation`, and
-  -- `value_preservation`.
-  sorry
+  intro state term finalState value storeTyping env env' lifetime ty
+    hvalid hstore hwf henv hcheck hsteps
+  exact ⟨
+    alias_preservation state term finalState value storeTyping env env' lifetime ty
+      hvalid hstore hwf henv hcheck hsteps,
+    store_preservation state term finalState value storeTyping env env' lifetime ty
+      hvalid hstore hwf henv hcheck hsteps,
+    value_preservation state term finalState value storeTyping env env' lifetime ty
+      hvalid hstore hwf henv hcheck hsteps
+  ⟩
 
 end Paper
 end LwRust

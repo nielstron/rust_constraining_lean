@@ -1,3 +1,4 @@
+import LwRust.Paper.BorrowChecker
 import LwRust.Paper.InductiveSemantics
 
 /-!
@@ -121,7 +122,7 @@ mutual
     | borrow {ref : Reference} {mutable : Bool} {lvals : List LVal} {lv : LVal} :
         ref.owner = false →
         lv ∈ lvals →
-        OperationalSemantics.locate state lv = .ok ref →
+        locate state lv = .ok ref →
         ValueAbstracts state (.ref ref) (.borrow mutable lvals)
 
   /--
@@ -173,21 +174,27 @@ TODO: This captures Definition 4.4 for heap cells locally, but does not yet
 account for the paper's full store typing over all distinct values occurring in
 the term and store.
 -/
--- TODO: This captures Definition 4.4 for heap cells locally, but does not yet
--- account for the paper's full store typing over all distinct values occurring
--- in the term and store.
 def StoreAbstracts (state : State) (_term : Term) (storeTyping : StoreTyping) : Prop :=
   ∀ entry, entry ∈ state.heap → StoreAbstractsCell state storeTyping entry
 
 /--
 Paper Definition 4.8 (Well-formed Environment).
+
+Each environment slot must outlive the ambient lifetime, matching the direction
+used by the paper checker's within/references-within predicates.
 -/
 def WellFormedEnv (_state : State) (env : Env) (lifetime : Lifetime) : Prop :=
   ∀ entry,
     entry ∈ env →
-    lifetime.contains entry.snd.lifetime ∧
-      BorrowChecker.Ty.refsWithin env entry.snd.lifetime entry.snd.ty = .ok true
+    entry.snd.lifetime.contains lifetime ∧
+      BorrowChecker.RefsWithin env entry.snd.lifetime entry.snd.ty
 
+/--
+Paper Definition 4.7 (Safe Abstraction), implementation artifact.
+
+These checker-only names are introduced for tuple and conditional temporaries;
+they have type-environment entries but no runtime store cells.
+-/
 def TypeOnlyName (x : Name) : Prop :=
   x.startsWith "?" = true
 
@@ -215,15 +222,41 @@ def EnvAbstracts (state : State) (env : Env) : Prop :=
         cell.lifetime = slot.lifetime ∧
         PartialValueAbstracts state cell.value slot.ty
 
+/--
+Support lemma for Paper Definition 4.8 (Well-formed Environment).
+-/
+theorem well_formed_empty {state : State} {lifetime : Lifetime} :
+    WellFormedEnv state Env.empty lifetime := by
+  intro entry hmem
+  cases hmem
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction).
+-/
+theorem env_abstracts_empty {state : State} :
+    EnvAbstracts state Env.empty := by
+  intro x slot hget
+  cases hget
+
+/--
+Support lemma for Paper Corollary 9.4 (Read Preservation).
+-/
 theorem partial_value_defined {state : State} {value : Value} {ty : Ty} :
     PartialValueAbstracts state (some value) ty →
-    BorrowChecker.Ty.defined ty = true →
+    BorrowChecker.TyDefined ty →
     ValueAbstracts state value ty := by
-  -- TODO: `BorrowChecker.Ty.defined` is an opaque executable `partial def`.
-  -- Prove this after replacing the checker-side partial functions with
-  -- inductive relations or exposing equation lemmas for the executable checker.
-  sorry
+  intro hpartial hdefined
+  cases hpartial with
+  | moved =>
+      cases hdefined
+  | some hvalue =>
+      exact hvalue
 
+/--
+Support lemma for Paper Corollary 9.4 (Read Preservation).
+
+Live partial values are complete value abstractions.
+-/
 theorem partial_value_live {state : State} {value : Value} {ty : Ty} :
     PartialValueAbstracts state (some value) ty →
     value ≠ .moved →
@@ -236,6 +269,11 @@ theorem partial_value_live {state : State} {value : Value} {ty : Ty} :
       exact hv
 
 mutual
+  /--
+  Support lemma for Paper Lemma 9.7 (Value Typing).
+
+  Complete value abstraction preserves tuple arity.
+  -/
   theorem value_abstract_preserves_tuple_arity {state : State} {value : Value} {ty : Ty} :
       ValueAbstracts state value ty →
       match value, ty with
@@ -250,6 +288,9 @@ mutual
     | box _ _ _ => trivial
     | borrow _ _ _ => trivial
 
+  /--
+  Support lemma for Paper Lemma 9.7 (Value Typing), list form.
+  -/
   theorem values_abstract_length {state : State} {values : List Value} {tys : List Ty} :
       ValuesAbstract state values tys →
       values.length = tys.length := by
@@ -260,6 +301,9 @@ mutual
         simp [values_abstract_length hvalues]
 end
 
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction).
+-/
 theorem env_abstracts_get {state : State} {env : Env} {x : Name} {slot : Slot} :
     EnvAbstracts state env →
     Env.get env x = some slot →
@@ -272,6 +316,9 @@ theorem env_abstracts_get {state : State} {env : Env} {x : Name} {slot : Slot} :
   intro henv hget
   exact henv x slot hget
 
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction), runtime-name case.
+-/
 theorem env_abstracts_runtime_get {state : State} {env : Env} {x : Name} {slot : Slot} :
     EnvAbstracts state env →
     ¬ TypeOnlyName x →
@@ -286,27 +333,153 @@ theorem env_abstracts_runtime_get {state : State} {env : Env} {x : Name} {slot :
   | inl htemp => exact False.elim (hnotTemp htemp)
   | inr hruntime => exact hruntime
 
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction), erasure lookup.
+-/
+theorem env_get_erase_of_get_ne {env : Env} {x y : Name} {slot : Slot} :
+    y ≠ x →
+    Env.get (Env.erase env x) y = some slot →
+    Env.get env y = some slot := by
+  intro hyx
+  unfold Env.erase
+  induction env with
+  | nil =>
+      simp [Env.get]
+  | cons entry rest ih =>
+      cases entry with
+      | mk z s =>
+          by_cases hz : z = x
+          · subst hz
+            simp [Env.get, hyx]
+            intro hget
+            exact ih hget
+          · simp [Env.get, hz]
+            intro hget
+            by_cases hyz : y = z
+            · simp [hyz]
+              simp [hyz] at hget
+              exact hget
+            · simp [hyz]
+              simp [hyz] at hget
+              exact ih hget
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction), update lookup.
+-/
+theorem env_get_put_same {env : Env} {x : Name} {slot : Slot} :
+    Env.get (Env.put env x slot) x = some slot := by
+  unfold Env.put
+  simp [Env.get]
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction), update lookup.
+-/
+theorem env_get_put_of_ne {env : Env} {x y : Name} {slot result : Slot} :
+    y ≠ x →
+    Env.get (Env.put env x slot) y = some result →
+    Env.get env y = some result := by
+  intro hyx hget
+  unfold Env.put at hget
+  simp [Env.get, hyx] at hget
+  exact env_get_erase_of_get_ne hyx hget
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction), erasure lookup.
+-/
+theorem env_get_erase_self (env : Env) (x : Name) :
+    Env.get (Env.erase env x) x = none := by
+  unfold Env.erase
+  induction env with
+  | nil =>
+      simp [Env.get]
+  | cons entry rest ih =>
+      cases entry with
+      | mk z s =>
+          by_cases hzx : z = x
+          · subst hzx
+            simp [ih]
+          · have hxz : x ≠ z := fun h => hzx h.symm
+            simp [Env.get, hzx, hxz, ih]
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction), erasure lookup.
+
+Any successful lookup after erasure was already a successful lookup before
+erasure.
+-/
+theorem env_get_of_get_erase {env : Env} {x y : Name} {slot : Slot} :
+    Env.get (Env.erase env x) y = some slot →
+    Env.get env y = some slot := by
+  intro hget
+  by_cases hyx : y = x
+  · subst hyx
+    rw [env_get_erase_self] at hget
+    cases hget
+  · exact env_get_erase_of_get_ne hyx hget
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction).
+
+Adding a checker-only temporary preserves the runtime abstraction relation.
+-/
 theorem env_abstracts_put_type_only {state : State} {env : Env} {x : Name} {slot : Slot} :
     EnvAbstracts state env →
     TypeOnlyName x →
     EnvAbstracts state (Env.put env x slot) := by
-  -- TODO: Prove from the equations for `Env.get`, `Env.put`, and `Env.erase`.
-  -- This is the bridge needed by tuple and if-guard progress: the checker
-  -- extends the type environment with fresh `?n` names that do not allocate
-  -- runtime cells.
-  sorry
+  intro henv hx y yslot hget
+  unfold Env.put at hget
+  simp [Env.get] at hget
+  by_cases hyx : y = x
+  · subst hyx
+    left
+    exact hx
+  · have hgetErase : Env.get (Env.erase env x) y = some yslot := by
+      simpa [hyx] using hget
+    exact henv y yslot (env_get_erase_of_get_ne hyx hgetErase)
 
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction).
+
+Erasing a checker environment entry preserves safe abstraction.
+-/
+theorem env_abstracts_erase {state : State} {env : Env} {x : Name} :
+    EnvAbstracts state env →
+    EnvAbstracts state (Env.erase env x) := by
+  intro henv y slot hget
+  exact henv y slot (env_get_of_get_erase hget)
+
+/--
+Support lemma for Paper Definition 4.7 (Safe Abstraction).
+
+Removing several checker environment entries preserves safe abstraction.
+-/
+theorem env_abstracts_remove_many {state : State} {env : Env} {xs : List Name} :
+    EnvAbstracts state env →
+    EnvAbstracts state (Env.removeMany env xs) := by
+  intro henv
+  induction xs generalizing env with
+  | nil =>
+      simpa [Env.removeMany] using henv
+  | cons x xs ih =>
+      simpa [Env.removeMany] using ih (env_abstracts_erase (state := state) (env := env) (x := x) henv)
+
+/--
+Support lemma for Paper Lemma 4.9 (Borrow Invariance).
+-/
 theorem well_formed_put_type_only {state : State} {env : Env} {x : Name} {slot : Slot}
     {lifetime : Lifetime} :
     WellFormedEnv state env lifetime →
     TypeOnlyName x →
-    lifetime.contains slot.lifetime →
-    BorrowChecker.Ty.refsWithin (Env.put env x slot) slot.lifetime slot.ty = .ok true →
+    slot.lifetime.contains lifetime →
+    BorrowChecker.RefsWithin (Env.put env x slot) slot.lifetime slot.ty →
     WellFormedEnv state (Env.put env x slot) lifetime := by
-  -- TODO: The remaining proof is list membership bookkeeping plus the opaque
-  -- executable `BorrowChecker.Ty.refsWithin` obligation for entries whose type
-  -- mentions the new type-only name.
-  sorry
+  intro hwf _ hcontains hrefs entry hmem
+  simp [Env.put] at hmem
+  rcases hmem with rfl | htail
+  · exact ⟨hcontains, hrefs⟩
+  · have hin : entry ∈ env := (List.mem_filter.mp htail).1
+    rcases hwf entry hin with ⟨hlifetime, _⟩
+    exact ⟨hlifetime, trivial⟩
 
 /--
 Paper Lemma 9.7 (Value Typing), restricted to the part currently formalized:
@@ -321,21 +494,20 @@ theorem value_typing {env env' : Env} {lifetime : Lifetime} {value : Value} {ty 
 /--
 Paper Lemma 9.3 (Location Lemma), variable case.
 
-TODO: This case is stated separately because the executable
-`BorrowChecker.typeOf` is opaque as a Lean `partial def`.
+TODO: This case is stated separately because checker-only names are permitted
+in `EnvAbstracts`; a runtime-name premise is needed to rule those out.
 -/
 theorem location_var {state : State} {env : Env} {x : Name} {ty : Ty}
     {ambientLifetime targetLifetime : Lifetime} :
     EnvAbstracts state env →
     WellFormedEnv state env ambientLifetime →
-    BorrowChecker.typeOf env (LVal.var x) = .ok (ty, targetLifetime) →
+    BorrowChecker.TypeOf env (LVal.var x) ty targetLifetime →
     ∃ ref cell,
-      OperationalSemantics.locate state (LVal.var x) = .ok ref ∧
+      locate state (LVal.var x) = .ok ref ∧
       state.getCell ref.address = some cell ∧
       PartialValueAbstracts state cell.value ty := by
-  -- TODO: This is the variable case of `location`.  It is immediate from
-  -- `EnvAbstracts` once `BorrowChecker.typeOf` is available as equations rather
-  -- than as an opaque executable `partial def`.
+  -- TODO: This is immediate from `EnvAbstracts` for runtime names.  The current
+  -- statement still allows checker-only names, which have no runtime location.
   sorry
 
 /--
@@ -349,13 +521,13 @@ theorem location {state : State} {env : Env} {lv : LVal} {ty : Ty}
     {ambientLifetime targetLifetime : Lifetime} :
     EnvAbstracts state env →
     WellFormedEnv state env ambientLifetime →
-    BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
+    BorrowChecker.TypeOf env lv ty targetLifetime →
     ∃ ref cell,
-      OperationalSemantics.locate state lv = .ok ref ∧
+      locate state lv = .ok ref ∧
       state.getCell ref.address = some cell ∧
       PartialValueAbstracts state cell.value ty := by
   -- TODO: Port paper Lemma 9.3.  The proof follows the structure of
-  -- `BorrowChecker.typeOf` and `OperationalSemantics.locate`, using
+  -- `BorrowChecker.TypeOf` and `locate`, using
   -- `EnvAbstracts` for variables and `ValueAbstracts.borrow` for dereferences.
   sorry
 
@@ -369,8 +541,8 @@ theorem read_preservation {state : State} {env : Env} {lv : LVal} {ty : Ty}
     {ambientLifetime targetLifetime : Lifetime} :
     EnvAbstracts state env →
     WellFormedEnv state env ambientLifetime →
-    BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-    BorrowChecker.Ty.defined ty = true →
+    BorrowChecker.TypeOf env lv ty targetLifetime →
+    BorrowChecker.TyDefined ty →
     ∃ value,
       state.readLVal lv = .ok value ∧
       ValueAbstracts state value ty := by
@@ -378,26 +550,32 @@ theorem read_preservation {state : State} {env : Env} {lv : LVal} {ty : Ty}
   -- out `none` and `moved` partial values.
   sorry
 
+/--
+Support lemma for Paper Lemma 4.10 (Progress), move-write case.
+-/
 theorem move_write_progress {state : State} {env : Env} {lv : LVal} {ty : Ty}
     {ambientLifetime targetLifetime : Lifetime} :
     EnvAbstracts state env →
     WellFormedEnv state env ambientLifetime →
-    BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-    BorrowChecker.Ty.defined ty = true →
-    BorrowChecker.writeProhibited env lv = false →
+    BorrowChecker.TypeOf env lv ty targetLifetime →
+    BorrowChecker.TyDefined ty →
+    BorrowChecker.WriteAllowed env lv →
     ∃ state', state.writeLVal lv none = .ok state' := by
   -- TODO: This is the write side of progress for moves.  It should follow from
   -- `location`, absence of write-prohibiting borrows, and definedness of the
   -- target value.
   sorry
 
+/--
+Support lemma for Paper Lemma 4.10 (Progress), assignment-write case.
+-/
 theorem assign_write_progress {state : State} {env : Env} {lv : LVal} {ty : Ty}
     {value : Value} {ambientLifetime targetLifetime : Lifetime} :
     EnvAbstracts state env →
     WellFormedEnv state env ambientLifetime →
-    BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-    BorrowChecker.Ty.defined ty = true →
-    BorrowChecker.writeProhibited env lv = false →
+    BorrowChecker.TypeOf env lv ty targetLifetime →
+    BorrowChecker.TyDefined ty →
+    BorrowChecker.WriteAllowed env lv →
     ValueAbstracts state value ty →
     ∃ state', state.writeLVal lv (some value) = .ok state' := by
   -- TODO: Port the assignment-write case of progress; this is the same location

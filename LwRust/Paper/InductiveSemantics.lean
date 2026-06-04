@@ -1,13 +1,7 @@
-import LwRust.Core.BorrowChecker
-import LwRust.Core.OperationalSemantics
+import LwRust.Paper.Runtime
 
 /-!
-Inductive presentation of the executable core semantics and checker.
-
-The constructors mirror `Core.OperationalSemantics.eval` and
-`Core.BorrowChecker.checkTerm`.  These relations are used by the paper proof
-statements; adequacy back to the executable functions is stated separately in
-`LwRust.Paper.Adequacy`.
+Inductive presentation of the paper operational semantics.
 -/
 
 namespace LwRust
@@ -15,37 +9,10 @@ namespace Paper
 
 open Core
 
-abbrev State := OperationalSemantics.State
-abbrev Cell := OperationalSemantics.Cell
-
 mutual
-  inductive ValueHasType : Value → Ty → Prop where
-    | unit : ValueHasType .unit Ty.unit
-    | int (n : Int) : ValueHasType (.int n) Ty.int
-    | tuple {values : List Value} {tys : List Ty} :
-        ValuesHaveTypes values tys →
-        ValueHasType (.tuple values) (.tuple tys)
-
-    -- TODO: This context-free fallback is only for the executable `execute`
-    -- theorem, which discards the final store.  The paper preservation theorem
-    -- below uses `ValueAbstracts`, which is store-aware.
-    | ref {r : Reference} :
-        ValueHasType (.ref r) (.borrow false [])
-
-    -- TODO: Moved values should only appear inside the store; connecting this to
-    -- `Ty.undef` requires the executable store typing invariant.
-    | moved {ty : Ty} :
-        ValueHasType .moved (.undef ty)
-
-  inductive ValuesHaveTypes : List Value → List Ty → Prop where
-    | nil : ValuesHaveTypes [] []
-    | cons {value : Value} {values : List Value} {ty : Ty} {tys : List Ty} :
-        ValueHasType value ty →
-        ValuesHaveTypes values tys →
-        ValuesHaveTypes (value :: values) (ty :: tys)
-end
-
-mutual
+  /--
+  Paper Section 3 big-step evaluation relation.
+  -/
   inductive Evaluates : State → Lifetime → Term → State → Value → Prop where
     | val {state : State} {lifetime : Lifetime} {value : Value} :
         Evaluates state lifetime (.val value) state value
@@ -60,7 +27,7 @@ mutual
         state.writeLVal lv none = .ok state' →
         Evaluates state lifetime (.access .move lv) state' value
     | borrow {state : State} {lifetime : Lifetime} {mutable : Bool} {lv : LVal} {ref : Reference} :
-        OperationalSemantics.locate state lv = .ok ref →
+        locate state lv = .ok ref →
         Evaluates state lifetime (.borrow mutable lv) state (.ref ref.borrowed)
     | box {state state₁ state₂ : State} {lifetime : Lifetime} {term : Term}
         {value : Value} {ref : Reference} :
@@ -100,6 +67,9 @@ mutual
         Evaluates state₂ lifetime falseBlock state' value →
         Evaluates state lifetime (.ifElse eq lhs rhs trueBlock falseBlock) state' value
 
+  /--
+  Paper Section 3 big-step evaluation relation for statement/block sequences.
+  -/
   inductive EvaluatesSeq : State → Lifetime → List Term → State → Value → Prop where
     | nil {state : State} {lifetime : Lifetime} :
         EvaluatesSeq state lifetime [] state .unit
@@ -113,6 +83,9 @@ mutual
         EvaluatesSeq state₁ lifetime (next :: rest) state₂ value →
         EvaluatesSeq state lifetime (term :: next :: rest) state₂ value
 
+  /--
+  Paper Section 3 big-step evaluation relation for tuple argument lists.
+  -/
   inductive EvaluatesTerms : State → Lifetime → List Term → State → List Value → Prop where
     | nil {state : State} {lifetime : Lifetime} :
         EvaluatesTerms state lifetime [] state []
@@ -121,113 +94,6 @@ mutual
         Evaluates state lifetime term state₁ value →
         EvaluatesTerms state₁ lifetime terms state₂ values →
         EvaluatesTerms state lifetime (term :: terms) state₂ (value :: values)
-end
-
-mutual
-  inductive Checks : Env → Lifetime → Term → Env → Ty → Prop where
-    | unit {env : Env} {lifetime : Lifetime} :
-        Checks env lifetime (.val .unit) env Ty.unit
-    | int {env : Env} {lifetime : Lifetime} (n : Int) :
-        Checks env lifetime (.val (.int n)) env Ty.int
-    | runtimeTuple {env : Env} {lifetime : Lifetime} {fields : List Value} {tys : List Ty} :
-        ValuesHaveTypes fields tys →
-        Checks env lifetime (.val (.tuple fields)) env (Ty.tuple tys)
-    | accessCopy {env : Env} {lifetime : Lifetime} {lv : LVal} {ty : Ty} {targetLifetime : Lifetime} :
-        BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-        BorrowChecker.Ty.defined ty = true →
-        BorrowChecker.Ty.copyable ty = true →
-        BorrowChecker.readProhibited env lv = false →
-        Checks env lifetime (.access .copy lv) env ty
-    | accessTemp {env : Env} {lifetime : Lifetime} {lv : LVal} {ty : Ty} {targetLifetime : Lifetime} :
-        BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-        BorrowChecker.Ty.defined ty = true →
-        BorrowChecker.readProhibited env lv = false →
-        Checks env lifetime (.access .temp lv) env ty
-    | accessMove {env env' : Env} {lifetime : Lifetime} {lv : LVal} {ty : Ty}
-        {targetLifetime : Lifetime} :
-        BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-        BorrowChecker.Ty.defined ty = true →
-        BorrowChecker.writeProhibited env lv = false →
-        BorrowChecker.move env lv = .ok env' →
-        Checks env lifetime (.access .move lv) env' ty
-    | borrowImm {env : Env} {lifetime targetLifetime : Lifetime} {lv : LVal} {ty : Ty} :
-        BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-        BorrowChecker.Ty.defined ty = true →
-        BorrowChecker.readProhibited env lv = false →
-        Checks env lifetime (.borrow false lv) env (.borrow false [lv])
-    | borrowMut {env : Env} {lifetime targetLifetime : Lifetime} {lv : LVal} {ty : Ty} :
-        BorrowChecker.typeOf env lv = .ok (ty, targetLifetime) →
-        BorrowChecker.Ty.defined ty = true →
-        BorrowChecker.writeProhibited env lv = false →
-        BorrowChecker.mutLVal env lv = .ok true →
-        Checks env lifetime (.borrow true lv) env (.borrow true [lv])
-    | box {env env' : Env} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-        Checks env lifetime term env' ty →
-        Checks env lifetime (.box term) env' (.box ty)
-    | letMut {env env' : Env} {lifetime : Lifetime} {x : Name} {initialiser : Term}
-        {ty : Ty} :
-        Env.get env x = none →
-        Checks env lifetime initialiser env' ty →
-        Checks env lifetime (.letMut x initialiser)
-          (Env.put env' x { ty := ty, lifetime := lifetime }) Ty.unit
-    | assign {env env₁ env₂ : Env} {lifetime targetLifetime : Lifetime} {lhs : LVal}
-        {rhs : Term} {lhsTy rhsTy : Ty} :
-        BorrowChecker.typeOf env lhs = .ok (lhsTy, targetLifetime) →
-        Checks env lifetime rhs env₁ rhsTy →
-        BorrowChecker.compatible env₁ lhsTy rhsTy = .ok true →
-        BorrowChecker.Ty.within env₁ targetLifetime rhsTy = .ok true →
-        BorrowChecker.write env₁ lhs rhsTy true = .ok env₂ →
-        BorrowChecker.writeProhibited env₂ lhs = false →
-        Checks env lifetime (.assign lhs rhs) env₂ Ty.unit
-    | block {env env' : Env} {lifetime blockLifetime : Lifetime} {terms : List Term}
-        {ty : Ty} :
-        ChecksSeq env blockLifetime terms env' ty →
-        BorrowChecker.Ty.within env' lifetime ty = .ok true →
-        BorrowChecker.scopedAfterDrop env' blockLifetime = .ok true →
-        Checks env lifetime (.block blockLifetime terms) (Env.dropLifetime env' blockLifetime) ty
-    | tuple {env env' : Env} {lifetime : Lifetime} {terms : List Term} {tys : List Ty}
-        {temps : List Name} :
-        ChecksTerms env lifetime terms 0 env' tys temps →
-        Checks env lifetime (.tuple terms) (Env.removeMany env' temps) (.tuple tys)
-    | ifElse {env env₁ env₂ env₃ trueEnv falseEnv joinedEnv : Env} {lifetime : Lifetime}
-        {eq : Bool} {lhs rhs trueBlock falseBlock : Term} {lhsTy rhsTy trueTy falseTy resultTy : Ty} :
-        (fresh : Name) →
-        fresh = "?" ++ toString env.length →
-        Checks env lifetime lhs env₁ lhsTy →
-        Checks (Env.put env₁ fresh { ty := lhsTy, lifetime := Lifetime.root }) lifetime rhs env₂ rhsTy →
-        env₃ = Env.erase env₂ fresh →
-        BorrowChecker.compatible env₃ lhsTy rhsTy = .ok true →
-        BorrowChecker.Ty.copyable lhsTy = true →
-        BorrowChecker.Ty.copyable rhsTy = true →
-        Checks env₃ lifetime trueBlock trueEnv trueTy →
-        Checks env₃ lifetime falseBlock falseEnv falseTy →
-        BorrowChecker.joinEnv trueEnv falseEnv = .ok joinedEnv →
-        BorrowChecker.compatible joinedEnv trueTy falseTy = .ok true →
-        BorrowChecker.Ty.union trueTy falseTy = .ok resultTy →
-        Checks env lifetime (.ifElse eq lhs rhs trueBlock falseBlock) joinedEnv resultTy
-
-  inductive ChecksSeq : Env → Lifetime → List Term → Env → Ty → Prop where
-    | nil {env : Env} {lifetime : Lifetime} :
-        ChecksSeq env lifetime [] env Ty.unit
-    | single {env env' : Env} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-        Checks env lifetime term env' ty →
-        ChecksSeq env lifetime [term] env' ty
-    | cons {env env₁ env₂ : Env} {lifetime : Lifetime} {term next : Term}
-        {rest : List Term} {termTy resultTy : Ty} :
-        Checks env lifetime term env₁ termTy →
-        ChecksSeq env₁ lifetime (next :: rest) env₂ resultTy →
-        ChecksSeq env lifetime (term :: next :: rest) env₂ resultTy
-
-  inductive ChecksTerms :
-      Env → Lifetime → List Term → Nat → Env → List Ty → List Name → Prop where
-    | nil {env : Env} {lifetime : Lifetime} {n : Nat} :
-        ChecksTerms env lifetime [] n env [] []
-    | cons {env env₁ env₂ env₃ : Env} {lifetime : Lifetime} {term : Term}
-        {terms : List Term} {n : Nat} {ty : Ty} {tys : List Ty} {names : List Name} :
-        Checks env lifetime term env₁ ty →
-        env₂ = Env.put env₁ ("?" ++ toString n) { ty := ty, lifetime := Lifetime.root } →
-        ChecksTerms env₂ lifetime terms (n + 1) env₃ tys names →
-        ChecksTerms env lifetime (term :: terms) n env₃ (ty :: tys) (("?" ++ toString n) :: names)
 end
 
 /--
@@ -246,7 +112,7 @@ inductive Step : State → Lifetime → Term → State → Term → Prop where
       state.writeLVal lv none = .ok state' →
       Step state lifetime (.access .move lv) state' (.val value)
   | borrow {state : State} {lifetime : Lifetime} {mutable : Bool} {lv : LVal} {ref : Reference} :
-      OperationalSemantics.locate state lv = .ok ref →
+      locate state lv = .ok ref →
       Step state lifetime (.borrow mutable lv) state (.val (.ref ref.borrowed))
   | boxValue {state state' : State} {lifetime : Lifetime} {value : Value}
       {ref : Reference} :
@@ -354,6 +220,15 @@ theorem value_no_step {state state' : State} {lifetime : Lifetime}
   intro h
   cases h
 
+theorem terminal_no_step {state state' : State} {lifetime : Lifetime}
+    {term term' : Term} :
+    Terminal term →
+    ¬ Step state lifetime term state' term' := by
+  intro hterminal hstep
+  rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
+  subst hterm
+  exact value_no_step hstep
+
 theorem multistep_value_inv {state finalState : State} {lifetime : Lifetime}
     {value : Value} {term : Term} :
     MultiStep state lifetime (.val value) finalState term →
@@ -364,6 +239,130 @@ theorem multistep_value_inv {state finalState : State} {lifetime : Lifetime}
       exact ⟨rfl, rfl⟩
   | trans hstep _ =>
       exact False.elim (value_no_step hstep)
+
+theorem multistep_terminal_inv {state finalState : State} {lifetime : Lifetime}
+    {term finalTerm : Term} :
+    Terminal term →
+    MultiStep state lifetime term finalState finalTerm →
+    finalState = state ∧ finalTerm = term := by
+  intro hterminal hmulti
+  cases hmulti with
+  | refl =>
+      exact ⟨rfl, rfl⟩
+  | trans hstep _ =>
+      exact False.elim (terminal_no_step hterminal hstep)
+
+theorem multistep_append {state₁ state₂ state₃ : State} {lifetime : Lifetime}
+    {term₁ term₂ term₃ : Term} :
+    MultiStep state₁ lifetime term₁ state₂ term₂ →
+    MultiStep state₂ lifetime term₂ state₃ term₃ →
+    MultiStep state₁ lifetime term₁ state₃ term₃ := by
+  intro hleft hright
+  induction hleft with
+  | refl =>
+      exact hright
+  | trans hstep _ ih =>
+      exact MultiStep.trans hstep (ih hright)
+
+theorem step_multistep {state state' : State} {lifetime : Lifetime}
+    {term term' : Term} :
+    Step state lifetime term state' term' →
+    MultiStep state lifetime term state' term' := by
+  intro hstep
+  exact MultiStep.trans hstep MultiStep.refl
+
+theorem multistep_box_context {state finalState : State} {lifetime : Lifetime}
+    {term finalTerm : Term} :
+    MultiStep state lifetime term finalState finalTerm →
+    MultiStep state lifetime (.box term) finalState (.box finalTerm) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.boxSub hstep) ih
+
+theorem multistep_let_mut_context {state finalState : State} {lifetime : Lifetime}
+    {x : Name} {term finalTerm : Term} :
+    MultiStep state lifetime term finalState finalTerm →
+    MultiStep state lifetime (.letMut x term) finalState (.letMut x finalTerm) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.letMutSub hstep) ih
+
+theorem multistep_assign_context {state finalState : State} {lifetime : Lifetime}
+    {lhs : LVal} {rhs finalRhs : Term} :
+    MultiStep state lifetime rhs finalState finalRhs →
+    MultiStep state lifetime (.assign lhs rhs) finalState (.assign lhs finalRhs) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.assignSub hstep) ih
+
+theorem multistep_if_lhs_context {state finalState : State} {lifetime : Lifetime}
+    {eq : Bool} {lhs finalLhs rhs trueBlock falseBlock : Term} :
+    MultiStep state lifetime lhs finalState finalLhs →
+    MultiStep state lifetime (.ifElse eq lhs rhs trueBlock falseBlock)
+      finalState (.ifElse eq finalLhs rhs trueBlock falseBlock) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.ifLhsSub hstep) ih
+
+theorem multistep_if_rhs_context {state finalState : State} {lifetime : Lifetime}
+    {eq : Bool} {lhsValue : Value} {rhs finalRhs trueBlock falseBlock : Term} :
+    MultiStep state lifetime rhs finalState finalRhs →
+    MultiStep state lifetime (.ifElse eq (.val lhsValue) rhs trueBlock falseBlock)
+      finalState (.ifElse eq (.val lhsValue) finalRhs trueBlock falseBlock) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.ifRhsSub hstep) ih
+
+theorem multistep_tuple_head_context {state finalState : State} {lifetime : Lifetime}
+    {term finalTerm : Term} {rest : List Term} :
+    MultiStep state lifetime term finalState finalTerm →
+    MultiStep state lifetime (.tuple (term :: rest))
+      finalState (.tuple (finalTerm :: rest)) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.tupleHeadSub hstep) ih
+
+theorem multistep_block_single_context {state finalState : State}
+    {lifetime blockLifetime : Lifetime} {term finalTerm : Term} :
+    MultiStep state blockLifetime term finalState finalTerm →
+    MultiStep state lifetime (.block blockLifetime [term])
+      finalState (.block blockLifetime [finalTerm]) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.blockSingleSub hstep) ih
+
+theorem multistep_block_head_context {state finalState : State}
+    {lifetime blockLifetime : Lifetime} {term finalTerm next : Term} {rest : List Term} :
+    MultiStep state blockLifetime term finalState finalTerm →
+    MultiStep state lifetime (.block blockLifetime (term :: next :: rest))
+      finalState (.block blockLifetime (finalTerm :: next :: rest)) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.blockHeadSub hstep) ih
 
 end Paper
 end LwRust
