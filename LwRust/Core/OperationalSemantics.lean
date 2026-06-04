@@ -67,12 +67,16 @@ def expectSome {α : Type} (msg : String) : Option α → EvalM α
   | none => fail msg
 
 partial def Value.readPath (value : Value) : List Nat → EvalM Value
-  | [] => return value
+  | [] =>
+      match value with
+      | .moved => fail "use of moved value"
+      | _ => return value
   | i :: rest =>
       match value with
       | .tuple fields => do
           let field ← expectSome "invalid tuple accessor" fields[i]?
           Value.readPath field rest
+      | .moved => fail "use of moved value"
       | _ => fail "cannot select field from non-tuple value"
 
 partial def Value.writePath (value : Value) (path : List Nat) (newValue : Value) : EvalM Value :=
@@ -84,6 +88,7 @@ partial def Value.writePath (value : Value) (path : List Nat) (newValue : Value)
           let field ← expectSome "invalid tuple accessor" fields[i]?
           let updated ← Value.writePath field rest newValue
           return .tuple (fields.set i updated)
+      | .moved => fail "use of moved value"
       | _ => fail "cannot select field from non-tuple value"
 
 def State.readRef (state : State) (ref : Reference) : EvalM Value := do
@@ -98,14 +103,16 @@ def State.writeRef (state : State) (ref : Reference) (value : Option Value) : Ev
       if ref.path.isEmpty then
         return state.putCell ref.address { cell with value := none }
       else
-        -- TODO: Java writes `null` into tuple components after a move. The Lean
-        -- value model currently has no null tuple component, so partial moves out
-        -- of tuple fields are represented only in the static type environment.
-        return state
+        let old ← expectSome "use of moved value" cell.value
+        let updated ← Value.writePath old ref.path .moved
+        return state.putCell ref.address { cell with value := some updated }
   | some value =>
-      let old ← expectSome "use of moved value" cell.value
-      let updated ← Value.writePath old ref.path value
-      return state.putCell ref.address { cell with value := some updated }
+      if ref.path.isEmpty then
+        return state.putCell ref.address { cell with value := some value }
+      else
+        let old ← expectSome "use of moved value" cell.value
+        let updated ← Value.writePath old ref.path value
+        return state.putCell ref.address { cell with value := some updated }
 
 partial def locate (state : State) (lv : LVal) : EvalM Reference := do
   let root ← expectSome "variable undeclared" (state.getVar lv.name)

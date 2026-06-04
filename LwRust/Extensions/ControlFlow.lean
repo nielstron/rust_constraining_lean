@@ -1,4 +1,4 @@
-import LwRust.CompleteProgram
+import LwRust.Core.Syntax
 
 /-!
 Control-flow extension.
@@ -12,8 +12,8 @@ namespace LwRust
 namespace Extensions
 namespace ControlFlow
 
-def ifEq := CompleteProgram.ifEq
-def ifNe := CompleteProgram.ifNe
+def ifEq := Core.ifEq
+def ifNe := Core.ifNe
 
 -- TODO: The Java file reserves opcodes for `if`, `while`, and `do while`, but
 -- does not implement typing or semantics for them. They are therefore not

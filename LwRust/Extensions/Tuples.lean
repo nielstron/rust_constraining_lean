@@ -1,4 +1,4 @@
-import LwRust.CompleteProgram
+import LwRust.Core.Syntax
 
 /-!
 Tuple extension.
@@ -15,8 +15,8 @@ namespace Tuples
 
 open Core
 
-def tuple := CompleteProgram.tuple
-def field := CompleteProgram.field
+def tuple := Core.tuple
+def field := Core.field
 
 end Tuples
 end Extensions

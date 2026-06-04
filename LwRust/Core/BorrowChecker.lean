@@ -123,6 +123,24 @@ partial def Ty.within (env : Env) (lifetime : Lifetime) : Ty → CheckM Bool
         return slot.lifetime.contains lifetime)
   | .undef _ => fail "undefined type cannot be assigned"
 
+partial def Ty.refsWithin (env : Env) (lifetime : Lifetime) : Ty → CheckM Bool
+  | .unit => return true
+  | .int => return true
+  | .box t => Ty.refsWithin env lifetime t
+  | .tuple ts => ts.allM (Ty.refsWithin env lifetime)
+  | .borrow _ lvals =>
+      lvals.allM (fun lv => do
+        let slot ← expectSome "variable undeclared" (Env.get env lv.name)
+        return slot.lifetime.contains lifetime)
+  | .undef _ => return true
+
+def scopedAfterDrop (env : Env) (dropped : Lifetime) : CheckM Bool :=
+  env.allM (fun entry => do
+    if entry.snd.lifetime == dropped then
+      return true
+    else
+      Ty.refsWithin env entry.snd.lifetime entry.snd.ty)
+
 partial def strike (ty : Ty) (path : Path) (i : Nat := 0) : CheckM Ty :=
   if i == path.length then
     return Ty.undefine ty
@@ -264,6 +282,7 @@ partial def checkTerm (env : Env) (lifetime : Lifetime) (term : Term) : CheckM (
   | .val .unit => return (env, .unit)
   | .val (.int _) => return (env, .int)
   | .val (.ref _) => fail "locations are not source-level syntax"
+  | .val .moved => fail "moved values are not source-level syntax"
   | .val (.tuple fields) =>
       -- Runtime tuple values only arise after evaluation. Source tuples use `Term.tuple`.
       return (env, .tuple (fields.map (fun _ => Ty.unit)))
@@ -323,6 +342,8 @@ partial def checkTerm (env : Env) (lifetime : Lifetime) (term : Term) : CheckM (
   | .block blockLifetime terms => do
       let (env, ty) ← checkSeq env blockLifetime terms
       if !(← Ty.within env lifetime ty) then
+        fail "lifetime not within"
+      else if !(← scopedAfterDrop env blockLifetime) then
         fail "lifetime not within"
       else
         return (Env.dropLifetime env blockLifetime, ty)

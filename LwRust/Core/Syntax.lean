@@ -102,6 +102,7 @@ inductive Value where
   | int (n : Int)
   | ref (r : Reference)
   | tuple (fields : List Value)
+  | moved
   deriving BEq, Repr
 
 inductive AccessKind where
@@ -167,6 +168,33 @@ def names (env : Env) : List Name :=
   env.map Prod.fst
 
 end Env
+
+/-!
+Small object-language constructor helpers.  These are intentionally in
+`Core.Syntax` now; the former complete-program layer was only a forwarding DSL.
+-/
+
+def var : Name → LVal := LVal.var
+def deref : LVal → LVal := LVal.deref
+def field : LVal → Nat → LVal := LVal.index
+
+def int : Int → Term := Term.int
+def unit : Term := Term.unit
+def move : LVal → Term := Term.move
+def copy : LVal → Term := Term.copy
+def temp : LVal → Term := Term.temp
+def borrow : LVal → Term := Term.immBorrow
+def borrowMut : LVal → Term := Term.mutBorrow
+def box : Term → Term := Term.box
+def tuple : List Term → Term := Term.tuple
+def letMut : Name → Term → Term := Term.letMut
+def assign : LVal → Term → Term := Term.assign
+def block : Lifetime → List Term → Term := Term.block
+def ifEq (lhs rhs trueBlock falseBlock : Term) : Term :=
+  Term.ifElse true lhs rhs trueBlock falseBlock
+def ifNe (lhs rhs trueBlock falseBlock : Term) : Term :=
+  Term.ifElse false lhs rhs trueBlock falseBlock
+def invoke : Name → List Term → Term := Term.invoke
 
 end Core
 end LwRust
