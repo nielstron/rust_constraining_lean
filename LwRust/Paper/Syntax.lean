@@ -8,7 +8,20 @@ namespace LwRust
 namespace Core
 
 abbrev Name := String
-abbrev Lifetime := List Nat
+
+/--
+Reference lifetime names are paths in the lexical lifetime tree.
+
+This is intentionally a wrapper rather than an abbreviation for `List Nat`, so
+we can give lifetimes their own order without changing Lean's existing list
+order.
+-/
+structure Lifetime where
+  path : List Nat
+  deriving BEq, DecidableEq, Repr
+
+instance : Coe (List Nat) Lifetime where
+  coe path := { path := path }
 
 inductive LVal where
   | var (name : Name)
@@ -63,10 +76,10 @@ inductive PartialValue where
   | undef
   deriving BEq, Repr
 
-def Lifetime.root : Lifetime := []
+def Lifetime.root : Lifetime := { path := [] }
 
 def Lifetime.contains (outer inner : Lifetime) : Bool :=
-  outer.isPrefixOf inner
+  outer.path.isPrefixOf inner.path
 
 def Lifetime.min? (lhs rhs : Lifetime) : Option Lifetime :=
   if lhs.contains rhs then some rhs
