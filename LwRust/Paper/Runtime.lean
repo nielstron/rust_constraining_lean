@@ -1,7 +1,7 @@
-import LwRust.Core.Syntax
+import LwRust.Paper.Syntax
 
 /-!
-Runtime structures and primitive actions for the paper formalization.
+Runtime store primitives for the core FR semantics in Section 3.2.
 -/
 
 namespace LwRust
@@ -9,140 +9,175 @@ namespace Paper
 
 open Core
 
-abbrev EvalM := Except String
-
 /--
-Paper Section 3 store cell.
+Paper Section 3 store slot `⟨v⊥⟩^m`, i.e. the current contents and allocation
+lifetime of one abstract location.
 -/
-structure Cell where
+structure StoreSlot where
+  value : PartialValue
   lifetime : Lifetime
-  value : Option Value
   deriving BEq, Repr
 
 /--
-Paper Section 3 runtime state.
+Paper Section 3 program store `S`, represented as a mathematical finite partial
+map from abstract locations to store slots.
+
+The finite-domain invariant is intentionally left abstract here.  The semantics
+uses only lookup, functional update, freshness (`slotAt ℓ = none`), and erasure.
 -/
-structure State where
-  nextAddress : Nat := 0
-  heap : List (Nat × Cell) := []
-  vars : List (Name × Reference) := []
-  deriving BEq, Repr
+structure ProgramStore where
+  slotAt : Location → Option StoreSlot
 
-def fail {α : Type} (msg : String) : EvalM α :=
-  Except.error msg
+namespace ProgramStore
 
-def expectSome {α : Type} (msg : String) : Option α → EvalM α
-  | some x => Except.ok x
-  | none => fail msg
+def empty : ProgramStore :=
+  { slotAt := fun _ => none }
 
-namespace State
+def fresh (store : ProgramStore) (location : Location) : Prop :=
+  store.slotAt location = none
 
-def empty : State := {}
+def update (store : ProgramStore) (location : Location) (slot : StoreSlot) : ProgramStore :=
+  { slotAt := fun candidate =>
+      if candidate = location then some slot else store.slotAt candidate }
 
-def lookupVar (x : Name) : List (Name × Reference) → Option Reference
-  | [] => none
-  | (y, r) :: rest => if x == y then some r else lookupVar x rest
+def erase (store : ProgramStore) (location : Location) : ProgramStore :=
+  { slotAt := fun candidate =>
+      if candidate = location then none else store.slotAt candidate }
 
-def getVar (state : State) (x : Name) : Option Reference :=
-  lookupVar x state.vars
+@[simp] theorem empty_slotAt (location : Location) :
+    empty.slotAt location = none := by
+  rfl
 
-def putVar (state : State) (x : Name) (r : Reference) : State :=
-  { state with vars := (x, r) :: state.vars.filter (fun entry => entry.fst != x) }
+@[simp] theorem update_slotAt_same
+    (store : ProgramStore) (location : Location) (slot : StoreSlot) :
+    (store.update location slot).slotAt location = some slot := by
+  simp [update]
 
-def dropLifetime (state : State) (lifetime : Lifetime) : State :=
-  { state with
-    vars := state.vars,
-    heap := state.heap.map (fun entry =>
-      if entry.snd.lifetime == lifetime then (entry.fst, { entry.snd with value := none }) else entry) }
+@[simp] theorem update_slotAt_ne
+    (store : ProgramStore) {candidate location : Location} (slot : StoreSlot) :
+    candidate ≠ location →
+    (store.update location slot).slotAt candidate = store.slotAt candidate := by
+  intro hne
+  simp [update, hne]
 
-def lookupCell (address : Nat) : List (Nat × Cell) → Option Cell
-  | [] => none
-  | (a, c) :: rest => if a == address then some c else lookupCell address rest
+@[simp] theorem erase_slotAt_same (store : ProgramStore) (location : Location) :
+    (store.erase location).slotAt location = none := by
+  simp [erase]
 
-def getCell (state : State) (address : Nat) : Option Cell :=
-  lookupCell address state.heap
+@[simp] theorem erase_slotAt_ne
+    (store : ProgramStore) {candidate location : Location} :
+    candidate ≠ location →
+    (store.erase location).slotAt candidate = store.slotAt candidate := by
+  intro hne
+  simp [erase, hne]
 
-def putCell (state : State) (address : Nat) (cell : Cell) : State :=
-  { state with heap := (address, cell) :: state.heap.filter (fun entry => entry.fst != address) }
+/--
+R-Declare store update: `S[ℓx ↦ ⟨v⟩^l]`.
+-/
+def declare (store : ProgramStore) (x : Name) (lifetime : Lifetime) (value : Value) :
+    ProgramStore :=
+  store.update (.var x) { value := .value value, lifetime := lifetime }
 
-def allocate (state : State) (lifetime : Lifetime) (value : Value) : State × Reference :=
-  let address := state.nextAddress
-  let ref := { address := address, path := [], owner := true }
-  ({ state with
-      nextAddress := address + 1,
-      heap := (address, { lifetime := lifetime, value := some value }) :: state.heap },
-    ref)
+/--
+R-Box store update at a chosen fresh heap location: `S[ℓn ↦ ⟨v⟩^*]`.
+Freshness is a premise of the reduction rule, not executable state.
+-/
+def boxAt (store : ProgramStore) (address : Nat) (value : Value) : ProgramStore × Reference :=
+  let location := Location.heap address
+  (store.update location { value := .value value, lifetime := Lifetime.root },
+    { location := location, owner := true })
 
-end State
+/--
+Definition 3.1. Locate the store location denoted by an lval.
+-/
+def loc (store : ProgramStore) : LVal → Option Location
+  | .var x => some (.var x)
+  | .deref lv => do
+      let location ← loc store lv
+      let slot ← store.slotAt location
+      match slot.value with
+      | .value (.ref ref) => some ref.location
+      | .value _ => none
+      | .undef => none
 
-def readValuePath : Value → List Nat → EvalM Value
-  | value, [] =>
-      match value with
-      | .moved => fail "use of moved value"
-      | _ => return value
-  | .tuple fields, i :: rest => do
-      let field ← expectSome "invalid tuple accessor" fields[i]?
-      readValuePath field rest
-  | .moved, _ :: _ => fail "use of moved value"
-  | _, _ :: _ => fail "cannot select field from non-tuple value"
+/--
+Definition 3.2. Read the store slot for an lval.  This can return an undefined
+partial value; rules that require a value pattern-match on the returned slot.
+-/
+def read (store : ProgramStore) (lv : LVal) : Option StoreSlot := do
+  let location ← store.loc lv
+  store.slotAt location
 
-def writeValuePath : Value → List Nat → Value → EvalM Value
-  | _, [], newValue => return newValue
-  | .tuple fields, i :: rest, newValue => do
-      let field ← expectSome "invalid tuple accessor" fields[i]?
-      let updated ← writeValuePath field rest newValue
-      return .tuple (fields.set i updated)
-  | .moved, _ :: _, _ => fail "use of moved value"
-  | _, _ :: _, _ => fail "cannot select field from non-tuple value"
+/--
+Definition 3.3. Write a partial value to an existing lval, preserving the
+location's allocation lifetime.
+-/
+def write (store : ProgramStore) (lv : LVal) (value : PartialValue) : Option ProgramStore := do
+  let location ← store.loc lv
+  let slot ← store.slotAt location
+  return store.update location { slot with value := value }
 
-namespace State
+def readValue (store : ProgramStore) (lv : LVal) : Option Value := do
+  let slot ← store.read lv
+  match slot.value with
+  | .value value => some value
+  | .undef => none
 
-def readRef (state : State) (ref : Reference) : EvalM Value := do
-  let cell ← expectSome "invalid location" (state.getCell ref.address)
-  let value ← expectSome "use of moved value" cell.value
-  readValuePath value ref.path
+def writeValue (store : ProgramStore) (lv : LVal) (value : Value) : Option ProgramStore :=
+  store.write lv (.value value)
 
-def writeRef (state : State) (ref : Reference) (value : Option Value) : EvalM State := do
-  let cell ← expectSome "invalid location" (state.getCell ref.address)
-  match value with
-  | none =>
-      if ref.path.isEmpty then
-        return state.putCell ref.address { cell with value := none }
-      else
-        let old ← expectSome "use of moved value" cell.value
-        let updated ← writeValuePath old ref.path .moved
-        return state.putCell ref.address { cell with value := some updated }
-  | some value =>
-      if ref.path.isEmpty then
-        return state.putCell ref.address { cell with value := some value }
-      else
-        let old ← expectSome "use of moved value" cell.value
-        let updated ← writeValuePath old ref.path value
-        return state.putCell ref.address { cell with value := some updated }
+/--
+Definition 3.4, drop-set form.  `Drops S ψ S'` is the paper's recursive
+`drop(S, ψ) = S'`.
+-/
+inductive Drops : ProgramStore → List PartialValue → ProgramStore → Prop where
+  | nil {store : ProgramStore} :
+      Drops store [] store
+  | nonOwner {store store' : ProgramStore} {value : PartialValue} {rest : List PartialValue} :
+      (∀ ref, value ≠ .value (.ref ref) ∨ ref.owner = false) →
+      Drops store rest store' →
+      Drops store (value :: rest) store'
+  | ownerMissing {store store' : ProgramStore} {ref : Reference} {rest : List PartialValue} :
+      ref.owner = true →
+      store.slotAt ref.location = none →
+      Drops store rest store' →
+      Drops store (.value (.ref ref) :: rest) store'
+  | ownerPresent {store store' : ProgramStore} {ref : Reference} {slot : StoreSlot}
+      {rest : List PartialValue} :
+      ref.owner = true →
+      store.slotAt ref.location = some slot →
+      Drops (store.erase ref.location) (slot.value :: rest) store' →
+      Drops store (.value (.ref ref) :: rest) store'
 
-def locatePath (state : State) (ref : Reference) : Path → EvalM Reference
-  | [] => return ref
-  | .deref :: rest => do
-      match (← state.readRef ref) with
-      | .ref r => locatePath state r rest
-      | _ => fail "expected reference value"
-  | .index i :: rest =>
-      locatePath state (ref.atIndex i) rest
+/--
+Definition 3.4, lifetime form.  `DropsLifetime S m S'` is the paper's
+`drop(S, m) = S'`.  The drop set is exactly the owned references to locations
+allocated in lifetime `m`.
+-/
+inductive DropsLifetime (store : ProgramStore) (lifetime : Lifetime) (store' : ProgramStore) :
+    Prop where
+  | intro {dropSet : List PartialValue} :
+      (∀ value, value ∈ dropSet ↔
+        ∃ location slot,
+          store.slotAt location = some slot ∧
+          slot.lifetime = lifetime ∧
+          value = .value (.ref { location := location, owner := true })) →
+      Drops store dropSet store' →
+      DropsLifetime store lifetime store'
 
-def locate (state : State) (lv : LVal) : EvalM Reference := do
-  let root ← expectSome "variable undeclared" (state.getVar lv.name)
-  locatePath state root lv.path
+end ProgramStore
 
-def readLVal (state : State) (lv : LVal) : EvalM Value := do
-  state.readRef (← state.locate lv)
+def loc (store : ProgramStore) (lv : LVal) : Option Location :=
+  store.loc lv
 
-def writeLVal (state : State) (lv : LVal) (value : Option Value) : EvalM State := do
-  state.writeRef (← state.locate lv) value
+def read (store : ProgramStore) (lv : LVal) : Option StoreSlot :=
+  store.read lv
 
-end State
+def write (store : ProgramStore) (lv : LVal) (value : PartialValue) : Option ProgramStore :=
+  store.write lv value
 
-def locate (state : State) (lv : LVal) : EvalM Reference :=
-  state.locate lv
+abbrev Drops := ProgramStore.Drops
+abbrev DropsLifetime := ProgramStore.DropsLifetime
 
 end Paper
 end LwRust

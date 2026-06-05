@@ -9,6 +9,38 @@ namespace Paper
 
 open Core
 
+structure EnvSlot where
+  ty : PartialTy
+  lifetime : Lifetime
+  deriving BEq, Repr
+
+abbrev Slot := EnvSlot
+
+abbrev Env := List (Name × EnvSlot)
+
+namespace Env
+
+def empty : Env := []
+
+def get (env : Env) (x : Name) : Option EnvSlot :=
+  match env with
+  | [] => none
+  | (y, s) :: rest => if x == y then some s else get rest x
+
+def erase (env : Env) (x : Name) : Env :=
+  env.filter (fun entry => entry.fst != x)
+
+def put (env : Env) (x : Name) (slot : EnvSlot) : Env :=
+  (x, slot) :: erase env x
+
+def dropLifetime (env : Env) (lifetime : Lifetime) : Env :=
+  env.filter (fun entry => entry.snd.lifetime != lifetime)
+
+def names (env : Env) : List Name :=
+  env.map Prod.fst
+
+end Env
+
 namespace BorrowChecker
 
 /--
