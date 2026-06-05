@@ -56,11 +56,11 @@ inductive Step : ProgramStore → Lifetime → Term → ProgramStore → Term �
       Step store₁ lifetime (.letMut x (.val value)) store₂ (.val .unit)
 
   /-- R-Seq.  The paper's sequence syntax is represented by the term list in a block. -/
-  | seq {store₁ store₂ : ProgramStore} {lifetime : Lifetime}
+  | seq {store₁ store₂ : ProgramStore} {lifetime blockLifetime : Lifetime}
       {value : Value} {next : Term} {rest : List Term} :
       Drops store₁ [.value value] store₂ →
-      Step store₁ lifetime (.block lifetime (.val value :: next :: rest))
-        store₂ (.block lifetime (next :: rest))
+      Step store₁ lifetime (.block blockLifetime (.val value :: next :: rest))
+        store₂ (.block blockLifetime (next :: rest))
 
   /-- R-BlockA. -/
   | blockA {store₁ store₂ : ProgramStore} {lifetime blockLifetime : Lifetime}
