@@ -1,4 +1,4 @@
-import LwRust.Core.Syntax
+import LwRust.Paper.Syntax
 
 /-!
 Inductive presentation of the paper borrow checker.

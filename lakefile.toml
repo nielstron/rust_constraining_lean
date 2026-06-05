@@ -4,3 +4,7 @@ defaultTargets = ["LwRust"]
 
 [[lean_lib]]
 name = "LwRust"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"

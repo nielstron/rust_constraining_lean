@@ -218,6 +218,7 @@ def EnvAbstracts (state : State) (env : Env) : Prop :=
     TypeOnlyName x ∨
       ∃ ref cell,
         state.getVar x = some ref ∧
+        ref.path = [] ∧
         state.getCell ref.address = some cell ∧
         cell.lifetime = slot.lifetime ∧
         PartialValueAbstracts state cell.value slot.ty
@@ -268,6 +269,149 @@ theorem partial_value_live {state : State} {value : Value} {ty : Ty} :
   | some hv =>
       exact hv
 
+/--
+Paper Lemma 9.3 (Location), path-aware selected-value abstraction.
+
+The executable runtime represents tuple-field locations as a heap address plus
+a reference path.  This predicate says that following that path through the
+stored root value reaches a component abstracting the l-value type.
+-/
+inductive ValueAtPathAbstracts (state : State) : Value → List Nat → Ty → Prop where
+  | here {value : Value} {ty : Ty} :
+      ValueAbstracts state value ty →
+      ValueAtPathAbstracts state value [] ty
+  | index {values : List Value} {tys : List Ty} {i : Nat} {field : Value}
+      {path : List Nat} {ty : Ty} :
+      ValuesAbstract state values tys →
+      values[i]? = some field →
+      ValueAtPathAbstracts state field path ty →
+      ValueAtPathAbstracts state (.tuple values) (i :: path) ty
+
+/--
+Paper Lemma 9.3 (Location), path-aware partial selected-value abstraction.
+
+This is the partial-value counterpart used for l-values that may denote an
+undefined or moved slot.
+-/
+inductive PartialValueAtPathAbstracts (state : State) :
+    Option Value → List Nat → Ty → Prop where
+  | root {value : Option Value} {ty : Ty} :
+      PartialValueAbstracts state value ty →
+      PartialValueAtPathAbstracts state value [] ty
+  | some {value : Value} {path : List Nat} {ty : Ty} :
+      ValueAtPathAbstracts state value path ty →
+      PartialValueAtPathAbstracts state (some value) path ty
+
+-- TODO: This helper is intentionally path-oriented.  A later bridge should
+-- connect it to the paper's notation where selected fields are themselves
+-- locations in the store.
+
+theorem value_at_path_read_exists {state : State} {root : Value} {path : List Nat}
+    {ty : Ty} :
+    ValueAtPathAbstracts state root path ty →
+    ∃ selected, readValuePath root path = .ok selected ∧
+      ValueAbstracts state selected ty := by
+  intro h
+  induction h with
+  | here hvalue =>
+      cases hvalue with
+      | unit =>
+          exact ⟨.unit, rfl, ValueAbstracts.unit⟩
+      | int n =>
+          exact ⟨.int n, rfl, ValueAbstracts.int n⟩
+      | tuple hvalues =>
+          exact ⟨.tuple _, rfl, ValueAbstracts.tuple hvalues⟩
+      | box howner hcell hpartial =>
+          exact ⟨.ref _, rfl, ValueAbstracts.box howner hcell hpartial⟩
+      | borrow howner hin hloc =>
+          exact ⟨.ref _, rfl, ValueAbstracts.borrow howner hin hloc⟩
+  | index hvalues hfield hpath ih =>
+      rcases ih with ⟨selected, hread, hvalue⟩
+      refine ⟨selected, ?_, hvalue⟩
+      simp [readValuePath, expectSome, hfield]
+      change readValuePath _ _ = .ok selected
+      exact hread
+
+theorem value_at_path_write_exists {state : State} {root : Value} {path : List Nat}
+    {ty : Ty} :
+    ValueAtPathAbstracts state root path ty →
+    ∀ newValue, ∃ updated, writeValuePath root path newValue = .ok updated := by
+  intro h
+  induction h with
+  | here _ =>
+      intro newValue
+      exact ⟨newValue, rfl⟩
+  | index hvalues hfield hpath ih =>
+      rename_i values tys i field path ty
+      intro newValue
+      rcases ih newValue with ⟨updatedField, hwrite⟩
+      refine ⟨.tuple (values.set i updatedField), ?_⟩
+      simp [writeValuePath, expectSome, hfield]
+      change (writeValuePath field path newValue).map
+          (fun updated => Value.tuple (values.set i updated)) =
+        .ok (.tuple (values.set i updatedField))
+      rw [hwrite]
+      rfl
+
+theorem partial_value_at_path_read_exists {state : State} {root : Option Value}
+    {path : List Nat} {ty : Ty} :
+    PartialValueAtPathAbstracts state root path ty →
+    BorrowChecker.TyDefined ty →
+    ∃ selected rootValue,
+      root = some rootValue ∧
+      readValuePath rootValue path = .ok selected ∧
+      ValueAbstracts state selected ty := by
+  intro h hdefined
+  cases h with
+  | root hpartial =>
+      cases root with
+      | none =>
+          cases hpartial
+          cases hdefined
+      | some rootValue =>
+          have hvalue := partial_value_defined hpartial hdefined
+          refine ⟨rootValue, rootValue, rfl, ?_, hvalue⟩
+          cases hvalue <;> rfl
+  | some hpath =>
+      rcases value_at_path_read_exists hpath with ⟨selected, hread, hvalue⟩
+      exact ⟨selected, _, rfl, hread, hvalue⟩
+
+theorem partial_value_at_path_write_exists {state : State} {root : Value}
+    {path : List Nat} {ty : Ty} :
+    PartialValueAtPathAbstracts state (some root) path ty →
+    ∀ newValue, ∃ updated, writeValuePath root path newValue = .ok updated := by
+  intro h
+  cases h with
+  | root _ =>
+      intro newValue
+      exact ⟨newValue, rfl⟩
+  | some hpath =>
+      exact value_at_path_write_exists hpath
+
+/--
+Support lemma for Paper Lemma 9.3 (Location): simplify successful runtime
+primitive binds.
+-/
+@[simp] theorem except_ok_bind {ε α β : Type} (x : α) (f : α → Except ε β) :
+    (do let y ← (Except.ok x : Except ε α); f y) = f x := by
+  rfl
+
+/--
+Support lemma for Paper Lemma 9.3 (Location): simplify successful runtime
+primitive maps.
+-/
+@[simp] theorem except_ok_map {ε α β : Type} (x : α) (f : α → β) :
+    Except.map f (Except.ok x : Except ε α) = Except.ok (f x) := by
+  rfl
+
+/--
+Support lemma for Paper Lemma 9.3 (Location): simplify successful runtime
+primitive functor maps.
+-/
+@[simp] theorem except_ok_fmap {ε α β : Type} (x : α) (f : α → β) :
+    f <$> (Except.ok x : Except ε α) = Except.ok (f x) := by
+  rfl
+
 mutual
   /--
   Support lemma for Paper Lemma 9.7 (Value Typing).
@@ -310,6 +454,7 @@ theorem env_abstracts_get {state : State} {env : Env} {x : Name} {slot : Slot} :
     TypeOnlyName x ∨
     ∃ ref cell,
       state.getVar x = some ref ∧
+      ref.path = [] ∧
       state.getCell ref.address = some cell ∧
       cell.lifetime = slot.lifetime ∧
       PartialValueAbstracts state cell.value slot.ty := by
@@ -325,6 +470,7 @@ theorem env_abstracts_runtime_get {state : State} {env : Env} {x : Name} {slot :
     Env.get env x = some slot →
     ∃ ref cell,
       state.getVar x = some ref ∧
+      ref.path = [] ∧
       state.getCell ref.address = some cell ∧
       cell.lifetime = slot.lifetime ∧
       PartialValueAbstracts state cell.value slot.ty := by
@@ -501,13 +647,16 @@ theorem location_var {state : State} {env : Env} {x : Name} {ty : Ty}
     {ambientLifetime targetLifetime : Lifetime} :
     EnvAbstracts state env →
     WellFormedEnv state env ambientLifetime →
+    ¬ TypeOnlyName x →
     BorrowChecker.TypeOf env (LVal.var x) ty targetLifetime →
     ∃ ref cell,
       locate state (LVal.var x) = .ok ref ∧
       state.getCell ref.address = some cell ∧
-      PartialValueAbstracts state cell.value ty := by
-  -- TODO: This is immediate from `EnvAbstracts` for runtime names.  The current
-  -- statement still allows checker-only names, which have no runtime location.
+      PartialValueAtPathAbstracts state cell.value ref.path ty := by
+  -- TODO: Prove the `BorrowChecker.TypeOf` inversion for `LVal.var`.  The
+  -- runtime-name and root-reference premises now make this statement true; the
+  -- remaining work is ruling out the dependent deref/index constructors whose
+  -- paths cannot be `[]`.
   sorry
 
 /--
@@ -515,7 +664,7 @@ Paper Lemma 9.3 (Location Lemma).
 
 If an l-value has a type in the borrow-checker environment, then locating the
 same l-value in an abstracting runtime state succeeds and reaches a cell whose
-partial value abstracts that type.
+selected component abstracts that type.
 -/
 theorem location {state : State} {env : Env} {lv : LVal} {ty : Ty}
     {ambientLifetime targetLifetime : Lifetime} :
@@ -525,10 +674,12 @@ theorem location {state : State} {env : Env} {lv : LVal} {ty : Ty}
     ∃ ref cell,
       locate state lv = .ok ref ∧
       state.getCell ref.address = some cell ∧
-      PartialValueAbstracts state cell.value ty := by
+      PartialValueAtPathAbstracts state cell.value ref.path ty := by
   -- TODO: Port paper Lemma 9.3.  The proof follows the structure of
   -- `BorrowChecker.TypeOf` and `locate`, using
   -- `EnvAbstracts` for variables and `ValueAbstracts.borrow` for dereferences.
+  -- The Lean statement is path-aware because the runtime stores tuple field
+  -- selection in `Reference.path` rather than as separate heap cells.
   sorry
 
 /--
@@ -546,9 +697,14 @@ theorem read_preservation {state : State} {env : Env} {lv : LVal} {ty : Ty}
     ∃ value,
       state.readLVal lv = .ok value ∧
       ValueAbstracts state value ty := by
-  -- TODO: Port paper Corollary 9.4 from `location`; the `defined` premise rules
-  -- out `none` and `moved` partial values.
-  sorry
+  intro henv hwf htype hdefined
+  rcases location henv hwf htype with ⟨ref, cell, hloc, hcell, hpartial⟩
+  rcases partial_value_at_path_read_exists hpartial hdefined with
+    ⟨selected, rootValue, hroot, hreadPath, hvalue⟩
+  have hlocState : state.locate lv = .ok ref := by
+    simpa [locate] using hloc
+  refine ⟨selected, ?_, hvalue⟩
+  simp [State.readLVal, State.readRef, hlocState, hcell, expectSome, hroot, hreadPath]
 
 /--
 Support lemma for Paper Lemma 4.10 (Progress), move-write case.
@@ -561,10 +717,22 @@ theorem move_write_progress {state : State} {env : Env} {lv : LVal} {ty : Ty}
     BorrowChecker.TyDefined ty →
     BorrowChecker.WriteAllowed env lv →
     ∃ state', state.writeLVal lv none = .ok state' := by
-  -- TODO: This is the write side of progress for moves.  It should follow from
-  -- `location`, absence of write-prohibiting borrows, and definedness of the
-  -- target value.
-  sorry
+  intro henv hwf htype hdefined _
+  rcases location henv hwf htype with ⟨ref, cell, hloc, hcell, hpartial⟩
+  have hlocState : state.locate lv = .ok ref := by
+    simpa [locate] using hloc
+  by_cases hempty : ref.path = []
+  · refine ⟨state.putCell ref.address { cell with value := none }, ?_⟩
+    simp [State.writeLVal, State.writeRef, hlocState, hcell, expectSome, hempty]
+  · rcases partial_value_at_path_read_exists hpartial hdefined with
+      ⟨_, rootValue, hroot, _, _⟩
+    have hpartialRoot : PartialValueAtPathAbstracts state (some rootValue) ref.path ty := by
+      simpa [hroot] using hpartial
+    rcases partial_value_at_path_write_exists hpartialRoot .moved with
+      ⟨updated, hwritePath⟩
+    refine ⟨state.putCell ref.address { cell with value := some updated }, ?_⟩
+    simp [State.writeLVal, State.writeRef, hlocState, hcell, expectSome,
+      hempty, hroot, hwritePath]
 
 /--
 Support lemma for Paper Lemma 4.10 (Progress), assignment-write case.
@@ -578,9 +746,22 @@ theorem assign_write_progress {state : State} {env : Env} {lv : LVal} {ty : Ty}
     BorrowChecker.WriteAllowed env lv →
     ValueAbstracts state value ty →
     ∃ state', state.writeLVal lv (some value) = .ok state' := by
-  -- TODO: Port the assignment-write case of progress; this is the same location
-  -- argument as `move_write_progress`, with `Value.writePath` preserving shape.
-  sorry
+  intro henv hwf htype hdefined _ _
+  rcases location henv hwf htype with ⟨ref, cell, hloc, hcell, hpartial⟩
+  have hlocState : state.locate lv = .ok ref := by
+    simpa [locate] using hloc
+  by_cases hempty : ref.path = []
+  · refine ⟨state.putCell ref.address { cell with value := some value }, ?_⟩
+    simp [State.writeLVal, State.writeRef, hlocState, hcell, expectSome, hempty]
+  · rcases partial_value_at_path_read_exists hpartial hdefined with
+      ⟨_, rootValue, hroot, _, _⟩
+    have hpartialRoot : PartialValueAtPathAbstracts state (some rootValue) ref.path ty := by
+      simpa [hroot] using hpartial
+    rcases partial_value_at_path_write_exists hpartialRoot value with
+      ⟨updated, hwritePath⟩
+    refine ⟨state.putCell ref.address { cell with value := some updated }, ?_⟩
+    simp [State.writeLVal, State.writeRef, hlocState, hcell, expectSome,
+      hempty, hroot, hwritePath]
 
 end Paper
 end LwRust

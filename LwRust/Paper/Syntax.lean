@@ -3,14 +3,7 @@ import Std
 /-!
 Core syntax for the Featherweight Rust implementation.
 
-This is a direct executable representation of the Java syntax in
-`FeatherweightRust/src/featherweightrust/core/Syntax.java`, with two deliberate
-adaptations:
-
-* values are separated from reducible terms, instead of Java values also being
-  terms through inheritance;
-* tuple path elements are present in the shared path datatype so that the
-  tuple extension can reuse the core l-value machinery.
+This is a direct executable representation of the Paper syntax.
 -/
 
 namespace LwRust
