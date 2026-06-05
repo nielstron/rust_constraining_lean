@@ -224,5 +224,254 @@ theorem multistep_block_context {store finalStore : ProgramStore}
   | trans hstep _ ih =>
       exact MultiStep.trans (Step.blockA hstep) ih
 
+namespace WorkedExample
+
+def l : Lifetime := [0]
+def m : Lifetime := [0, 0]
+
+def x : LVal := .var "x"
+def y : LVal := .var "y"
+def z : LVal := .var "z"
+def derefY : LVal := .deref y
+
+def owned (location : Location) : Value :=
+  .ref { location := location, owner := true }
+
+def borrowed (location : Location) : Value :=
+  .ref { location := location, owner := false }
+
+def unitDrops (store : ProgramStore) :
+    Drops store [.value .unit] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+def intDrops (store : ProgramStore) (n : Int) :
+    Drops store [.value (.int n)] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+def borrowDrops (store : ProgramStore) (location : Location) :
+    Drops store [.value (borrowed location)] store := by
+  refine ProgramStore.Drops.nonOwner ?_ ProgramStore.Drops.nil
+  intro ref
+  by_cases h : (PartialValue.value (borrowed location)) = .value (.ref ref)
+  · right
+    cases h
+    rfl
+  · left
+    exact h
+
+def S0 : ProgramStore := ProgramStore.empty
+def Sx : ProgramStore := S0.declare "x" l (.int 1)
+def SxHeap1 : ProgramStore := (Sx.boxAt 1 (.int 1)).fst
+def S4 : ProgramStore := SxHeap1.declare "y" l (owned (.heap 1))
+def S4Heap2 : ProgramStore := (S4.boxAt 2 (.int 0)).fst
+def S5 : ProgramStore := S4Heap2.declare "z" m (owned (.heap 2))
+def S6 : ProgramStore :=
+  (S5.erase (.heap 1)).update (.var "y")
+    { value := .value (borrowed (.var "z")), lifetime := l }
+def S6AfterMoveZ : ProgramStore :=
+  S6.update (.var "z") { value := .undef, lifetime := m }
+def S7 : ProgramStore :=
+  S6AfterMoveZ.update (.var "y")
+    { value := .value (owned (.heap 2)), lifetime := l }
+def S8 : ProgramStore :=
+  S7.update (.heap 2) { value := .undef, lifetime := Lifetime.root }
+def S9 : ProgramStore :=
+  S8.erase (.var "z")
+def Sfinal : ProgramStore :=
+  ((S9.erase (.var "x")).erase (.var "y")).erase (.heap 2)
+
+def declareX : Term := .letMut "x" (.val (.int 1))
+def declareY : Term := .letMut "y" (.box (.copy x))
+def declareZ : Term := .letMut "z" (.box (.val (.int 0)))
+def assignBorrowZ : Term := .assign y (.borrow false z)
+def assignMoveZ : Term := .assign y (.move z)
+def readThroughY : Term := .move derefY
+def innerBlock : Term :=
+  .block m [declareZ, assignBorrowZ, assignMoveZ, readThroughY]
+def workedProgram : Term :=
+  .block l [declareX, declareY, innerBlock]
+
+theorem declare_x_step :
+    Step S0 l workedProgram Sx (.block l [.val .unit, declareY, innerBlock]) := by
+  unfold workedProgram declareX S0 Sx l
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_x :
+    Step Sx l (.block l [.val .unit, declareY, innerBlock])
+      Sx (.block l [declareY, innerBlock]) := by
+  exact Step.seq (unitDrops _)
+
+theorem copy_x_for_y_box :
+    Step Sx l (.block l [declareY, innerBlock])
+      Sx (.block l [.letMut "y" (.box (.val (.int 1))), innerBlock]) := by
+  unfold declareY x
+  exact Step.blockA (Step.subDeclare (Step.subBox (Step.copy (valueLifetime := l) (by
+    simp [Sx, S0, l, ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update]))))
+
+theorem allocate_y_box :
+    Step Sx l (.block l [.letMut "y" (.box (.val (.int 1))), innerBlock])
+      SxHeap1 (.block l [.letMut "y" (.val (owned (.heap 1))), innerBlock]) := by
+  unfold SxHeap1 owned
+  exact Step.blockA (Step.subDeclare (Step.box (address := 1)
+    (ref := { location := .heap 1, owner := true }) (by
+    simp [Sx, S0, l, ProgramStore.fresh, ProgramStore.declare,
+      ProgramStore.update]) (by simp [ProgramStore.boxAt])))
+
+theorem declare_y_step :
+    Step SxHeap1 l (.block l [.letMut "y" (.val (owned (.heap 1))), innerBlock])
+      S4 (.block l [.val .unit, innerBlock]) := by
+  unfold S4 owned
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_y :
+    Step S4 l (.block l [.val .unit, innerBlock]) S4 (.block l [innerBlock]) := by
+  exact Step.seq (unitDrops _)
+
+theorem allocate_z_box :
+    Step S4 l innerBlock S4Heap2
+      (.block m [.letMut "z" (.val (owned (.heap 2))), assignBorrowZ, assignMoveZ, readThroughY]) := by
+  unfold innerBlock declareZ owned
+  exact Step.blockA (Step.subDeclare (Step.box (address := 2)
+    (ref := { location := .heap 2, owner := true }) (by
+    simp [S4, SxHeap1, Sx, S0, l, ProgramStore.fresh,
+      ProgramStore.boxAt, ProgramStore.declare, ProgramStore.update])
+    (by simp [S4Heap2, ProgramStore.boxAt])))
+
+theorem declare_z_step :
+    Step S4Heap2 l
+      (.block m [.letMut "z" (.val (owned (.heap 2))), assignBorrowZ, assignMoveZ, readThroughY])
+      S5 (.block m [.val .unit, assignBorrowZ, assignMoveZ, readThroughY]) := by
+  unfold S5 owned
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_z :
+    Step S5 m (.block m [.val .unit, assignBorrowZ, assignMoveZ, readThroughY])
+      S5 (.block m [assignBorrowZ, assignMoveZ, readThroughY]) := by
+  exact Step.seq (unitDrops _)
+
+theorem borrow_z_under_assignment :
+    Step S5 m assignBorrowZ S5 (.assign y (.val (borrowed (.var "z")))) := by
+  unfold assignBorrowZ z borrowed
+  exact Step.subAssign (Step.borrow (by simp [ProgramStore.loc]))
+
+theorem assign_y_borrow_z :
+    Step S5 m (.assign y (.val (borrowed (.var "z")))) S6 (.val .unit) := by
+  refine Step.assign
+    (store₂ := S5.erase (.heap 1))
+    (oldSlot := { value := .value (owned (.heap 1)), lifetime := l }) ?_ ?_ ?_
+  · simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, S5, S4Heap2, S4, SxHeap1, Sx, S0, y, l, m,
+      owned]
+  · refine ProgramStore.Drops.ownerPresent
+      (slot := { value := .value (.int 1), lifetime := Lifetime.root }) rfl ?_ ?_
+    · simp [ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update, S5, S4Heap2,
+        S4, SxHeap1, Sx, S0, l, m, owned]
+    · exact intDrops (S5.erase (.heap 1)) 1
+  · simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase, S6, S5, S4Heap2,
+      S4, SxHeap1, Sx, S0, y, l, m, borrowed, owned]
+
+theorem move_z_under_assignment :
+    Step S6 m assignMoveZ S6AfterMoveZ (.assign y (.val (owned (.heap 2)))) := by
+  unfold assignMoveZ S6AfterMoveZ S6 S5 S4Heap2 S4 SxHeap1 Sx S0 y z l m borrowed owned
+  exact Step.subAssign (Step.move (valueLifetime := [0, 0])
+    (by simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase])
+    (by simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase]))
+
+theorem assign_y_move_z :
+    Step S6AfterMoveZ m (.assign y (.val (owned (.heap 2)))) S7 (.val .unit) := by
+  refine Step.assign
+    (store₂ := S6AfterMoveZ)
+    (oldSlot := { value := .value (borrowed (.var "z")), lifetime := l }) ?_ ?_ ?_
+  · simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase, S6AfterMoveZ, S6, S5,
+      S4Heap2, S4, SxHeap1, Sx, S0, y, l, m, borrowed, owned]
+  · exact borrowDrops _ (.var "z")
+  · simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase, S7, S6AfterMoveZ, S6,
+      S5, S4Heap2, S4, SxHeap1, Sx, S0, y, l, m, borrowed, owned]
+
+theorem read_through_y_step :
+    Step S7 m readThroughY S8 (.val (.int 0)) := by
+  unfold readThroughY derefY S8 S7 S6AfterMoveZ S6 S5 S4Heap2 S4 SxHeap1 Sx S0
+    y l m borrowed owned
+  exact Step.move (valueLifetime := Lifetime.root)
+    (by simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase])
+    (by simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.boxAt, ProgramStore.update, ProgramStore.erase])
+
+theorem drop_inner_lifetime :
+    DropsLifetime S8 m S9 := by
+  refine ProgramStore.DropsLifetime.intro
+    (dropSet := [.value (.ref { location := .var "z", owner := true })]) ?_ ?_
+  · intro value
+    constructor
+    · intro hmem
+      simp at hmem
+      subst hmem
+      refine ⟨.var "z", { value := .undef, lifetime := m }, ?_, rfl, rfl⟩
+      simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+        l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+        ProgramStore.erase]
+    · intro h
+      rcases h with ⟨location, slot, hslot, hlifetime, hvalue⟩
+      subst hvalue
+      simp
+      cases location with
+      | var name =>
+          by_cases hy : name = "y"
+          · subst hy
+            simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+              l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+              ProgramStore.erase] at hslot
+            cases hslot
+            simp [l, m] at hlifetime
+          · by_cases hz : name = "z"
+            · subst hz
+              rfl
+            · simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+                l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+                ProgramStore.erase, hy, hz] at hslot
+              by_cases hx : name = "x"
+              · subst hx
+                simp at hslot
+                cases hslot
+                simp [l, m] at hlifetime
+              · simp [hx] at hslot
+      | heap address =>
+          by_cases h2 : address = 2
+          · subst h2
+            simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+              l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+              ProgramStore.erase] at hslot
+            cases hslot
+            simp [m] at hlifetime
+            contradiction
+          · by_cases h1 : address = 1
+            · subst h1
+              simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+                l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+                ProgramStore.erase] at hslot
+            · simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+                l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+                ProgramStore.erase, h1, h2] at hslot
+  · refine ProgramStore.Drops.ownerPresent
+      (slot := { value := .undef, lifetime := m }) rfl ?_ ?_
+    · simp [S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+        l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+        ProgramStore.erase]
+    · unfold S9
+      exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+theorem inner_block_returns_zero :
+    Step S8 l (.block m [.val (.int 0)]) S9 (.val (.int 0)) := by
+  exact Step.blockB drop_inner_lifetime
+
+end WorkedExample
+
 end Paper
 end LwRust
