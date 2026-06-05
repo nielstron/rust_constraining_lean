@@ -1,3 +1,4 @@
+import Mathlib.Data.Finmap
 import LwRust.Paper.Syntax
 
 /-!
@@ -178,6 +179,148 @@ def write (store : ProgramStore) (lv : LVal) (value : PartialValue) : Option Pro
 
 abbrev Drops := ProgramStore.Drops
 abbrev DropsLifetime := ProgramStore.DropsLifetime
+
+/-! ## Concrete finite implementation -/
+
+/--
+A concrete finite implementation of program stores.
+
+`ProgramStore` above is the paper-facing mathematical interface: a partial map
+observed through `slotAt`.  `ConcreteProgramStore` is an actual finite map
+implementation of the same interface.  Every primitive operation returns another
+`ConcreteProgramStore`, so stores started from `empty` remain concrete stores by
+construction.
+-/
+structure ConcreteProgramStore where
+  slots : Finmap (fun _ : Location => StoreSlot)
+
+namespace ConcreteProgramStore
+
+def empty : ConcreteProgramStore :=
+  { slots := ∅ }
+
+def slotAt (store : ConcreteProgramStore) (location : Location) : Option StoreSlot :=
+  store.slots.lookup location
+
+def fresh (store : ConcreteProgramStore) (location : Location) : Prop :=
+  store.slotAt location = none
+
+def update (store : ConcreteProgramStore) (location : Location) (slot : StoreSlot) :
+    ConcreteProgramStore :=
+  { slots := store.slots.insert location slot }
+
+def erase (store : ConcreteProgramStore) (location : Location) : ConcreteProgramStore :=
+  { slots := store.slots.erase location }
+
+def toProgramStore (store : ConcreteProgramStore) : ProgramStore :=
+  { slotAt := store.slotAt }
+
+instance : Coe ConcreteProgramStore ProgramStore where
+  coe := toProgramStore
+
+@[simp] theorem empty_slotAt (location : Location) :
+    empty.slotAt location = none := by
+  rfl
+
+@[simp] theorem update_slotAt_same
+    (store : ConcreteProgramStore) (location : Location) (slot : StoreSlot) :
+    (store.update location slot).slotAt location = some slot := by
+  simp [slotAt, update]
+
+@[simp] theorem update_slotAt_ne
+    (store : ConcreteProgramStore) {candidate location : Location} (slot : StoreSlot) :
+    candidate ≠ location →
+    (store.update location slot).slotAt candidate = store.slotAt candidate := by
+  intro hne
+  simp [slotAt, update, hne]
+
+@[simp] theorem erase_slotAt_same (store : ConcreteProgramStore) (location : Location) :
+    (store.erase location).slotAt location = none := by
+  simp [slotAt, erase]
+
+@[simp] theorem erase_slotAt_ne
+    (store : ConcreteProgramStore) {candidate location : Location} :
+    candidate ≠ location →
+    (store.erase location).slotAt candidate = store.slotAt candidate := by
+  intro hne
+  simp [slotAt, erase, hne]
+
+/-- Concrete version of R-Declare's store update. -/
+def declare (store : ConcreteProgramStore) (x : Name) (lifetime : Lifetime) (value : Value) :
+    ConcreteProgramStore :=
+  store.update (.var x) { value := .value value, lifetime := lifetime }
+
+/-- Concrete version of R-Box's heap allocation update. -/
+def boxAt (store : ConcreteProgramStore) (address : Nat) (value : Value) :
+    ConcreteProgramStore × Reference :=
+  let location := Location.heap address
+  (store.update location { value := .value value, lifetime := Lifetime.root },
+    { location := location, owner := true })
+
+/-- Concrete version of Definition 3.1. -/
+def loc (store : ConcreteProgramStore) : LVal → Option Location
+  | .var x => some (.var x)
+  | .deref lv => do
+      let location ← loc store lv
+      let slot ← store.slotAt location
+      match slot.value with
+      | .value (.ref ref) => some ref.location
+      | .value _ => none
+      | .undef => none
+
+/-- Concrete version of Definition 3.2. -/
+def read (store : ConcreteProgramStore) (lv : LVal) : Option StoreSlot := do
+  let location ← store.loc lv
+  store.slotAt location
+
+/-- Concrete version of Definition 3.3. -/
+def write (store : ConcreteProgramStore) (lv : LVal) (value : PartialValue) :
+    Option ConcreteProgramStore := do
+  let location ← store.loc lv
+  let slot ← store.slotAt location
+  return store.update location { slot with value := value }
+
+def readValue (store : ConcreteProgramStore) (lv : LVal) : Option Value := do
+  let slot ← store.read lv
+  match slot.value with
+  | .value value => some value
+  | .undef => none
+
+def writeValue (store : ConcreteProgramStore) (lv : LVal) (value : Value) :
+    Option ConcreteProgramStore :=
+  store.write lv (.value value)
+
+@[simp] theorem toProgramStore_slotAt (store : ConcreteProgramStore) (location : Location) :
+    (store : ProgramStore).slotAt location = store.slotAt location := by
+  rfl
+
+@[simp] theorem toProgramStore_empty :
+    (empty : ProgramStore) = ProgramStore.empty := by
+  rfl
+
+@[simp] theorem toProgramStore_update
+    (store : ConcreteProgramStore) (location : Location) (slot : StoreSlot) :
+    ((store.update location slot : ConcreteProgramStore) : ProgramStore) =
+      (store : ProgramStore).update location slot := by
+  apply congrArg ProgramStore.mk
+  funext candidate
+  by_cases h : candidate = location
+  · subst h
+    simp
+  · simp [h]
+
+@[simp] theorem toProgramStore_erase
+    (store : ConcreteProgramStore) (location : Location) :
+    ((store.erase location : ConcreteProgramStore) : ProgramStore) =
+      (store : ProgramStore).erase location := by
+  apply congrArg ProgramStore.mk
+  funext candidate
+  by_cases h : candidate = location
+  · subst h
+    simp
+  · simp [h]
+
+end ConcreteProgramStore
 
 end Paper
 end LwRust

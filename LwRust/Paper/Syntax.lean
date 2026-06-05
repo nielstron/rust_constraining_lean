@@ -69,12 +69,12 @@ inductive Value where
   | unit
   | int (value : Int)
   | ref (location : Reference)
-  deriving BEq, Repr
+  deriving BEq, DecidableEq, Repr
 
 inductive PartialValue where
   | value (value : Value)
   | undef
-  deriving BEq, Repr
+  deriving BEq, DecidableEq, Repr
 
 def Lifetime.root : Lifetime := { path := [] }
 

@@ -1,4 +1,5 @@
 import Mathlib.Data.List.Nodup
+import Mathlib.Tactic
 import LwRust.Paper.InductiveSemantics
 import LwRust.Paper.Typing
 
@@ -1558,6 +1559,60 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
   · rcases hborrow with ⟨mutable, targets, hborrow⟩
     subst hborrow
     exact validPartialValue_borrow_nonOwner hvalid
+
+theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
+    {oldTy : PartialTy} {rhsTy : Ty} :
+    ShapeCompatible env oldTy (.ty rhsTy) →
+    oldTy = .ty .unit ∨ oldTy = .ty .int ∨
+      (∃ inner, oldTy = .undef inner) ∨
+      ∃ mutable targets, oldTy = .ty (.borrow mutable targets) := by
+  intro hshape
+  cases hshape with
+  | unit =>
+      exact Or.inl rfl
+  | int =>
+      exact Or.inr (Or.inl rfl)
+  | borrow =>
+      exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
+  | undefLeft _hinner =>
+      exact Or.inr (Or.inr (Or.inl ⟨_, rfl⟩))
+
+theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
+    {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
+    PartialTyStrengthens (.ty selectedTy) oldTy →
+    ShapeCompatible env oldTy (.ty rhsTy) →
+    selectedTy = .unit ∨ selectedTy = .int ∨
+      ∃ mutable targets, selectedTy = .borrow mutable targets := by
+  intro hstrength hshape
+  cases hshape with
+  | unit =>
+      cases hstrength
+      exact Or.inl rfl
+  | int =>
+      cases hstrength
+      exact Or.inr (Or.inl rfl)
+  | borrow =>
+      cases hstrength with
+      | reflex =>
+          exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+      | borrow _hsubset =>
+          exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+  | undefLeft hinner =>
+      cases hstrength with
+      | intoUndef hinnerStrength =>
+          cases hinner with
+          | unit =>
+              cases hinnerStrength
+              exact Or.inl rfl
+          | int =>
+              cases hinnerStrength
+              exact Or.inr (Or.inl rfl)
+          | borrow =>
+              cases hinnerStrength with
+              | reflex =>
+                  exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+              | borrow _hsubset =>
+                  exact Or.inr (Or.inr ⟨_, _, rfl⟩)
 
 theorem validValue_owningLocation_allocated {store : ProgramStore}
     {value : Value} {ty : Ty} {owned : Location} :
@@ -3453,6 +3508,67 @@ theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
       exact ihHead
     · exact ihRest selected hselected
 
+theorem lvalTyping_read_nonOwner_of_shapeCompatible {store : ProgramStore} {env : Env}
+    {current valueLifetime : Lifetime} {lv : LVal} {oldTy : PartialTy}
+    {rhsTy : Ty} {oldSlot : StoreSlot} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    LValTyping env lv oldTy valueLifetime →
+    ShapeCompatible env oldTy (.ty rhsTy) →
+    store.read lv = some oldSlot →
+    PartialValueNonOwner oldSlot.value := by
+  intro hwellFormed hsafe htyping hshape hread
+  have hshapeOld := partialTy_nonOwnerShape_of_shapeCompatible_right_ty hshape
+  cases htyping with
+  | var henvSlot =>
+      exact safeAbstraction_var_read_nonOwner_of_envShape hsafe henvSlot hread hshapeOld
+  | box hinner =>
+      rename_i sourceLv
+      have hboxLocation :
+          LValLocationAbstraction store sourceLv (.box oldTy) :=
+        lvalTyping_defined_location hwellFormed hsafe hinner
+      rcases location_box hboxLocation with
+        ⟨location, slot, hloc, hslot, hvalid⟩
+      have hreadSlot :
+          store.read (.deref sourceLv) = some slot := by
+        simp [ProgramStore.read, hloc, hslot]
+      rw [hread] at hreadSlot
+      injection hreadSlot with hslotEq
+      cases hslotEq
+      exact validPartialValue_nonOwner_of_envShape hvalid hshapeOld
+  | borrow hborrow htargets =>
+      rename_i sourceLv mutable targets _borrowLifetime
+      have hborrowLocation :=
+        lvalTyping_defined_location hwellFormed hsafe hborrow
+      have htargetsLocation :
+          ∀ target ty lifetime,
+            LValTyping env target (.ty ty) lifetime →
+            LValLocationAbstraction store target (.ty ty) := by
+        intro target ty lifetime htarget
+        exact lvalTyping_defined_location hwellFormed hsafe htarget
+      rcases location_borrow_selected hborrowLocation htargets htargetsLocation with
+        ⟨selectedTy, hselectedLocation, hstrength⟩
+      rcases hselectedLocation with
+        ⟨location, slot, hloc, hslot, hvalid⟩
+      have hreadSlot :
+          store.read (.deref sourceLv) = some slot := by
+        simp [ProgramStore.read, hloc, hslot]
+      rw [hread] at hreadSlot
+      injection hreadSlot with hslotEq
+      cases hslotEq
+      have hselectedShape :
+          selectedTy = .unit ∨ selectedTy = .int ∨
+            ∃ mutable targets, selectedTy = .borrow mutable targets :=
+        ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty hstrength hshape
+      rcases hselectedShape with hunit | hint | hborrowShape
+      · subst hunit
+        exact validPartialValue_unit_nonOwner hvalid
+      · subst hint
+        exact validPartialValue_int_nonOwner hvalid
+      · rcases hborrowShape with ⟨mutable, targets, hborrowTy⟩
+        subst hborrowTy
+        exact validPartialValue_borrow_nonOwner hvalid
+
 /-- Lemma 9.3 operational corollary: locating an lval makes `read` defined. -/
 theorem read_defined_of_location {store : ProgramStore} {lv : LVal} {ty : PartialTy} :
     LValLocationAbstraction store lv ty →
@@ -3478,6 +3594,23 @@ theorem read_defined_of_allocated {store : ProgramStore} {lv : LVal} :
   intro hlocation
   rcases hlocation with ⟨location, slot, hloc, hslot⟩
   exact ⟨slot, by simp [ProgramStore.read, hloc, hslot]⟩
+
+theorem allocated_of_read {store : ProgramStore} {lv : LVal} {slot : StoreSlot} :
+    store.read lv = some slot →
+    LValAllocatedLocation store lv := by
+  intro hread
+  unfold ProgramStore.read at hread
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hread
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none =>
+          simp [hloc, hslot] at hread
+      | some runtimeSlot =>
+          simp [hloc, hslot] at hread
+          subst hread
+          exact ⟨location, runtimeSlot, hloc, hslot⟩
 
 theorem write_defined_of_allocated {store : ProgramStore} {lv : LVal}
     {value : PartialValue} :
@@ -4820,12 +4953,6 @@ structure OperationalStoreProgress (store : ProgramStore) : Prop where
   dropValue : ∀ value : Value, ∃ store', Drops store [.value value] store'
   dropPartial : ∀ value : PartialValue, ∃ store', Drops store [value] store'
   dropLifetime : ∀ lifetime : Lifetime, ∃ store', DropsLifetime store lifetime store'
-  assignValue :
-    ∀ lhs oldSlot value,
-      store.read lhs = some oldSlot →
-      ∃ storeAfterDrop storeAfterWrite,
-        Drops store [oldSlot.value] storeAfterDrop ∧
-        storeAfterDrop.write lhs (.value value) = some storeAfterWrite
 
 /-! ### Drop Existence Fragments -/
 
@@ -4882,17 +5009,88 @@ theorem drops_value_nonOwner {store : ProgramStore} {value : Value} :
 
 @[simp] theorem drops_borrowed (store : ProgramStore) (location : Location) :
     Drops store [PartialValue.value (.ref { location := location, owner := false })] store := by
-  exact drops_nonOwner (by
-    intro ref
-    by_cases href :
-        PartialValue.value (Value.ref { location := location, owner := false }) =
-          PartialValue.value (Value.ref ref)
-    · exact Or.inr (by
-        injection href with hrefValue
-        cases ref
-        cases hrefValue
-        rfl)
-    · exact Or.inl href)
+  exact drops_nonOwner (partialValueNonOwner_borrowed location)
+
+/--
+Finite-support drop existence.
+
+The paper treats stores as finite maps, so recursive `drop` always terminates:
+an owning-reference drop either finds no slot or erases one supported location
+before continuing.  This lemma is the abstract support-based form used to derive
+operational progress for concrete finite stores.
+-/
+theorem drops_exists_of_supported :
+    ∀ (support : Finset Location) (store : ProgramStore) (values : List PartialValue),
+      (∀ location slot, store.slotAt location = some slot → location ∈ support) →
+      ∃ store', Drops store values store'
+  | support, store, [], _hsupported => ⟨store, ProgramStore.Drops.nil⟩
+  | support, store, value :: rest, hsupported => by
+      cases value with
+      | undef =>
+          rcases drops_exists_of_supported support store rest hsupported with
+            ⟨store', hdrops⟩
+          exact ⟨store', ProgramStore.Drops.nonOwner partialValueNonOwner_undef hdrops⟩
+      | value runtimeValue =>
+          cases runtimeValue with
+          | unit =>
+              rcases drops_exists_of_supported support store rest hsupported with
+                ⟨store', hdrops⟩
+              exact ⟨store', ProgramStore.Drops.nonOwner partialValueNonOwner_unit hdrops⟩
+          | int n =>
+              rcases drops_exists_of_supported support store rest hsupported with
+                ⟨store', hdrops⟩
+              exact ⟨store', ProgramStore.Drops.nonOwner (partialValueNonOwner_int n) hdrops⟩
+          | ref ref =>
+              cases howner : ref.owner with
+              | false =>
+                  rcases drops_exists_of_supported support store rest hsupported with
+                    ⟨store', hdrops⟩
+                  exact ⟨store', ProgramStore.Drops.nonOwner (by
+                    cases ref with
+                    | mk location owner =>
+                        simp at howner
+                        subst howner
+                        exact partialValueNonOwner_borrowed location) hdrops⟩
+              | true =>
+                  by_cases hpresent : ∃ slot, store.slotAt ref.location = some slot
+                  · rcases hpresent with ⟨slot, hslot⟩
+                    have hmem : ref.location ∈ support :=
+                      hsupported ref.location slot hslot
+                    have hsupportedErase :
+                        ∀ location slot',
+                          (store.erase ref.location).slotAt location = some slot' →
+                          location ∈ support.erase ref.location := by
+                      intro location slot' hslot'
+                      by_cases hsame : location = ref.location
+                      · subst hsame
+                        simp [ProgramStore.erase] at hslot'
+                      · have hslotOriginal : store.slotAt location = some slot' := by
+                          simpa [ProgramStore.erase, hsame] using hslot'
+                        exact Finset.mem_erase.mpr
+                          ⟨hsame, hsupported location slot' hslotOriginal⟩
+                    rcases drops_exists_of_supported (support.erase ref.location)
+                        (store.erase ref.location) (slot.value :: rest) hsupportedErase with
+                      ⟨store', hdrops⟩
+                    exact ⟨store',
+                      ProgramStore.Drops.ownerPresent howner hslot hdrops⟩
+                  · have hmissing : store.slotAt ref.location = none := by
+                      cases hslot : store.slotAt ref.location with
+                      | none => rfl
+                      | some slot =>
+                          exact False.elim (hpresent ⟨slot, hslot⟩)
+                    rcases drops_exists_of_supported support store rest hsupported with
+                      ⟨store', hdrops⟩
+                    exact ⟨store',
+                      ProgramStore.Drops.ownerMissing howner hmissing hdrops⟩
+termination_by support _store values => support.card + values.length
+decreasing_by
+  all_goals simp_wf
+  all_goals
+    first
+    | omega
+    | have hcard : (support.erase ref.location).card < support.card :=
+        Finset.card_erase_lt_of_mem hmem
+      omega
 
 theorem drops_empty_value (value : Value) :
     ∃ store', Drops ProgramStore.empty [.value value] store' := by
@@ -4946,8 +5144,34 @@ theorem drops_empty_lifetime (lifetime : Lifetime) :
   · exact drops_empty_value
   · exact drops_empty_partial
   · exact drops_empty_lifetime
-  · intro lhs oldSlot value hread
-    simp [ProgramStore.read, ProgramStore.empty] at hread
+
+/--
+A program store bundled with the operational witnesses needed by Progress.
+
+This is intentionally a certified wrapper around `ProgramStore`, not a
+replacement for the paper's mathematical store.  The bare `ProgramStore` is an
+arbitrary partial-map function, so progress cannot prove freshness/drop/write
+totality for every inhabitant without an additional finite/well-behaved-store
+invariant.
+-/
+structure OperationalProgramStore where
+  toProgramStore : ProgramStore
+  progress : OperationalStoreProgress toProgramStore
+
+namespace OperationalProgramStore
+
+instance : Coe OperationalProgramStore ProgramStore where
+  coe store := store.toProgramStore
+
+@[simp] theorem operationalStoreProgress (store : OperationalProgramStore) :
+    OperationalStoreProgress (store : ProgramStore) :=
+  store.progress
+
+@[simp] def empty : OperationalProgramStore :=
+  { toProgramStore := ProgramStore.empty
+    progress := operationalStoreProgress_empty }
+
+end OperationalProgramStore
 
 theorem ProgressResult.step_of_not_terminal {store : ProgramStore}
     {lifetime : Lifetime} {term : Term} :
@@ -5160,12 +5384,14 @@ theorem progress_assign_value_at {store storeAfterDrop storeAfterWrite : Program
 
 theorem progress_assign_value {store : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {oldSlot : StoreSlot} {value : Value} :
-    OperationalStoreProgress store →
+    PartialValueNonOwner oldSlot.value →
     store.read lhs = some oldSlot →
     ProgressResult store lifetime (.assign lhs (.val value)) := by
-  intro hstore hread
-  rcases hstore.assignValue lhs oldSlot value hread with
-    ⟨storeAfterDrop, storeAfterWrite, hdrops, hwrite⟩
+  intro hnonOwner hread
+  let hdrops : Drops store [oldSlot.value] store := drops_nonOwner hnonOwner
+  rcases write_defined_of_allocated (store := store) (lv := lhs)
+      (value := PartialValue.value value) (allocated_of_read hread) with
+    ⟨storeAfterWrite, hwrite⟩
   exact progress_assign_value_at hread hdrops hwrite
 
 /-- Lemma 4.10, `T-Assign` value case. -/
@@ -5177,13 +5403,19 @@ theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
     OperationalStoreProgress store →
     TermTyping env typing lifetime (.assign lhs (.val value)) ty env₂ →
     ProgressResult store lifetime (.assign lhs (.val value)) := by
-  intro hwellFormed hsafe hstore htyping
+  intro hwellFormed hsafe _hstore htyping
   cases htyping with
-  | assign hLhs _hRhs _hshape _hwf _hwriteEnv _hnotWriteProhibited =>
+  | assign hLhs hRhs hshape _hwf _hwriteEnv _hnotWriteProhibited =>
       rcases read_defined_of_allocated
           (lvalTyping_allocated_location hwellFormed hsafe hLhs) with
         ⟨oldSlot, hread⟩
-      exact progress_assign_value hstore hread
+      cases hRhs with
+      | const _hvalue =>
+          have hnonOwner :
+              PartialValueNonOwner oldSlot.value :=
+            lvalTyping_read_nonOwner_of_shapeCompatible
+              hwellFormed hsafe hLhs hshape hread
+          exact progress_assign_value hnonOwner hread
 
 /--
 Lemma 4.10, `R-Seq` value case, with the required drop witness.
@@ -5448,6 +5680,34 @@ theorem progress_runtime {store : ProgramStore} {env₁ env₂ : Env}
     ProgressResult store lifetime term := by
   intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstore htyping
   exact progress hvalidRuntime.1 hvalidStoreTyping hwellFormed hsafe hstore htyping
+
+/-- Lemma 4.10, Progress for a certified operational store. -/
+theorem OperationalProgramStore.progressResult {store : OperationalProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidState (store : ProgramStore) term →
+    ValidStoreTyping (store : ProgramStore) term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    (store : ProgramStore) ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult (store : ProgramStore) lifetime term := by
+  intro hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+  exact Paper.progress hvalidState hvalidStoreTyping hwellFormed hsafe store.progress htyping
+
+/--
+Lemma 4.10, Progress for the mechanised runtime-validity package over a
+certified operational store.
+-/
+theorem OperationalProgramStore.progress_runtime {store : OperationalProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidRuntimeState (store : ProgramStore) term →
+    ValidStoreTyping (store : ProgramStore) term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    (store : ProgramStore) ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult (store : ProgramStore) lifetime term := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe htyping
+  exact Paper.progress_runtime hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+    store.progress htyping
 
 /--
 Lemma 4.10, non-terminal form.
