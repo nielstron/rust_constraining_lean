@@ -259,6 +259,10 @@ def borrowDrops (store : ProgramStore) (location : Location) :
   · left
     exact h
 
+def undefDrops (store : ProgramStore) :
+    Drops store [.undef] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
 def S0 : ProgramStore := ProgramStore.empty
 def Sx : ProgramStore := S0.declare "x" l (.int 1)
 def SxHeap1 : ProgramStore := (Sx.boxAt 1 (.int 1)).fst
@@ -429,7 +433,7 @@ theorem drop_inner_lifetime :
               l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
               ProgramStore.erase] at hslot
             cases hslot
-            simp [l, m] at hlifetime
+            simp [m] at hlifetime
           · by_cases hz : name = "z"
             · subst hz
               rfl
@@ -440,7 +444,7 @@ theorem drop_inner_lifetime :
               · subst hx
                 simp at hslot
                 cases hslot
-                simp [l, m] at hlifetime
+                simp [m] at hlifetime
               · simp [hx] at hslot
       | heap address =>
           by_cases h2 : address = 2
@@ -470,6 +474,88 @@ theorem drop_inner_lifetime :
 theorem inner_block_returns_zero :
     Step S8 l (.block m [.val (.int 0)]) S9 (.val (.int 0)) := by
   exact Step.blockB drop_inner_lifetime
+
+theorem drop_outer_lifetime :
+    DropsLifetime S9 l Sfinal := by
+  refine ProgramStore.DropsLifetime.intro
+    (dropSet := [
+      .value (.ref { location := .var "x", owner := true }),
+      .value (.ref { location := .var "y", owner := true })]) ?_ ?_
+  · intro value
+    constructor
+    · intro hmem
+      simp at hmem
+      rcases hmem with hvalue | hvalue
+      · subst hvalue
+        refine ⟨.var "x", { value := .value (.int 1), lifetime := l }, ?_, rfl, rfl⟩
+        simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+          l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+          ProgramStore.erase]
+      · subst hvalue
+        refine ⟨.var "y", { value := .value (owned (.heap 2)), lifetime := l }, ?_, rfl, rfl⟩
+        simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+          l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+          ProgramStore.erase, owned]
+    · intro h
+      rcases h with ⟨location, slot, hslot, hlifetime, hvalue⟩
+      subst hvalue
+      simp
+      cases location with
+      | var name =>
+          by_cases hx : name = "x"
+          · subst hx
+            left
+            rfl
+          · by_cases hy : name = "y"
+            · subst hy
+              right
+              rfl
+            · simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+                l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+                ProgramStore.erase, hx, hy] at hslot
+              by_cases hz : name = "z"
+              · subst hz
+                simp at hslot
+              · simp [hz] at hslot
+      | heap address =>
+          by_cases h2 : address = 2
+          · subst h2
+            simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+              l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+              ProgramStore.erase] at hslot
+            cases hslot
+            simp [l] at hlifetime
+            contradiction
+          · by_cases h1 : address = 1
+            · subst h1
+              simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+                l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+                ProgramStore.erase] at hslot
+            · simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+                l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+                ProgramStore.erase, h1, h2] at hslot
+  · refine ProgramStore.Drops.ownerPresent
+      (slot := { value := .value (.int 1), lifetime := l }) rfl ?_ ?_
+    · simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+        l, m, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+        ProgramStore.erase]
+    · refine ProgramStore.Drops.nonOwner (by intro ref; left; simp) ?_
+      refine ProgramStore.Drops.ownerPresent
+        (slot := { value := .value (owned (.heap 2)), lifetime := l }) rfl ?_ ?_
+      · simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+          l, m, owned, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+          ProgramStore.erase]
+      · refine ProgramStore.Drops.ownerPresent
+          (slot := { value := .undef, lifetime := Lifetime.root }) rfl ?_ ?_
+        · simp [S9, S8, S7, S6AfterMoveZ, S6, S5, S4Heap2, S4, SxHeap1, Sx, S0,
+            l, m, owned, ProgramStore.declare, ProgramStore.boxAt, ProgramStore.update,
+            ProgramStore.erase]
+        · unfold Sfinal
+          exact undefDrops _
+
+theorem outer_block_returns_zero :
+    Step S9 l (.block l [.val (.int 0)]) Sfinal (.val (.int 0)) := by
+  exact Step.blockB drop_outer_lifetime
 
 end WorkedExample
 
