@@ -280,19 +280,6 @@ def LifetimeMeet (left right meet : Lifetime) : Prop :=
     LifetimeMeet lifetime lifetime lifetime := by
   simp [LifetimeMeet]
 
-def LVal.base : LVal → Name
-  | .var x => x
-  | .deref lv => LVal.base lv
-
-/-- Definitions 3.12 and 3.13 collapse to a list of dereference selectors. -/
-def LVal.path : LVal → List Unit
-  | .var _ => []
-  | .deref lv => LVal.path lv ++ [()]
-
-/-- Definition 3.14, path conflict `u # w`. -/
-def PathConflicts (left right : LVal) : Prop :=
-  LVal.base left = LVal.base right
-
 mutual
   /-- Definition 3.11, lval typing `Γ ⊢ w : ⟨T̃⟩^m`. -/
   inductive LValTyping : Env → LVal → PartialTy → Lifetime → Prop where
@@ -333,6 +320,26 @@ mutual
         LValTargetsTyping env (target :: rest) unionTy lifetime
 end
 
+/-- Definitions 3.12 and 3.13 collapse to a list of dereference selectors. -/
+abbrev Path := List Unit
+
+def LVal.path : LVal → Path
+  | .var _ => []
+  | .deref lv => LVal.path lv ++ [()]
+
+def LVal.base : LVal → Name
+  | .var x => x
+  | .deref lv => LVal.base lv
+
+/-- Definition 3.14, path conflict `u ⋈ w`. -/
+def PathConflicts (left right : LVal) : Prop :=
+  LVal.base left = LVal.base right
+
+infix:50 " ⋈ " => PathConflicts
+
+notation:max "&mut " targets:max => Ty.borrow true targets
+notation:max "&" targets:max => Ty.borrow false targets
+
 /-- Definition 3.15, type containment inside a variable slot. -/
 inductive PartialTyContains : PartialTy → Ty → Prop where
   | here {ty : Ty} :
@@ -344,22 +351,24 @@ inductive PartialTyContains : PartialTy → Ty → Prop where
 def EnvContains (env : Env) (x : Name) (ty : Ty) : Prop :=
   ∃ slot, env.slotAt x = some slot ∧ PartialTyContains slot.ty ty
 
+notation:50 env:51 " ⊢ " x:51 " ↝ " ty:51 => EnvContains env x ty
+
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
   ∃ x targets target,
-    EnvContains env x (.borrow true targets) ∧
+    env ⊢ x ↝ (&mut targets) ∧
     target ∈ targets ∧
-    PathConflicts target lv
+    target ⋈ lv
 
 /-- Definition 3.17, `writeProhibited(Γ, w)`. -/
 def WriteProhibited (env : Env) (lv : LVal) : Prop :=
   ReadProhibited env lv ∨
   ∃ x targets target,
-    EnvContains env x (.borrow false targets) ∧
+    env ⊢ x ↝ (&targets) ∧
     target ∈ targets ∧
-    PathConflicts target lv
+    target ⋈ lv
 
-def Strike : List Unit → PartialTy → PartialTy → Prop
+def Strike : Path → PartialTy → PartialTy → Prop
   | [], .ty sourceTy, .undef targetTy => sourceTy = targetTy
   | _ :: path, .box inner, .box struck => Strike path inner struck
   | _, _, _ => False
