@@ -179,6 +179,20 @@ theorem step_multistep {store store' : ProgramStore} {lifetime : Lifetime}
   intro hstep
   exact MultiStep.trans hstep MultiStep.refl
 
+theorem multistep_first_step_of_not_terminal {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {term : Term} {finalValue : Value} :
+    ¬ Terminal term →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    ∃ store' term',
+      Step store lifetime term store' term' ∧
+      MultiStep store' lifetime term' finalStore (.val finalValue) := by
+  intro hnotTerminal hmulti
+  cases hmulti with
+  | refl =>
+      exact False.elim (hnotTerminal (value_terminal finalValue))
+  | trans hstep hrest =>
+      exact ⟨_, _, hstep, hrest⟩
+
 theorem multistep_box_context {store finalStore : ProgramStore} {lifetime : Lifetime}
     {term finalTerm : Term} :
     MultiStep store lifetime term finalStore finalTerm →
@@ -189,6 +203,36 @@ theorem multistep_box_context {store finalStore : ProgramStore} {lifetime : Life
       exact MultiStep.refl
   | trans hstep _ ih =>
       exact MultiStep.trans (Step.subBox hstep) ih
+
+theorem multistep_box_to_value_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {term : Term} {finalValue : Value} :
+    MultiStep store lifetime (.box term) finalStore (.val finalValue) →
+    ∃ midStore value,
+      MultiStep store lifetime term midStore (.val value) ∧
+      Step midStore lifetime (.box (.val value)) finalStore (.val finalValue) := by
+  intro hmulti
+  generalize hstart : Term.box term = start at hmulti
+  generalize hend : Term.val finalValue = final at hmulti
+  induction hmulti generalizing term finalValue with
+  | refl =>
+      cases hstart
+      cases hend
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | box hfresh hbox =>
+          rename_i address boxedValue ref
+          rcases multistep_value_inv hrest with ⟨hstore, hterm⟩
+          subst hstore
+          rw [hterm] at hend
+          injection hend with hvalue
+          subst hvalue
+          rw [hterm]
+          exact ⟨_, boxedValue, MultiStep.refl,
+            Step.box hfresh hbox⟩
+      | subBox hinnerStep =>
+          rcases ih rfl hend with ⟨midStore, value, hinnerMulti, hboxStep⟩
+          exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti, hboxStep⟩
 
 theorem multistep_declare_context {store finalStore : ProgramStore} {lifetime : Lifetime}
     {x : Name} {term finalTerm : Term} :
@@ -201,6 +245,36 @@ theorem multistep_declare_context {store finalStore : ProgramStore} {lifetime : 
   | trans hstep _ ih =>
       exact MultiStep.trans (Step.subDeclare hstep) ih
 
+theorem multistep_declare_to_value_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {x : Name} {term : Term} {finalValue : Value} :
+    MultiStep store lifetime (.letMut x term) finalStore (.val finalValue) →
+    ∃ midStore value,
+      MultiStep store lifetime term midStore (.val value) ∧
+      Step midStore lifetime (.letMut x (.val value)) finalStore (.val finalValue) := by
+  intro hmulti
+  generalize hstart : Term.letMut x term = start at hmulti
+  generalize hend : Term.val finalValue = final at hmulti
+  induction hmulti generalizing x term finalValue with
+  | refl =>
+      cases hstart
+      cases hend
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | declare hstore =>
+          rename_i declaredValue
+          rcases multistep_value_inv hrest with ⟨hfinalStore, hterm⟩
+          subst hfinalStore
+          rw [hterm] at hend
+          injection hend with hvalue
+          subst hvalue
+          rw [hterm]
+          exact ⟨_, declaredValue, MultiStep.refl, Step.declare hstore⟩
+      | subDeclare hinnerStep =>
+          rcases ih rfl hend with ⟨midStore, value, hinnerMulti, hdeclareStep⟩
+          exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti,
+            hdeclareStep⟩
+
 theorem multistep_assign_context {store finalStore : ProgramStore} {lifetime : Lifetime}
     {lhs : LVal} {rhs finalRhs : Term} :
     MultiStep store lifetime rhs finalStore finalRhs →
@@ -211,6 +285,37 @@ theorem multistep_assign_context {store finalStore : ProgramStore} {lifetime : L
       exact MultiStep.refl
   | trans hstep _ ih =>
       exact MultiStep.trans (Step.subAssign hstep) ih
+
+theorem multistep_assign_to_value_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {lhs : LVal} {rhs : Term} {finalValue : Value} :
+    MultiStep store lifetime (.assign lhs rhs) finalStore (.val finalValue) →
+    ∃ midStore value,
+      MultiStep store lifetime rhs midStore (.val value) ∧
+      Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) := by
+  intro hmulti
+  generalize hstart : Term.assign lhs rhs = start at hmulti
+  generalize hend : Term.val finalValue = final at hmulti
+  induction hmulti generalizing lhs rhs finalValue with
+  | refl =>
+      cases hstart
+      cases hend
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | assign hread hdrops hwrite =>
+          rename_i assignedValue
+          rcases multistep_value_inv hrest with ⟨hfinalStore, hterm⟩
+          subst hfinalStore
+          rw [hterm] at hend
+          injection hend with hvalue
+          subst hvalue
+          rw [hterm]
+          exact ⟨_, assignedValue, MultiStep.refl,
+            Step.assign hread hdrops hwrite⟩
+      | subAssign hinnerStep =>
+          rcases ih rfl hend with ⟨midStore, value, hinnerMulti, hassignStep⟩
+          exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti,
+            hassignStep⟩
 
 theorem multistep_block_context {store finalStore : ProgramStore}
     {lifetime blockLifetime : Lifetime} {term finalTerm : Term} {rest : List Term} :
@@ -223,6 +328,36 @@ theorem multistep_block_context {store finalStore : ProgramStore}
       exact MultiStep.refl
   | trans hstep _ ih =>
       exact MultiStep.trans (Step.blockA hstep) ih
+
+theorem multistep_block_to_value_first_step_inv {store finalStore : ProgramStore}
+    {lifetime blockLifetime : Lifetime} {terms : List Term} {finalValue : Value} :
+    MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
+    (∃ value next rest store',
+      terms = .val value :: next :: rest ∧
+      Drops store [.value value] store' ∧
+      MultiStep store' lifetime (.block blockLifetime (next :: rest))
+        finalStore (.val finalValue)) ∨
+    (∃ term rest store' term',
+      terms = term :: rest ∧
+      Step store blockLifetime term store' term' ∧
+      MultiStep store' lifetime (.block blockLifetime (term' :: rest))
+        finalStore (.val finalValue)) ∨
+    (∃ value store',
+      terms = [.val value] ∧
+      DropsLifetime store blockLifetime store' ∧
+      MultiStep store' lifetime (.val value) finalStore (.val finalValue)) := by
+  intro hmulti
+  rcases multistep_first_step_of_not_terminal
+      (term := .block blockLifetime terms)
+      (by simp [Terminal]) hmulti with
+    ⟨store', term', hstep, hrest⟩
+  cases hstep with
+  | seq hdrops =>
+      exact Or.inl ⟨_, _, _, store', rfl, hdrops, hrest⟩
+  | blockA hhead =>
+      exact Or.inr (Or.inl ⟨_, _, store', _, rfl, hhead, hrest⟩)
+  | blockB hdrops =>
+      exact Or.inr (Or.inr ⟨_, store', rfl, hdrops, hrest⟩)
 
 namespace WorkedExample
 

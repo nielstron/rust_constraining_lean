@@ -267,6 +267,84 @@ theorem ValidRuntimeState.storeOwnersAllocated {store : ProgramStore} {term : Te
   intro hvalid
   exact hvalid.2
 
+theorem validState_box_inner {store : ProgramStore} {term : Term} :
+    ValidState store (.box term) →
+    ValidState store term := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_box_inner {store : ProgramStore} {term : Term} :
+    ValidRuntimeState store (.box term) →
+    ValidRuntimeState store term := by
+  intro hvalid
+  exact ⟨validState_box_inner hvalid.1, hvalid.2⟩
+
+theorem validState_box_value_of_value {store : ProgramStore} {value : Value} :
+    ValidState store (.val value) →
+    ValidState store (.box (.val value)) := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_box_value_of_value {store : ProgramStore} {value : Value} :
+    ValidRuntimeState store (.val value) →
+    ValidRuntimeState store (.box (.val value)) := by
+  intro hvalid
+  exact ⟨validState_box_value_of_value hvalid.1, hvalid.2⟩
+
+theorem validState_declare_value_of_value {store : ProgramStore} {x : Name}
+    {value : Value} :
+    ValidState store (.val value) →
+    ValidState store (.letMut x (.val value)) := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_declare_value_of_value {store : ProgramStore} {x : Name}
+    {value : Value} :
+    ValidRuntimeState store (.val value) →
+    ValidRuntimeState store (.letMut x (.val value)) := by
+  intro hvalid
+  exact ⟨validState_declare_value_of_value hvalid.1, hvalid.2⟩
+
+theorem validState_declare_inner {store : ProgramStore} {x : Name} {term : Term} :
+    ValidState store (.letMut x term) →
+    ValidState store term := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_declare_inner {store : ProgramStore} {x : Name}
+    {term : Term} :
+    ValidRuntimeState store (.letMut x term) →
+    ValidRuntimeState store term := by
+  intro hvalid
+  exact ⟨validState_declare_inner hvalid.1, hvalid.2⟩
+
+theorem validState_assign_value_of_value {store : ProgramStore} {lhs : LVal}
+    {value : Value} :
+    ValidState store (.val value) →
+    ValidState store (.assign lhs (.val value)) := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_assign_value_of_value {store : ProgramStore} {lhs : LVal}
+    {value : Value} :
+    ValidRuntimeState store (.val value) →
+    ValidRuntimeState store (.assign lhs (.val value)) := by
+  intro hvalid
+  exact ⟨validState_assign_value_of_value hvalid.1, hvalid.2⟩
+
+theorem validState_assign_inner {store : ProgramStore} {lhs : LVal} {rhs : Term} :
+    ValidState store (.assign lhs rhs) →
+    ValidState store rhs := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_assign_inner {store : ProgramStore} {lhs : LVal}
+    {rhs : Term} :
+    ValidRuntimeState store (.assign lhs rhs) →
+    ValidRuntimeState store rhs := by
+  intro hvalid
+  exact ⟨validState_assign_inner hvalid.1, hvalid.2⟩
+
 theorem ValidRuntimeState.validStore {store : ProgramStore} {term : Term} :
     ValidRuntimeState store term → ValidStore store := by
   intro hvalid
@@ -656,129 +734,52 @@ inductive DropsAvoids : ProgramStore → List PartialValue → Location → Prop
       DropsAvoids (store.erase ref.location) (slot.value :: rest) location →
       DropsAvoids store (.value (.ref ref) :: rest) location
 
-theorem dropsAvoids_nonOwner {store : ProgramStore} {value : PartialValue}
-    {location : Location} :
-    (∀ ref, value ≠ .value (.ref ref) ∨ ref.owner = false) →
-    DropsAvoids store [value] location := by
-  intro hnonOwner
-  exact DropsAvoids.nonOwner hnonOwner DropsAvoids.nil
-
-@[simp] theorem dropsAvoids_undef (store : ProgramStore) (location : Location) :
-    DropsAvoids store [.undef] location := by
-  exact dropsAvoids_nonOwner (by intro ref; exact Or.inl (by simp))
-
-@[simp] theorem dropsAvoids_unit (store : ProgramStore) (location : Location) :
-    DropsAvoids store [.value .unit] location := by
-  exact dropsAvoids_nonOwner (by intro ref; exact Or.inl (by simp))
-
-@[simp] theorem dropsAvoids_int (store : ProgramStore) (location : Location) (value : Int) :
-    DropsAvoids store [.value (.int value)] location := by
-  exact dropsAvoids_nonOwner (by intro ref; exact Or.inl (by simp))
-
-@[simp] theorem dropsAvoids_borrowed
-    (store : ProgramStore) (location borrowedLocation : Location) :
-    DropsAvoids store
-      [.value (.ref { location := borrowedLocation, owner := false })] location := by
-  exact dropsAvoids_nonOwner (by
-    intro ref
-    by_cases href :
-        PartialValue.value (Value.ref { location := borrowedLocation, owner := false }) =
-          PartialValue.value (Value.ref ref)
-    · exact Or.inr (by
-        injection href with hrefValue
-        cases ref
-        cases hrefValue
-        rfl)
-    · exact Or.inl href)
-
-@[simp] theorem drops_undef_slotAt_preserved {store store' : ProgramStore}
-    {location : Location} {slot : StoreSlot} :
-    Drops store [.undef] store' →
+theorem dropsAvoids_slotAt_preserved {store store' : ProgramStore}
+    {values : List PartialValue} {location : Location} {slot : StoreSlot} :
+    Drops store values store' →
+    DropsAvoids store values location →
     store.slotAt location = some slot →
     store'.slotAt location = some slot := by
-  intro hdrops hslot
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
+  intro hdrops havoids hslot
+  induction hdrops generalizing location slot with
+  | nil =>
       exact hslot
-
-@[simp] theorem drops_unit_slotAt_preserved {store store' : ProgramStore}
-    {location : Location} {slot : StoreSlot} :
-    Drops store [.value .unit] store' →
-    store.slotAt location = some slot →
-    store'.slotAt location = some slot := by
-  intro hdrops hslot
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hslot
-
-@[simp] theorem drops_int_slotAt_preserved {store store' : ProgramStore}
-    {value : Int} {location : Location} {slot : StoreSlot} :
-    Drops store [.value (.int value)] store' →
-    store.slotAt location = some slot →
-    store'.slotAt location = some slot := by
-  intro hdrops hslot
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hslot
-
-@[simp] theorem drops_borrowed_slotAt_preserved {store store' : ProgramStore}
-    {borrowedLocation location : Location} {slot : StoreSlot} :
-    Drops store [.value (.ref { location := borrowedLocation, owner := false })] store' →
-    store.slotAt location = some slot →
-    store'.slotAt location = some slot := by
-  intro hdrops hslot
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hslot
-  | ownerMissing howner _hmissing _hrest =>
-      simp at howner
-  | ownerPresent howner _hpresent _hrest =>
-      simp at howner
-
-theorem drops_undef_eq {store store' : ProgramStore} :
-    Drops store [.undef] store' →
-    store' = store := by
-  intro hdrops
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      rfl
-
-theorem drops_unit_eq {store store' : ProgramStore} :
-    Drops store [.value .unit] store' →
-    store' = store := by
-  intro hdrops
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      rfl
-
-theorem drops_int_eq {store store' : ProgramStore} {value : Int} :
-    Drops store [.value (.int value)] store' →
-    store' = store := by
-  intro hdrops
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      rfl
-
-theorem drops_borrowed_eq {store store' : ProgramStore}
-    {borrowedLocation : Location} :
-    Drops store [.value (.ref { location := borrowedLocation, owner := false })] store' →
-    store' = store := by
-  intro hdrops
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      rfl
-  | ownerMissing howner _hmissing _hrest =>
-      simp at howner
-  | ownerPresent howner _hpresent _hrest =>
-      simp at howner
+  | nonOwner hnonOwner _hdrops ih =>
+      cases havoids with
+      | nonOwner _havoidsHead havoidsRest =>
+          exact ih havoidsRest hslot
+      | ownerMissing howner _hmissing _havoidsRest =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+      | ownerPresent howner _hpresent _hne _havoidsRest =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+  | ownerMissing howner hmissing _hdrops ih =>
+      cases havoids with
+      | nonOwner hnonOwner _havoidsRest =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+      | ownerMissing _howner _hmissing havoidsRest =>
+          exact ih havoidsRest hslot
+      | ownerPresent _howner hpresent _hne _havoidsRest =>
+          rw [hmissing] at hpresent
+          cases hpresent
+  | ownerPresent howner hpresent _hdrops ih =>
+      rename_i storeBefore _storeAfter ref erasedSlot rest
+      cases havoids with
+      | nonOwner hnonOwner _havoidsRest =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+      | ownerMissing _howner hmissing _havoidsRest =>
+          rw [hpresent] at hmissing
+          cases hmissing
+      | ownerPresent _howner _hpresent hne havoidsRest =>
+          rw [hpresent] at _hpresent
+          cases _hpresent
+          have herasedSlot :
+              (storeBefore.erase ref.location).slotAt location = some slot := by
+            simpa [ProgramStore.erase, hne.symm] using hslot
+          exact ih havoidsRest herasedSlot
 
 /-- Dropping a non-owning partial value leaves the store unchanged. -/
 theorem drops_partialValue_nonOwner_eq {store store' : ProgramStore}
@@ -787,25 +788,14 @@ theorem drops_partialValue_nonOwner_eq {store store' : ProgramStore}
     Drops store [value] store' →
     store' = store := by
   intro hnonOwner hdrops
-  cases value with
-  | undef =>
-      exact drops_undef_eq hdrops
-  | value runtimeValue =>
-      cases runtimeValue with
-      | unit =>
-          exact drops_unit_eq hdrops
-      | int n =>
-          exact drops_int_eq hdrops
-      | ref ref =>
-          cases ref with
-          | mk location owner =>
-              cases owner with
-              | false =>
-                  exact drops_borrowed_eq (borrowedLocation := location) hdrops
-              | true =>
-                  rcases hnonOwner { location := location, owner := true } with hne | hborrowed
-                  · exact False.elim (hne rfl)
-                  · simp at hborrowed
+  cases hdrops with
+  | nonOwner _hnonOwner hrest =>
+      cases hrest
+      rfl
+  | ownerMissing howner _hmissing _hrest =>
+      exact False.elim (not_partialValueNonOwner_owning_ref howner hnonOwner)
+  | ownerPresent howner _hpresent _hrest =>
+      exact False.elim (not_partialValueNonOwner_owning_ref howner hnonOwner)
 
 /-- Dropping a runtime value with no owning reference leaves the store unchanged. -/
 theorem drops_value_nonOwner_eq {store store' : ProgramStore} {value : Value} :
@@ -813,19 +803,30 @@ theorem drops_value_nonOwner_eq {store store' : ProgramStore} {value : Value} :
     Drops store [.value value] store' →
     store' = store := by
   intro hnonOwner hdrops
-  cases value with
-  | unit =>
-      exact drops_unit_eq hdrops
-  | int value =>
-      exact drops_int_eq hdrops
-  | ref ref =>
-      cases ref with
-      | mk location owner =>
-          cases owner with
-          | false =>
-              exact drops_borrowed_eq (borrowedLocation := location) hdrops
-          | true =>
-              simp [valueOwnedLocation?] at hnonOwner
+  exact drops_partialValue_nonOwner_eq (by
+    intro ref
+    cases value with
+    | unit =>
+        exact Or.inl (by simp)
+    | int _ =>
+        exact Or.inl (by simp)
+    | ref valueRef =>
+        cases valueRef with
+        | mk location owner =>
+            cases owner with
+            | false =>
+                by_cases href :
+                    PartialValue.value
+                      (Value.ref { location := location, owner := false }) =
+                    PartialValue.value (Value.ref ref)
+                · exact Or.inr (by
+                    injection href with hvalue
+                    cases ref
+                    cases hvalue
+                    rfl)
+                · exact Or.inl href
+            | true =>
+                simp [valueOwnedLocation?] at hnonOwner) hdrops
 
 /--
 Dropping a list of non-owning partial values leaves the store unchanged.
@@ -851,33 +852,6 @@ theorem drops_all_nonOwner_eq {store store' : ProgramStore} {values : List Parti
   | ownerPresent howner _hslot _hrest =>
       exact False.elim
         (not_partialValueNonOwner_owning_ref howner (hnonOwner _ (by simp)))
-
-/-- A list of non-owning partial values can be dropped without changing the store. -/
-theorem drops_all_nonOwner {store : ProgramStore} {values : List PartialValue} :
-    (∀ value, value ∈ values → PartialValueNonOwner value) →
-    Drops store values store := by
-  intro hnonOwner
-  induction values with
-  | nil =>
-      exact ProgramStore.Drops.nil
-  | cons head tail ih =>
-      exact ProgramStore.Drops.nonOwner
-        (hnonOwner head (by simp))
-        (ih (by
-          intro value hmem
-          exact hnonOwner value (by simp [hmem])))
-
-/-- Dropping a list of non-owning partial values preserves every slot lookup. -/
-theorem drops_all_nonOwner_slotAt_preserved {store store' : ProgramStore}
-    {values : List PartialValue} {location : Location} {slot : StoreSlot} :
-    (∀ value, value ∈ values → PartialValueNonOwner value) →
-    Drops store values store' →
-    store.slotAt location = some slot →
-    store'.slotAt location = some slot := by
-  intro hnonOwner hdrops hslot
-  have hstore : store' = store := drops_all_nonOwner_eq hnonOwner hdrops
-  subst hstore
-  exact hslot
 
 /-- Lemma 9.8 support: dropping a lifetime preserves store validity. -/
 theorem dropsLifetime_validStore {store store' : ProgramStore} {lifetime : Lifetime} :
@@ -1389,58 +1363,6 @@ def ValidValue (store : ProgramStore) (value : Value) (ty : Ty) : Prop :=
 notation:50 store:51 " ⊢ " value:51 " ∼ " ty:51 =>
   ValidPartialValue store value ty
 
-/-- Dropping `undef` preserves valid partial-value abstractions. -/
-theorem validPartialValue_after_drops_undef {store store' : ProgramStore}
-    {value : PartialValue} {ty : PartialTy} :
-    Drops store [.undef] store' →
-    ValidPartialValue store value ty →
-    ValidPartialValue store' value ty := by
-  intro hdrops hvalid
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hvalid
-
-/-- Dropping unit preserves valid partial-value abstractions. -/
-theorem validPartialValue_after_drops_unit {store store' : ProgramStore}
-    {value : PartialValue} {ty : PartialTy} :
-    Drops store [.value .unit] store' →
-    ValidPartialValue store value ty →
-    ValidPartialValue store' value ty := by
-  intro hdrops hvalid
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hvalid
-
-/-- Dropping an integer preserves valid partial-value abstractions. -/
-theorem validPartialValue_after_drops_int {store store' : ProgramStore}
-    {dropped : Int} {value : PartialValue} {ty : PartialTy} :
-    Drops store [.value (.int dropped)] store' →
-    ValidPartialValue store value ty →
-    ValidPartialValue store' value ty := by
-  intro hdrops hvalid
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hvalid
-
-/-- Dropping a borrowed reference preserves valid partial-value abstractions. -/
-theorem validPartialValue_after_drops_borrowed {store store' : ProgramStore}
-    {borrowedLocation : Location} {value : PartialValue} {ty : PartialTy} :
-    Drops store [.value (.ref { location := borrowedLocation, owner := false })] store' →
-    ValidPartialValue store value ty →
-    ValidPartialValue store' value ty := by
-  intro hdrops hvalid
-  cases hdrops with
-  | nonOwner _hnonOwner hrest =>
-      cases hrest
-      exact hvalid
-  | ownerMissing howner _hmissing _hrest =>
-      simp at howner
-  | ownerPresent howner _hpresent _hrest =>
-      simp at howner
-
 /--
 Dropping a list of non-owning partial values preserves existing partial-value
 abstractions, since the store is unchanged.
@@ -1466,6 +1388,27 @@ def ValidStoreTyping (store : ProgramStore) (term : Term) (typing : StoreTyping)
   ∀ value,
     value ∈ termValues term →
     ∃ ty, ValueTyping typing value ty ∧ ValidValue store value ty
+
+theorem validStoreTyping_box_inner {store : ProgramStore} {term : Term}
+    {typing : StoreTyping} :
+    ValidStoreTyping store (.box term) typing →
+    ValidStoreTyping store term typing := by
+  intro hvalid value hmem
+  exact hvalid value (by simpa [termValues] using hmem)
+
+theorem validStoreTyping_declare_inner {store : ProgramStore} {x : Name}
+    {term : Term} {typing : StoreTyping} :
+    ValidStoreTyping store (.letMut x term) typing →
+    ValidStoreTyping store term typing := by
+  intro hvalid value hmem
+  exact hvalid value (by simpa [termValues] using hmem)
+
+theorem validStoreTyping_assign_inner {store : ProgramStore} {lhs : LVal}
+    {rhs : Term} {typing : StoreTyping} :
+    ValidStoreTyping store (.assign lhs rhs) typing →
+    ValidStoreTyping store rhs typing := by
+  intro hvalid value hmem
+  exact hvalid value (by simpa [termValues] using hmem)
 
 /--
 After `R-Seq` drops a completed head value, the remaining block mentions only
@@ -1508,39 +1451,6 @@ theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
       subst howned
       exact ⟨_, hslot⟩
 
-theorem validPartialValue_unit_nonOwner {store : ProgramStore}
-    {value : PartialValue} :
-    ValidPartialValue store value (.ty .unit) →
-    PartialValueNonOwner value := by
-  intro hvalid
-  cases hvalid
-  exact partialValueNonOwner_unit
-
-theorem validPartialValue_int_nonOwner {store : ProgramStore}
-    {value : PartialValue} :
-    ValidPartialValue store value (.ty .int) →
-    PartialValueNonOwner value := by
-  intro hvalid
-  cases hvalid
-  exact partialValueNonOwner_int _
-
-theorem validPartialValue_undef_nonOwner {store : ProgramStore}
-    {value : PartialValue} {ty : Ty} :
-    ValidPartialValue store value (.undef ty) →
-    PartialValueNonOwner value := by
-  intro hvalid
-  cases hvalid
-  exact partialValueNonOwner_undef
-
-theorem validPartialValue_borrow_nonOwner {store : ProgramStore}
-    {value : PartialValue} {mutable : Bool} {targets : List LVal} :
-    ValidPartialValue store value (.ty (.borrow mutable targets)) →
-    PartialValueNonOwner value := by
-  intro hvalid
-  cases hvalid with
-  | borrow =>
-      exact partialValueNonOwner_borrowed _
-
 theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
     {value : PartialValue} {ty : PartialTy} :
     ValidPartialValue store value ty →
@@ -1548,17 +1458,31 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
       ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner value := by
   intro hvalid hshape
-  rcases hshape with hunit | hint | hundef | hborrow
-  · subst hunit
-    exact validPartialValue_unit_nonOwner hvalid
-  · subst hint
-    exact validPartialValue_int_nonOwner hvalid
-  · rcases hundef with ⟨inner, hundef⟩
-    subst hundef
-    exact validPartialValue_undef_nonOwner hvalid
-  · rcases hborrow with ⟨mutable, targets, hborrow⟩
-    subst hborrow
-    exact validPartialValue_borrow_nonOwner hvalid
+  cases hvalid with
+  | unit =>
+      exact partialValueNonOwner_unit
+  | int =>
+      exact partialValueNonOwner_int _
+  | undef =>
+      exact partialValueNonOwner_undef
+  | borrow =>
+      exact partialValueNonOwner_borrowed _
+  | box =>
+      rcases hshape with hunit | hint | hundef | hborrow
+      · cases hunit
+      · cases hint
+      · rcases hundef with ⟨_inner, hundef⟩
+        cases hundef
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
+  | boxFull =>
+      rcases hshape with hunit | hint | hundef | hborrow
+      · cases hunit
+      · cases hint
+      · rcases hundef with ⟨_inner, hundef⟩
+        cases hundef
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
 
 theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
     {oldTy : PartialTy} {rhsTy : Ty} :
@@ -2307,64 +2231,6 @@ theorem storePreservation_assign_var_envShape_of_preserved
   exact storePreservation_assign_var_old_nonOwner_of_preserved
     hsafe henvX hwriteEnv hnonOwner hread hdrops hwrite hnewValid hpreserveOther
 
-/--
-Variable-base assignment store preservation for assigning `unit`, deriving the
-old-value non-owner side condition from the lhs environment type shape.
--/
-theorem storePreservation_assign_var_unit_envShape_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
-    {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot} :
-    store ∼ₛ env →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) .unit env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
-    store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value .unit) = some store' →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ∼ₛ env' := by
-  intro hsafe henvX hwriteEnv hshape hread hdrops hwrite hpreserveOther
-  exact storePreservation_assign_var_envShape_of_preserved
-    hsafe henvX hwriteEnv hshape hread hdrops hwrite
-    (ValidPartialValue.unit (store := store')) hpreserveOther
-
-/--
-Variable-base assignment store preservation for assigning an integer, deriving
-the old-value non-owner side condition from the lhs environment type shape.
--/
-theorem storePreservation_assign_var_int_envShape_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
-    {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot} {value : Int} :
-    store ∼ₛ env →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) .int env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
-    store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value (.int value)) = some store' →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ∼ₛ env' := by
-  intro hsafe henvX hwriteEnv hshape hread hdrops hwrite hpreserveOther
-  exact storePreservation_assign_var_envShape_of_preserved
-    hsafe henvX hwriteEnv hshape hread hdrops hwrite
-    (ValidPartialValue.int (store := store')) hpreserveOther
-
 /-- Updating a fresh location does not change an already-defined lval location. -/
 theorem loc_update_of_loc {store : ProgramStore} {updatedLocation : Location}
     {newSlot : StoreSlot} {lv : LVal} {location : Location} :
@@ -2844,6 +2710,29 @@ theorem safeAbstraction_boxAt {store : ProgramStore} {env : Env}
           using hslot,
       validPartialValue_boxAt hfresh hvalid⟩
 
+/--
+Lemma 9.10, `R-Box` store-preservation fragment, factored around the
+operand-value abstraction established by the inner preservation proof.
+-/
+theorem storePreservation_box_step_of_validValue {store store' : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} {ref : Reference} :
+    store ∼ₛ env₁ →
+    ValidValue store value ty →
+    TermTyping env₁ typing lifetime (.box (.val value)) (.box ty) env₂ →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    store' ∼ₛ env₂ ∧ ValidValue store' (.ref ref) (.box ty) := by
+  intro hsafe hvalidValue htyping hstep
+  cases htyping with
+  | box hinner =>
+      cases hinner with
+      | const _hvalueTyping =>
+          cases hstep with
+          | box hfresh hbox =>
+              cases hbox
+              exact ⟨safeAbstraction_boxAt hfresh hsafe,
+                validValue_boxAt_ref hfresh hvalidValue⟩
+
 /-- Lemma 9.10, `R-Box` store-preservation fragment. -/
 theorem storePreservation_box_step {store store' : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
@@ -2858,21 +2747,19 @@ theorem storePreservation_box_step {store store' : ProgramStore}
   | box hinner =>
       cases hinner with
       | const hvalueTyping =>
-          cases hstep with
-          | box hfresh hbox =>
-              rcases hvalidStoreTyping value (by simp [termValues]) with
-                ⟨storedTy, hstoredTyping, hvalidValue⟩
-              have hty : storedTy = ty := by
-                cases hstoredTyping <;> cases hvalueTyping
-                · rfl
-                · rfl
-                · rename_i hstoredLookup hvalueLookup
-                  rw [hstoredLookup] at hvalueLookup
-                  injection hvalueLookup
-              subst hty
-              cases hbox
-              exact ⟨safeAbstraction_boxAt hfresh hsafe,
-                validValue_boxAt_ref hfresh hvalidValue⟩
+          rcases hvalidStoreTyping value (by simp [termValues]) with
+            ⟨storedTy, hstoredTyping, hvalidValue⟩
+          have hty : storedTy = ty := by
+            cases hstoredTyping <;> cases hvalueTyping
+            · rfl
+            · rfl
+            · rename_i hstoredLookup hvalueLookup
+              rw [hstoredLookup] at hvalueLookup
+              injection hvalueLookup
+          subst hty
+          exact storePreservation_box_step_of_validValue hsafe hvalidValue
+            (TermTyping.box (typing := typing) (TermTyping.const hvalueTyping))
+            hstep
 
 /-- Lemma 9.9, `R-Box` one-step value preservation fragment. -/
 theorem valuePreservation_box_step {store store' : ProgramStore}
@@ -2937,6 +2824,297 @@ theorem wellFormedEnv_empty_all :
     ∀ lifetime, WellFormedEnv Env.empty lifetime := by
   intro lifetime
   exact wellFormedEnv_empty lifetime
+
+theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
+    env.fresh x →
+    (∀ {lv ty lifetime},
+      LValTyping env lv ty lifetime →
+      LValTyping (env.update x slot) lv ty lifetime) ∧
+    (∀ {targets ty lifetime},
+    LValTargetsTyping env targets ty lifetime →
+    LValTargetsTyping (env.update x slot) targets ty lifetime) := by
+  intro hfresh
+  constructor
+  · intro lv ty lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun lv ty lifetime _ =>
+        LValTyping (env.update x slot) lv ty lifetime)
+      (motive_2 := fun targets ty lifetime _ =>
+        LValTargetsTyping (env.update x slot) targets ty lifetime)
+      (by
+        intro y envSlot hslot
+        by_cases h : y = x
+        · subst h
+          unfold Env.fresh at hfresh
+          rw [hfresh] at hslot
+          cases hslot
+        · exact LValTyping.var (by simpa [Env.update, h]))
+      (by
+        intro lv inner lifetime _htyping ih
+        exact LValTyping.box ih)
+      (by
+        intro lv mutable targets borrowLifetime targetLifetime targetTy
+          _hborrow _htargets ihBorrow ihTargets
+        exact LValTyping.borrow ihBorrow ihTargets)
+      (by
+        intro target ty lifetime _htarget ihTarget
+        exact LValTargetsTyping.singleton ihTarget)
+      (by
+        intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+          _hhead _hrest hunion hintersection ihHead ihRest
+        exact LValTargetsTyping.cons ihHead ihRest hunion hintersection)
+      htyping
+  · intro targets ty lifetime htyping
+    exact LValTargetsTyping.rec
+      (motive_1 := fun lv ty lifetime _ =>
+        LValTyping (env.update x slot) lv ty lifetime)
+      (motive_2 := fun targets ty lifetime _ =>
+        LValTargetsTyping (env.update x slot) targets ty lifetime)
+      (by
+        intro y envSlot hslot
+        by_cases h : y = x
+        · subst h
+          unfold Env.fresh at hfresh
+          rw [hfresh] at hslot
+          cases hslot
+        · exact LValTyping.var (by simpa [Env.update, h]))
+      (by
+        intro lv inner lifetime _htyping ih
+        exact LValTyping.box ih)
+      (by
+        intro lv mutable targets borrowLifetime targetLifetime targetTy
+          _hborrow _htargets ihBorrow ihTargets
+        exact LValTyping.borrow ihBorrow ihTargets)
+      (by
+        intro target ty lifetime _htarget ihTarget
+        exact LValTargetsTyping.singleton ihTarget)
+      (by
+        intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+          _hhead _hrest hunion hintersection ihHead ihRest
+        exact LValTargetsTyping.cons ihHead ihRest hunion hintersection)
+      htyping
+
+theorem LValTyping.update_fresh_one {env : Env} {x : Name} {slot : EnvSlot}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    env.fresh x →
+    LValTyping env lv ty lifetime →
+    LValTyping (env.update x slot) lv ty lifetime := by
+  intro hfresh htyping
+  exact (LValTyping.update_fresh (slot := slot) hfresh).1 htyping
+
+theorem LValTargetsTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot}
+    {targets : List LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    env.fresh x →
+    LValTargetsTyping env targets ty lifetime →
+    LValTargetsTyping (env.update x slot) targets ty lifetime := by
+  intro hfresh htyping
+  exact (LValTyping.update_fresh (slot := slot) hfresh).2 htyping
+
+theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
+    {slot : EnvSlot} {slotLifetime : Lifetime} {targets : List LVal} :
+    env.fresh x →
+    BorrowTargetsWellFormedInSlot env slotLifetime targets →
+    BorrowTargetsWellFormedInSlot (env.update x slot) slotLifetime targets := by
+  intro hfresh htargets target hmem
+  rcases htargets target hmem with
+    ⟨targetTy, targetLifetime, htyping, houtlives⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTyping.update_fresh_one (slot := slot) hfresh htyping,
+    houtlives⟩
+
+theorem BorrowTargetsWellFormed.inSlot {env : Env} {targets : List LVal}
+    {lifetime : Lifetime} :
+    BorrowTargetsWellFormed env targets lifetime →
+    BorrowTargetsWellFormedInSlot env lifetime targets := by
+  intro htargets
+  induction htargets with
+  | singleton htarget houtlives =>
+      intro target hmem
+      simp at hmem
+      subst hmem
+      exact ⟨_, _, htarget, houtlives⟩
+  | cons htarget houtlives _hrest ih =>
+      intro selected hmem
+      simp at hmem
+      rcases hmem with hselected | hselected
+      · subst hselected
+        exact ⟨_, _, htarget, houtlives⟩
+      · exact ih selected hselected
+
+theorem borrowTargetsWellFormedInSlot_of_wellFormedTy_contains {env : Env}
+    {ty : Ty} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal} :
+    WellFormedTy env ty lifetime →
+    PartialTyContains (.ty ty) (.borrow mutable targets) →
+    BorrowTargetsWellFormedInSlot env lifetime targets := by
+  intro hwellTy hcontains
+  cases hcontains with
+  | here =>
+      cases hwellTy with
+      | borrow htargets =>
+          exact BorrowTargetsWellFormed.inSlot htargets
+
+theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    WellFormedTy env ty lifetime →
+    env.fresh x →
+    WellFormedEnv (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
+  intro hwellEnv hwellTy hfresh
+  constructor
+  · intro y envSlot mutable targets hslot hcontains
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq :
+          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+      have hcontainedEq :
+          containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+          simpa [Env.update] using hcontainedSlot
+        exact h.symm
+      subst hcontainedEq
+      exact borrowTargetsWellFormedInSlot_update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
+        (borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontainsTy)
+    · have hslotOld : env.slotAt y = some envSlot := by
+        simpa [Env.update, hy] using hslot
+      have hcontainsOld : env ⊢ y ↝ Ty.borrow mutable targets := by
+        rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+        have hcontainedOld : env.slotAt y = some containedSlot := by
+          simpa [Env.update, hy] using hcontainedSlot
+        exact ⟨containedSlot, hcontainedOld, hcontainsTy⟩
+      exact borrowTargetsWellFormedInSlot_update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
+        (hwellEnv.1 y envSlot mutable targets hslotOld hcontainsOld)
+  · intro y envSlot hslot
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq :
+          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      exact LifetimeOutlives.refl lifetime
+    · have hslotOld : env.slotAt y = some envSlot := by
+        simpa [Env.update, hy] using hslot
+      exact hwellEnv.2 y envSlot hslotOld
+
+/--
+The final environment-extension step used by Lemma 4.9, Borrow Invariance:
+once the type computed by the typing derivation is well formed in the output
+environment, adding a fresh result slot preserves well-formedness.
+-/
+theorem borrowInvariance_result_extension {env₂ : Env} {gamma : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env₂ lifetime →
+    WellFormedTy env₂ ty lifetime →
+    env₂.fresh gamma →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime := by
+  exact WellFormedEnv.update_fresh_ty
+
+theorem LifetimeIntersection.le_of_le {left right intersection current : Lifetime} :
+    LifetimeIntersection left right intersection →
+    left ≤ current →
+    right ≤ current →
+    intersection ≤ current := by
+  intro hintersection hleft hright
+  exact hintersection.2 (by
+    intro lifetime hmem
+    simp at hmem
+    rcases hmem with h | h
+    · simpa [h] using hleft
+    · simpa [h] using hright)
+
+theorem LifetimeOutlives.trans {first second third : Lifetime} :
+    first ≤ second →
+    second ≤ third →
+    first ≤ third := by
+  intro hfirst hsecond
+  simp [LifetimeOutlives, Core.Lifetime.contains] at hfirst hsecond ⊢
+  exact hfirst.trans hsecond
+
+theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
+    WellFormedEnv env current →
+    (∀ {lv ty lifetime},
+      LValTyping env lv ty lifetime →
+      lifetime ≤ current) ∧
+    (∀ {targets ty lifetime},
+      LValTargetsTyping env targets ty lifetime →
+      lifetime ≤ current) := by
+  intro hwellEnv
+  constructor
+  · intro lv ty lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun _lv _ty lifetime _ => lifetime ≤ current)
+      (motive_2 := fun _targets _ty lifetime _ => lifetime ≤ current)
+      (by
+        intro x slot hslot
+        exact hwellEnv.2 x slot hslot)
+      (by
+        intro _lv _inner _lifetime _htyping ih
+        exact ih)
+      (by
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+          _hborrow _htargets _ihBorrow ihTargets
+        exact ihTargets)
+      (by
+        intro _target _ty _lifetime _htarget ihTarget
+        exact ihTarget)
+      (by
+        intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy _unionTy
+          _hhead _hrest _hunion hintersection ihHead ihRest
+        exact LifetimeIntersection.le_of_le hintersection ihHead ihRest)
+      htyping
+  · intro targets ty lifetime htyping
+    exact LValTargetsTyping.rec
+      (motive_1 := fun _lv _ty lifetime _ => lifetime ≤ current)
+      (motive_2 := fun _targets _ty lifetime _ => lifetime ≤ current)
+      (by
+        intro x slot hslot
+        exact hwellEnv.2 x slot hslot)
+      (by
+        intro _lv _inner _lifetime _htyping ih
+        exact ih)
+      (by
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+          _hborrow _htargets _ihBorrow ihTargets
+        exact ihTargets)
+      (by
+        intro _target _ty _lifetime _htarget ihTarget
+        exact ihTarget)
+      (by
+        intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy _unionTy
+          _hhead _hrest _hunion hintersection ihHead ihRest
+        exact LifetimeIntersection.le_of_le hintersection ihHead ihRest)
+      htyping
+
+theorem LValTyping.lifetime_outlives_one {env : Env} {current : Lifetime}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    WellFormedEnv env current →
+    LValTyping env lv ty lifetime →
+    lifetime ≤ current := by
+  intro hwellEnv htyping
+  exact (LValTyping.lifetime_outlives hwellEnv).1 htyping
+
+theorem LValTyping.var_inv {env : Env} {x : Name}
+    {ty : PartialTy} {lifetime : Lifetime} :
+    LValTyping env (.var x) ty lifetime →
+    ∃ slot,
+      env.slotAt x = some slot ∧
+      slot.ty = ty ∧
+      slot.lifetime = lifetime := by
+  intro htyping
+  cases htyping with
+  | var hslot =>
+      exact ⟨_, hslot, rfl, rfl⟩
 
 /-! ## Appendix 9.1: Preliminary Lemmas -/
 
@@ -3095,9 +3273,60 @@ theorem valueTyping_deterministic {typing : StoreTyping} {value : Value}
   cases hleft <;> cases hright
   · rfl
   · rfl
-  · rename_i hleftLookup hrightLookup
+  · rename_i _ref hleftLookup hrightLookup
     rw [hleftLookup] at hrightLookup
     injection hrightLookup
+
+/-- Lemma 9.7 lifted to singleton term lists. -/
+theorem termListTyping_singleton_value_environment_eq {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ty : Ty} :
+    TermListTyping env₁ typing lifetime [.val value] ty env₂ →
+    env₁ = env₂ := by
+  intro htyping
+  cases htyping with
+  | singleton hterm =>
+      exact valueTyping_environment_eq hterm
+  | cons _hterm hrest =>
+      cases hrest
+
+/-- `T-Const` inversion for singleton value term lists. -/
+theorem termListTyping_singleton_value_valueTyping {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ty : Ty} :
+    TermListTyping env₁ typing lifetime [.val value] ty env₂ →
+    ValueTyping typing value ty := by
+  intro htyping
+  cases htyping with
+  | singleton hterm =>
+      cases hterm with
+      | const hvalueTyping =>
+          exact hvalueTyping
+  | cons _hterm hrest =>
+      cases hrest
+
+/--
+Block value typing consequence used by the `R-BlockB` preservation cases:
+a singleton value block outputs exactly `drop(Γ, m)`.
+-/
+theorem blockValueTyping_output_eq {env env' : Env} {typing : StoreTyping}
+    {lifetime blockLifetime : Lifetime} {value : Value} {ty : Ty} :
+    TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
+    env' = env.dropLifetime blockLifetime := by
+  intro htyping
+  cases htyping with
+  | block hterms _hwellFormed hdrop =>
+      have henv₂ := termListTyping_singleton_value_environment_eq hterms
+      rw [henv₂]
+      exact hdrop
+
+/-- `T-Const` inversion for singleton value blocks. -/
+theorem blockValueTyping_valueTyping {env env' : Env} {typing : StoreTyping}
+    {lifetime blockLifetime : Lifetime} {value : Value} {ty : Ty} :
+    TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
+    ValueTyping typing value ty := by
+  intro htyping
+  cases htyping with
+  | block hterms _hwellFormed _hdrop =>
+      exact termListTyping_singleton_value_valueTyping hterms
 
 /--
 Lemma 9.9 support: if the store typing is valid for a terminal value and the
@@ -3562,12 +3791,13 @@ theorem lvalTyping_read_nonOwner_of_shapeCompatible {store : ProgramStore} {env 
         ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty hstrength hshape
       rcases hselectedShape with hunit | hint | hborrowShape
       · subst hunit
-        exact validPartialValue_unit_nonOwner hvalid
+        exact validPartialValue_nonOwner_of_envShape hvalid (Or.inl rfl)
       · subst hint
-        exact validPartialValue_int_nonOwner hvalid
+        exact validPartialValue_nonOwner_of_envShape hvalid (Or.inr (Or.inl rfl))
       · rcases hborrowShape with ⟨mutable, targets, hborrowTy⟩
         subst hborrowTy
-        exact validPartialValue_borrow_nonOwner hvalid
+        exact validPartialValue_nonOwner_of_envShape hvalid
+          (Or.inr (Or.inr (Or.inr ⟨mutable, targets, rfl⟩)))
 
 /-- Lemma 9.3 operational corollary: locating an lval makes `read` defined. -/
 theorem read_defined_of_location {store : ProgramStore} {lv : LVal} {ty : PartialTy} :
@@ -3757,44 +3987,6 @@ theorem valuePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
   | borrow hloc =>
       exact ValidPartialValue.borrow (by simp) hloc
 
-/-- Lemma 9.9, `R-BlockB` value-preservation fragment for a `unit` result. -/
-theorem valuePreservation_blockB_unit_step {store store' : ProgramStore}
-    {env env₂ : Env} {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
-    {ty : Ty} :
-    TermTyping env typing lifetime (.block blockLifetime [.val .unit]) ty env₂ →
-    Step store lifetime (.block blockLifetime [.val .unit]) store' (.val .unit) →
-    ValidValue store' .unit ty := by
-  intro htyping _hstep
-  cases htyping with
-  | block hterms _hwf _hdrop =>
-      cases hterms with
-      | singleton hterm =>
-          cases hterm with
-          | const hvalueTyping =>
-              cases hvalueTyping
-              exact ValidPartialValue.unit
-      | cons _hterm hrest =>
-          cases hrest
-
-/-- Lemma 9.9, `R-BlockB` value-preservation fragment for an integer result. -/
-theorem valuePreservation_blockB_int_step {store store' : ProgramStore}
-    {env env₂ : Env} {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
-    {value : Int} {ty : Ty} :
-    TermTyping env typing lifetime (.block blockLifetime [.val (.int value)]) ty env₂ →
-    Step store lifetime (.block blockLifetime [.val (.int value)]) store' (.val (.int value)) →
-    ValidValue store' (.int value) ty := by
-  intro htyping _hstep
-  cases htyping with
-  | block hterms _hwf _hdrop =>
-      cases hterms with
-      | singleton hterm =>
-          cases hterm with
-          | const hvalueTyping =>
-              cases hvalueTyping
-              exact ValidPartialValue.int
-      | cons _hterm hrest =>
-          cases hrest
-
 /-- Copyable runtime values never contain owning references. -/
 theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
     CopyTy ty →
@@ -3932,6 +4124,19 @@ theorem storeOwnersAllocated_move_step {store store' : ProgramStore}
       exact storeOwnersAllocated_write_undef hallocated hwrite
 
 /-- Allocation invariant preservation for `R-Declare`. -/
+theorem storeOwnersAllocated_declare_step_of_validValue {store store' : ProgramStore}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    StoreOwnersAllocated store →
+    ValidValue store value ty →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    StoreOwnersAllocated store' := by
+  intro hallocated hvalidValue hstep
+  cases hstep with
+  | declare hstore' =>
+      subst hstore'
+      exact storeOwnersAllocated_declare_of_validValue hallocated hvalidValue
+
+/-- Allocation invariant preservation for `R-Declare`. -/
 theorem storeOwnersAllocated_declare_step {store store' : ProgramStore}
     {typing : StoreTyping} {lifetime : Lifetime} {x : Name} {value : Value} :
     StoreOwnersAllocated store →
@@ -3943,8 +4148,8 @@ theorem storeOwnersAllocated_declare_step {store store' : ProgramStore}
   | declare hstore' =>
       rcases hvalidStoreTyping value (by simp [termValues]) with
         ⟨_ty, _hvalueTyping, hvalidValue⟩
-      subst hstore'
-      exact storeOwnersAllocated_declare_of_validValue hallocated hvalidValue
+      exact storeOwnersAllocated_declare_step_of_validValue hallocated hvalidValue
+        (Step.declare (lifetime := lifetime) hstore')
 
 /-- Allocation invariant preservation for `R-Seq`. -/
 theorem storeOwnersAllocated_seq_step {store store' : ProgramStore}
@@ -4021,6 +4226,22 @@ The freshness side conditions required by `validState_box_step` are derived
 from value validity and from the explicit allocation invariant for abstract
 stores.
 -/
+theorem validState_box_step_of_validValue {store store' : ProgramStore}
+    {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
+    ValidState store (.box (.val value)) →
+    StoreOwnersAllocated store →
+    ValidValue store value ty →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidState store' (.val (.ref ref)) := by
+  intro hvalidState hallocated hvalidValue hstep
+  cases hstep with
+  | box hfresh hbox =>
+      exact validState_box_step hvalidState hfresh
+        (validValue_fresh_not_owningLocation hvalidValue hfresh)
+        (not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
+        hbox
+
+/-- Lemma 9.8, typed `R-Box` valid-state preservation fragment. -/
 theorem validState_box_step_typed {store store' : ProgramStore}
     {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ref : Reference} :
     ValidState store (.box (.val value)) →
@@ -4033,10 +4254,22 @@ theorem validState_box_step_typed {store store' : ProgramStore}
   | box hfresh hbox =>
       rcases hvalidStoreTyping value (by simp [termValues]) with
         ⟨_ty, _hvalueTyping, hvalidValue⟩
-      exact validState_box_step hvalidState hfresh
-        (validValue_fresh_not_owningLocation hvalidValue hfresh)
-        (not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
-        hbox
+      exact validState_box_step_of_validValue (lifetime := lifetime)
+        hvalidState hallocated hvalidValue
+        (Step.box (lifetime := lifetime) hfresh hbox)
+
+/-- Allocation invariant preservation for `R-Box`, from operand validity. -/
+theorem storeOwnersAllocated_box_step_of_validValue {store store' : ProgramStore}
+    {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
+    StoreOwnersAllocated store →
+    ValidValue store value ty →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    StoreOwnersAllocated store' := by
+  intro hallocated hvalidValue hstep
+  cases hstep with
+  | box _hfresh hbox =>
+      cases hbox
+      exact storeOwnersAllocated_boxAt_of_validValue hallocated hvalidValue
 
 /-- Allocation invariant preservation for `R-Box`. -/
 theorem storeOwnersAllocated_box_step {store store' : ProgramStore}
@@ -4047,11 +4280,12 @@ theorem storeOwnersAllocated_box_step {store store' : ProgramStore}
     StoreOwnersAllocated store' := by
   intro hallocated hvalidStoreTyping hstep
   cases hstep with
-  | box _hfresh hbox =>
+  | box hfresh hbox =>
       rcases hvalidStoreTyping value (by simp [termValues]) with
         ⟨_ty, _hvalueTyping, hvalidValue⟩
-      cases hbox
-      exact storeOwnersAllocated_boxAt_of_validValue hallocated hvalidValue
+      exact storeOwnersAllocated_box_step_of_validValue (lifetime := lifetime)
+        hallocated hvalidValue
+        (Step.box (lifetime := lifetime) hfresh hbox)
 
 /-! ### Composed Runtime Validity Preservation Fragments -/
 
@@ -4153,6 +4387,22 @@ theorem validRuntimeState_assign_step_old_nonOwner
   exact validRuntimeState_assign_step_of_postDrop_validValue
     (lifetime := lifetime) hvalidRuntime hvalidRuntime.2 hvalidValue hread hdrops hwrite
 
+/-- Runtime-validity preservation for `R-Declare`, from initializer validity. -/
+theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStore}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    ValidRuntimeState store (.letMut x (.val value)) →
+    store.fresh (.var x) →
+    ValidValue store value ty →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    ValidRuntimeState store' (.val .unit) := by
+  intro hvalidRuntime hfresh hvalidValue hstep
+  cases hstep with
+  | declare hstore' =>
+      subst hstore'
+      exact ⟨validState_declare hvalidRuntime.1 hfresh,
+        storeOwnersAllocated_declare_step_of_validValue hvalidRuntime.2 hvalidValue
+          (Step.declare rfl)⟩
+
 /-- Runtime-validity preservation for `R-Declare`. -/
 theorem validRuntimeState_declare_step {store store' : ProgramStore}
     {typing : StoreTyping} {lifetime : Lifetime} {x : Name} {value : Value} :
@@ -4164,10 +4414,10 @@ theorem validRuntimeState_declare_step {store store' : ProgramStore}
   intro hvalidRuntime hfresh hvalidStoreTyping hstep
   cases hstep with
   | declare hstore' =>
-      subst hstore'
-      exact ⟨validState_declare hvalidRuntime.1 hfresh,
-        storeOwnersAllocated_declare_step hvalidRuntime.2 hvalidStoreTyping
-          (Step.declare rfl)⟩
+      rcases hvalidStoreTyping value (by simp [termValues]) with
+        ⟨_ty, _hvalueTyping, hvalidValue⟩
+      exact validRuntimeState_declare_step_of_validValue hvalidRuntime hfresh hvalidValue
+        (Step.declare (lifetime := lifetime) hstore')
 
 /-- Runtime-validity preservation for `R-Seq`. -/
 theorem validRuntimeState_seq_step {store store' : ProgramStore}
@@ -4198,6 +4448,18 @@ theorem validRuntimeState_blockB_step {store store' : ProgramStore}
           hvalidRuntime.1 hvalidRuntime.2 hdropDisjoint
           (Step.blockB (lifetime := lifetime) hdrops)⟩
 
+/-- Runtime-validity preservation for `R-Box`, from operand validity. -/
+theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
+    {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
+    ValidRuntimeState store (.box (.val value)) →
+    ValidValue store value ty →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidRuntimeState store' (.val (.ref ref)) := by
+  intro hvalidRuntime hvalidValue hstep
+  exact ⟨validState_box_step_of_validValue hvalidRuntime.1 hvalidRuntime.2
+      hvalidValue hstep,
+    storeOwnersAllocated_box_step_of_validValue hvalidRuntime.2 hvalidValue hstep⟩
+
 /-- Runtime-validity preservation for `R-Box`. -/
 theorem validRuntimeState_box_step {store store' : ProgramStore}
     {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ref : Reference} :
@@ -4206,9 +4468,13 @@ theorem validRuntimeState_box_step {store store' : ProgramStore}
     Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
     ValidRuntimeState store' (.val (.ref ref)) := by
   intro hvalidRuntime hvalidStoreTyping hstep
-  exact ⟨validState_box_step_typed hvalidRuntime.1 hvalidRuntime.2
-      hvalidStoreTyping hstep,
-    storeOwnersAllocated_box_step hvalidRuntime.2 hvalidStoreTyping hstep⟩
+  cases hstep with
+  | box hfresh hbox =>
+      rcases hvalidStoreTyping value (by simp [termValues]) with
+        ⟨_ty, _hvalueTyping, hvalidValue⟩
+      exact validRuntimeState_box_step_of_validValue (lifetime := lifetime)
+        hvalidRuntime hvalidValue
+        (Step.box (lifetime := lifetime) hfresh hbox)
 
 /-- Lemma 9.10, `R-Copy` store-preservation fragment. -/
 theorem storePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
@@ -4311,6 +4577,7 @@ theorem preservation_move_var_step_runtime {store store' : ProgramStore}
     EnvMove env₁ (.var x) env₂ →
     TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
     Step store lifetime (.move (.var x)) store' (.val value) →
+    ValidValue store' value ty →
     (∀ y envSlot oldValue,
       y ≠ x →
       env₁.slotAt y = some envSlot →
@@ -4318,11 +4585,56 @@ theorem preservation_move_var_step_runtime {store store' : ProgramStore}
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ValidPartialValue store' oldValue envSlot.ty) →
     ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
-      ValidValue store value ty := by
-  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep hpreserveOld
+      ValidValue store' value ty := by
+  intro _hwellFormed hsafe hvalidRuntime henvSlot hmove _htyping hstep hvalidValue
+    hpreserveOld
   exact ⟨validRuntimeState_move_step hvalidRuntime hstep,
     storePreservation_move_var_step hsafe henvSlot hmove hstep hpreserveOld,
-    valuePreservation_move_step (typing := typing) hwellFormed hsafe htyping hstep⟩
+    hvalidValue⟩
+
+/--
+Lemma 4.11, `R-Box` one-step preservation fragment, factored around the
+operand-value abstraction established by inner preservation.
+-/
+theorem preservation_box_redex_runtime_of_validValue {store store' : ProgramStore}
+    {env : Env} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} {ref : Reference} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.box (.val value)) →
+    ValidValue store value ty →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidRuntimeState store' (.val (.ref ref)) ∧ store' ∼ₛ env ∧
+      ValidValue store' (.ref ref) (.box ty) := by
+  intro hsafe hvalidRuntime hoperandValid hstep
+  cases hstep with
+  | box hfresh hbox =>
+      cases hbox
+      exact ⟨validRuntimeState_box_step_of_validValue hvalidRuntime hoperandValid
+          (Step.box (lifetime := lifetime) hfresh rfl),
+        safeAbstraction_boxAt hfresh hsafe,
+        validValue_boxAt_ref hfresh hoperandValid⟩
+
+/--
+Lemma 4.11, `R-Box` one-step preservation fragment, factored around the
+operand-value abstraction established by inner preservation.
+-/
+theorem preservation_box_step_runtime_of_validValue {store store' : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} {ref : Reference} :
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.box (.val value)) →
+    ValidValue store value ty →
+    TermTyping env₁ typing lifetime (.box (.val value)) (.box ty) env₂ →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidRuntimeState store' (.val (.ref ref)) ∧ store' ∼ₛ env₂ ∧
+      ValidValue store' (.ref ref) (.box ty) := by
+  intro hsafe hvalidRuntime hoperandValid htyping hstep
+  cases htyping with
+  | box hinner =>
+      cases hinner with
+      | const _hvalueTyping =>
+          exact preservation_box_redex_runtime_of_validValue hsafe hvalidRuntime
+            hoperandValid hstep
 
 /--
 Lemma 4.11, `R-Box` one-step preservation fragment.
@@ -4341,10 +4653,59 @@ theorem preservation_box_step_runtime {store store' : ProgramStore}
     ValidRuntimeState store' (.val (.ref ref)) ∧ store' ∼ₛ env₂ ∧
       ValidValue store' (.ref ref) (.box ty) := by
   intro hvalidStoreTyping hsafe hvalidRuntime htyping hstep
-  rcases storePreservation_box_step hvalidStoreTyping hsafe htyping hstep with
-    ⟨hsafe₂, hvalidValue⟩
-  exact ⟨validRuntimeState_box_step hvalidRuntime hvalidStoreTyping hstep,
-    hsafe₂, hvalidValue⟩
+  cases htyping with
+  | box hinner =>
+      cases hinner with
+      | const hvalueTyping =>
+          rcases hvalidStoreTyping value (by simp [termValues]) with
+            ⟨storedTy, hstoredTyping, hvalidValue⟩
+          have hty : storedTy = ty :=
+            valueTyping_deterministic hstoredTyping hvalueTyping
+          subst hty
+          exact preservation_box_step_runtime_of_validValue hsafe hvalidRuntime
+            hvalidValue
+            (TermTyping.box (typing := typing) (TermTyping.const hvalueTyping))
+            hstep
+
+/--
+Lemma 4.11, `R-Declare` one-step preservation fragment.
+
+This is the paper-facing combination of the runtime-validity, store-preservation,
+and value-preservation facts for a variable declaration step.
+-/
+theorem preservation_declare_redex_runtime_of_validValue {store store' : ProgramStore}
+    {env : Env} {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    env.fresh x →
+    ValidRuntimeState store (.letMut x (.val value)) →
+    ValidValue store value ty →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    ValidRuntimeState store' (.val .unit) ∧
+      store' ∼ₛ env.update x { ty := .ty ty, lifetime := lifetime } ∧
+      ValidValue store' .unit .unit := by
+  intro hsafe hfresh hvalidRuntime hvalidValue hstep
+  have hfreshStore : store.fresh (VariableProjection x) :=
+    safeAbstraction_store_fresh_var hsafe hfresh
+  cases hstep with
+  | declare hstore' =>
+      subst hstore'
+      have hsafe' :
+          store.declare x lifetime value ∼ₛ
+            env.update x { ty := .ty ty, lifetime := lifetime } := by
+        exact safeAbstraction_declare hsafe hfresh
+          (validPartialValue_declare hfreshStore hvalidValue)
+          (by
+            intro y envSlot oldValue _hyx henv hstoreSlot
+            rcases hsafe.2 y envSlot henv with
+              ⟨safeValue, hsafeSlot, hsafeValid⟩
+            rw [hstoreSlot] at hsafeSlot
+            injection hsafeSlot with hslotEq
+            cases hslotEq
+            exact validPartialValue_declare hfreshStore hsafeValid)
+      exact ⟨validRuntimeState_declare_step_of_validValue
+          hvalidRuntime hfreshStore hvalidValue (Step.declare (lifetime := lifetime) rfl),
+        hsafe',
+        ValidPartialValue.unit⟩
 
 /--
 Lemma 4.11, `R-Declare` one-step preservation fragment.
@@ -4365,13 +4726,18 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
   intro hvalidStoreTyping hsafe hvalidRuntime htyping hstep
   cases htyping with
   | declare hfresh hinit henv₃ =>
-      have hfreshStore : store.fresh (VariableProjection x) :=
-        safeAbstraction_store_fresh_var hsafe hfresh
-      exact ⟨validRuntimeState_declare_step hvalidRuntime hfreshStore
-          hvalidStoreTyping hstep,
-        storePreservation_declare_step_valid hvalidStoreTyping hsafe
-          (TermTyping.declare hfresh hinit henv₃) hstep,
-        ValidPartialValue.unit⟩
+      cases hinit with
+      | const hvalueTyping =>
+          rcases hvalidStoreTyping value (by simp [termValues]) with
+            ⟨storedTy, hstoredTyping, hvalidValue⟩
+          have hty : storedTy = _ :=
+            valueTyping_deterministic hstoredTyping hvalueTyping
+          subst hty
+          have hpreserved :=
+            preservation_declare_redex_runtime_of_validValue hsafe hfresh
+              hvalidRuntime hvalidValue hstep
+          rw [henv₃]
+          exact hpreserved
 
 /--
 Lemma 4.11, `R-Assign` runtime/value preservation fragment.
@@ -4469,132 +4835,6 @@ theorem preservation_assign_var_envShape_step_runtime_of_preserved
     hvalidValue hread hdrops hwrite hnewValid hpreserveOther
 
 /--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment for assigning
-`unit` when the old lhs environment type is non-owning-shaped.
--/
-theorem preservation_assign_var_unit_envShape_step_runtime_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
-    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.assign (.var x) (.val .unit)) →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) .unit env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
-    store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value .unit) = some store' →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hsafe hvalidRuntime henvX hwriteEnv hshape hread hdrops hwrite hpreserveOther
-  exact preservation_assign_var_envShape_step_runtime_of_preserved
-    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hshape
-    (ValidPartialValue.unit (store := store)) hread hdrops hwrite
-    (ValidPartialValue.unit (store := store')) hpreserveOther
-
-/--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment for assigning an
-integer when the old lhs environment type is non-owning-shaped.
--/
-theorem preservation_assign_var_int_envShape_step_runtime_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
-    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
-    {value : Int} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.assign (.var x) (.val (.int value))) →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) .int env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
-    store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value (.int value)) = some store' →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hsafe hvalidRuntime henvX hwriteEnv hshape hread hdrops hwrite hpreserveOther
-  exact preservation_assign_var_envShape_step_runtime_of_preserved
-    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hshape
-    (ValidPartialValue.int (store := store)) hread hdrops hwrite
-    (ValidPartialValue.int (store := store')) hpreserveOther
-
-/--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment for assigning
-`unit` when the old lhs value is non-owning.
--/
-theorem preservation_assign_var_unit_old_nonOwner_step_runtime_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
-    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.assign (.var x) (.val .unit)) →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) .unit env' →
-    PartialValueNonOwner oldSlot.value →
-    store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value .unit) = some store' →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hread hdrops hwrite hpreserveOther
-  exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
-    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
-    (ValidPartialValue.unit (store := store)) hread hdrops hwrite
-    (ValidPartialValue.unit (store := store')) hpreserveOther
-
-/--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment for assigning an
-integer when the old lhs value is non-owning.
--/
-theorem preservation_assign_var_int_old_nonOwner_step_runtime_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
-    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
-    {value : Int} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.assign (.var x) (.val (.int value))) →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) .int env' →
-    PartialValueNonOwner oldSlot.value →
-    store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value (.int value)) = some store' →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hread hdrops hwrite hpreserveOther
-  exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
-    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
-    (ValidPartialValue.int (store := store)) hread hdrops hwrite
-    (ValidPartialValue.int (store := store')) hpreserveOther
-
-/--
 Lemma 4.11, `R-Seq` preservation fragment for non-owning values.
 
 This covers unit, integers, and shared references.  Owning references need the
@@ -4645,94 +4885,6 @@ theorem preservation_seq_nonOwner_step_runtime_with_storeTyping
       subst hstore
       exact ⟨hvalidRuntime', hsafe', validStoreTyping_block_tail hstoreTyping⟩
 
-/-- Lemma 4.11 support, `R-Seq` preservation for `unit`, carrying store typing. -/
-theorem preservation_seq_unit_step_runtime_with_storeTyping
-    {store store' : ProgramStore} {env : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {next : Term} {rest : List Term} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.block blockLifetime (.val .unit :: next :: rest)) →
-    ValidStoreTyping store (.block blockLifetime (.val .unit :: next :: rest)) typing →
-    Step store lifetime (.block blockLifetime (.val .unit :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧
-      store' ∼ₛ env ∧
-      ValidStoreTyping store' (.block blockLifetime (next :: rest)) typing := by
-  exact preservation_seq_nonOwner_step_runtime_with_storeTyping (by rfl)
-
-/-- Lemma 4.11 support, `R-Seq` preservation for integers, carrying store typing. -/
-theorem preservation_seq_int_step_runtime_with_storeTyping
-    {store store' : ProgramStore} {env : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {value : Int} {next : Term} {rest : List Term} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.block blockLifetime (.val (.int value) :: next :: rest)) →
-    ValidStoreTyping store (.block blockLifetime (.val (.int value) :: next :: rest)) typing →
-    Step store lifetime (.block blockLifetime (.val (.int value) :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧
-      store' ∼ₛ env ∧
-      ValidStoreTyping store' (.block blockLifetime (next :: rest)) typing := by
-  exact preservation_seq_nonOwner_step_runtime_with_storeTyping (by rfl)
-
-/--
-Lemma 4.11 support, `R-Seq` preservation for borrowed references, carrying store
-typing.
--/
-theorem preservation_seq_borrowed_step_runtime_with_storeTyping
-    {store store' : ProgramStore} {env : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {borrowedLocation : Location}
-    {next : Term} {rest : List Term} :
-    store ∼ₛ env →
-    ValidRuntimeState store
-      (.block blockLifetime
-        (.val (.ref { location := borrowedLocation, owner := false }) :: next :: rest)) →
-    ValidStoreTyping store
-      (.block blockLifetime
-        (.val (.ref { location := borrowedLocation, owner := false }) :: next :: rest)) typing →
-    Step store lifetime
-      (.block blockLifetime
-        (.val (.ref { location := borrowedLocation, owner := false }) :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧
-      store' ∼ₛ env ∧
-      ValidStoreTyping store' (.block blockLifetime (next :: rest)) typing := by
-  exact preservation_seq_nonOwner_step_runtime_with_storeTyping (by rfl)
-
-/-- Lemma 4.11, `R-Seq` preservation fragment for unit. -/
-theorem preservation_seq_unit_step_runtime {store store' : ProgramStore}
-    {env : Env} {lifetime blockLifetime : Lifetime} {next : Term} {rest : List Term} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.block blockLifetime (.val .unit :: next :: rest)) →
-    Step store lifetime (.block blockLifetime (.val .unit :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧ store' ∼ₛ env := by
-  exact preservation_seq_nonOwner_step_runtime (by rfl)
-
-/-- Lemma 4.11, `R-Seq` preservation fragment for integers. -/
-theorem preservation_seq_int_step_runtime {store store' : ProgramStore}
-    {env : Env} {lifetime blockLifetime : Lifetime} {value : Int}
-    {next : Term} {rest : List Term} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.block blockLifetime (.val (.int value) :: next :: rest)) →
-    Step store lifetime (.block blockLifetime (.val (.int value) :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧ store' ∼ₛ env := by
-  exact preservation_seq_nonOwner_step_runtime (by rfl)
-
-/-- Lemma 4.11, `R-Seq` preservation fragment for borrowed references. -/
-theorem preservation_seq_borrowed_step_runtime {store store' : ProgramStore}
-    {env : Env} {lifetime blockLifetime : Lifetime} {borrowedLocation : Location}
-    {next : Term} {rest : List Term} :
-    store ∼ₛ env →
-    ValidRuntimeState store
-      (.block blockLifetime
-        (.val (.ref { location := borrowedLocation, owner := false }) :: next :: rest)) →
-    Step store lifetime
-      (.block blockLifetime
-        (.val (.ref { location := borrowedLocation, owner := false }) :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧ store' ∼ₛ env := by
-  exact preservation_seq_nonOwner_step_runtime (by rfl)
-
 /--
 Lemma 4.11, `R-BlockB` one-step preservation fragment, factored through the
 store-side premises needed by Lemma 9.5 (`drop(S, m) ∼ drop(Γ, m)`).
@@ -4760,15 +4912,7 @@ theorem preservation_blockB_value_step_runtime_of_drop_preserved
       ValidValue store' value ty := by
   intro hvalidRuntime hsafe htyping hdropDisjoint hstep hvalidValue hdomain hpreserve
   have henv' : env' = env.dropLifetime blockLifetime := by
-    cases htyping with
-    | block hterms _hwf hdrop =>
-        cases hterms with
-        | singleton hterm =>
-            cases hterm with
-            | const _hvalueTyping =>
-                exact hdrop
-        | cons _hterm hrest =>
-            cases hrest
+    exact blockValueTyping_output_eq htyping
   have hsafeDrop : store' ∼ₛ env.dropLifetime blockLifetime := by
     cases hstep with
     | blockB hdrops =>
@@ -4778,66 +4922,6 @@ theorem preservation_blockB_value_step_runtime_of_drop_preserved
     exact hsafeDrop
   exact ⟨validRuntimeState_blockB_step hvalidRuntime hdropDisjoint hstep,
     hsafe', hvalidValue⟩
-
-/--
-Lemma 4.11, `R-BlockB` preservation fragment for a `unit` result.  The value
-preservation premise is discharged by Lemma 9.9's scalar case.
--/
-theorem preservation_blockB_unit_step_runtime_of_drop_preserved
-    {store store' : ProgramStore} {env env' : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} :
-    ValidRuntimeState store (.block blockLifetime [.val .unit]) →
-    store ∼ₛ env →
-    TermTyping env typing lifetime (.block blockLifetime [.val .unit]) .unit env' →
-    LifetimeDropOwnersDisjoint store blockLifetime →
-    Step store lifetime (.block blockLifetime [.val .unit]) store' (.val .unit) →
-    (∀ x,
-      (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
-        ∃ envSlot, (env.dropLifetime blockLifetime).slotAt x = some envSlot) →
-    (∀ x envSlot,
-      env.slotAt x = some envSlot →
-      envSlot.lifetime ≠ blockLifetime →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection x) =
-          some { value := oldValue, lifetime := envSlot.lifetime } ∧
-        ValidPartialValue store' oldValue envSlot.ty) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hvalidRuntime hsafe htyping hdropDisjoint hstep hdomain hpreserve
-  exact preservation_blockB_value_step_runtime_of_drop_preserved
-    hvalidRuntime hsafe htyping hdropDisjoint hstep
-    (valuePreservation_blockB_unit_step htyping hstep)
-    hdomain hpreserve
-
-/--
-Lemma 4.11, `R-BlockB` preservation fragment for an integer result.  The value
-preservation premise is discharged by Lemma 9.9's scalar case.
--/
-theorem preservation_blockB_int_step_runtime_of_drop_preserved
-    {store store' : ProgramStore} {env env' : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {value : Int} :
-    ValidRuntimeState store (.block blockLifetime [.val (.int value)]) →
-    store ∼ₛ env →
-    TermTyping env typing lifetime (.block blockLifetime [.val (.int value)]) .int env' →
-    LifetimeDropOwnersDisjoint store blockLifetime →
-    Step store lifetime (.block blockLifetime [.val (.int value)]) store' (.val (.int value)) →
-    (∀ x,
-      (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
-        ∃ envSlot, (env.dropLifetime blockLifetime).slotAt x = some envSlot) →
-    (∀ x envSlot,
-      env.slotAt x = some envSlot →
-      envSlot.lifetime ≠ blockLifetime →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection x) =
-          some { value := oldValue, lifetime := envSlot.lifetime } ∧
-        ValidPartialValue store' oldValue envSlot.ty) →
-    ValidRuntimeState store' (.val (.int value)) ∧ store' ∼ₛ env' ∧
-      ValidValue store' (.int value) .int := by
-  intro hvalidRuntime hsafe htyping hdropDisjoint hstep hdomain hpreserve
-  exact preservation_blockB_value_step_runtime_of_drop_preserved
-    hvalidRuntime hsafe htyping hdropDisjoint hstep
-    (valuePreservation_blockB_int_step htyping hstep)
-    hdomain hpreserve
 
 /--
 Lemma 4.11, `R-BlockB` one-step preservation when the block lifetime is absent
@@ -4859,15 +4943,7 @@ theorem preservation_blockB_value_step_runtime_no_slots
       ValidValue store' value ty := by
   intro hvalidRuntime hsafe htyping hnoLifetime hstep hvalidValue
   have henv' : env' = env.dropLifetime blockLifetime := by
-    cases htyping with
-    | block hterms _hwf hdrop =>
-        cases hterms with
-        | singleton hterm =>
-            cases hterm with
-            | const _hvalueTyping =>
-                exact hdrop
-        | cons _hterm hrest =>
-            cases hrest
+    exact blockValueTyping_output_eq htyping
   have hdropDisjoint : LifetimeDropOwnersDisjoint store blockLifetime :=
     lifetimeDropOwnersDisjoint_of_no_slots hnoLifetime
   have hsafe' : store' ∼ₛ env.dropLifetime blockLifetime := by
@@ -4880,45 +4956,615 @@ theorem preservation_blockB_value_step_runtime_no_slots
       exact hsafe',
     hvalidValue⟩
 
-/--
-Lemma 4.11, absent-lifetime `R-BlockB` preservation for a `unit` result.
--/
-theorem preservation_blockB_unit_step_runtime_no_slots
-    {store store' : ProgramStore} {env env' : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} :
-    ValidRuntimeState store (.block blockLifetime [.val .unit]) →
+/-! ### Multistep Preservation Fragments -/
+
+/-- Lemma 4.11, multistep preservation for `R-Copy` redexes. -/
+theorem preservation_copy_multistep_runtime {store finalStore : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+    {lv : LVal} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env current →
     store ∼ₛ env →
-    TermTyping env typing lifetime (.block blockLifetime [.val .unit]) .unit env' →
-    (∀ location slot,
-      store.slotAt location = some slot →
-      slot.lifetime ≠ blockLifetime) →
-    Step store lifetime (.block blockLifetime [.val .unit]) store' (.val .unit) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hvalidRuntime hsafe htyping hnoLifetime hstep
-  exact preservation_blockB_value_step_runtime_no_slots
-    hvalidRuntime hsafe htyping hnoLifetime hstep
-    (valuePreservation_blockB_unit_step htyping hstep)
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue ty := by
+  intro hwellFormed hsafe hvalidRuntime htyping hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (by intro hterminal; simp [Terminal] at hterminal)
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | copy _hread =>
+          exact ⟨_, rfl⟩)
+    (by
+      intro _store' _value hstep
+      cases hstep with
+      | copy hread =>
+          exact preservation_copy_step_runtime hwellFormed hsafe hvalidRuntime htyping
+            (Step.copy (lifetime := lifetime) hread))
+    hmulti
+
+/-- Lemma 4.11, multistep preservation for `R-Borrow` redexes. -/
+theorem preservation_borrow_multistep_runtime {store finalStore : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lv : LVal} {mutable : Bool} {finalValue : Value} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.borrow mutable lv) →
+    TermTyping env typing lifetime (.borrow mutable lv) (.borrow mutable [lv]) env₂ →
+    MultiStep store lifetime (.borrow mutable lv) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue (.borrow mutable [lv]) := by
+  intro hsafe hvalidRuntime htyping hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (by intro hterminal; simp [Terminal] at hterminal)
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | borrow _hloc =>
+          exact ⟨_, rfl⟩)
+    (by
+      intro _store' _value hstep
+      cases hstep with
+      | borrow hloc =>
+          exact preservation_borrow_step_runtime hsafe hvalidRuntime htyping
+            (Step.borrow (lifetime := lifetime) hloc))
+    hmulti
 
 /--
-Lemma 4.11, absent-lifetime `R-BlockB` preservation for an integer result.
+Lemma 4.11, multistep preservation for variable `R-Move` redexes, factored
+through the move/update preservation obligations.
+
+The paper's `R-Move` proof relies on Update Preservation for the overwritten
+source slot.  For the abstract store, we expose the two facts needed by the
+one-step fragment: the moved value remains valid in the post-store, and all
+other environment slots keep valid abstractions.
 -/
-theorem preservation_blockB_int_step_runtime_no_slots
-    {store store' : ProgramStore} {env env' : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {value : Int} :
-    ValidRuntimeState store (.block blockLifetime [.val (.int value)]) →
+theorem preservation_move_var_multistep_runtime_of_preserved
+    {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping}
+    {current lifetime valueLifetime : Lifetime}
+    {x : Name} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env₁ current →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move (.var x)) →
+    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    EnvMove env₁ (.var x) env₂ →
+    TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
+    (∀ store' value,
+      Step store lifetime (.move (.var x)) store' (.val value) →
+      ValidValue store' value ty) →
+    (∀ store' value,
+      Step store lifetime (.move (.var x)) store' (.val value) →
+      ∀ y envSlot oldValue,
+        y ≠ x →
+        env₁.slotAt y = some envSlot →
+        store.slotAt (VariableProjection y) =
+          some { value := oldValue, lifetime := envSlot.lifetime } →
+        ValidPartialValue store' oldValue envSlot.ty) →
+    MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue ty := by
+  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hvaluePreserved
+    hpreserveOld hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (term := .move (.var x))
+    (ty := ty)
+    (by simp [Terminal])
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | move _hread _hwrite =>
+          exact ⟨_, rfl⟩)
+    (by
+      intro store' value hstep
+      cases hstep with
+      | move hread hwrite =>
+          exact preservation_move_var_step_runtime hwellFormed hsafe hvalidRuntime
+            henvSlot hmove htyping
+            (Step.move (lifetime := lifetime) hread hwrite)
+            (hvaluePreserved store' value
+              (Step.move (lifetime := lifetime) hread hwrite))
+            (hpreserveOld store' value
+              (Step.move (lifetime := lifetime) hread hwrite)))
+    hmulti
+
+/-- Lemma 4.11, multistep preservation for `R-Box` redexes. -/
+theorem preservation_box_multistep_runtime {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    ValidStoreTyping store (.box (.val value)) typing →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.box (.val value)) →
+    TermTyping env₁ typing lifetime (.box (.val value)) (.box ty) env₂ →
+    MultiStep store lifetime (.box (.val value)) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue (.box ty) := by
+  intro hvalidStoreTyping hsafe hvalidRuntime htyping hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (term := .box (.val value))
+    (ty := .box ty)
+    (by simp [Terminal])
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | box _hfresh _hbox =>
+          exact ⟨_, rfl⟩
+      | subBox hvalueStep =>
+          exact False.elim (value_no_step hvalueStep))
+    (by
+      intro _store' _value hstep
+      cases hstep with
+      | box hfresh hbox =>
+          exact preservation_box_step_runtime hvalidStoreTyping hsafe hvalidRuntime htyping
+            (Step.box (lifetime := lifetime) hfresh hbox))
+    hmulti
+
+/--
+Lemma 4.11, `T-Box` composition step.
+
+This is the induction-over-constructor shape for `box t`: apply the preservation
+induction hypothesis to the operand until it is a value, then apply `R-Box`.
+-/
+theorem preservation_box_context_multistep_runtime
+    {store midStore finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {value finalValue : Value} {ty : Ty} :
+    (ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ env₂ ∧
+        ValidValue midStore value ty) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime term midStore (.val value) →
+    Step midStore lifetime (.box (.val value)) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue (.box ty) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hboxStep
+  cases htyping with
+  | box hinnerTyping =>
+      rcases hinnerPreservation
+          (validRuntimeState_box_inner hvalidRuntime)
+          (validStoreTyping_box_inner hvalidStoreTyping)
+          hsafe hinnerTyping hinnerMulti with
+        ⟨hvalidInner, hsafeInner, hvalidValue⟩
+      cases hboxStep with
+      | box hfresh hbox =>
+          exact preservation_box_redex_runtime_of_validValue hsafeInner
+            (validRuntimeState_box_value_of_value hvalidInner)
+            hvalidValue
+            (Step.box (lifetime := lifetime) hfresh hbox)
+
+/--
+Lemma 4.11, `T-Box` multistep preservation case.
+
+This packages the operational decomposition of a terminal `box t` reduction with
+the constructor-shaped preservation composition above.
+-/
+theorem preservation_box_context_terminal_multistep_runtime
+    {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    (∀ {midStore value},
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ env₂ ∧
+        ValidValue midStore value ty) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime (.box term) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue (.box ty) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
+  rcases multistep_box_to_value_inv hmulti with
+    ⟨midStore, value, hinnerMulti, hboxStep⟩
+  exact preservation_box_context_multistep_runtime
+    (midStore := midStore)
+    (value := value)
+    (by
+      intro hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping hmultiInner
+      exact hinnerPreservation hvalidInner hvalidStoreTypingInner hsafeInner
+        hinnerTyping hmultiInner)
+    hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hboxStep
+
+/-- Lemma 4.11, multistep preservation for `R-Declare` redexes. -/
+theorem preservation_declare_multistep_runtime {store finalStore : ProgramStore}
+    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {x : Name} {value finalValue : Value} :
+    ValidStoreTyping store (.letMut x (.val value)) typing →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.letMut x (.val value)) →
+    TermTyping env₁ typing lifetime (.letMut x (.val value)) .unit env₃ →
+    MultiStep store lifetime (.letMut x (.val value)) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+      ValidValue finalStore finalValue .unit := by
+  intro hvalidStoreTyping hsafe hvalidRuntime htyping hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (term := .letMut x (.val value))
+    (ty := .unit)
+    (by simp [Terminal])
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | declare _hstore =>
+          exact ⟨.unit, rfl⟩
+      | subDeclare hvalueStep =>
+          exact False.elim (value_no_step hvalueStep))
+    (by
+      intro _store' _value hstep
+      cases hstep with
+      | declare hstore =>
+          exact preservation_declare_step_runtime hvalidStoreTyping hsafe hvalidRuntime htyping
+              (Step.declare (lifetime := lifetime) hstore))
+    hmulti
+
+/--
+Lemma 4.11, `T-Declare` composition step.
+
+This is the induction-over-constructor shape for `let mut x = t`: apply the
+preservation induction hypothesis to the initializer, then apply `R-Declare`.
+The `env₂.fresh x` premise is the paper-side freshness fact needed after the
+initializer has produced its output environment.
+-/
+theorem preservation_declare_context_multistep_runtime
+    {store midStore finalStore : ProgramStore}
+    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {x : Name} {term : Term} {value finalValue : Value} :
+    (∀ {innerTy innerEnv},
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime term innerTy innerEnv →
+      MultiStep store lifetime term midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ innerEnv ∧
+        ValidValue midStore value innerTy) →
+    (∀ {innerTy innerEnv},
+      TermTyping env₁ typing lifetime term innerTy innerEnv →
+      innerEnv.fresh x) →
+    ValidRuntimeState store (.letMut x term) →
+    ValidStoreTyping store (.letMut x term) typing →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.letMut x term) .unit env₃ →
+    MultiStep store lifetime term midStore (.val value) →
+    Step midStore lifetime (.letMut x (.val value)) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+      ValidValue finalStore finalValue .unit := by
+  intro hinnerPreservation hfreshAfter hvalidRuntime hvalidStoreTyping hsafe htyping
+    hinnerMulti hdeclareStep
+  cases htyping with
+  | declare _hfresh₁ hinnerTyping henv₃ =>
+      rcases hinnerPreservation
+          (validRuntimeState_declare_inner hvalidRuntime)
+          (validStoreTyping_declare_inner hvalidStoreTyping)
+          hsafe hinnerTyping hinnerMulti with
+        ⟨hvalidInner, hsafeInner, hvalidValue⟩
+      cases hdeclareStep with
+      | declare hstore =>
+          have hpreserved :=
+            preservation_declare_redex_runtime_of_validValue hsafeInner
+              (hfreshAfter hinnerTyping)
+              (validRuntimeState_declare_value_of_value hvalidInner)
+              hvalidValue
+              (Step.declare (lifetime := lifetime) hstore)
+          rw [henv₃]
+          exact hpreserved
+
+/--
+Lemma 4.11, `T-Declare` multistep preservation case.
+
+This packages the operational decomposition of a terminal `let mut x = t`
+reduction with the constructor-shaped preservation composition above.
+-/
+theorem preservation_declare_context_terminal_multistep_runtime
+    {store finalStore : ProgramStore}
+    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {x : Name} {term : Term} {finalValue : Value} :
+    (∀ {midStore value innerTy innerEnv},
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime term innerTy innerEnv →
+      MultiStep store lifetime term midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ innerEnv ∧
+        ValidValue midStore value innerTy) →
+    (∀ {innerTy innerEnv},
+      TermTyping env₁ typing lifetime term innerTy innerEnv →
+      innerEnv.fresh x) →
+    ValidRuntimeState store (.letMut x term) →
+    ValidStoreTyping store (.letMut x term) typing →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.letMut x term) .unit env₃ →
+    MultiStep store lifetime (.letMut x term) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+      ValidValue finalStore finalValue .unit := by
+  intro hinnerPreservation hfreshAfter hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
+  rcases multistep_declare_to_value_inv hmulti with
+    ⟨midStore, value, hinnerMulti, hdeclareStep⟩
+  exact preservation_declare_context_multistep_runtime
+    (midStore := midStore)
+    (value := value)
+    (by
+      intro innerTy innerEnv hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping
+        hmultiInner
+      exact hinnerPreservation (midStore := midStore) (value := value)
+        (innerTy := innerTy) (innerEnv := innerEnv)
+        hvalidInner hvalidStoreTypingInner hsafeInner
+        hinnerTyping hmultiInner)
+    hfreshAfter
+    hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hdeclareStep
+
+/--
+Lemma 4.11, `T-Assign` composition step.
+
+This is the induction-over-constructor shape for `w = t`: apply the
+preservation induction hypothesis to the RHS, then discharge the assignment
+redex with the paper's Update Preservation obligation.
+-/
+theorem preservation_assign_context_multistep_runtime
+    {store midStore finalStore : ProgramStore}
+    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lhs : LVal} {rhs : Term} {value finalValue : Value} :
+    (∀ {rhsTy env₂},
+      ValidRuntimeState store rhs →
+      ValidStoreTyping store rhs typing →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      MultiStep store lifetime rhs midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ env₂ ∧
+        ValidValue midStore value rhsTy) →
+    (∀ {targetLifetime oldTy rhsTy env₂},
+      LValTyping env₁ lhs oldTy targetLifetime →
+      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      ShapeCompatible env₂ oldTy (.ty rhsTy) →
+      WellFormedTy env₂ rhsTy targetLifetime →
+      EnvWrite 0 env₂ lhs rhsTy env₃ →
+      ¬ WriteProhibited env₃ lhs →
+      ValidRuntimeState midStore (.assign lhs (.val value)) →
+      midStore ∼ₛ env₂ →
+      ValidValue midStore value rhsTy →
+      Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
+      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+        ValidValue finalStore finalValue .unit) →
+    ValidRuntimeState store (.assign lhs rhs) →
+    ValidStoreTyping store (.assign lhs rhs) typing →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ →
+    MultiStep store lifetime rhs midStore (.val value) →
+    Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+      ValidValue finalStore finalValue .unit := by
+  intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping
+    hinnerMulti hassignStep
+  cases htyping with
+  | assign hLv hinnerTyping hshape hwellTy hwrite hnotWrite =>
+      rcases hinnerPreservation
+          (validRuntimeState_assign_inner hvalidRuntime)
+          (validStoreTyping_assign_inner hvalidStoreTyping)
+          hsafe hinnerTyping hinnerMulti with
+        ⟨hvalidInner, hsafeInner, hvalidValue⟩
+      exact hassignRedex hLv hinnerTyping hshape hwellTy hwrite hnotWrite
+        (validRuntimeState_assign_value_of_value hvalidInner)
+        hsafeInner hvalidValue hassignStep
+
+/--
+Lemma 4.11, `T-Assign` multistep preservation case.
+
+This packages the operational decomposition of a terminal assignment reduction
+with the constructor-shaped preservation composition above.
+-/
+theorem preservation_assign_context_terminal_multistep_runtime
+    {store finalStore : ProgramStore}
+    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lhs : LVal} {rhs : Term} {finalValue : Value} :
+    (∀ {midStore value rhsTy env₂},
+      ValidRuntimeState store rhs →
+      ValidStoreTyping store rhs typing →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      MultiStep store lifetime rhs midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ env₂ ∧
+        ValidValue midStore value rhsTy) →
+    (∀ {midStore value targetLifetime oldTy rhsTy env₂},
+      LValTyping env₁ lhs oldTy targetLifetime →
+      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      ShapeCompatible env₂ oldTy (.ty rhsTy) →
+      WellFormedTy env₂ rhsTy targetLifetime →
+      EnvWrite 0 env₂ lhs rhsTy env₃ →
+      ¬ WriteProhibited env₃ lhs →
+      ValidRuntimeState midStore (.assign lhs (.val value)) →
+      midStore ∼ₛ env₂ →
+      ValidValue midStore value rhsTy →
+      Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
+      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+        ValidValue finalStore finalValue .unit) →
+    ValidRuntimeState store (.assign lhs rhs) →
+    ValidStoreTyping store (.assign lhs rhs) typing →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ →
+    MultiStep store lifetime (.assign lhs rhs) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
+      ValidValue finalStore finalValue .unit := by
+  intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
+  rcases multistep_assign_to_value_inv hmulti with
+    ⟨midStore, value, hinnerMulti, hassignStep⟩
+  exact preservation_assign_context_multistep_runtime
+    (midStore := midStore)
+    (value := value)
+    (by
+      intro rhsTy env₂ hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping
+        hmultiInner
+      exact hinnerPreservation (midStore := midStore) (value := value)
+        (rhsTy := rhsTy) (env₂ := env₂)
+        hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping hmultiInner)
+    (by
+      intro targetLifetime oldTy rhsTy env₂ hLv hinnerTyping hshape hwellTy hwrite
+        hnotWrite hvalidAssign hsafeAssign hvalidValue hstep
+      exact hassignRedex (midStore := midStore) (value := value)
+        (targetLifetime := targetLifetime) (oldTy := oldTy)
+        (rhsTy := rhsTy) (env₂ := env₂)
+        hLv hinnerTyping hshape hwellTy hwrite hnotWrite
+        hvalidAssign hsafeAssign hvalidValue hstep)
+    hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hassignStep
+
+/--
+Lemma 4.11, multistep preservation for `R-BlockB` redexes when the block
+lifetime is absent from the store.
+-/
+theorem preservation_blockB_value_multistep_runtime_no_slots
+    {store finalStore : ProgramStore} {env env' : Env} {typing : StoreTyping}
+    {lifetime blockLifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    ValidRuntimeState store (.block blockLifetime [.val value]) →
     store ∼ₛ env →
-    TermTyping env typing lifetime (.block blockLifetime [.val (.int value)]) .int env' →
+    TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
     (∀ location slot,
       store.slotAt location = some slot →
       slot.lifetime ≠ blockLifetime) →
-    Step store lifetime (.block blockLifetime [.val (.int value)]) store' (.val (.int value)) →
-    ValidRuntimeState store' (.val (.int value)) ∧ store' ∼ₛ env' ∧
-      ValidValue store' (.int value) .int := by
-  intro hvalidRuntime hsafe htyping hnoLifetime hstep
-  exact preservation_blockB_value_step_runtime_no_slots
-    hvalidRuntime hsafe htyping hnoLifetime hstep
-    (valuePreservation_blockB_int_step htyping hstep)
+    ValidValue store value ty →
+    MultiStep store lifetime (.block blockLifetime [.val value]) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
+      ValidValue finalStore finalValue ty := by
+  intro hvalidRuntime hsafe htyping hnoLifetime hvalidValue hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (term := .block blockLifetime [.val value])
+    (ty := ty)
+    (by simp [Terminal])
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | blockA hvalueStep =>
+          exact False.elim (value_no_step hvalueStep)
+      | blockB _hdrops =>
+          exact ⟨value, rfl⟩)
+    (by
+      intro _store' _value hstep
+      cases hstep with
+      | blockB hdrops =>
+          have hstore : _store' = store :=
+            dropsLifetime_no_slots_eq hnoLifetime hdrops
+          have hvalidValue' : ValidValue _store' value ty := by
+            rw [hstore]
+            exact hvalidValue
+          exact preservation_blockB_value_step_runtime_no_slots
+            hvalidRuntime hsafe htyping hnoLifetime
+            (Step.blockB (lifetime := lifetime) hdrops)
+            hvalidValue')
+    hmulti
+
+/--
+Lemma 4.11, multistep preservation for `R-BlockB` redexes, factored through
+the paper's Drop Preservation obligations.
+
+This is the general version of the absent-lifetime special case below: the
+runtime lifetime drop must provide domain agreement with `Γ.dropLifetime` and
+preservation of valid abstractions for surviving variables.
+-/
+theorem preservation_blockB_value_multistep_runtime_of_drop_preserved
+    {store finalStore : ProgramStore} {env env' : Env} {typing : StoreTyping}
+    {lifetime blockLifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    ValidRuntimeState store (.block blockLifetime [.val value]) →
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
+    LifetimeDropOwnersDisjoint store blockLifetime →
+    ValidValue store value ty →
+    (∀ store',
+      DropsLifetime store blockLifetime store' →
+      ValidValue store' value ty) →
+    (∀ store',
+      DropsLifetime store blockLifetime store' →
+      ∀ x,
+        (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
+          ∃ envSlot, (env.dropLifetime blockLifetime).slotAt x = some envSlot) →
+    (∀ store',
+      DropsLifetime store blockLifetime store' →
+      ∀ x envSlot,
+        env.slotAt x = some envSlot →
+        envSlot.lifetime ≠ blockLifetime →
+        ∃ oldValue,
+          store'.slotAt (VariableProjection x) =
+            some { value := oldValue, lifetime := envSlot.lifetime } ∧
+          ValidPartialValue store' oldValue envSlot.ty) →
+    MultiStep store lifetime (.block blockLifetime [.val value]) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
+      ValidValue finalStore finalValue ty := by
+  intro hvalidRuntime hsafe htyping hdropDisjoint _hvalidValue hresultValue hdomain hpreserve
+    hmulti
+  exact preservation_runtime_multistep_of_step_to_value
+    (term := .block blockLifetime [.val value])
+    (ty := ty)
+    (by simp [Terminal])
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | blockA hvalueStep =>
+          exact False.elim (value_no_step hvalueStep)
+      | blockB _hdrops =>
+          exact ⟨value, rfl⟩)
+    (by
+      intro _store' _value hstep
+      cases hstep with
+      | blockB hdrops =>
+          exact preservation_blockB_value_step_runtime_of_drop_preserved
+            hvalidRuntime hsafe htyping hdropDisjoint
+            (Step.blockB (lifetime := lifetime) hdrops)
+            (hresultValue _store' hdrops)
+            (hdomain _store' hdrops)
+            (hpreserve _store' hdrops))
+    hmulti
+
+/--
+Lemma 4.11, block terminal multistep dispatcher.
+
+The operational decomposition of a terminal block reduction has exactly the
+three paper rule shapes: `R-Seq`, `R-BlockA`, and `R-BlockB`.  This theorem is
+the preservation-side induction skeleton; the branch premises are discharged by
+the term-list preservation proof and the paper's Drop Preservation obligations.
+-/
+theorem preservation_block_terminal_multistep_runtime_of_first_step
+    {store finalStore : ProgramStore} {env' : Env}
+    {lifetime blockLifetime : Lifetime} {terms : List Term}
+    {finalValue : Value} {ty : Ty} :
+    (∀ value next rest store',
+      terms = .val value :: next :: rest →
+      Drops store [.value value] store' →
+      MultiStep store' lifetime (.block blockLifetime (next :: rest))
+        finalStore (.val finalValue) →
+      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
+        ValidValue finalStore finalValue ty) →
+    (∀ term rest store' term',
+      terms = term :: rest →
+      Step store blockLifetime term store' term' →
+      MultiStep store' lifetime (.block blockLifetime (term' :: rest))
+        finalStore (.val finalValue) →
+      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
+        ValidValue finalStore finalValue ty) →
+    (∀ value store',
+      terms = [.val value] →
+      DropsLifetime store blockLifetime store' →
+      MultiStep store' lifetime (.val value) finalStore (.val finalValue) →
+      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
+        ValidValue finalStore finalValue ty) →
+    MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
+      ValidValue finalStore finalValue ty := by
+  intro hseq hblockA hblockB hmulti
+  rcases multistep_block_to_value_first_step_inv hmulti with
+    hseqCase | hblockACase | hblockBCase
+  · rcases hseqCase with ⟨value, next, rest, store', hterms, hdrops, htail⟩
+    exact hseq value next rest store' hterms hdrops htail
+  · rcases hblockACase with ⟨term, rest, store', term', hterms, hstep, htail⟩
+    exact hblockA term rest store' term' hterms hstep htail
+  · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
+    exact hblockB value store' hterms hdrops htail
 
 /-- Lemma 9.9, `R-Assign` one-step value preservation fragment. -/
 theorem valuePreservation_assign_step {store₁ store₂ : ProgramStore}
@@ -4961,55 +5607,6 @@ theorem drops_nonOwner {store : ProgramStore} {value : PartialValue} :
     Drops store [value] store := by
   intro hnonOwner
   exact ProgramStore.Drops.nonOwner hnonOwner ProgramStore.Drops.nil
-
-/--
-Runtime values without an owning reference satisfy the paper's non-owner drop
-side condition.
--/
-theorem drops_value_nonOwner {store : ProgramStore} {value : Value} :
-    valueOwnedLocation? value = none →
-    Drops store [.value value] store := by
-  intro hnonOwner
-  exact drops_nonOwner (by
-    intro ref
-    cases value with
-    | unit =>
-        exact Or.inl (by simp)
-    | int _ =>
-        exact Or.inl (by simp)
-    | ref valueRef =>
-        cases valueRef with
-        | mk location owner =>
-            cases owner with
-            | false =>
-                by_cases href :
-                    PartialValue.value
-                      (Value.ref { location := location, owner := false }) =
-                    PartialValue.value (Value.ref ref)
-                · exact Or.inr (by
-                    injection href with hvalue
-                    cases ref
-                    cases hvalue
-                    rfl)
-                · exact Or.inl href
-            | true =>
-                simp [valueOwnedLocation?] at hnonOwner)
-
-@[simp] theorem drops_undef (store : ProgramStore) :
-    Drops store [PartialValue.undef] store := by
-  exact drops_nonOwner (by intro ref; exact Or.inl (by simp))
-
-@[simp] theorem drops_unit (store : ProgramStore) :
-    Drops store [PartialValue.value .unit] store := by
-  exact drops_nonOwner (by intro ref; exact Or.inl (by simp))
-
-@[simp] theorem drops_int (store : ProgramStore) (value : Int) :
-    Drops store [PartialValue.value (.int value)] store := by
-  exact drops_nonOwner (by intro ref; exact Or.inl (by simp))
-
-@[simp] theorem drops_borrowed (store : ProgramStore) (location : Location) :
-    Drops store [PartialValue.value (.ref { location := location, owner := false })] store := by
-  exact drops_nonOwner (partialValueNonOwner_borrowed location)
 
 /--
 Finite-support drop existence.
@@ -5096,9 +5693,11 @@ theorem drops_empty_value (value : Value) :
     ∃ store', Drops ProgramStore.empty [.value value] store' := by
   cases value with
   | unit =>
-      exact ⟨ProgramStore.empty, drops_unit ProgramStore.empty⟩
+      exact ⟨ProgramStore.empty,
+        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
   | int value =>
-      exact ⟨ProgramStore.empty, drops_int ProgramStore.empty value⟩
+      exact ⟨ProgramStore.empty,
+        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
   | ref ref =>
       cases howner : ref.owner with
       | false =>
@@ -5121,7 +5720,8 @@ theorem drops_empty_partial (value : PartialValue) :
     ∃ store', Drops ProgramStore.empty [value] store' := by
   cases value with
   | undef =>
-      exact ⟨ProgramStore.empty, drops_undef ProgramStore.empty⟩
+      exact ⟨ProgramStore.empty,
+        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
   | value value =>
       exact drops_empty_value value
 
@@ -5429,37 +6029,6 @@ theorem progress_seq_value_at {store storeAfterDrop : ProgramStore}
     ProgressResult store lifetime (.block blockLifetime (.val value :: next :: rest)) := by
   intro hdrops
   exact Or.inr ⟨storeAfterDrop, .block blockLifetime (next :: rest), Step.seq hdrops⟩
-
-theorem progress_seq_nonOwner {store : ProgramStore}
-    {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
-    PartialValueNonOwner (.value value) →
-    ProgressResult store lifetime (.block blockLifetime (.val value :: next :: rest)) := by
-  intro hnonOwner
-  exact progress_seq_value_at (drops_nonOwner hnonOwner)
-
-theorem progress_seq_value_nonOwner {store : ProgramStore}
-    {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
-    valueOwnedLocation? value = none →
-    ProgressResult store lifetime (.block blockLifetime (.val value :: next :: rest)) := by
-  intro hnonOwner
-  exact progress_seq_value_at (drops_value_nonOwner hnonOwner)
-
-theorem progress_seq_unit (store : ProgramStore)
-    {lifetime blockLifetime : Lifetime} {next : Term} {rest : List Term} :
-    ProgressResult store lifetime (.block blockLifetime (.val .unit :: next :: rest)) := by
-  exact progress_seq_value_at (drops_unit store)
-
-theorem progress_seq_int (store : ProgramStore)
-    {lifetime blockLifetime : Lifetime} {value : Int} {next : Term} {rest : List Term} :
-    ProgressResult store lifetime (.block blockLifetime (.val (.int value) :: next :: rest)) := by
-  exact progress_seq_value_at (drops_int store value)
-
-theorem progress_seq_borrowed (store : ProgramStore)
-    {lifetime blockLifetime : Lifetime} {location : Location} {next : Term} {rest : List Term} :
-    ProgressResult store lifetime
-      (.block blockLifetime
-        (.val (.ref { location := location, owner := false }) :: next :: rest)) := by
-  exact progress_seq_value_at (drops_borrowed store location)
 
 theorem progress_seq_value {store : ProgramStore}
     {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
@@ -5787,6 +6356,55 @@ theorem progress_borrow_var (store : ProgramStore) (lifetime : Lifetime)
       (.val (.ref { location := .var x, owner := false })) := by
   exact Step.borrow (by simp [ProgramStore.loc])
 
+/-! ## Section 4.5: Type and Borrow Safety -/
+
+/-- A term terminates when it multisteps to a runtime value. -/
+def TerminatesAsValue (store : ProgramStore) (lifetime : Lifetime) (term : Term) : Prop :=
+  ∃ finalStore finalValue,
+    MultiStep store lifetime term finalStore (.val finalValue)
+
+/--
+The terminal safety conclusion of Lemma 4.11 / Theorem 4.12: the terminal state
+is valid, the final store safely abstracts the output environment, and the
+terminal value abstracts the result type.
+-/
+def TerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) :
+    Prop :=
+  ValidRuntimeState store (.val value) ∧ store ∼ₛ env ∧ ValidValue store value ty
+
+/--
+Theorem 4.12 bridge, Type and Borrow Safety.
+
+The paper's core calculus is terminating, while this mechanisation keeps the
+operational semantics relational.  Therefore the theorem is stated with an
+explicit termination witness and the Lemma 4.11 preservation conclusion as a
+premise.  Progress rules out an initially stuck well-typed state; preservation
+turns the terminal multistep into the safe terminal state promised by the paper.
+-/
+theorem typeAndBorrowSafety_of_preservation
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    (∀ finalStore finalValue,
+      MultiStep store lifetime term finalStore (.val finalValue) →
+      TerminalStateSafe finalStore finalValue env₂ ty) →
+    TerminatesAsValue store lifetime term →
+    ProgressResult store lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep store lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
+    hpreservation hterminates
+  rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
+  exact ⟨progress_runtime hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+      hstoreProgress htyping,
+    ⟨finalStore, finalValue, hmulti, hpreservation finalStore finalValue hmulti⟩⟩
+
 /-! ## Section 4.5.1: Borrow Safety -/
 
 /--
@@ -5805,11 +6423,394 @@ def BorrowSafeEnv (env : Env) : Prop :=
     targetMutable ⋈ targetOther →
     x = y
 
+def TyBorrowFree (ty : Ty) : Prop :=
+  ∀ mutable targets, ¬ PartialTyContains (.ty ty) (.borrow mutable targets)
+
+def PartialTyBorrowFree (ty : PartialTy) : Prop :=
+  ∀ mutable targets, ¬ PartialTyContains ty (.borrow mutable targets)
+
+theorem partialTyContains_ty_iff_eq {ty needle : Ty} :
+    PartialTyContains (.ty ty) needle ↔ ty = needle := by
+  constructor
+  · intro hcontains
+    cases hcontains
+    rfl
+  · intro hty
+    subst hty
+    exact PartialTyContains.here
+
+theorem tyBorrowFree_iff_not_borrow {ty : Ty} :
+    TyBorrowFree ty ↔ ∀ mutable targets, ty ≠ .borrow mutable targets := by
+  constructor
+  · intro hfree mutable targets hty
+    exact hfree mutable targets
+      (partialTyContains_ty_iff_eq.mpr hty)
+  · intro hnotBorrow mutable targets hcontains
+    exact hnotBorrow mutable targets
+      (partialTyContains_ty_iff_eq.mp hcontains)
+
+theorem partialTyBorrowFree_ty {ty : Ty} :
+    TyBorrowFree ty →
+    PartialTyBorrowFree (.ty ty) := by
+  intro hfree mutable targets hcontains
+  exact hfree mutable targets hcontains
+
+@[simp] theorem partialTyBorrowFree_undef (ty : Ty) :
+    PartialTyBorrowFree (.undef ty) := by
+  intro mutable targets hcontains
+  cases hcontains
+
+@[simp] theorem partialTyBorrowFree_box {ty : PartialTy} :
+    PartialTyBorrowFree ty →
+    PartialTyBorrowFree (.box ty) := by
+  intro hfree mutable targets hcontains
+  cases hcontains with
+  | box hinner =>
+      exact hfree mutable targets hinner
+
+@[simp] theorem tyBorrowFree_unit :
+    TyBorrowFree .unit := by
+  rw [tyBorrowFree_iff_not_borrow]
+  intro mutable targets h
+  cases h
+
+@[simp] theorem tyBorrowFree_int :
+    TyBorrowFree .int := by
+  rw [tyBorrowFree_iff_not_borrow]
+  intro mutable targets h
+  cases h
+
+@[simp] theorem tyBorrowFree_box (ty : Ty) :
+    TyBorrowFree (.box ty) := by
+  rw [tyBorrowFree_iff_not_borrow]
+  intro mutable targets h
+  cases h
+
+theorem not_tyBorrowFree_borrow (mutable : Bool) (targets : List LVal) :
+    ¬ TyBorrowFree (.borrow mutable targets) := by
+  intro hfree
+  exact hfree mutable targets PartialTyContains.here
+
 @[simp] theorem borrowSafeEnv_empty :
     BorrowSafeEnv Env.empty := by
   intro x y mutable targetsMutable targetsOther targetMutable targetOther hcontains _ _ _ _
   rcases hcontains with ⟨slot, hslot, _hcontainsTy⟩
   simp [Env.empty] at hslot
+
+theorem EnvContains.update_fresh_ne {env : Env} {x y : Name} {slot : EnvSlot}
+    {ty : Ty} :
+    y ≠ x →
+    (env.update x slot) ⊢ y ↝ ty →
+    env ⊢ y ↝ ty := by
+  intro hy hcontains
+  rcases hcontains with ⟨containedSlot, hslot, hcontainsTy⟩
+  exact ⟨containedSlot, by simpa [Env.update, hy] using hslot, hcontainsTy⟩
+
+theorem EnvContains.update_same {env : Env} {x : Name} {slot : EnvSlot}
+    {ty : Ty} :
+    PartialTyContains slot.ty ty →
+    (env.update x slot) ⊢ x ↝ ty := by
+  intro hcontains
+  exact ⟨slot, by simp [Env.update], hcontains⟩
+
+theorem pathConflicts_symm {left right : LVal} :
+    left ⋈ right →
+    right ⋈ left := by
+  intro h
+  exact h.symm
+
+theorem not_envContains_update_fresh_same_of_borrowFree {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} {borrowTy : Ty} :
+    TyBorrowFree ty →
+    borrowTy = .borrow mutable targets →
+    ¬ (env.update x { ty := .ty ty, lifetime := lifetime }) ⊢ x ↝ borrowTy := by
+  intro hborrowFree hborrowTy hcontains
+  subst hborrowTy
+  rcases hcontains with ⟨containedSlot, hslot, hcontainsTy⟩
+  have hslotEq :
+      containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+    have h :
+        { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+      simpa [Env.update] using hslot
+    exact h.symm
+  subst hslotEq
+  exact hborrowFree mutable targets hcontainsTy
+
+theorem borrowSafeEnv_update_partialBorrowFree {env : Env} {x : Name}
+    {slot : EnvSlot} :
+    BorrowSafeEnv env →
+    PartialTyBorrowFree slot.ty →
+    BorrowSafeEnv (env.update x slot) := by
+  intro hsafe hborrowFree y z mutable targetsMutable targetsOther targetMutable
+    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  by_cases hy : y = x
+  · have hcontainsMutableAtX :
+        (env.update x slot) ⊢ x ↝ Ty.borrow true targetsMutable := by
+      simpa [hy] using hcontainsMutable
+    exact False.elim
+      (by
+        rcases hcontainsMutableAtX with ⟨containedSlot, hslot, hcontainsTy⟩
+        have hslotEq : containedSlot = slot := by
+          have h : slot = containedSlot := by
+            simpa [Env.update] using hslot
+          exact h.symm
+        subst hslotEq
+        exact hborrowFree true targetsMutable hcontainsTy)
+  · by_cases hz : z = x
+    · have hcontainsOtherAtX :
+          (env.update x slot) ⊢ x ↝ Ty.borrow mutable targetsOther := by
+        simpa [hz] using hcontainsOther
+      exact False.elim
+        (by
+          rcases hcontainsOtherAtX with ⟨containedSlot, hslot, hcontainsTy⟩
+          have hslotEq : containedSlot = slot := by
+            have h : slot = containedSlot := by
+              simpa [Env.update] using hslot
+            exact h.symm
+          subst hslotEq
+          exact hborrowFree mutable targetsOther hcontainsTy)
+    · exact hsafe y z mutable targetsMutable targetsOther targetMutable targetOther
+        (EnvContains.update_fresh_ne hy hcontainsMutable)
+        (EnvContains.update_fresh_ne hz hcontainsOther)
+        htargetMutable htargetOther hconflict
+
+theorem borrowSafeEnv_update_fresh_borrowFree {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    TyBorrowFree ty →
+    BorrowSafeEnv (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe hborrowFree
+  exact borrowSafeEnv_update_partialBorrowFree hsafe
+    (partialTyBorrowFree_ty hborrowFree)
+
+theorem borrowSafeEnv_move_var {env env' : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    env.slotAt x = some { ty := .ty ty, lifetime := lifetime } →
+    EnvMove env (.var x) env' →
+    BorrowSafeEnv env' := by
+  intro hsafe hslot hmove
+  rcases hmove with ⟨slot, struck, hbaseSlot, hstrike, henv'⟩
+  simp [LVal.base, LVal.path] at hbaseSlot hstrike henv'
+  rw [hslot] at hbaseSlot
+  injection hbaseSlot with hslotEq
+  subst hslotEq
+  cases struck with
+  | ty struckTy =>
+      cases hstrike
+  | box struckInner =>
+      cases hstrike
+  | undef shape =>
+      have hshape : ty = shape := hstrike
+      subst hshape
+      rw [henv']
+      exact borrowSafeEnv_update_partialBorrowFree hsafe
+        (partialTyBorrowFree_undef ty)
+
+theorem borrowSafety_move_var {env env' : Env} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {x : Name} {ty : Ty} :
+    BorrowSafeEnv env →
+    env.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    TermTyping env typing lifetime (.move (.var x)) ty env' →
+    BorrowSafeEnv env' := by
+  intro hsafe hslot htyping
+  cases htyping with
+  | move _hLv _hnotWrite hmove =>
+      exact borrowSafeEnv_move_var hsafe hslot hmove
+
+theorem EnvContains.dropLifetime_of_contains {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    (env.dropLifetime lifetime) ⊢ x ↝ ty →
+    env ⊢ x ↝ ty := by
+  intro hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨henvSlot, _hlifetime⟩
+  exact ⟨slot, henvSlot, hcontainsTy⟩
+
+theorem borrowSafeEnv_dropLifetime {env : Env} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    BorrowSafeEnv (env.dropLifetime lifetime) := by
+  intro hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    (EnvContains.dropLifetime_of_contains hcontainsMutable)
+    (EnvContains.dropLifetime_of_contains hcontainsOther)
+    htargetMutable htargetOther hconflict
+
+theorem borrowSafety_block_drop {env env' : Env} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    env' = env.dropLifetime lifetime →
+    BorrowSafeEnv env' := by
+  intro hsafe henv'
+  rw [henv']
+  exact borrowSafeEnv_dropLifetime hsafe
+
+theorem borrowSafety_copy {env env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {lv : LVal} {ty : Ty} :
+    BorrowSafeEnv env →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    BorrowSafeEnv env₂ := by
+  intro hsafe htyping
+  cases htyping
+  exact hsafe
+
+theorem borrowSafety_borrow {env env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {lv : LVal} {mutable : Bool} :
+    BorrowSafeEnv env →
+    TermTyping env typing lifetime (.borrow mutable lv) (.borrow mutable [lv]) env₂ →
+    BorrowSafeEnv env₂ := by
+  intro hsafe htyping
+  cases htyping with
+  | mutBorrow =>
+      exact hsafe
+  | immBorrow =>
+      exact hsafe
+
+theorem borrowSafeEnv_update_fresh_immBorrow {env : Env} {gamma : Name}
+    {lv : LVal} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    env.fresh gamma →
+    ¬ ReadProhibited env lv →
+    BorrowSafeEnv
+      (env.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) := by
+  intro hsafe hfresh hnotRead x y mutable targetsMutable targetsOther targetMutable
+    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  by_cases hx : x = gamma
+  · have hcontainsMutableAtGamma :
+        (env.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) ⊢
+          gamma ↝ Ty.borrow true targetsMutable := by
+      simpa [hx] using hcontainsMutable
+    rcases hcontainsMutableAtGamma with ⟨slot, hslot, hcontainsTy⟩
+    have hslotEq :
+        slot = { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } := by
+      have h :
+          { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } = slot := by
+        simpa [Env.update] using hslot
+      exact h.symm
+    subst hslotEq
+    have hborrowEq :
+        Ty.borrow false [lv] = Ty.borrow true targetsMutable :=
+      partialTyContains_ty_iff_eq.mp hcontainsTy
+    cases hborrowEq
+  · by_cases hy : y = gamma
+    · have hcontainsOtherAtGamma :
+          (env.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) ⊢
+            gamma ↝ Ty.borrow mutable targetsOther := by
+        simpa [hy] using hcontainsOther
+      rcases hcontainsOtherAtGamma with ⟨slot, hslot, hcontainsTy⟩
+      have hslotEq :
+          slot = { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } = slot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      have hborrowEq :
+          Ty.borrow false [lv] = Ty.borrow mutable targetsOther :=
+        partialTyContains_ty_iff_eq.mp hcontainsTy
+      injection hborrowEq with _hmutable htargets
+      have htargetOtherEq : targetOther = lv := by
+        cases htargets
+        simpa using htargetOther
+      subst htargetOtherEq
+      exact False.elim (hnotRead ⟨x, targetsMutable, targetMutable,
+        EnvContains.update_fresh_ne hx hcontainsMutable,
+        htargetMutable,
+        hconflict⟩)
+    · exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+        (EnvContains.update_fresh_ne hx hcontainsMutable)
+        (EnvContains.update_fresh_ne hy hcontainsOther)
+        htargetMutable htargetOther hconflict
+
+theorem borrowSafety_immBorrow_result_extension {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {gamma : Name} :
+    BorrowSafeEnv env →
+    TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv]) env₂ →
+    env₂.fresh gamma →
+    BorrowSafeEnv
+      (env₂.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) := by
+  intro hsafe htyping hfresh
+  cases htyping with
+  | immBorrow _hLv hnotRead =>
+      exact borrowSafeEnv_update_fresh_immBorrow hsafe hfresh hnotRead
+
+theorem borrowSafety_box_context {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    (TermTyping env₁ typing lifetime term ty env₂ → BorrowSafeEnv env₂) →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    BorrowSafeEnv env₂ := by
+  intro hinner htyping
+  cases htyping with
+  | box hterm =>
+      exact hinner hterm
+
+theorem borrowSafety_block_context {env₁ env₃ : Env}
+    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
+    {terms : List Term} {ty : Ty} :
+    (∀ env₂, TermListTyping env₁ typing blockLifetime terms ty env₂ → BorrowSafeEnv env₂) →
+    TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃ →
+    BorrowSafeEnv env₃ := by
+  intro htermsSafe htyping
+  cases htyping with
+  | block hterms _hwellTy hdrop =>
+      exact borrowSafety_block_drop (htermsSafe _ hterms) hdrop
+
+/--
+Corollary 4.14 support: extending the output environment with a fresh,
+borrow-free result slot preserves both well-formedness and borrow safety.
+
+The remaining borrow-safety work is the paper's typing-rule induction showing
+that the output environment of a well-typed term is itself borrow safe.  This
+theorem packages the final result-extension step from the corollary.
+-/
+theorem borrowSafety_result_extension_borrowFree {env : Env} {gamma : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    WellFormedTy env ty lifetime →
+    BorrowSafeEnv env →
+    TyBorrowFree ty →
+    env.fresh gamma →
+    WellFormedEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
+      BorrowSafeEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hwellFormed hwellTy hborrowSafe hborrowFree hfresh
+  exact ⟨borrowInvariance_result_extension hwellFormed hwellTy hfresh,
+    borrowSafeEnv_update_fresh_borrowFree hborrowSafe hborrowFree⟩
+
+theorem borrowSafety_result_extension_nonBorrow {env : Env} {gamma : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    WellFormedTy env ty lifetime →
+    BorrowSafeEnv env →
+    (∀ mutable targets, ty ≠ .borrow mutable targets) →
+    env.fresh gamma →
+    WellFormedEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
+      BorrowSafeEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hwellFormed hwellTy hborrowSafe hnotBorrow hfresh
+  exact borrowSafety_result_extension_borrowFree hwellFormed hwellTy hborrowSafe
+    (tyBorrowFree_iff_not_borrow.mpr hnotBorrow) hfresh
+
+/--
+Corollary 4.14, `T-Const` case: typing a value does not change the environment,
+so borrow safety of the result extension follows from the borrow-free shape of
+the result type.
+-/
+theorem borrowSafety_value_result_extension_borrowFree {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ty : Ty}
+    {gamma : Name} :
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    WellFormedEnv env lifetime →
+    WellFormedTy env₂ ty lifetime →
+    BorrowSafeEnv env →
+    TyBorrowFree ty →
+    env₂.fresh gamma →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro htyping hwellFormed hwellTy hborrowSafe hborrowFree hfresh
+  have henv : env = env₂ := valueTyping_environment_eq htyping
+  subst henv
+  exact borrowSafety_result_extension_borrowFree hwellFormed hwellTy hborrowSafe
+    hborrowFree hfresh
 
 /-! ## Source-Level Initial States -/
 
@@ -5875,6 +6876,63 @@ theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
       exact ⟨.int, ValueTyping.int, ValidPartialValue.int⟩
   | ref ref =>
       cases hsource
+
+theorem sourceValue_validValue_of_empty_valueTyping {store : ProgramStore}
+    {value : Value} {ty : Ty} :
+    SourceValue value →
+    ValueTyping StoreTyping.empty value ty →
+    ValidValue store value ty := by
+  intro hsource htyping
+  rcases sourceValue_emptyStoreTyping (store := store) hsource with
+    ⟨sourceTy, hsourceTyping, hvalidValue⟩
+  have hty : sourceTy = ty :=
+    valueTyping_deterministic hsourceTyping htyping
+  subst hty
+  exact hvalidValue
+
+theorem sourceValue_empty_valueTyping_borrowFree {value : Value} {ty : Ty} :
+    SourceValue value →
+    ValueTyping StoreTyping.empty value ty →
+    TyBorrowFree ty := by
+  intro hsource htyping
+  cases value with
+  | unit =>
+      cases htyping
+      exact tyBorrowFree_unit
+  | int _ =>
+      cases htyping
+      exact tyBorrowFree_int
+  | ref _ =>
+      cases hsource
+
+theorem sourceTerm_empty_valueTyping_borrowFree {term : Term}
+    {value : Value} {ty : Ty} :
+    SourceTerm term →
+    value ∈ termValues term →
+    ValueTyping StoreTyping.empty value ty →
+    TyBorrowFree ty := by
+  intro hsource hmem htyping
+  exact sourceValue_empty_valueTyping_borrowFree (hsource value hmem) htyping
+
+theorem sourceInitial_value_borrowSafety_result_extension
+    {value : Value} {ty : Ty} {env₂ : Env} {lifetime : Lifetime}
+    {gamma : Name} :
+    SourceValue value →
+    TermTyping Env.empty StoreTyping.empty lifetime (.val value) ty env₂ →
+    WellFormedTy env₂ ty lifetime →
+    env₂.fresh gamma →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsource htyping hwellTy hfresh
+  cases htyping with
+  | const hvalueTyping =>
+      exact borrowSafety_value_result_extension_borrowFree
+        (TermTyping.const hvalueTyping)
+        (wellFormedEnv_empty lifetime)
+        hwellTy
+        borrowSafeEnv_empty
+        (sourceValue_empty_valueTyping_borrowFree hsource hvalueTyping)
+        hfresh
 
 theorem sourceTerm_validStoreTyping_empty {store : ProgramStore} {term : Term} :
     SourceTerm term →
@@ -5993,55 +7051,6 @@ theorem sourceInitial_runtime_progress_step {term : Term} {lifetime : Lifetime}
   exact (sourceInitial_runtime_progress hsource htyping).step_of_not_terminal hnotTerminal
 
 /--
-Source-level `R-BlockB` value preservation.
-
-This is the source-initial scalar instance of Lemma 9.9: source programs do not
-contain runtime references, so the block result is either unit or an integer.
--/
-theorem sourceValue_blockB_valuePreservation_step
-    {value : Value} {store' : ProgramStore} {lifetime blockLifetime : Lifetime}
-    {ty : Ty} {env₂ : Env} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.block blockLifetime [.val value]) ty env₂ →
-    Step ProgramStore.empty lifetime (.block blockLifetime [.val value]) store' (.val value) →
-    ValidValue store' value ty := by
-  intro hsource htyping hstep
-  cases value with
-  | unit =>
-      exact valuePreservation_blockB_unit_step htyping hstep
-  | int _ =>
-      exact valuePreservation_blockB_int_step htyping hstep
-  | ref _ =>
-      cases hsource
-
-/--
-Source-initial one-step preservation for `R-BlockB` when the block contains a
-source-level value.  From the empty store, the block lifetime is absent, so the
-runtime and environment lifetime drops are both no-ops.
--/
-theorem sourceInitial_blockB_value_step_preservation
-    {value : Value} {store' : ProgramStore} {lifetime blockLifetime : Lifetime}
-    {ty : Ty} {env₂ : Env} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.block blockLifetime [.val value]) ty env₂ →
-    Step ProgramStore.empty lifetime (.block blockLifetime [.val value]) store' (.val value) →
-    ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
-      ValidValue store' value ty := by
-  intro hsource htyping hstep
-  have hsourceTerm : SourceTerm (.block blockLifetime [.val value]) := by
-    intro candidate hmem
-    simp [termValues] at hmem
-    subst hmem
-    exact hsource
-  exact preservation_blockB_value_step_runtime_no_slots
-    (sourceInitialRuntimeState_valid hsourceTerm)
-    safeAbstraction_empty
-    htyping
-    (empty_no_lifetime_slots blockLifetime)
-    hstep
-    (sourceValue_blockB_valuePreservation_step hsource htyping hstep)
-
-/--
 Source-initial multistep preservation for a block containing a source-level
 value.  This is the `R-BlockB` source-level instance of Lemma 4.11.
 -/
@@ -6055,48 +7064,19 @@ theorem sourceInitial_blockB_value_multistep_preservation
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
       ValidValue finalStore finalValue ty := by
   intro hsource htyping hmulti
-  exact preservation_runtime_multistep_of_step_to_value
-    (by intro hterminal; cases hterminal)
-    (by
-      intro _store' _term' hstep
-      cases hstep with
-      | blockA hheadStep =>
-          exact False.elim (value_no_step hheadStep)
-      | blockB _hdrops =>
-          exact ⟨value, rfl⟩)
-    (by
-      intro _store' _steppedValue hstep
-      cases hstep with
-      | blockB hdrops =>
-          exact sourceInitial_blockB_value_step_preservation hsource htyping
-            (Step.blockB (lifetime := lifetime) hdrops))
-    hmulti
-
-/--
-Source-initial one-step preservation for `R-Box` when boxing a source-level
-value.
--/
-theorem sourceInitial_box_value_step_preservation
-    {value : Value} {store' : ProgramStore} {ref : Reference}
-    {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.box (.val value)) (.box ty) env₂ →
-    Step ProgramStore.empty lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    ValidRuntimeState store' (.val (.ref ref)) ∧ store' ∼ₛ env₂ ∧
-      ValidValue store' (.ref ref) (.box ty) := by
-  intro hsource htyping hstep
-  have hsourceTerm : SourceTerm (.box (.val value)) := by
+  have hsourceTerm : SourceTerm (.block blockLifetime [.val value]) := by
     intro candidate hmem
     simp [termValues] at hmem
     subst hmem
     exact hsource
-  exact preservation_box_step_runtime
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
-      (term := .box (.val value)) hsourceTerm)
-    safeAbstraction_empty
+  exact preservation_blockB_value_multistep_runtime_no_slots
     (sourceInitialRuntimeState_valid hsourceTerm)
+    safeAbstraction_empty
     htyping
-    hstep
+    (empty_no_lifetime_slots blockLifetime)
+    (sourceValue_validValue_of_empty_valueTyping hsource
+      (blockValueTyping_valueTyping htyping))
+    hmulti
 
 /--
 Source-initial multistep preservation for `box v` with a source-level value.
@@ -6111,48 +7091,18 @@ theorem sourceInitial_box_value_multistep_preservation
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
       ValidValue finalStore finalValue (.box ty) := by
   intro hsource htyping hmulti
-  exact preservation_runtime_multistep_of_step_to_value
-    (by intro hterminal; cases hterminal)
-    (by
-      intro _store' _term' hstep
-      cases hstep with
-      | box _hfresh _hbox =>
-          exact ⟨_, rfl⟩
-      | subBox hvalueStep =>
-          exact False.elim (value_no_step hvalueStep))
-    (by
-      intro _store' _steppedValue hstep
-      cases hstep with
-      | box hfresh hbox =>
-          exact sourceInitial_box_value_step_preservation hsource htyping
-            (Step.box (lifetime := lifetime) hfresh hbox))
-    hmulti
-
-/--
-Source-initial one-step preservation for `R-Declare` when declaring a
-source-level value.
--/
-theorem sourceInitial_declare_value_step_preservation
-    {x : Name} {value : Value} {store' : ProgramStore}
-    {lifetime : Lifetime} {env₃ : Env} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.letMut x (.val value)) .unit env₃ →
-    Step ProgramStore.empty lifetime (.letMut x (.val value)) store' (.val .unit) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env₃ ∧
-      ValidValue store' .unit .unit := by
-  intro hsource htyping hstep
-  have hsourceTerm : SourceTerm (.letMut x (.val value)) := by
+  have hsourceTerm : SourceTerm (.box (.val value)) := by
     intro candidate hmem
     simp [termValues] at hmem
     subst hmem
     exact hsource
-  exact preservation_declare_step_runtime
+  exact preservation_box_multistep_runtime
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
-      (term := .letMut x (.val value)) hsourceTerm)
+      (term := .box (.val value)) hsourceTerm)
     safeAbstraction_empty
     (sourceInitialRuntimeState_valid hsourceTerm)
     htyping
-    hstep
+    hmulti
 
 /--
 Source-initial multistep preservation for `let mut x = v` with a source-level
@@ -6168,21 +7118,17 @@ theorem sourceInitial_declare_value_multistep_preservation
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
       ValidValue finalStore finalValue .unit := by
   intro hsource htyping hmulti
-  exact preservation_runtime_multistep_of_step_to_value
-    (by intro hterminal; cases hterminal)
-    (by
-      intro _store' _term' hstep
-      cases hstep with
-      | declare _hstore' =>
-          exact ⟨.unit, rfl⟩
-      | subDeclare hvalueStep =>
-          exact False.elim (value_no_step hvalueStep))
-    (by
-      intro _store' _steppedValue hstep
-      cases hstep with
-      | declare hstore' =>
-          exact sourceInitial_declare_value_step_preservation hsource htyping
-            (Step.declare (lifetime := lifetime) hstore'))
+  have hsourceTerm : SourceTerm (.letMut x (.val value)) := by
+    intro candidate hmem
+    simp [termValues] at hmem
+    subst hmem
+    exact hsource
+  exact preservation_declare_multistep_runtime
+    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
+      (term := .letMut x (.val value)) hsourceTerm)
+    safeAbstraction_empty
+    (sourceInitialRuntimeState_valid hsourceTerm)
+    htyping
     hmulti
 
 /--
@@ -6213,6 +7159,142 @@ theorem sourceInitial_multistep_value_preservation
     safeAbstraction_empty
     htyping
     hmulti
+
+/-! ## Paper-Facing Section 4 Targets -/
+
+/--
+Main well-formedness induction behind Lemma 4.9.
+
+This is the backwards target for Borrow Invariance: typing a term in a
+well-formed environment produces a well-formed output environment and a
+well-formed result type.
+-/
+theorem typingPreservesWellFormed {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  sorry
+
+/--
+Lemma 4.9, Borrow Invariance.
+
+The paper phrases the conclusion as well-formedness of the output environment
+extended with a fresh result binding `γ ↦ <T>^l`.
+-/
+theorem borrowInvariance {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
+  rcases typingPreservesWellFormed hvalidState hvalidStoreTyping hwellFormed
+      hsafe htyping with
+    ⟨hwellFormedOutput, hwellFormedTy⟩
+  exact borrowInvariance_result_extension hwellFormedOutput hwellFormedTy hfresh
+
+/--
+Lemma 4.11, Preservation.
+
+This is stated over `ValidRuntimeState`, the mechanised package that contains
+Definition 4.3's valid-state condition plus the explicit owner-allocation
+invariant needed by our concrete store model.
+-/
+theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {finalValue : Value} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateSafe finalStore finalValue env₂ ty := by
+  sorry
+
+/--
+Theorem 4.12, Type and Borrow Safety.
+
+The paper assumes termination; here that assumption is represented by an
+explicit multistep witness to a final runtime value.
+-/
+theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    TerminatesAsValue store lifetime term →
+    ProgressResult store lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep store lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress
+    htyping hterminates
+  exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
+    hwellFormed hsafe hstoreProgress htyping
+    (by
+      intro finalStore finalValue hmulti
+      exact preservation hvalidRuntime hvalidStoreTyping
+        (hwellFormed lifetime) hsafe htyping hmulti)
+    hterminates
+
+/--
+Main borrow-safety induction behind Corollary 4.14.
+
+The result binding is included in the statement because the paper's corollary
+checks borrow-safety after extending the output environment with `γ ↦ <T>^l`.
+-/
+theorem typingPreservesBorrowSafeResult {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  sorry
+
+/--
+Corollary 4.14, Borrow Safety.
+
+Starting from a borrow-safe environment, the output environment extended with
+the fresh result binding is both well-formed and borrow-safe.
+-/
+theorem borrowSafety {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
+    hfresh
+  exact ⟨
+    borrowInvariance hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+      hfresh,
+    typingPreservesBorrowSafeResult hvalidState hvalidStoreTyping hwellFormed
+      hborrowSafe hsafe htyping hfresh⟩
 
 end Paper
 end LwRust
