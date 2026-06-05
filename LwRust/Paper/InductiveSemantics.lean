@@ -559,5 +559,356 @@ theorem outer_block_returns_zero :
 
 end WorkedExample
 
+namespace InvalidBorrowExample
+
+/-!
+Section 3.3 example (9).  Operationally this program reduces to `unit`, but it
+is intentionally not type-and-borrow safe: `x` is assigned while mutably
+borrowed by `y`.
+-/
+
+def l : Lifetime := [1]
+
+def x : LVal := .var "x"
+def y : LVal := .var "y"
+
+def borrowed (location : Location) : Value :=
+  .ref { location := location, owner := false }
+
+def unitDrops (store : ProgramStore) :
+    Drops store [.value .unit] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+def intDrops (store : ProgramStore) (n : Int) :
+    Drops store [.value (.int n)] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+def borrowDrops (store : ProgramStore) (location : Location) :
+    Drops store [.value (borrowed location)] store := by
+  refine ProgramStore.Drops.nonOwner ?_ ProgramStore.Drops.nil
+  intro ref
+  by_cases h : (PartialValue.value (borrowed location)) = .value (.ref ref)
+  · right
+    cases h
+    rfl
+  · left
+    exact h
+
+def S0 : ProgramStore := ProgramStore.empty
+def Sx : ProgramStore := S0.declare "x" l (.int 0)
+def Sy : ProgramStore := Sx.declare "y" l (borrowed (.var "x"))
+def Sassigned : ProgramStore :=
+  Sy.update (.var "x") { value := .value (.int 1), lifetime := l }
+def Sfinal : ProgramStore :=
+  (Sassigned.erase (.var "x")).erase (.var "y")
+
+def declareX : Term := .letMut "x" (.val (.int 0))
+def declareY : Term := .letMut "y" (.borrow true x)
+def assignX : Term := .assign x (.val (.int 1))
+def invalidProgram : Term := .block l [declareX, declareY, assignX]
+
+theorem declare_x_step :
+    Step S0 l invalidProgram Sx (.block l [.val .unit, declareY, assignX]) := by
+  unfold invalidProgram declareX S0 Sx l
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_x :
+    Step Sx l (.block l [.val .unit, declareY, assignX])
+      Sx (.block l [declareY, assignX]) := by
+  exact Step.seq (unitDrops _)
+
+theorem borrow_x_under_declare_y :
+    Step Sx l (.block l [declareY, assignX])
+      Sx (.block l [.letMut "y" (.val (borrowed (.var "x"))), assignX]) := by
+  unfold declareY x borrowed
+  exact Step.blockA (Step.subDeclare (Step.borrow (by simp [ProgramStore.loc])))
+
+theorem declare_y_step :
+    Step Sx l (.block l [.letMut "y" (.val (borrowed (.var "x"))), assignX])
+      Sy (.block l [.val .unit, assignX]) := by
+  unfold Sy borrowed
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_y :
+    Step Sy l (.block l [.val .unit, assignX])
+      Sy (.block l [assignX]) := by
+  exact Step.seq (unitDrops _)
+
+theorem assign_x_while_borrowed_step :
+    Step Sy l (.block l [assignX]) Sassigned (.block l [.val .unit]) := by
+  unfold assignX Sassigned Sy Sx S0 x l borrowed
+  exact Step.blockA (Step.assign
+    (oldSlot := { value := .value (.int 0), lifetime := [1] })
+    (store₂ := ProgramStore.empty.declare "x" [1] (.int 0) |>.declare "y" [1]
+      (Value.ref { location := Location.var "x", owner := false }))
+    (by simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update])
+    (intDrops _ 0)
+    (by simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update]))
+
+theorem drop_invalid_lifetime :
+    DropsLifetime Sassigned l Sfinal := by
+  refine ProgramStore.DropsLifetime.intro
+    (dropSet := [
+      .value (.ref { location := .var "x", owner := true }),
+      .value (.ref { location := .var "y", owner := true })]) ?_ ?_
+  · intro value
+    constructor
+    · intro hmem
+      simp at hmem
+      rcases hmem with hvalue | hvalue
+      · subst hvalue
+        refine ⟨.var "x", { value := .value (.int 1), lifetime := l }, ?_, rfl, rfl⟩
+        simp [Sassigned, Sy, Sx, S0, l, ProgramStore.declare, ProgramStore.update]
+      · subst hvalue
+        refine ⟨.var "y", { value := .value (borrowed (.var "x")), lifetime := l }, ?_, rfl, rfl⟩
+        simp [Sassigned, Sy, Sx, S0, l, borrowed, ProgramStore.declare, ProgramStore.update]
+    · intro h
+      rcases h with ⟨location, slot, hslot, hlifetime, hvalue⟩
+      subst hvalue
+      simp
+      cases location with
+      | var name =>
+          by_cases hx : name = "x"
+          · subst hx
+            left
+            rfl
+          · by_cases hy : name = "y"
+            · subst hy
+              right
+              rfl
+            · simp [Sassigned, Sy, Sx, S0, l, ProgramStore.declare,
+                ProgramStore.update, hx, hy] at hslot
+      | heap address =>
+          simp [Sassigned, Sy, Sx, S0, l, ProgramStore.declare,
+            ProgramStore.update] at hslot
+  · refine ProgramStore.Drops.ownerPresent
+      (slot := { value := .value (.int 1), lifetime := l }) rfl ?_ ?_
+    · simp [Sassigned, Sy, Sx, S0, l, ProgramStore.declare, ProgramStore.update]
+    · refine ProgramStore.Drops.nonOwner (by intro ref; left; simp) ?_
+      refine ProgramStore.Drops.ownerPresent
+        (slot := { value := .value (borrowed (.var "x")), lifetime := l }) rfl ?_ ?_
+      · simp [Sassigned, Sy, Sx, S0, l, borrowed, ProgramStore.declare,
+          ProgramStore.update, ProgramStore.erase]
+      · unfold Sfinal
+        exact borrowDrops _ (.var "x")
+
+theorem invalid_program_returns_unit :
+    Step Sassigned l (.block l [.val .unit]) Sfinal (.val .unit) := by
+  exact Step.blockB drop_invalid_lifetime
+
+end InvalidBorrowExample
+
+namespace InvalidEscapingBorrowExample
+
+/-!
+Section 3.3 example (10).  Operationally this can reduce past the inner block
+and move `y` into `w`, but it is not type-and-borrow safe: after the inner block,
+`y` contains a borrowed reference to `z`, whose lifetime has ended.
+A read of `w` afterwards would get the program stuck.
+-/
+
+def l : Lifetime := [2]
+def m : Lifetime := [2, 0]
+
+def x : LVal := .var "x"
+def y : LVal := .var "y"
+def z : LVal := .var "z"
+
+def borrowed (location : Location) : Value :=
+  .ref { location := location, owner := false }
+
+def unitDrops (store : ProgramStore) :
+    Drops store [.value .unit] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+def intDrops (store : ProgramStore) (n : Int) :
+    Drops store [.value (.int n)] store := by
+  exact ProgramStore.Drops.nonOwner (by intro ref; left; simp) ProgramStore.Drops.nil
+
+def borrowDrops (store : ProgramStore) (location : Location) :
+    Drops store [.value (borrowed location)] store := by
+  refine ProgramStore.Drops.nonOwner ?_ ProgramStore.Drops.nil
+  intro ref
+  by_cases h : (PartialValue.value (borrowed location)) = .value (.ref ref)
+  · right
+    cases h
+    rfl
+  · left
+    exact h
+
+def S0 : ProgramStore := ProgramStore.empty
+def Sx : ProgramStore := S0.declare "x" l (.int 0)
+def SyX : ProgramStore := Sx.declare "y" l (borrowed (.var "x"))
+def Sz : ProgramStore := SyX.declare "z" m (.int 0)
+def SyZ : ProgramStore :=
+  Sz.update (.var "y") { value := .value (borrowed (.var "z")), lifetime := l }
+def SafterInner : ProgramStore :=
+  SyZ.erase (.var "z")
+def SafterMoveY : ProgramStore :=
+  SafterInner.update (.var "y") { value := .undef, lifetime := l }
+def Sw : ProgramStore :=
+  SafterMoveY.declare "w" l (borrowed (.var "z"))
+
+def declareX : Term := .letMut "x" (.val (.int 0))
+def declareY : Term := .letMut "y" (.borrow true x)
+def declareZ : Term := .letMut "z" (.val (.int 0))
+def assignYBorrowZ : Term := .assign y (.borrow true z)
+def innerBlock : Term := .block m [declareZ, assignYBorrowZ]
+def declareW : Term := .letMut "w" (.move y)
+def invalidProgram : Term := .block l [declareX, declareY, innerBlock, declareW]
+
+theorem declare_x_step :
+    Step S0 l invalidProgram Sx (.block l [.val .unit, declareY, innerBlock, declareW]) := by
+  unfold invalidProgram declareX S0 Sx l
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_x :
+    Step Sx l (.block l [.val .unit, declareY, innerBlock, declareW])
+      Sx (.block l [declareY, innerBlock, declareW]) := by
+  exact Step.seq (unitDrops _)
+
+theorem borrow_x_under_declare_y :
+    Step Sx l (.block l [declareY, innerBlock, declareW])
+      Sx (.block l [.letMut "y" (.val (borrowed (.var "x"))), innerBlock, declareW]) := by
+  unfold declareY x borrowed
+  exact Step.blockA (Step.subDeclare (Step.borrow (by simp [ProgramStore.loc])))
+
+theorem declare_y_step :
+    Step Sx l (.block l [.letMut "y" (.val (borrowed (.var "x"))), innerBlock, declareW])
+      SyX (.block l [.val .unit, innerBlock, declareW]) := by
+  unfold SyX borrowed
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_y :
+    Step SyX l (.block l [.val .unit, innerBlock, declareW])
+      SyX (.block l [innerBlock, declareW]) := by
+  exact Step.seq (unitDrops _)
+
+theorem declare_z_step :
+    Step SyX l innerBlock Sz (.block m [.val .unit, assignYBorrowZ]) := by
+  unfold innerBlock declareZ Sz
+  exact Step.blockA (Step.declare rfl)
+
+theorem seq_after_declare_z :
+    Step Sz m (.block m [.val .unit, assignYBorrowZ])
+      Sz (.block m [assignYBorrowZ]) := by
+  exact Step.seq (unitDrops _)
+
+theorem borrow_z_under_assignment :
+    Step Sz m assignYBorrowZ Sz (.assign y (.val (borrowed (.var "z")))) := by
+  unfold assignYBorrowZ z borrowed
+  exact Step.subAssign (Step.borrow (by simp [ProgramStore.loc]))
+
+theorem assign_y_borrow_z :
+    Step Sz m (.assign y (.val (borrowed (.var "z")))) SyZ (.val .unit) := by
+  refine Step.assign
+    (store₂ := Sz)
+    (oldSlot := { value := .value (borrowed (.var "x")), lifetime := l }) ?_ ?_ ?_
+  · simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update, Sz, SyX, Sx, S0, y, l, m, borrowed]
+  · exact borrowDrops _ (.var "x")
+  · simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update, SyZ, Sz, SyX, Sx, S0, y, l, m, borrowed]
+
+theorem drop_inner_lifetime :
+    DropsLifetime SyZ m SafterInner := by
+  refine ProgramStore.DropsLifetime.intro
+    (dropSet := [.value (.ref { location := .var "z", owner := true })]) ?_ ?_
+  · intro value
+    constructor
+    · intro hmem
+      simp at hmem
+      subst hmem
+      refine ⟨.var "z", { value := .value (.int 0), lifetime := m }, ?_, rfl, rfl⟩
+      simp [SyZ, Sz, SyX, Sx, S0, l, m, borrowed, ProgramStore.declare,
+        ProgramStore.update]
+    · intro h
+      rcases h with ⟨location, slot, hslot, hlifetime, hvalue⟩
+      subst hvalue
+      simp
+      cases location with
+      | var name =>
+          by_cases hx : name = "x"
+          · subst hx
+            simp [SyZ, Sz, SyX, Sx, S0, l, m, borrowed, ProgramStore.declare,
+              ProgramStore.update] at hslot
+            cases hslot
+            simp [m] at hlifetime
+          · by_cases hy : name = "y"
+            · subst hy
+              simp [SyZ, Sz, SyX, Sx, S0, l, m, borrowed, ProgramStore.declare,
+                ProgramStore.update] at hslot
+              cases hslot
+              simp [m] at hlifetime
+            · by_cases hz : name = "z"
+              · subst hz
+                rfl
+              · simp [SyZ, Sz, SyX, Sx, S0, l, m, borrowed, ProgramStore.declare,
+                  ProgramStore.update, hx, hy, hz] at hslot
+      | heap address =>
+          simp [SyZ, Sz, SyX, Sx, S0, l, m, borrowed, ProgramStore.declare,
+            ProgramStore.update] at hslot
+  · refine ProgramStore.Drops.ownerPresent
+      (slot := { value := .value (.int 0), lifetime := m }) rfl ?_ ?_
+    · simp [SyZ, Sz, SyX, Sx, S0, l, m, borrowed, ProgramStore.declare,
+        ProgramStore.update]
+    · unfold SafterInner
+      exact intDrops _ 0
+
+theorem inner_block_returns_unit :
+    Step SyZ l (.block m [.val .unit]) SafterInner (.val .unit) := by
+  exact Step.blockB drop_inner_lifetime
+
+theorem seq_after_inner_block :
+    Step SafterInner l (.block l [.val .unit, declareW])
+      SafterInner (.block l [declareW]) := by
+  exact Step.seq (unitDrops _)
+
+theorem move_y_under_declare_w :
+    Step SafterInner l (.block l [declareW])
+      SafterMoveY (.block l [.letMut "w" (.val (borrowed (.var "z")))]) := by
+  unfold declareW SafterMoveY SafterInner SyZ Sz SyX Sx S0 y l m borrowed
+  exact Step.blockA (Step.subDeclare (Step.move (valueLifetime := [2])
+    (by simp [ProgramStore.read, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update, ProgramStore.erase])
+    (by simp [ProgramStore.write, ProgramStore.loc, ProgramStore.declare,
+      ProgramStore.update, ProgramStore.erase])))
+
+theorem declare_w_with_escaping_borrow :
+    Step SafterMoveY l (.block l [.letMut "w" (.val (borrowed (.var "z")))])
+      Sw (.block l [.val .unit]) := by
+  unfold Sw borrowed
+  exact Step.blockA (Step.declare rfl)
+
+theorem w_points_to_dropped_z :
+    Sw.read (.var "w") =
+      some { value := .value (borrowed (.var "z")), lifetime := l } := by
+  simp [Sw, SafterMoveY, SafterInner, SyZ, Sz, SyX, Sx, S0, l, m, borrowed,
+    ProgramStore.read, ProgramStore.loc, ProgramStore.declare, ProgramStore.update,
+    ProgramStore.erase]
+
+theorem z_has_been_dropped :
+    Sw.slotAt (.var "z") = none := by
+  simp [Sw, SafterMoveY, SafterInner, SyZ, Sz, SyX, Sx, S0, l, m, borrowed,
+    ProgramStore.declare, ProgramStore.update, ProgramStore.erase]
+
+theorem read_deref_w_after_z_dropped :
+    Sw.read (.deref (.var "w")) = none := by
+  simp [Sw, SafterMoveY, SafterInner, SyZ, Sz, SyX, Sx, S0, l, m, borrowed,
+    ProgramStore.read, ProgramStore.loc, ProgramStore.declare, ProgramStore.update,
+    ProgramStore.erase]
+
+theorem deref_w_after_z_dropped_is_stuck :
+    ¬ ∃ store' term', Step Sw l (.move (.deref (.var "w"))) store' term' := by
+  intro h
+  rcases h with ⟨store', term', hstep⟩
+  cases hstep with
+  | move hread _ =>
+      simp [read_deref_w_after_z_dropped] at hread
+
+end InvalidEscapingBorrowExample
+
 end Paper
 end LwRust
