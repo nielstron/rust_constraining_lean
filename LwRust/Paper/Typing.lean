@@ -38,12 +38,6 @@ def update (env : Env) (x : Name) (slot : EnvSlot) : Env :=
 def erase (env : Env) (x : Name) : Env :=
   { slotAt := fun y => if y = x then none else env.slotAt y }
 
-/-- Definition 3.20, environment drop `drop(Γ, m)`. -/
-def dropLifetime (env : Env) (lifetime : Lifetime) : Env :=
-  { slotAt := fun x =>
-      match env.slotAt x with
-      | some slot => if slot.lifetime = lifetime then none else some slot
-      | none => none }
 
 @[simp] theorem update_slotAt_same (env : Env) (x : Name) (slot : EnvSlot) :
     (env.update x slot).slotAt x = some slot := by
@@ -393,6 +387,17 @@ inductive Mutable : Env → LVal → Prop where
       LValTyping env lv (.ty (.borrow true targets)) lifetime →
       (∀ target, target ∈ targets → Mutable env target) →
       Mutable env (.deref lv)
+
+namespace Env
+
+/-- Definition 3.20, environment drop `drop(Γ, m)`. -/
+def dropLifetime (env : Env) (lifetime : Lifetime) : Env :=
+  { slotAt := fun x =>
+      match env.slotAt x with
+      | some slot => if slot.lifetime = lifetime then none else some slot
+      | none => none }
+
+end Env
 
 /-- All borrow targets are well formed for the requested lifetime. -/
 inductive BorrowTargetsWellFormed : Env → List LVal → Lifetime → Prop where
