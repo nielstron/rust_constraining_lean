@@ -7924,6 +7924,20 @@ theorem lvalTyping_deref_of_coherent {env : Env} (hcoh : Coherent env)
   obtain ⟨ty, lifetime, htargets⟩ := hcoh lv mutable targets borrowLifetime h
   exact ⟨ty, lifetime, LValTyping.borrow h htargets⟩
 
+/-- A positive-rank write whose target lval is *initialised* (types to `.ty`)
+preserves the shape of every slot.  The location typing `w : .ty` is exactly the
+leaf-initialisation discriminant: the matching lemma turns it into the
+`WriteLeafTy` premise of `EnvWrite.shapePreserved_init`. -/
+theorem EnvWrite.shapePreserved_of_typed {env result : Env} {rank : Nat}
+    {w : LVal} {rhsTy : Ty} {leafTy : Ty} {lf : Lifetime}
+    (hrank : 0 < rank) (hwrite : EnvWrite rank env w rhsTy result)
+    (hw : LValTyping env w (.ty leafTy) lf) :
+    EnvShapePreserved env result := by
+  apply EnvWrite.shapePreserved_init hrank hwrite
+  intro slot hslot
+  have := writeLeafTy_of_lvalTyping hw hslot [] rhsTy WriteLeafTy.leaf
+  simpa using this
+
 /-- Environment strengthening is transitive (an ingredient for the write-result
 strengthening characterization `env ≤ result`). -/
 theorem EnvStrengthens.trans {a b c : Env}
