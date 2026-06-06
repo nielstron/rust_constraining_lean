@@ -208,6 +208,10 @@ instance : LE Lifetime where
     LifetimeOutlives outer inner ↔ outer.contains inner :=
   Iff.rfl
 
+/-- Paper `l ≺ m`: `m` is the immediate nested block lifetime below `l`. -/
+def LifetimeChild (parent child : Lifetime) : Prop :=
+  ∃ label, child.path = parent.path ++ [label]
+
 @[refl, simp] theorem LifetimeOutlives.refl (lifetime : Lifetime) :
     LifetimeOutlives lifetime lifetime := by
   simp [LifetimeOutlives, Core.Lifetime.contains]
@@ -338,6 +342,9 @@ notation:max "&" targets:max => Ty.borrow false targets
 inductive PartialTyContains : PartialTy → Ty → Prop where
   | here {ty : Ty} :
       PartialTyContains (.ty ty) ty
+  | tyBox {inner needle : Ty} :
+      PartialTyContains (.ty inner) needle →
+      PartialTyContains (.ty (.box inner)) needle
   | box {inner : PartialTy} {needle : Ty} :
       PartialTyContains inner needle →
       PartialTyContains (.box inner) needle
@@ -399,19 +406,25 @@ def dropLifetime (env : Env) (lifetime : Lifetime) : Env :=
 
 end Env
 
-/-- All borrow targets are well formed for the requested lifetime. -/
+/-- The variable slot at the base of an lval survives for the requested lifetime. -/
+def LValBaseOutlives (env : Env) (lv : LVal) (lifetime : Lifetime) : Prop :=
+  ∃ slot, env.slotAt (LVal.base lv) = some slot ∧ slot.lifetime ≤ lifetime
+
+/--
+All borrow targets are well formed for the requested lifetime.
+
+This follows the paper's `L-Borrow` premise: the whole finite target list `u`
+must type as `Γ ⊢ u : ⟨T⟩^m`, not merely have each member independently
+typable.  The final component is the mechanisation's slot-survival
+strengthening used by drop/update preservation.
+-/
 inductive BorrowTargetsWellFormed : Env → List LVal → Lifetime → Prop where
-  | singleton {env : Env} {target : LVal} {targetTy : Ty}
+  | intro {env : Env} {targets : List LVal} {targetTy : Ty}
       {targetLifetime lifetime : Lifetime} :
-      LValTyping env target (.ty targetTy) targetLifetime →
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime →
       LifetimeOutlives targetLifetime lifetime →
-      BorrowTargetsWellFormed env [target] lifetime
-  | cons {env : Env} {target : LVal} {rest : List LVal} {targetTy : Ty}
-      {targetLifetime lifetime : Lifetime} :
-      LValTyping env target (.ty targetTy) targetLifetime →
-      LifetimeOutlives targetLifetime lifetime →
-      BorrowTargetsWellFormed env rest lifetime →
-      BorrowTargetsWellFormed env (target :: rest) lifetime
+      (∀ target, target ∈ targets → LValBaseOutlives env target lifetime) →
+      BorrowTargetsWellFormed env targets lifetime
 
 /-- Definition 3.21, well-formed type `Γ ⊢ T ≽ l`. -/
 inductive WellFormedTy : Env → Ty → Lifetime → Prop where
@@ -563,6 +576,7 @@ mutual
     /-- T-Block. -/
     | block {env₁ env₂ env₃ : Env} {typing : StoreTyping}
         {lifetime blockLifetime : Lifetime} {terms : List Term} {ty : Ty} :
+        LifetimeChild lifetime blockLifetime →
         TermListTyping env₁ typing blockLifetime terms ty env₂ →
         WellFormedTy env₂ ty lifetime →
         env₃ = env₂.dropLifetime blockLifetime →
@@ -572,6 +586,7 @@ mutual
         {x : Name} {term : Term} {ty : Ty} :
         env₁.fresh x →
         TermTyping env₁ typing lifetime term ty env₂ →
+        env₂.fresh x →
         env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
         TermTyping env₁ typing lifetime (.letMut x term) .unit env₃
     /-- T-Assign. -/
