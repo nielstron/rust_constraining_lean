@@ -329,6 +329,59 @@ def LVal.base : LVal → Name
   | .var x => x
   | .deref lv => LVal.base lv
 
+/-- Number of dereferences in an lval (length of its path). -/
+def LVal.derefCount : LVal → Nat
+  | .var _ => 0
+  | .deref lv => LVal.derefCount lv + 1
+
+/-- Variables occurring in a full type (the base names of all borrow targets). -/
+def Ty.vars : Ty → List Name
+  | .unit => []
+  | .int => []
+  | .borrow _ targets => targets.map LVal.base
+  | .box inner => Ty.vars inner
+
+/-- Variables occurring (in live borrows) in a partial type.
+
+`undef` shadows are moved-out and carry no live borrow, mirroring
+`PartialTyContains`, which does not descend into `undef`. -/
+def PartialTy.vars : PartialTy → List Name
+  | .ty t => Ty.vars t
+  | .box inner => PartialTy.vars inner
+  | .undef _ => []
+
+/--
+Definition 11 of `lw_rust_followup`, Linearizable typing.
+
+An environment is linearizable when there is a rank function `φ` on variables
+such that every variable strictly outranks all variables occurring in its slot
+type.  This forbids cyclic borrow references and is the well-foundedness
+condition that makes the `LValTyping` recursion (and hence shape-determinism of
+borrow-target unions) terminate.
+-/
+def Linearizable (env : Env) : Prop :=
+  ∃ φ : Name → Nat,
+    ∀ x slot, env.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x
+
+/-- Structural shape equality of full types, ignoring borrow *target lists* (but
+keeping the `mutable` flag).  Box types are rigid in the strengthening order, so
+two box shapes count as equal only when their contents are literally equal —
+which is all that arises, because box-typed lvals have a unique type. -/
+def Ty.sameShape : Ty → Ty → Prop
+  | .unit, .unit => True
+  | .int, .int => True
+  | .borrow m₁ _, .borrow m₂ _ => m₁ = m₂
+  | .box t₁, .box t₂ => t₁ = t₂
+  | _, _ => False
+
+/-- Structural shape equality of partial types. -/
+def PartialTy.sameShape : PartialTy → PartialTy → Prop
+  | .ty t₁, .ty t₂ => Ty.sameShape t₁ t₂
+  | .box p₁, .box p₂ => p₁ = p₂
+  | .undef t₁, .undef t₂ => Ty.sameShape t₁ t₂
+  | _, _ => False
+
 /-- Definition 3.14, path conflict `u ⋈ w`. -/
 def PathConflicts (left right : LVal) : Prop :=
   LVal.base left = LVal.base right
@@ -456,13 +509,23 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
   | box {env : Env} {left right : PartialTy} :
       ShapeCompatible env left right →
       ShapeCompatible env (.box left) (.box right)
-  /-- S-Bor. -/
-  | borrow {env : Env} {mutable : Bool} {leftTargets rightTargets : List LVal} :
+  /-- S-Bor.
+
+  Definition 3.22 requires the borrow *pointee* types to be shape compatible,
+  not merely that each target is individually typeable.  Concretely all left
+  targets share a pointee type `leftTy`, all right targets share `rightTy`, and
+  `leftTy ≈ rightTy`.  Dropping the `ShapeCompatible env (.ty leftTy) (.ty
+  rightTy)` premise (as an earlier version did) makes `T-Assign` accept e.g.
+  `&mut &c ≈ &mut int`, after which a write-through-borrow weak update can build
+  the ill-formed type `&mut[a,b]` with non-joinable pointees — breaking
+  Borrow Invariance (Lemma 4.9). -/
+  | borrow {env : Env} {mutable : Bool} {leftTargets rightTargets : List LVal}
+      {leftTy rightTy : Ty} :
       (∀ leftTarget, leftTarget ∈ leftTargets →
-        ∀ rightTarget, rightTarget ∈ rightTargets →
-          ∃ leftTy rightTy leftLifetime rightLifetime,
-            LValTyping env leftTarget (.ty leftTy) leftLifetime ∧
-            LValTyping env rightTarget (.ty rightTy) rightLifetime) →
+        ∃ leftLifetime, LValTyping env leftTarget (.ty leftTy) leftLifetime) →
+      (∀ rightTarget, rightTarget ∈ rightTargets →
+        ∃ rightLifetime, LValTyping env rightTarget (.ty rightTy) rightLifetime) →
+      ShapeCompatible env (.ty leftTy) (.ty rightTy) →
       ShapeCompatible env (.ty (.borrow mutable leftTargets))
         (.ty (.borrow mutable rightTargets))
   /-- S-UndefL. -/
