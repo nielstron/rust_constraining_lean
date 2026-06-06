@@ -3293,6 +3293,91 @@ theorem PartialTyBorrowsWellFormedInSlot.box_inv {env : Env}
   intro hpartial mutable targets hcontains
   exact hpartial (PartialTyContains.box hcontains)
 
+/-- Every lval typing has a base variable slot. -/
+theorem LValTyping.base_slot_exists {env : Env} :
+    ∀ {lv : LVal} {p : PartialTy} {lf : Lifetime}, LValTyping env lv p lf →
+      ∃ slot, env.slotAt (LVal.base lv) = some slot := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro p lf h
+      cases h with | var hslot => exact ⟨_, by simpa [LVal.base] using hslot⟩
+  | deref lv' ih =>
+      intro p lf h
+      cases h with
+      | box hb => simpa [LVal.base] using ih hb
+      | borrow hb _ => simpa [LVal.base] using ih hb
+
+/-- A variable in a (partial) type's `vars` comes from a contained borrow whose
+target it is the base of.  (`Ty`/`PartialTy` are mutually inductive, so the proof
+goes through the shared recursor.) -/
+theorem partialTy_vars_mem_contains {pt : PartialTy} :
+    ∀ v, v ∈ PartialTy.vars pt →
+      ∃ mutable targets, PartialTyContains pt (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v :=
+  PartialTy.rec
+    (motive_1 := fun t => ∀ v, v ∈ Ty.vars t →
+      ∃ mutable targets, PartialTyContains (.ty t) (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v)
+    (motive_2 := fun pt => ∀ v, v ∈ PartialTy.vars pt →
+      ∃ mutable targets, PartialTyContains pt (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v)
+    (by intro v hv; simp [Ty.vars] at hv)
+    (by intro v hv; simp [Ty.vars] at hv)
+    (by
+      intro m tgts v hv
+      simp only [Ty.vars, List.mem_map] at hv
+      obtain ⟨tgt, htgt, rfl⟩ := hv
+      exact ⟨m, tgts, PartialTyContains.here, tgt, htgt, rfl⟩)
+    (by
+      intro inner ih v hv
+      simp only [Ty.vars] at hv
+      obtain ⟨m, tgts, hcontains, tgt, htgt, hbase⟩ := ih v hv
+      exact ⟨m, tgts, PartialTyContains.tyBox hcontains, tgt, htgt, hbase⟩)
+    (by intro t ih v hv; exact ih v (by simpa [PartialTy.vars] using hv))
+    (by
+      intro p ih v hv
+      simp only [PartialTy.vars] at hv
+      obtain ⟨m, tgts, hcontains, w⟩ := ih v hv
+      exact ⟨m, tgts, PartialTyContains.box hcontains, w⟩)
+    (by intro s _ih v hv;
+        exact (List.not_mem_nil (show v ∈ ([] : List Name) from hv)).elim)
+    pt
+
+/-- Variables occurring in a well-formed type are bound in the environment (each
+is the base of a borrow target, which types in `env`). -/
+theorem wellFormedTy_vars_in_env {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedTy env ty lifetime →
+    ∀ v, v ∈ Ty.vars ty → ∃ slot, env.slotAt v = some slot := by
+  intro hwf v hv
+  obtain ⟨m, tgts, hcontains, tgt, htgt, hbase⟩ :=
+    partialTy_vars_mem_contains (pt := .ty ty) v (by simpa [PartialTy.vars] using hv)
+  obtain ⟨T, lt, hty, _, _⟩ :=
+    borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwf hcontains tgt htgt
+  rw [← hbase]
+  exact LValTyping.base_slot_exists hty
+
+/-- Variables in a slot's type of a contained-borrow-well-formed env are bound. -/
+theorem containedBorrows_slot_vars_in_env {env : Env} {y : Name} {slot : EnvSlot} :
+    ContainedBorrowsWellFormed env →
+    env.slotAt y = some slot →
+    ∀ v, v ∈ PartialTy.vars slot.ty → ∃ s, env.slotAt v = some s := by
+  intro hcontained hslot v hv
+  obtain ⟨m, tgts, hcontains, tgt, htgt, hbase⟩ := partialTy_vars_mem_contains v hv
+  have hwf := hcontained y slot m tgts hslot ⟨slot, hslot, hcontains⟩
+  obtain ⟨T, lt, hty, _, _⟩ := hwf tgt htgt
+  rw [← hbase]
+  exact LValTyping.base_slot_exists hty
+
+/-- Membership bound for the fresh-variable rank: every listed variable's
+`φ + 1` is below the fold-max. -/
+theorem mem_foldr_max_succ {l : List Name} {φ : Name → Nat} {v : Name}
+    (hv : v ∈ l) :
+    φ v + 1 ≤ l.foldr (fun w acc => max (φ w + 1) acc) 0 := by
+  induction hv with
+  | head as => exact le_max_left _ _
+  | tail b _hmem ih => exact le_trans ih (le_max_right _ _)
+
 theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime} :
     WellFormedEnv env lifetime →
@@ -3351,8 +3436,33 @@ theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
     -- preservation, to discharge).
     sorry
   · -- Linearizable: rank the fresh variable strictly above the variables of its
-    -- slot type.  STUB (lw_rust_followup Def 11 preservation).
-    sorry
+    -- slot type (a finite list); existing ranks unchanged.
+    obtain ⟨φ, hφ⟩ := hwellEnv.2.2.2
+    have hfreshEq : env.slotAt x = none := hfresh
+    have hxnotin : x ∉ Ty.vars ty := by
+      intro hx
+      obtain ⟨s, hs⟩ := wellFormedTy_vars_in_env hwellTy x hx
+      rw [hfreshEq] at hs
+      exact absurd hs (by simp)
+    refine ⟨fun n => if n = x then
+      (Ty.vars ty).foldr (fun w acc => max (φ w + 1) acc) 0 else φ n, ?_⟩
+    intro y slot hslot v hv
+    by_cases hy : y = x
+    · have hslotEq : slot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        rw [hy] at hslot
+        simpa [Env.update] using hslot.symm
+      have hvty : v ∈ Ty.vars ty := by
+        rw [hslotEq] at hv; simpa [PartialTy.vars] using hv
+      have hvx : v ≠ x := fun h => hxnotin (h ▸ hvty)
+      simp only [if_neg hvx, if_pos hy]
+      exact lt_of_lt_of_le (Nat.lt_succ_self _) (mem_foldr_max_succ hvty)
+    · have hslotOld : env.slotAt y = some slot := by
+        simpa [Env.update, hy] using hslot
+      obtain ⟨s, hs⟩ := containedBorrows_slot_vars_in_env hwellEnv.1 hslotOld v hv
+      have hvx : v ≠ x := by
+        intro h; rw [h, hfreshEq] at hs; exact absurd hs (by simp)
+      simp only [if_neg hy, if_neg hvx]
+      exact hφ y slot hslotOld v hv
 
 /-- Updating a variable slot without changing its allocation lifetime preserves Definition 4.8(ii). -/
 theorem EnvSlotsOutlive.update_same_lifetime {env : Env} {x : Name}
@@ -16553,21 +16663,6 @@ theorem ContainedBorrowsWellFormed.dropLifetime_child_of_transport
     htransport
     (hwellBody.1 x slot mutable targets holdSlot holdContains)
     hslotParent
-
-/-- Every lval typing has a base variable slot. -/
-theorem LValTyping.base_slot_exists {env : Env} :
-    ∀ {lv : LVal} {p : PartialTy} {lf : Lifetime}, LValTyping env lv p lf →
-      ∃ slot, env.slotAt (LVal.base lv) = some slot := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro p lf h
-      cases h with | var hslot => exact ⟨_, by simpa [LVal.base] using hslot⟩
-  | deref lv' ih =>
-      intro p lf h
-      cases h with
-      | box hb => simpa [LVal.base] using ih hb
-      | borrow hb _ => simpa [LVal.base] using ih hb
 
 /-- `Linearizable` is preserved by a lifetime drop (the same rank function works;
 `dropLifetime` only removes slots). -/
