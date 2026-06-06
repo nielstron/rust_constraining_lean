@@ -3,3 +3,4 @@ import LwRust.Paper.Runtime
 import LwRust.Paper.InductiveSemantics
 import LwRust.Paper.Typing
 import LwRust.Paper.Soundness
+import LwRust.Paper.Soundness.Index

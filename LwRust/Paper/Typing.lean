@@ -372,14 +372,32 @@ def Ty.sameShape : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
   | .borrow m₁ _, .borrow m₂ _ => m₁ = m₂
-  | .box t₁, .box t₂ => t₁ = t₂
+  | .box t₁, .box t₂ => Ty.sameShape t₁ t₂
   | _, _ => False
 
 /-- Structural shape equality of partial types. -/
 def PartialTy.sameShape : PartialTy → PartialTy → Prop
   | .ty t₁, .ty t₂ => Ty.sameShape t₁ t₂
-  | .box p₁, .box p₂ => p₁ = p₂
+  | .box p₁, .box p₂ => PartialTy.sameShape p₁ p₂
   | .undef t₁, .undef t₂ => Ty.sameShape t₁ t₂
+  | _, _ => False
+
+/-- Finer type equivalence than `sameShape`: structural, and borrow target
+lists must be subset-equivalent (same set).  This is what `LValTyping`
+determinism actually establishes (target lists are unique up to set), and the
+extra subset-equivalence is what lets reborrow chains be related. -/
+def Ty.eqv : Ty → Ty → Prop
+  | .unit, .unit => True
+  | .int, .int => True
+  | .borrow m₁ t₁, .borrow m₂ t₂ => m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
+  | .box t₁, .box t₂ => Ty.eqv t₁ t₂
+  | _, _ => False
+
+/-- Partial-type version of `Ty.eqv`. -/
+def PartialTy.eqv : PartialTy → PartialTy → Prop
+  | .ty t₁, .ty t₂ => Ty.eqv t₁ t₂
+  | .box p₁, .box p₂ => PartialTy.eqv p₁ p₂
+  | .undef t₁, .undef t₂ => Ty.eqv t₁ t₂
   | _, _ => False
 
 /-- Definition 3.14, path conflict `u ⋈ w`. -/
@@ -466,17 +484,30 @@ def LValBaseOutlives (env : Env) (lv : LVal) (lifetime : Lifetime) : Prop :=
 /--
 All borrow targets are well formed for the requested lifetime.
 
-This follows the paper's `L-Borrow` premise: the whole finite target list `u`
-must type as `Γ ⊢ u : ⟨T⟩^m`, not merely have each member independently
-typable.  The final component is the mechanisation's slot-survival
-strengthening used by drop/update preservation.
--/
+This is the borrow invariant of Definition 4.8(i), stated faithfully **per
+target**: each individual target lval `w` is typable (`Γ ⊢ w : T^m`) with its
+own pointee type `T` and lifetime `m ≼ l`, plus the mechanisation's slot-survival
+component used by drop/update preservation.
+
+Note the deliberate separation from Definition 3.21 (`WellFormedTy`, the
+well-formed *type* judgement): the paper's `L-Borrow` premise `Γ ⊢ u : ⟨T⟩^m`
+types the whole target set *jointly* (one shared pointee type `T`).  That joint
+typing is what the typing rules establish when a borrow is **created** (T-LvBor
+produces an `LValTargetsTyping`).  The well-formedness invariant that must be
+**preserved** through execution, however, is only the per-target statement of
+Definition 4.8(i).  Conflating the two — carrying the joint typing as the runtime
+invariant — is unsound at environment joins: rule W-Bor merges the target lists
+of two borrows (`&u₁ ⊔ &u₂ = &(u₁ ⊔ u₂)`) without requiring their pointee types
+to join, so the merged list has no joint typing in general, yet each target
+retains its own per-target typing.  Keeping this predicate per-target is exactly
+what makes borrow invariance provable across joins. -/
 inductive BorrowTargetsWellFormed : Env → List LVal → Lifetime → Prop where
-  | intro {env : Env} {targets : List LVal} {targetTy : Ty}
-      {targetLifetime lifetime : Lifetime} :
-      LValTargetsTyping env targets (.ty targetTy) targetLifetime →
-      LifetimeOutlives targetLifetime lifetime →
-      (∀ target, target ∈ targets → LValBaseOutlives env target lifetime) →
+  | intro {env : Env} {targets : List LVal} {lifetime : Lifetime} :
+      (∀ target, target ∈ targets →
+        ∃ targetTy targetLifetime,
+          LValTyping env target (.ty targetTy) targetLifetime ∧
+          LifetimeOutlives targetLifetime lifetime ∧
+          LValBaseOutlives env target lifetime) →
       BorrowTargetsWellFormed env targets lifetime
 
 /-- Definition 3.21, well-formed type `Γ ⊢ T ≽ l`. -/

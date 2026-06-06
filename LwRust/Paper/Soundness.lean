@@ -2776,15 +2776,29 @@ theorem valuePreservation_box_step {store store' : ProgramStore}
 /-! ## Section 4.3: Borrow Invariance -/
 
 /--
-Definition 4.8(i).  Every borrow contained in an environment slot points at a
-well-typed lval whose allocation lifetime outlives the borrow's lifetime.
--/
+Definition 4.8(i), the borrow invariant, stated faithfully **per target**.
+
+The paper's Definition 4.8(i) reads: for all `x` and `w` with `Γ ⊢ x ↝ &[mut] w`
+and `Γ(x) = ·ⁿ`, we have `Γ ⊢ w : T^m ∧ m ≼ n`.  The quantifier ranges over the
+*individual* target lval `w`, and `Γ ⊢ w : T^m` types that single lval.  This is
+strictly weaker than the joint target-list typing `Γ ⊢ ū : ⟨T⟩^m` used by the
+well-formed-*type* judgement (Definition 3.21, `WellFormedTy`): the invariant
+does **not** require all targets to share one joined pointee type.
+
+This distinction matters at environment joins.  Joining `&[mut] L` with
+`&[mut] R` produces `&[mut] (L ⊔ R)` whose target list merges `L` and `R`
+(rule W-Bor merges only the target lists, never the pointee types).  The merged
+list need not have a joint pointee typing — but each individual target keeps the
+typing it had on whichever side it came from, so the per-target invariant is
+preserved.  An earlier mechanisation used the joint typing here, which is exactly
+why the join case could not be discharged. -/
 def BorrowTargetsWellFormedInSlot
     (env : Env) (slotLifetime : Lifetime) (targets : List LVal) : Prop :=
-  ∃ targetTy targetLifetime,
-    LValTargetsTyping env targets (.ty targetTy) targetLifetime ∧
-      targetLifetime ≤ slotLifetime ∧
-      ∀ target, target ∈ targets → LValBaseOutlives env target slotLifetime
+  ∀ target, target ∈ targets →
+    ∃ targetTy targetLifetime,
+      LValTyping env target (.ty targetTy) targetLifetime ∧
+        targetLifetime ≤ slotLifetime ∧
+        LValBaseOutlives env target slotLifetime
 
 /--
 Slot-local borrow invariant for a partial type.  This is the proof obligation
@@ -2925,34 +2939,30 @@ theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
     env.fresh x →
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
     BorrowTargetsWellFormedInSlot (env.update x slot) slotLifetime targets := by
-  intro hfresh htargets
-  rcases htargets with
+  intro hfresh htargets target hmem
+  rcases htargets target hmem with
     ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
-  exact ⟨targetTy, targetLifetime,
-    LValTargetsTyping.update_fresh (slot := slot) hfresh htyping,
-    houtlives,
-    by
-      intro target hmem
-      rcases hbase target hmem with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-      have hbaseSlot' :
-          (env.update x slot).slotAt (LVal.base target) = some baseSlot := by
-        have hbaseNe : LVal.base target ≠ x := by
-          intro hbaseEq
-          subst hbaseEq
-          unfold Env.fresh at hfresh
-          rw [hfresh] at hbaseSlot
-          cases hbaseSlot
-        simpa [Env.update, hbaseNe] using hbaseSlot
-      exact ⟨baseSlot, hbaseSlot', hbaseOutlives⟩⟩
+  refine ⟨targetTy, targetLifetime,
+    LValTyping.update_fresh_one (slot := slot) hfresh htyping, houtlives, ?_⟩
+  rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+  have hbaseSlot' :
+      (env.update x slot).slotAt (LVal.base target) = some baseSlot := by
+    have hbaseNe : LVal.base target ≠ x := by
+      intro hbaseEq
+      subst hbaseEq
+      unfold Env.fresh at hfresh
+      rw [hfresh] at hbaseSlot
+      cases hbaseSlot
+    simpa [Env.update, hbaseNe] using hbaseSlot
+  exact ⟨baseSlot, hbaseSlot', hbaseOutlives⟩
 
 theorem BorrowTargetsWellFormed.inSlot {env : Env} {targets : List LVal}
     {lifetime : Lifetime} :
     BorrowTargetsWellFormed env targets lifetime →
     BorrowTargetsWellFormedInSlot env lifetime targets := by
-  intro htargets
+  intro htargets target hmem
   cases htargets with
-  | intro htyping houtlives hbase =>
-      exact ⟨_, _, htyping, houtlives, hbase⟩
+  | intro hmembers => exact hmembers target hmem
 
 theorem BorrowTargetsWellFormed.singleton {env : Env} {target : LVal}
     {targetTy : Ty} {targetLifetime lifetime : Lifetime} :
@@ -2961,14 +2971,11 @@ theorem BorrowTargetsWellFormed.singleton {env : Env} {target : LVal}
     LValBaseOutlives env target lifetime →
     BorrowTargetsWellFormed env [target] lifetime := by
   intro htarget houtlives hbase
-  exact BorrowTargetsWellFormed.intro
-    (LValTargetsTyping.singleton htarget)
-    houtlives
-    (by
-      intro selected hselected
-      simp at hselected
-      subst hselected
-      exact hbase)
+  refine BorrowTargetsWellFormed.intro (by
+    intro selected hselected
+    simp at hselected
+    subst hselected
+    exact ⟨targetTy, targetLifetime, htarget, houtlives, hbase⟩)
 
 theorem LifetimeOutlives.trans {first second third : Lifetime} :
     first ≤ second →
@@ -3105,15 +3112,14 @@ theorem BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed {env : Env}
     slotLifetime ≤ lifetime →
     BorrowTargetsWellFormed env targets lifetime := by
   intro htargets houtlives
-  rcases htargets with
+  refine BorrowTargetsWellFormed.intro ?_
+  intro target hmem
+  rcases htargets target hmem with
     ⟨targetTy, targetLifetime, htargetTyping, htargetOutlivesSlot, hbase⟩
-  exact BorrowTargetsWellFormed.intro htargetTyping
-    (LifetimeOutlives.trans htargetOutlivesSlot houtlives)
-    (by
-      intro target hmem
-      rcases hbase target hmem with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-      exact ⟨baseSlot, hbaseSlot,
-        LifetimeOutlives.trans hbaseOutlives houtlives⟩)
+  refine ⟨targetTy, targetLifetime, htargetTyping,
+    LifetimeOutlives.trans htargetOutlivesSlot houtlives, ?_⟩
+  rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+  exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
 
 theorem EnvContains.borrowTargetsWellFormed {env : Env} {x : Name}
     {mutable : Bool} {targets : List LVal} {lifetime : Lifetime} :
@@ -3135,54 +3141,9 @@ theorem BorrowTargetsWellFormed.member {env : Env} {targets : List LVal}
         LValTyping env target (.ty targetTy) targetLifetime ∧
         targetLifetime ≤ lifetime ∧
         LValBaseOutlives env target lifetime := by
-  intro htargets
+  intro htargets target hmem
   cases htargets with
-  | intro htargetsTyping houtlives hbase =>
-      intro target hmem
-      have hmember :
-          ∀ selected,
-            selected ∈ targets →
-            ∃ targetTy targetLifetime,
-              LValTyping env selected (.ty targetTy) targetLifetime ∧
-                targetLifetime ≤ lifetime := by
-        refine LValTargetsTyping.rec
-          (motive_1 := fun _lv _partialTy _targetLifetime _ => True)
-          (motive_2 := fun targets _partialTy targetLifetime _ =>
-            targetLifetime ≤ lifetime →
-            ∀ selected,
-              selected ∈ targets →
-              ∃ targetTy selectedLifetime,
-                LValTyping env selected (.ty targetTy) selectedLifetime ∧
-                  selectedLifetime ≤ lifetime)
-          ?var ?box ?borrow ?singleton ?cons htargetsTyping houtlives
-        · intro _x _slot _hslot
-          trivial
-        · intro _lv _inner _lifetime _htyping _ih
-          trivial
-        · intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-            _hborrow _htargets _ihBorrow _ihTargets
-          trivial
-        · intro target ty targetLifetime htarget _ihTarget houtlives selected hmem
-          simp at hmem
-          subst hmem
-          exact ⟨ty, targetLifetime, htarget, houtlives⟩
-        · intro head rest headTy headLifetime restLifetime targetLifetime restTy
-            unionTy hhead _hrest _hunion hintersection _ihHead ihRest
-            houtlives selected hmem
-          simp at hmem
-          rcases hmem with hselected | hselected
-          · subst hselected
-            exact ⟨headTy, headLifetime, hhead,
-              LifetimeOutlives.trans
-                (hintersection.1 (by simp)) houtlives⟩
-          · exact ihRest
-              (LifetimeOutlives.trans
-                (hintersection.1 (by simp)) houtlives)
-              selected hselected
-      rcases hmember target hmem with
-        ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives⟩
-      exact ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives,
-        hbase target hmem⟩
+  | intro hmembers => exact hmembers target hmem
 
 theorem BorrowTargetsWellFormed.weaken {env : Env} {targets : List LVal}
     {outer inner : Lifetime} :
@@ -3191,30 +3152,29 @@ theorem BorrowTargetsWellFormed.weaken {env : Env} {targets : List LVal}
       BorrowTargetsWellFormed env targets inner := by
     intro htargets houterInner
     cases htargets with
-    | intro htargetsTyping houtlives hbase =>
-        exact BorrowTargetsWellFormed.intro htargetsTyping
-          (LifetimeOutlives.trans houtlives houterInner)
-          (by
-            intro target htarget
-            rcases hbase target htarget with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-            exact ⟨baseSlot, hbaseSlot,
-              LifetimeOutlives.trans hbaseOutlives houterInner⟩)
+    | intro hmembers =>
+        refine BorrowTargetsWellFormed.intro ?_
+        intro target htarget
+        rcases hmembers target htarget with
+          ⟨targetTy, targetLifetime, htyping, htOutlives, hbase⟩
+        refine ⟨targetTy, targetLifetime, htyping,
+          LifetimeOutlives.trans htOutlives houterInner, ?_⟩
+        rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+        exact ⟨baseSlot, hbaseSlot,
+          LifetimeOutlives.trans hbaseOutlives houterInner⟩
 
 theorem BorrowTargetsWellFormedInSlot.weaken {env : Env} {targets : List LVal}
     {outer inner : Lifetime} :
     BorrowTargetsWellFormedInSlot env outer targets →
     outer ≤ inner →
     BorrowTargetsWellFormedInSlot env inner targets := by
-  intro htargets houtlives
-  rcases htargets with
+  intro htargets houtlives target htarget
+  rcases htargets target htarget with
     ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives, hbase⟩
-  exact ⟨targetTy, targetLifetime, htargetTyping,
-    LifetimeOutlives.trans htargetOutlives houtlives,
-    by
-      intro target htarget
-      rcases hbase target htarget with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-      exact ⟨baseSlot, hbaseSlot,
-        LifetimeOutlives.trans hbaseOutlives houtlives⟩⟩
+  refine ⟨targetTy, targetLifetime, htargetTyping,
+    LifetimeOutlives.trans htargetOutlives houtlives, ?_⟩
+  rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+  exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
 
 theorem PartialTyBorrowsWellFormedInSlot.weaken {env : Env}
     {partialTy : PartialTy} {outer inner : Lifetime} :
@@ -5474,27 +5434,268 @@ theorem lvalTyping_vars_rank_lt {env : Env} {φ : Name → Nat}
       htyping
 
 @[refl] theorem Ty.sameShape_refl (t : Ty) : Ty.sameShape t t := by
-  cases t <;> simp [Ty.sameShape]
+  refine Ty.rec (motive_1 := fun t => Ty.sameShape t t)
+    (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
+  · trivial
+  · trivial
+  · intro _ _; rfl
+  · intro _ ih; exact ih
+  · intro _ _; trivial
+  · intro _ _; trivial
+  · intro _ _; trivial
 
 @[refl] theorem PartialTy.sameShape_refl (pt : PartialTy) :
     PartialTy.sameShape pt pt := by
-  cases pt with
-  | ty t => exact Ty.sameShape_refl t
-  | box p => simp [PartialTy.sameShape]
-  | undef t => exact Ty.sameShape_refl t
+  refine PartialTy.rec (motive_1 := fun t => Ty.sameShape t t)
+    (motive_2 := fun pt => PartialTy.sameShape pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
+  · trivial
+  · trivial
+  · intro _ _; rfl
+  · intro _ ih; exact ih
+  · intro _ ih; exact ih
+  · intro _ ih; exact ih
+  · intro _ ih; exact ih
 
-theorem Ty.sameShape_symm {a b : Ty} : Ty.sameShape a b → Ty.sameShape b a := by
-  cases a <;> cases b <;> simp_all [Ty.sameShape] <;> intro h <;> exact h.symm
+theorem Ty.sameShape_symm {a b : Ty} (h : Ty.sameShape a b) :
+    Ty.sameShape b a := by
+  have key : ∀ a b, Ty.sameShape a b → Ty.sameShape b a := by
+    intro a
+    refine Ty.rec (motive_1 := fun a => ∀ b, Ty.sameShape a b → Ty.sameShape b a)
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+    · intro b h; cases b <;> simp_all [Ty.sameShape]
+    · intro b h; cases b <;> simp_all [Ty.sameShape]
+    · intro _ _ b h; cases b <;> simp_all [Ty.sameShape] <;> exact h.symm
+    · intro _ ih b h
+      cases b with
+      | box t' => exact ih t' h
+      | unit => simp [Ty.sameShape] at h
+      | int => simp [Ty.sameShape] at h
+      | borrow _ _ => simp [Ty.sameShape] at h
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact key a b h
 
-theorem PartialTy.sameShape_symm {a b : PartialTy} :
-    PartialTy.sameShape a b → PartialTy.sameShape b a := by
-  cases a <;> cases b <;> simp_all [PartialTy.sameShape, Ty.sameShape_symm] <;>
-    intro h <;> exact h.symm
+theorem PartialTy.sameShape_symm {a b : PartialTy}
+    (h : PartialTy.sameShape a b) : PartialTy.sameShape b a := by
+  cases a <;> cases b <;>
+    simp_all [PartialTy.sameShape] <;>
+    first
+      | exact Ty.sameShape_symm (by assumption)
+      | exact (PartialTy.sameShape_symm (by assumption))
 
-theorem Ty.sameShape_trans {a b c : Ty} :
-    Ty.sameShape a b → Ty.sameShape b c → Ty.sameShape a c := by
-  cases a <;> cases b <;> cases c <;> simp only [Ty.sameShape] <;>
-    intro h1 h2 <;> first | trivial | exact h1.trans h2 | exact (h1.trans h2)
+theorem Ty.sameShape_trans {a b c : Ty}
+    (h₁ : Ty.sameShape a b) (h₂ : Ty.sameShape b c) : Ty.sameShape a c := by
+  have key : ∀ a b c, Ty.sameShape a b → Ty.sameShape b c → Ty.sameShape a c := by
+    intro a
+    refine Ty.rec
+      (motive_1 := fun a => ∀ b c, Ty.sameShape a b → Ty.sameShape b c →
+        Ty.sameShape a c)
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+    · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
+    · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
+    · intro _ _ b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
+    · intro _ ih b c h1 h2
+      cases b with
+      | box tb =>
+          cases c with
+          | box tc => exact ih tb tc h1 h2
+          | unit => simp [Ty.sameShape] at h2
+          | int => simp [Ty.sameShape] at h2
+          | borrow _ _ => simp [Ty.sameShape] at h2
+      | unit => simp [Ty.sameShape] at h1
+      | int => simp [Ty.sameShape] at h1
+      | borrow _ _ => simp [Ty.sameShape] at h1
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact key a b c h₁ h₂
+
+theorem PartialTy.sameShape_trans {a b c : PartialTy}
+    (h₁ : PartialTy.sameShape a b) (h₂ : PartialTy.sameShape b c) :
+    PartialTy.sameShape a c := by
+  cases a <;> cases b <;> cases c <;>
+    simp_all [PartialTy.sameShape] <;>
+    first
+      | exact Ty.sameShape_trans (by assumption) (by assumption)
+      | exact PartialTy.sameShape_trans (by assumption) (by assumption)
+
+/-- Forward shape preservation across an environment transformation: every slot
+present in `result` comes from a `sameShape` slot of `source`.  This is the
+shape-stability invariant tracked through `EnvWrite`/`UpdateAtPath`/
+`WriteBorrowTargets` (the Appendix 9.6 shape fragment). -/
+def EnvShapePreserved (source result : Env) : Prop :=
+  ∀ x resultSlot, result.slotAt x = some resultSlot →
+    ∃ sourceSlot, source.slotAt x = some sourceSlot ∧
+      PartialTy.sameShape sourceSlot.ty resultSlot.ty
+
+@[refl] theorem EnvShapePreserved.refl (env : Env) :
+    EnvShapePreserved env env := by
+  intro x slot hslot
+  exact ⟨slot, hslot, PartialTy.sameShape_refl _⟩
+
+theorem EnvShapePreserved.trans {first second third : Env} :
+    EnvShapePreserved first second →
+    EnvShapePreserved second third →
+    EnvShapePreserved first third := by
+  intro h12 h23 x slot hslot
+  rcases h23 x slot hslot with ⟨secondSlot, hsecondSlot, hshape23⟩
+  rcases h12 x secondSlot hsecondSlot with ⟨firstSlot, hfirstSlot, hshape12⟩
+  exact ⟨firstSlot, hfirstSlot, PartialTy.sameShape_trans hshape12 hshape23⟩
+
+theorem EnvShapePreserved.update_from_source_slot {source middle : Env}
+    {x : Name} {slot : EnvSlot} {newTy : PartialTy} :
+    EnvShapePreserved source middle →
+    source.slotAt x = some slot →
+    PartialTy.sameShape slot.ty newTy →
+    EnvShapePreserved source (middle.update x { slot with ty := newTy }) := by
+  intro hpres hslot hshape y resultSlot hresultSlot
+  by_cases hy : y = x
+  · subst hy
+    have hresultSlotEq : resultSlot = { slot with ty := newTy } := by
+      have h : { slot with ty := newTy } = resultSlot := by
+        simpa [Env.update] using hresultSlot
+      exact h.symm
+    subst hresultSlotEq
+    exact ⟨slot, hslot, hshape⟩
+  · have hmiddleSlot : middle.slotAt y = some resultSlot := by
+      simpa [Env.update, hy] using hresultSlot
+    exact hpres y resultSlot hmiddleSlot
+
+/-- Leaf shape-compatibility premise for a `Definition 3.23` write of `ty`
+through `path` into `oldTy`.  Stated as an inductive (so the borrow fan-out case
+may reference the relation at a *longer* path — through `prependPath` — without a
+structural-termination obstruction).  At the leaf the old type must be shape
+compatible with the written type; `box` peels one layer; `borrow` requires each
+target's onward write to be leaf-compatible. -/
+inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop where
+  | leaf {oldTy : PartialTy} {ty : Ty} :
+      ShapeCompatible env oldTy (.ty ty) →
+      WriteShapeCompat env [] oldTy ty
+  | box {path : List Unit} {inner : PartialTy} {ty : Ty} :
+      WriteShapeCompat env path inner ty →
+      WriteShapeCompat env (() :: path) (.box inner) ty
+  | borrow {path : List Unit} {targets : List LVal} {ty : Ty} :
+      (∀ t, t ∈ targets → ∀ tslot,
+        env.slotAt (LVal.base (prependPath path t)) = some tslot →
+        WriteShapeCompat env (LVal.path (prependPath path t)) tslot.ty ty) →
+      WriteShapeCompat env (() :: path) (.ty (.borrow true targets)) ty
+
+@[refl] theorem Ty.eqv_refl (t : Ty) : Ty.eqv t t := by
+  refine Ty.rec (motive_1 := fun t => Ty.eqv t t)
+    (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
+  · trivial
+  · trivial
+  · intro _ _; exact ⟨rfl, fun _ h => h, fun _ h => h⟩
+  · intro _ ih; exact ih
+  · intro _ _; trivial
+  · intro _ _; trivial
+  · intro _ _; trivial
+
+theorem Ty.sameShape_of_eqv {a b : Ty} (h : Ty.eqv a b) : Ty.sameShape a b := by
+  have key : ∀ a b, Ty.eqv a b → Ty.sameShape a b := by
+    intro a
+    refine Ty.rec (motive_1 := fun a => ∀ b, Ty.eqv a b → Ty.sameShape a b)
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+    · intro b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
+    · intro b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
+    · intro _ _ b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
+    · intro _ ih b h
+      cases b with
+      | box t' => exact ih t' h
+      | unit => simp [Ty.eqv] at h
+      | int => simp [Ty.eqv] at h
+      | borrow _ _ => simp [Ty.eqv] at h
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact key a b h
+
+theorem Ty.eqv_symm {a b : Ty} (h : Ty.eqv a b) : Ty.eqv b a := by
+  have key : ∀ a b, Ty.eqv a b → Ty.eqv b a := by
+    intro a
+    refine Ty.rec (motive_1 := fun a => ∀ b, Ty.eqv a b → Ty.eqv b a)
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+    · intro b h; cases b <;> simp_all [Ty.eqv]
+    · intro b h; cases b <;> simp_all [Ty.eqv]
+    · intro ma ta b h
+      cases b with
+      | borrow mb tb =>
+          simp only [Ty.eqv] at h ⊢
+          exact ⟨h.1.symm, h.2.2, h.2.1⟩
+      | unit => simp [Ty.eqv] at h
+      | int => simp [Ty.eqv] at h
+      | box _ => simp [Ty.eqv] at h
+    · intro _ ih b h
+      cases b with
+      | box t' => exact ih t' h
+      | unit => simp [Ty.eqv] at h
+      | int => simp [Ty.eqv] at h
+      | borrow _ _ => simp [Ty.eqv] at h
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact key a b h
+
+theorem Ty.eqv_trans {a b c : Ty} (h₁ : Ty.eqv a b) (h₂ : Ty.eqv b c) :
+    Ty.eqv a c := by
+  have key : ∀ a b c, Ty.eqv a b → Ty.eqv b c → Ty.eqv a c := by
+    intro a
+    refine Ty.rec
+      (motive_1 := fun a => ∀ b c, Ty.eqv a b → Ty.eqv b c → Ty.eqv a c)
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+    · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.eqv]
+    · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.eqv]
+    · intro ma ta b c h1 h2
+      cases b with
+      | borrow mb tb =>
+          cases c with
+          | borrow mc tc =>
+              simp only [Ty.eqv] at h1 h2 ⊢
+              exact ⟨h1.1.trans h2.1, fun x hx => h2.2.1 (h1.2.1 hx),
+                fun x hx => h1.2.2 (h2.2.2 hx)⟩
+          | unit => simp [Ty.eqv] at h2
+          | int => simp [Ty.eqv] at h2
+          | box _ => simp [Ty.eqv] at h2
+      | unit => simp [Ty.eqv] at h1
+      | int => simp [Ty.eqv] at h1
+      | box _ => simp [Ty.eqv] at h1
+    · intro _ ih b c h1 h2
+      cases b with
+      | box tb =>
+          cases c with
+          | box tc => exact ih tb tc h1 h2
+          | unit => simp [Ty.eqv] at h2
+          | int => simp [Ty.eqv] at h2
+          | borrow _ _ => simp [Ty.eqv] at h2
+      | unit => simp [Ty.eqv] at h1
+      | int => simp [Ty.eqv] at h1
+      | borrow _ _ => simp [Ty.eqv] at h1
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact key a b c h₁ h₂
+
+@[refl] theorem PartialTy.eqv_refl (pt : PartialTy) : PartialTy.eqv pt pt := by
+  refine PartialTy.rec (motive_1 := fun t => Ty.eqv t t)
+    (motive_2 := fun pt => PartialTy.eqv pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
+  · trivial
+  · trivial
+  · intro _ _; exact ⟨rfl, fun _ h => h, fun _ h => h⟩
+  · intro _ ih; exact ih
+  · intro _ ih; exact ih
+  · intro _ ih; exact ih
+  · intro _ ih; exact ih
+
+theorem PartialTy.sameShape_of_eqv {a b : PartialTy} (h : PartialTy.eqv a b) :
+    PartialTy.sameShape a b := by
+  cases a <;> cases b <;>
+    first
+      | (simp only [PartialTy.eqv] at h; simp only [PartialTy.sameShape];
+         exact Ty.sameShape_of_eqv h)
+      | (simp only [PartialTy.eqv] at h; simp only [PartialTy.sameShape];
+         exact PartialTy.sameShape_of_eqv h)
+      | (simp [PartialTy.eqv] at h)
 
 /-- Shape compatibility of full types implies structural same-shape. -/
 theorem PartialTy.sameShape_of_shapeCompatible {env : Env} {a b : Ty} :
@@ -5505,20 +5706,161 @@ theorem PartialTy.sameShape_of_shapeCompatible {env : Env} {a b : Ty} :
   | int => simp [PartialTy.sameShape, Ty.sameShape]
   | borrow _ _ _ => simp [PartialTy.sameShape, Ty.sameShape]
 
-/-- Same-shape full types have a union (which is again same-shaped). -/
-theorem partialTyUnion_exists_of_sameShape {a b : Ty} :
-    PartialTy.sameShape (.ty a) (.ty b) →
-    ∃ u, PartialTyUnion (.ty a) (.ty b) (.ty u) := by
-  intro h
-  cases a <;> cases b <;> simp only [PartialTy.sameShape, Ty.sameShape] at h
-  · exact ⟨.unit, PartialTyUnion.self _⟩
-  · exact ⟨.int, PartialTyUnion.self _⟩
-  · rename_i m₁ t₁ m₂ t₂
-    subst h
-    exact ⟨.borrow m₁ (t₁ ++ t₂), PartialTyUnion.borrow_append⟩
-  · rename_i t₁ t₂
-    subst h
-    exact ⟨.box t₁, PartialTyUnion.self _⟩
+/-- The union target list of two same-`mutable` borrows is subset-equivalent to
+the append of the operand target lists (`U` is the LUB, so `U ⊆ L ++ R`, while
+`L, R ⊆ U` since `U` is an upper bound). -/
+theorem partialTyUnion_borrow_targetsEquiv {m : Bool} {L R U : List LVal} :
+    PartialTyUnion (.ty (.borrow m L)) (.ty (.borrow m R)) (.ty (.borrow m U)) →
+    U ⊆ L ++ R ∧ (L ++ R) ⊆ U := by
+  intro hunion
+  refine ⟨?_, ?_⟩
+  · have hmem : (PartialTy.ty (.borrow m (L ++ R))) ∈
+        upperBounds ({PartialTy.ty (.borrow m L),
+          PartialTy.ty (.borrow m R)} : Set PartialTy) := by
+      intro y hy
+      simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hy
+      rcases hy with rfl | rfl
+      · exact PartialTyStrengthens.borrow (List.subset_append_left L R)
+      · exact PartialTyStrengthens.borrow (List.subset_append_right L R)
+    exact PartialTyStrengthens.borrow_subset (hunion.2 hmem)
+  · intro x hx
+    rcases List.mem_append.mp hx with h | h
+    · exact PartialTyStrengthens.borrow_subset
+        (PartialTyUnion.left_strengthens hunion) h
+    · exact PartialTyStrengthens.borrow_subset
+        (PartialTyUnion.right_strengthens hunion) h
+
+/-- The union operation respects `eqv`: joining `eqv`-related heads and rests
+yields `eqv`-related unions. -/
+theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
+    (hhead : Ty.eqv headA headB) (hrest : Ty.eqv restA restB)
+    (hunionA : PartialTyUnion (.ty headA) (.ty restA) (.ty tyA))
+    (hunionB : PartialTyUnion (.ty headB) (.ty restB) (.ty tyB)) :
+    Ty.eqv tyA tyB := by
+  cases headA with
+  | unit =>
+      have hb : headB = .unit := by cases headB <;> simp_all [Ty.eqv]
+      subst hb
+      have htyA : tyA = .unit :=
+        PartialTyStrengthens.from_unit_inv (PartialTyUnion.left_strengthens hunionA)
+      have htyB : tyB = .unit :=
+        PartialTyStrengthens.from_unit_inv (PartialTyUnion.left_strengthens hunionB)
+      subst htyA; subst htyB; trivial
+  | int =>
+      have hb : headB = .int := by cases headB <;> simp_all [Ty.eqv]
+      subst hb
+      have htyA : tyA = .int :=
+        PartialTyStrengthens.from_int_inv (PartialTyUnion.left_strengthens hunionA)
+      have htyB : tyB = .int :=
+        PartialTyStrengthens.from_int_inv (PartialTyUnion.left_strengthens hunionB)
+      subst htyA; subst htyB; trivial
+  | box hA =>
+      cases headB with
+      | box hB =>
+          have htyA : tyA = .box hA :=
+            PartialTyStrengthens.from_box_ty_inv
+              (PartialTyUnion.left_strengthens hunionA)
+          have htyB : tyB = .box hB :=
+            PartialTyStrengthens.from_box_ty_inv
+              (PartialTyUnion.left_strengthens hunionB)
+          subst htyA; subst htyB
+          simpa [Ty.eqv] using hhead
+      | unit => simp [Ty.eqv] at hhead
+      | int => simp [Ty.eqv] at hhead
+      | borrow _ _ => simp [Ty.eqv] at hhead
+  | borrow mA tA =>
+      cases headB with
+      | borrow mB tB =>
+          simp only [Ty.eqv] at hhead
+          obtain ⟨rfl, htAB, htBA⟩ := hhead
+          rcases PartialTyStrengthens.from_borrow_inv
+            (PartialTyUnion.left_strengthens hunionA) with ⟨UA, htyAeq, _⟩
+          subst htyAeq
+          rcases PartialTyStrengthens.to_borrow_inv
+            (PartialTyUnion.right_strengthens hunionA) with ⟨rA, hrestAeq, _⟩
+          subst hrestAeq
+          rcases partialTyUnion_borrow_targetsEquiv hunionA with ⟨hUA_app, _⟩
+          rcases PartialTyStrengthens.from_borrow_inv
+            (PartialTyUnion.left_strengthens hunionB) with ⟨UB, htyBeq, _⟩
+          subst htyBeq
+          rcases PartialTyStrengthens.to_borrow_inv
+            (PartialTyUnion.right_strengthens hunionB) with ⟨rB, hrestBeq, _⟩
+          subst hrestBeq
+          rcases partialTyUnion_borrow_targetsEquiv hunionB with ⟨hUB_app, happ_UB⟩
+          rcases partialTyUnion_borrow_targetsEquiv hunionA with ⟨_, happ_UA⟩
+          simp only [Ty.eqv] at hrest
+          obtain ⟨_, hrAB, hrBA⟩ := hrest
+          refine ⟨rfl, ?_, ?_⟩
+          · intro x hx
+            rcases List.mem_append.mp (hUA_app hx) with h | h
+            · exact happ_UB (List.mem_append_left _ (htAB h))
+            · exact happ_UB (List.mem_append_right _ (hrAB h))
+          · intro x hx
+            rcases List.mem_append.mp (hUB_app hx) with h | h
+            · exact happ_UA (List.mem_append_left _ (htBA h))
+            · exact happ_UA (List.mem_append_right _ (hrBA h))
+      | unit => simp [Ty.eqv] at hhead
+      | int => simp [Ty.eqv] at hhead
+      | box _ => simp [Ty.eqv] at hhead
+
+/-- Strengthening within full types preserves shape: the strengthening rules
+that keep a `.ty` a `.ty` (W-Reflex, W-Bor) never change the head constructor. -/
+theorem ty_sameShape_of_strengthens {a b : Ty}
+    (h : PartialTyStrengthens (.ty a) (.ty b)) : Ty.sameShape a b := by
+  cases h with
+  | reflex => exact Ty.sameShape_refl _
+  | borrow _ => simp [Ty.sameShape]
+
+/-- W-Weak preserves shape: if the old slot type is shape compatible with the
+written full type, their join has the same shape as the old type.  The
+`ShapeCompatible` premise is what excludes the degenerate `box`/`undef` cases (a
+box can never be shape compatible with a full non-box `.ty`), and is exactly the
+premise the assignment rules already carry. -/
+theorem partialTyJoin_sameShape {env : Env} {old joined : PartialTy} {ty : Ty}
+    (hshape : ShapeCompatible env old (.ty ty))
+    (hjoin : PartialTyJoin old (.ty ty) joined) :
+    PartialTy.sameShape old joined := by
+  have hleft : PartialTyStrengthens old joined :=
+    PartialTyUnion.left_strengthens hjoin
+  cases hshape with
+  | unit =>
+      have hbound : joined ≤ (PartialTy.ty .unit) :=
+        hjoin.2 (by intro p hp; simp only [Set.mem_insert_iff,
+          Set.mem_singleton_iff] at hp; rcases hp with rfl | rfl <;> rfl)
+      cases joined with
+      | ty u => have := PartialTyStrengthens.to_unit_inv hbound; subst this; trivial
+      | box _ => cases hbound
+      | undef _ => cases hbound
+  | int =>
+      have hbound : joined ≤ (PartialTy.ty .int) :=
+        hjoin.2 (by intro p hp; simp only [Set.mem_insert_iff,
+          Set.mem_singleton_iff] at hp; rcases hp with rfl | rfl <;> rfl)
+      cases joined with
+      | ty u => have := PartialTyStrengthens.to_int_inv hbound; subst this; trivial
+      | box _ => cases hbound
+      | undef _ => cases hbound
+  | borrow hL hR hpointee =>
+      rename_i mutable leftTargets rightTargets leftTy rightTy
+      have hbound : joined ≤
+          (PartialTy.ty (.borrow mutable (leftTargets ++ rightTargets))) :=
+        hjoin.2 (by
+          intro p hp
+          simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hp
+          rcases hp with rfl | rfl
+          · exact PartialTyStrengthens.borrow (by
+              intro t ht; exact List.mem_append_left _ ht)
+          · exact PartialTyStrengthens.borrow (by
+              intro t ht; exact List.mem_append_right _ ht))
+      cases joined with
+      | ty u =>
+          rcases PartialTyStrengthens.to_borrow_inv hbound with ⟨st, hu, _⟩
+          subst hu; rfl
+      | box _ => cases hbound
+      | undef _ => cases hbound
+  | undefLeft hinner =>
+      cases hleft with
+      | reflex => exact PartialTy.sameShape_refl _
+      | undefLeft h => exact ty_sameShape_of_strengthens h
 
 /-- The union of `.ty head` with a full `.ty rest` has the same shape as `head`
 (the right operand must match `head`'s shape for the join to exist). -/
@@ -5540,7 +5882,51 @@ theorem partialTyUnion_ty_left_sameShape {head rest union : Ty} :
       subst hu; simp [Ty.sameShape]
   | box t =>
       have : union = .box t := PartialTyStrengthens.from_box_ty_inv hstr
-      subst this; simp [Ty.sameShape]
+      subst this
+      simpa [Ty.sameShape] using Ty.sameShape_refl t
+
+/-- If two `sameShape` partial types have a union, the union has that same shape.
+(The `sameShape a b` premise rules out the degenerate `.ty ⊔ .undef` join that
+would otherwise change the shape.) -/
+theorem partialTyUnion_sameShape_of_sameShape {a b c : PartialTy}
+    (hunion : PartialTyUnion a b c) (hab : PartialTy.sameShape a b) :
+    PartialTy.sameShape a c := by
+  have key : ∀ (a : PartialTy),
+      ∀ b c, PartialTyUnion a b c → PartialTy.sameShape a b →
+        PartialTy.sameShape a c := by
+    intro a
+    refine PartialTy.rec
+      (motive_1 := fun _ => True)
+      (motive_2 := fun a => ∀ b c, PartialTyUnion a b c →
+        PartialTy.sameShape a b → PartialTy.sameShape a c)
+      (by trivial) (by trivial) (by intro _ _; trivial) (by intro _ _; trivial)
+      ?tyCase ?boxCase ?undefCase a
+    · intro au _ b c hunion hab
+      cases b with
+      | ty bu =>
+          rcases PartialTyUnion.ty_ty_full hunion with ⟨cu, hc⟩
+          subst hc
+          exact Ty.sameShape_symm (partialTyUnion_ty_left_sameShape hunion)
+      | box _ => simp [PartialTy.sameShape] at hab
+      | undef _ => simp [PartialTy.sameShape] at hab
+    · intro ap ihBox b c hunion hab
+      cases b with
+      | box bp =>
+          rcases PartialTyUnion.box_box_shape hunion with ⟨cp, hc⟩
+          subst hc
+          exact ihBox bp cp (PartialTyUnion.box_inv hunion) hab
+      | ty _ => simp [PartialTy.sameShape] at hab
+      | undef _ => simp [PartialTy.sameShape] at hab
+    · intro au _ b c hunion hab
+      cases b with
+      | undef bu =>
+          have hleft := PartialTyUnion.left_strengthens hunion
+          cases hleft with
+          | reflex => exact PartialTy.sameShape_refl _
+          | undefLeft h => exact ty_sameShape_of_strengthens h
+      | ty _ => simp [PartialTy.sameShape] at hab
+      | box _ => simp [PartialTy.sameShape] at hab
+  exact key a b c hunion hab
 
 /-- The union type of a (non-empty) target list has the shape of any one of its
 members' types; combined with member determinism this fixes the union shape. -/
@@ -5607,19 +5993,299 @@ theorem lvalTargetsTyping_sameList_sameShape {env : Env} {tgts : List LVal}
           exact Ty.sameShape_trans hA
             (Ty.sameShape_trans hheads (Ty.sameShape_symm hB))
 
-/-- Single-lval shape determinism: in a well-formed, linearizable environment,
-any two typings of the same lval have the same shape.  Proved by strong
-induction on the rank of the lval's base variable, with an inner structural
-induction on the lval (the dereference recursion stays at the same rank, while
-borrow-target recursion strictly lowers the rank via `lvalTyping_vars_rank_lt`). -/
-theorem lvalTyping_sameShape {env : Env} {φ : Name → Nat}
+/-- `eqv` version of `lvalTargetsTyping_sameList_sameShape`: two target-list
+typings of the same list have `eqv` union types (so borrow target lists are
+subset-equivalent), given per-member `eqv` determinism. -/
+theorem lvalTargetsTyping_sameList_eqv {env : Env} :
+    ∀ (tgts : List LVal) {tyA tyB : Ty} {lA lB : Lifetime},
+    (∀ m, m ∈ tgts → ∀ ma mb lma lmb,
+      LValTyping env m (.ty ma) lma → LValTyping env m (.ty mb) lmb →
+      Ty.eqv ma mb) →
+    LValTargetsTyping env tgts (.ty tyA) lA →
+    LValTargetsTyping env tgts (.ty tyB) lB →
+    Ty.eqv tyA tyB := by
+  intro tgts
+  induction tgts with
+  | nil => intro tyA tyB lA lB _ htA _; cases htA
+  | cons head tail ih =>
+      intro tyA tyB lA lB hdet htA htB
+      cases htA with
+      | singleton hA =>
+          cases htB with
+          | singleton hB => exact hdet head (by simp) _ _ _ _ hA hB
+          | cons _ hrB _ _ => cases hrB
+      | cons hhA hrA huA hiA =>
+          cases htB with
+          | singleton _ => cases hrA
+          | cons hhB hrB huB hiB =>
+              rcases LValTargetsTyping.output_full hrA with ⟨rTyA, hrAfull⟩
+              rcases LValTargetsTyping.output_full hrB with ⟨rTyB, hrBfull⟩
+              subst hrAfull; subst hrBfull
+              have hheadEqv := hdet head (by simp) _ _ _ _ hhA hhB
+              have hrestEqv :=
+                ih (fun m hm => hdet m (List.mem_cons_of_mem head hm)) hrA hrB
+              exact partialTyUnion_eqv hheadEqv hrestEqv huA huB
+
+/--
+Target-list typing records a finite union of the target types.  Any selected
+target therefore has a full type that strengthens the union type.
+-/
+theorem lvalTargetsTyping_member_strengthens {env : Env}
+    {targets : List LVal} {unionTy : PartialTy} {lifetime : Lifetime} :
+    LValTargetsTyping env targets unionTy lifetime →
+    ∀ target,
+      target ∈ targets →
+      ∃ ty targetLifetime,
+        LValTyping env target (.ty ty) targetLifetime ∧
+        PartialTyStrengthens (.ty ty) unionTy := by
+  intro htargets
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _ _ _ _ => True)
+    (motive_2 := fun targets unionTy _ _ =>
+      ∀ target,
+        target ∈ targets →
+        ∃ ty targetLifetime,
+          LValTyping env target (.ty ty) targetLifetime ∧
+          PartialTyStrengthens (.ty ty) unionTy)
+    ?var ?box ?borrow ?singleton ?cons htargets
+  · intro _x _slot _hslot
+    trivial
+  · intro _lv _inner _lifetime _htyping _ih
+    trivial
+  · intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+      _htyping _htargets _ihTyping _ihTargets
+    trivial
+  · intro target ty targetLifetime htyping _ihTyping selected hmem
+    simp at hmem
+    subst hmem
+    exact ⟨ty, targetLifetime, htyping, PartialTyStrengthens.reflex⟩
+  · intro target rest headTy headLifetime _restLifetime _lifetime _restTy unionTy
+      hhead _hrest hunion _hintersection _ihHead ihRest selected hmem
+    simp at hmem
+    rcases hmem with hselected | hselected
+    · subst hselected
+      exact ⟨headTy, headLifetime, hhead, PartialTyUnion.left_strengthens hunion⟩
+    · rcases ihRest selected hselected with
+        ⟨ty, selectedLifetime, htyping, hstrength⟩
+      exact ⟨ty, selectedLifetime, htyping,
+        partialTyStrengthens_trans hstrength
+          (PartialTyUnion.right_strengthens hunion)⟩
+
+/-- A target of the union borrow comes from some member's borrow targets. -/
+theorem lvalTargetsTyping_borrowTargets_mem {env : Env} :
+    ∀ {tgts : List LVal} {m : Bool} {U : List LVal} {lu : Lifetime},
+    LValTargetsTyping env tgts (.ty (.borrow m U)) lu →
+    ∀ x, x ∈ U →
+      ∃ t, t ∈ tgts ∧ ∃ tt lt,
+        LValTyping env t (.ty (.borrow m tt)) lt ∧ x ∈ tt := by
+  intro tgts
+  induction tgts with
+  | nil => intro m U lu ht; cases ht
+  | cons head tail ih =>
+      intro m U lu ht x hx
+      cases ht with
+      | singleton hfirst =>
+          exact ⟨head, by simp, U, _, hfirst, hx⟩
+      | cons hhA hrA huA hiA =>
+          rcases LValTargetsTyping.output_full hrA with ⟨rTy, hrFull⟩
+          subst hrFull
+          rcases PartialTyStrengthens.to_borrow_inv
+            (PartialTyUnion.left_strengthens huA) with ⟨headTgts, hheadEq, _⟩
+          subst hheadEq
+          rcases PartialTyStrengthens.to_borrow_inv
+            (PartialTyUnion.right_strengthens huA) with ⟨restTgts, hrestEq, _⟩
+          subst hrestEq
+          rcases partialTyUnion_borrow_targetsEquiv huA with ⟨hU_app, _⟩
+          rcases List.mem_append.mp (hU_app hx) with h | h
+          · exact ⟨head, by simp, headTgts, _, hhA, h⟩
+          · rcases ih hrA x h with ⟨t, ht, tt, lt, htty, hxtt⟩
+            exact ⟨t, List.mem_cons_of_mem head ht, tt, lt, htty, hxtt⟩
+
+/-- Two target-list typings of subset-equivalent lists have `eqv` union types.
+Generalises `lvalTargetsTyping_sameList_eqv` to lists with the same member set,
+which is what relates reborrow chains (whose target lists are subset-equivalent
+LUB witnesses). -/
+theorem lvalTargetsTyping_subsetEquiv_eqv {env : Env}
+    {tgtsA tgtsB : List LVal} {tyA tyB : Ty} {lA lB : Lifetime}
+    (hAB : tgtsA ⊆ tgtsB) (hBA : tgtsB ⊆ tgtsA)
+    (hdet : ∀ m, m ∈ tgtsA ++ tgtsB → ∀ ma mb lma lmb,
+      LValTyping env m (.ty ma) lma → LValTyping env m (.ty mb) lmb → Ty.eqv ma mb)
+    (htA : LValTargetsTyping env tgtsA (.ty tyA) lA)
+    (htB : LValTargetsTyping env tgtsB (.ty tyB) lB) :
+    Ty.eqv tyA tyB := by
+  obtain ⟨h, hhmem⟩ : ∃ h, h ∈ tgtsA := by
+    cases htA with
+    | singleton _ => exact ⟨_, List.mem_cons_self⟩
+    | cons _ _ _ _ => exact ⟨_, List.mem_cons_self⟩
+  obtain ⟨hAty, hAlt, hAty_typing, hAty_le⟩ :=
+    lvalTargetsTyping_member_strengthens htA h hhmem
+  obtain ⟨hBty, hBlt, hBty_typing, hBty_le⟩ :=
+    lvalTargetsTyping_member_strengthens htB h (hAB hhmem)
+  have hh_eqv : Ty.eqv hAty hBty :=
+    hdet h (List.mem_append_left _ hhmem) _ _ _ _ hAty_typing hBty_typing
+  cases tyA with
+  | unit =>
+      have hAu : hAty = .unit := PartialTyStrengthens.to_unit_inv hAty_le
+      subst hAu
+      have hBu : hBty = .unit := by cases hBty <;> simp_all [Ty.eqv]
+      subst hBu
+      have : tyB = .unit := PartialTyStrengthens.from_unit_inv hBty_le
+      subst this; trivial
+  | int =>
+      have hAu : hAty = .int := PartialTyStrengthens.to_int_inv hAty_le
+      subst hAu
+      have hBu : hBty = .int := by cases hBty <;> simp_all [Ty.eqv]
+      subst hBu
+      have : tyB = .int := PartialTyStrengthens.from_int_inv hBty_le
+      subst this; trivial
+  | box cA =>
+      have hAbox : hAty = .box cA := by cases hAty_le; rfl
+      subst hAbox
+      have hBbox : ∃ cB, hBty = .box cB := by cases hBty <;> simp_all [Ty.eqv]
+      obtain ⟨cB, hBeq⟩ := hBbox
+      subst hBeq
+      have : tyB = .box cB :=
+        PartialTyStrengthens.from_box_ty_inv hBty_le
+      subst this
+      exact hh_eqv
+  | borrow m UA =>
+      rcases PartialTyStrengthens.to_borrow_inv hAty_le with ⟨hAtt, hAtyEq, _⟩
+      subst hAtyEq
+      cases hBty with
+      | borrow mB hBtt =>
+          simp only [Ty.eqv] at hh_eqv
+          obtain ⟨rfl, _, _⟩ := hh_eqv
+          rcases PartialTyStrengthens.from_borrow_inv hBty_le with ⟨UB, htyBeq, _⟩
+          subst htyBeq
+          refine ⟨rfl, ?_, ?_⟩
+          · intro x hx
+            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
+              lvalTargetsTyping_borrowTargets_mem htA x hx
+            obtain ⟨tBty, tBlt, tBtyping, tBle⟩ :=
+              lvalTargetsTyping_member_strengthens htB t (hAB htmem)
+            rcases PartialTyStrengthens.to_borrow_inv tBle with ⟨tt'', tBtyEq, htt''_UB⟩
+            subst tBtyEq
+            have hcmp := hdet t (List.mem_append_left _ htmem) _ _ _ _ httty tBtyping
+            simp only [Ty.eqv] at hcmp
+            exact htt''_UB (hcmp.2.1 hxtt)
+          · intro x hx
+            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
+              lvalTargetsTyping_borrowTargets_mem htB x hx
+            obtain ⟨tAty, tAlt, tAtyping, tAle⟩ :=
+              lvalTargetsTyping_member_strengthens htA t (hBA htmem)
+            rcases PartialTyStrengthens.to_borrow_inv tAle with ⟨tt'', tAtyEq, htt''_UA⟩
+            subst tAtyEq
+            have hcmp := hdet t (List.mem_append_right _ htmem) _ _ _ _ tAtyping httty
+            simp only [Ty.eqv] at hcmp
+            exact htt''_UA (hcmp.2.2 hxtt)
+      | unit => simp [Ty.eqv] at hh_eqv
+      | int => simp [Ty.eqv] at hh_eqv
+      | box _ => simp [Ty.eqv] at hh_eqv
+
+/-- Two environments whose common slots carry `eqv` types.  This is the relation
+preserved by the write-fan-out join (both sides are one environment modified by
+writing the same right-hand type), and it is what lets two branch typings of the
+same lval be related across environments. -/
+def EnvEqvCompat (e1 e2 : Env) : Prop :=
+  ∀ x slotA slotB, e1.slotAt x = some slotA → e2.slotAt x = some slotB →
+    PartialTy.eqv slotA.ty slotB.ty
+
+/-- Cross-environment version of `lvalTargetsTyping_subsetEquiv_eqv`: the two
+target-list typings live in possibly-different environments `e1`, `e2`, related
+only through the cross-environment member determinism `hdet`.  The proof is
+identical to the single-environment version (every member fact is taken in its
+own environment; the two sides are linked only via `hdet`). -/
+theorem lvalTargetsTyping_subsetEquiv_eqv_cross {e1 e2 : Env}
+    {tgtsA tgtsB : List LVal} {tyA tyB : Ty} {lA lB : Lifetime}
+    (hAB : tgtsA ⊆ tgtsB) (hBA : tgtsB ⊆ tgtsA)
+    (hdet : ∀ m, m ∈ tgtsA ++ tgtsB → ∀ ma mb lma lmb,
+      LValTyping e1 m (.ty ma) lma → LValTyping e2 m (.ty mb) lmb → Ty.eqv ma mb)
+    (htA : LValTargetsTyping e1 tgtsA (.ty tyA) lA)
+    (htB : LValTargetsTyping e2 tgtsB (.ty tyB) lB) :
+    Ty.eqv tyA tyB := by
+  obtain ⟨h, hhmem⟩ : ∃ h, h ∈ tgtsA := by
+    cases htA with
+    | singleton _ => exact ⟨_, List.mem_cons_self⟩
+    | cons _ _ _ _ => exact ⟨_, List.mem_cons_self⟩
+  obtain ⟨hAty, hAlt, hAty_typing, hAty_le⟩ :=
+    lvalTargetsTyping_member_strengthens htA h hhmem
+  obtain ⟨hBty, hBlt, hBty_typing, hBty_le⟩ :=
+    lvalTargetsTyping_member_strengthens htB h (hAB hhmem)
+  have hh_eqv : Ty.eqv hAty hBty :=
+    hdet h (List.mem_append_left _ hhmem) _ _ _ _ hAty_typing hBty_typing
+  cases tyA with
+  | unit =>
+      have hAu : hAty = .unit := PartialTyStrengthens.to_unit_inv hAty_le
+      subst hAu
+      have hBu : hBty = .unit := by cases hBty <;> simp_all [Ty.eqv]
+      subst hBu
+      have : tyB = .unit := PartialTyStrengthens.from_unit_inv hBty_le
+      subst this; trivial
+  | int =>
+      have hAu : hAty = .int := PartialTyStrengthens.to_int_inv hAty_le
+      subst hAu
+      have hBu : hBty = .int := by cases hBty <;> simp_all [Ty.eqv]
+      subst hBu
+      have : tyB = .int := PartialTyStrengthens.from_int_inv hBty_le
+      subst this; trivial
+  | box cA =>
+      have hAbox : hAty = .box cA := by cases hAty_le; rfl
+      subst hAbox
+      have hBbox : ∃ cB, hBty = .box cB := by cases hBty <;> simp_all [Ty.eqv]
+      obtain ⟨cB, hBeq⟩ := hBbox
+      subst hBeq
+      have : tyB = .box cB :=
+        PartialTyStrengthens.from_box_ty_inv hBty_le
+      subst this
+      exact hh_eqv
+  | borrow m UA =>
+      rcases PartialTyStrengthens.to_borrow_inv hAty_le with ⟨hAtt, hAtyEq, _⟩
+      subst hAtyEq
+      cases hBty with
+      | borrow mB hBtt =>
+          simp only [Ty.eqv] at hh_eqv
+          obtain ⟨rfl, _, _⟩ := hh_eqv
+          rcases PartialTyStrengthens.from_borrow_inv hBty_le with ⟨UB, htyBeq, _⟩
+          subst htyBeq
+          refine ⟨rfl, ?_, ?_⟩
+          · intro x hx
+            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
+              lvalTargetsTyping_borrowTargets_mem htA x hx
+            obtain ⟨tBty, tBlt, tBtyping, tBle⟩ :=
+              lvalTargetsTyping_member_strengthens htB t (hAB htmem)
+            rcases PartialTyStrengthens.to_borrow_inv tBle with ⟨tt'', tBtyEq, htt''_UB⟩
+            subst tBtyEq
+            have hcmp := hdet t (List.mem_append_left _ htmem) _ _ _ _ httty tBtyping
+            simp only [Ty.eqv] at hcmp
+            exact htt''_UB (hcmp.2.1 hxtt)
+          · intro x hx
+            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
+              lvalTargetsTyping_borrowTargets_mem htB x hx
+            obtain ⟨tAty, tAlt, tAtyping, tAle⟩ :=
+              lvalTargetsTyping_member_strengthens htA t (hBA htmem)
+            rcases PartialTyStrengthens.to_borrow_inv tAle with ⟨tt'', tAtyEq, htt''_UA⟩
+            subst tAtyEq
+            have hcmp := hdet t (List.mem_append_right _ htmem) _ _ _ _ tAtyping httty
+            simp only [Ty.eqv] at hcmp
+            exact htt''_UA (hcmp.2.2 hxtt)
+      | unit => simp [Ty.eqv] at hh_eqv
+      | int => simp [Ty.eqv] at hh_eqv
+      | box _ => simp [Ty.eqv] at hh_eqv
+
+/-- Single-lval type determinism (`eqv` form): in a linearizable environment,
+any two typings of the same lval have `eqv` types (same shape, and borrow target
+lists subset-equivalent).  Proved by strong induction on the rank of the lval's
+base variable, with an inner structural induction on the lval (the dereference
+recursion stays at the same rank, while borrow-target recursion strictly lowers
+the rank via `lvalTyping_vars_rank_lt`). -/
+theorem lvalTyping_eqv {env : Env} {φ : Name → Nat}
     (hφ : ∀ x slot, env.slotAt x = some slot →
       ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x) :
     ∀ (lv : LVal) {a b : PartialTy} {la lb : Lifetime},
-      LValTyping env lv a la → LValTyping env lv b lb → PartialTy.sameShape a b := by
+      LValTyping env lv a la → LValTyping env lv b lb → PartialTy.eqv a b := by
   suffices h : ∀ (n : Nat) (lv : LVal), φ (LVal.base lv) = n →
       ∀ {a b : PartialTy} {la lb : Lifetime},
-        LValTyping env lv a la → LValTyping env lv b lb → PartialTy.sameShape a b by
+        LValTyping env lv a la → LValTyping env lv b lb → PartialTy.eqv a b by
     intro lv a b la lb ha hb
     exact h (φ (LVal.base lv)) lv rfl ha hb
   intro n
@@ -5644,29 +6310,167 @@ theorem lvalTyping_sameShape {env : Env} {φ : Name → Nat}
             cases hb with
             | box hboxB =>
                 have hbox := ihStruct hbase' hboxA hboxB
-                simp only [PartialTy.sameShape] at hbox
-                rw [hbox]
+                exact hbox
             | borrow hborB htB =>
                 have hbad := ihStruct hbase' hboxA hborB
-                simp [PartialTy.sameShape] at hbad
+                simp [PartialTy.eqv] at hbad
         | borrow hborA htA =>
             cases hb with
             | box hboxB =>
                 have hbad := ihStruct hbase' hborA hboxB
-                simp [PartialTy.sameShape] at hbad
+                simp [PartialTy.eqv] at hbad
             | borrow hborB htB =>
                 rename_i mutA tgtsA borrowLifeA mutB tgtsB borrowLifeB
-                -- member shape determinism for borrow targets (lower rank)
-                have hmemDet : ∀ tgts, (∀ t ∈ tgts, φ (LVal.base t) < n) →
-                    ∀ m, m ∈ tgts → ∀ ma mb lma lmb,
+                -- member determinism: borrow targets have strictly smaller rank.
+                have hmemDet : ∀ (tgts : List LVal),
+                    (∀ t : LVal, t ∈ tgts → φ (LVal.base t) < n) →
+                    ∀ m : LVal, m ∈ tgts → ∀ ma mb lma lmb,
                       LValTyping env m (.ty ma) lma →
-                      LValTyping env m (.ty mb) lmb → Ty.sameShape ma mb := by
+                      LValTyping env m (.ty mb) lmb → Ty.eqv ma mb := by
                   intro tgts hlow m hm ma mb lma lmb hma hmb
-                  have hmamb : PartialTy.sameShape (.ty ma) (.ty mb) :=
-                    ihRank (φ (LVal.base m)) (hlow m hm) m rfl hma hmb
-                  simpa [PartialTy.sameShape] using hmamb
-                sorry
+                  have := ihRank (φ (LVal.base m)) (hlow m hm) m rfl hma hmb
+                  simpa [PartialTy.eqv] using this
+                -- both borrow lvals have lower-rank targets (rank lemma)
+                have hlowA : ∀ t : LVal, t ∈ tgtsA → φ (LVal.base t) < n := by
+                  intro t ht
+                  have hvar : LVal.base t ∈ PartialTy.vars
+                      (.ty (.borrow mutA tgtsA)) := by
+                    simp only [PartialTy.vars, Ty.vars, List.mem_map]
+                    exact ⟨t, ht, rfl⟩
+                  have hlt := (lvalTyping_vars_rank_lt hφ).1 hborA _ hvar
+                  have hxn : φ (LVal.base lv') = n := hbase'
+                  simpa [LVal.base] using lt_of_lt_of_eq hlt hxn
+                have hlowB : ∀ t : LVal, t ∈ tgtsB → φ (LVal.base t) < n := by
+                  intro t ht
+                  have hvar : LVal.base t ∈ PartialTy.vars
+                      (.ty (.borrow mutB tgtsB)) := by
+                    simp only [PartialTy.vars, Ty.vars, List.mem_map]
+                    exact ⟨t, ht, rfl⟩
+                  have hlt := (lvalTyping_vars_rank_lt hφ).1 hborB _ hvar
+                  have hxn : φ (LVal.base lv') = n := hbase'
+                  simpa [LVal.base] using lt_of_lt_of_eq hlt hxn
+                -- lv' is the same lval in both, so its borrow types are eqv:
+                -- mutA = mutB and tgtsA, tgtsB are subset-equivalent.
+                have hlvEqv : PartialTy.eqv (.ty (.borrow mutA tgtsA))
+                    (.ty (.borrow mutB tgtsB)) :=
+                  ihStruct hbase' hborA hborB
+                simp only [PartialTy.eqv, Ty.eqv] at hlvEqv
+                obtain ⟨rfl, htAB, htBA⟩ := hlvEqv
+                rcases LValTargetsTyping.output_full htA with ⟨aTy, haFull⟩
+                rcases LValTargetsTyping.output_full htB with ⟨bTy, hbFull⟩
+                subst haFull; subst hbFull
+                -- relate the two unions over subset-equivalent target lists
+                have heqv : Ty.eqv aTy bTy :=
+                  lvalTargetsTyping_subsetEquiv_eqv htAB htBA
+                    (hmemDet (tgtsA ++ tgtsB) (by
+                      intro t ht
+                      rcases List.mem_append.mp ht with h | h
+                      · exact hlowA t h
+                      · exact hlowB t h))
+                    htA htB
+                simpa [PartialTy.eqv] using heqv
     -- end deref
+
+/-- Cross-environment single-lval determinism: two typings of the same lval in
+`eqv`-compatible environments have `eqv` types.  This is the keystone for joining
+deref-of-borrow typings across the write-fan-out join — it is the cross-env
+mirror of `lvalTyping_eqv`, with the same φ-rank/structural induction and the
+cross-env `lvalTargetsTyping_subsetEquiv_eqv_cross` in the reborrow case. -/
+theorem lvalTyping_eqv_cross {e1 e2 : Env} {φ : Name → Nat}
+    (hcompat : EnvEqvCompat e1 e2)
+    (hφ1 : ∀ x slot, e1.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hφ2 : ∀ x slot, e2.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x) :
+    ∀ (lv : LVal) {a b : PartialTy} {la lb : Lifetime},
+      LValTyping e1 lv a la → LValTyping e2 lv b lb → PartialTy.eqv a b := by
+  suffices h : ∀ (n : Nat) (lv : LVal), φ (LVal.base lv) = n →
+      ∀ {a b : PartialTy} {la lb : Lifetime},
+        LValTyping e1 lv a la → LValTyping e2 lv b lb → PartialTy.eqv a b by
+    intro lv a b la lb ha hb
+    exact h (φ (LVal.base lv)) lv rfl ha hb
+  intro n
+  induction n using Nat.strong_induction_on with
+  | _ n ihRank =>
+    intro lv
+    induction lv with
+    | var x =>
+        intro _hbase a b la lb ha hb
+        cases ha with
+        | var hslotA =>
+            cases hb with
+            | var hslotB => exact hcompat x _ _ hslotA hslotB
+    | deref lv' ihStruct =>
+        intro hbase a b la lb ha hb
+        have hbase' : φ (LVal.base lv') = n := by simpa [LVal.base] using hbase
+        cases ha with
+        | box hboxA =>
+            cases hb with
+            | box hboxB =>
+                have hbox := ihStruct hbase' hboxA hboxB
+                exact hbox
+            | borrow hborB htB =>
+                have hbad := ihStruct hbase' hboxA hborB
+                simp [PartialTy.eqv] at hbad
+        | borrow hborA htA =>
+            cases hb with
+            | box hboxB =>
+                have hbad := ihStruct hbase' hborA hboxB
+                simp [PartialTy.eqv] at hbad
+            | borrow hborB htB =>
+                rename_i mutA tgtsA borrowLifeA mutB tgtsB borrowLifeB
+                have hmemDet : ∀ (tgts : List LVal),
+                    (∀ t : LVal, t ∈ tgts → φ (LVal.base t) < n) →
+                    ∀ m : LVal, m ∈ tgts → ∀ ma mb lma lmb,
+                      LValTyping e1 m (.ty ma) lma →
+                      LValTyping e2 m (.ty mb) lmb → Ty.eqv ma mb := by
+                  intro tgts hlow m hm ma mb lma lmb hma hmb
+                  have := ihRank (φ (LVal.base m)) (hlow m hm) m rfl hma hmb
+                  simpa [PartialTy.eqv] using this
+                have hlowA : ∀ t : LVal, t ∈ tgtsA → φ (LVal.base t) < n := by
+                  intro t ht
+                  have hvar : LVal.base t ∈ PartialTy.vars
+                      (.ty (.borrow mutA tgtsA)) := by
+                    simp only [PartialTy.vars, Ty.vars, List.mem_map]
+                    exact ⟨t, ht, rfl⟩
+                  have hlt := (lvalTyping_vars_rank_lt hφ1).1 hborA _ hvar
+                  simpa [LVal.base] using lt_of_lt_of_eq hlt hbase'
+                have hlowB : ∀ t : LVal, t ∈ tgtsB → φ (LVal.base t) < n := by
+                  intro t ht
+                  have hvar : LVal.base t ∈ PartialTy.vars
+                      (.ty (.borrow mutB tgtsB)) := by
+                    simp only [PartialTy.vars, Ty.vars, List.mem_map]
+                    exact ⟨t, ht, rfl⟩
+                  have hlt := (lvalTyping_vars_rank_lt hφ2).1 hborB _ hvar
+                  simpa [LVal.base] using lt_of_lt_of_eq hlt hbase'
+                have hlvEqv : PartialTy.eqv (.ty (.borrow mutA tgtsA))
+                    (.ty (.borrow mutB tgtsB)) :=
+                  ihStruct hbase' hborA hborB
+                simp only [PartialTy.eqv, Ty.eqv] at hlvEqv
+                obtain ⟨rfl, htAB, htBA⟩ := hlvEqv
+                rcases LValTargetsTyping.output_full htA with ⟨aTy, haFull⟩
+                rcases LValTargetsTyping.output_full htB with ⟨bTy, hbFull⟩
+                subst haFull; subst hbFull
+                have heqv : Ty.eqv aTy bTy :=
+                  lvalTargetsTyping_subsetEquiv_eqv_cross htAB htBA
+                    (hmemDet (tgtsA ++ tgtsB) (by
+                      intro t ht
+                      rcases List.mem_append.mp ht with h | h
+                      · exact hlowA t h
+                      · exact hlowB t h))
+                    htA htB
+                simpa [PartialTy.eqv] using heqv
+    -- end deref
+
+/-- Single-lval shape determinism (the coarse `sameShape` form used downstream),
+derived from `lvalTyping_eqv`. -/
+theorem lvalTyping_sameShape {env : Env} {φ : Name → Nat}
+    (hφ : ∀ x slot, env.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x) :
+    ∀ (lv : LVal) {a b : PartialTy} {la lb : Lifetime},
+      LValTyping env lv a la → LValTyping env lv b lb → PartialTy.sameShape a b := by
+  intro lv a b la lb ha hb
+  exact PartialTy.sameShape_of_eqv (lvalTyping_eqv hφ lv ha hb)
 
 theorem EnvJoin.slot_union {left right join : Env} {x : Name}
     {leftSlot rightSlot joinSlot : EnvSlot} :
@@ -5718,6 +6522,285 @@ theorem EnvJoin.slot_union {left right join : Env} {x : Name}
     have hjoinStrength := hjoin.2 hupper x
     simp [candidateEnv, Env.update, hjoinSlot] at hjoinStrength
     exact hjoinStrength
+
+/-- Appendix 9.6 shape stability: a `Definition 3.23` write of positive rank
+preserves the *shape* of every slot, provided the write is leaf-shape-compatible
+(`WriteShapeCompat`).  Positive rank forces every leaf update to be `W-Weak`
+(a join that preserves shape via `partialTyJoin_sameShape`); the `W-Strong`
+(rank 0) leaf — which could change `.undef`→`.ty` on re-initialisation — never
+occurs in this regime, so it is discharged vacuously. -/
+theorem EnvWrite.shapePreserved {rank : Nat} {env result : Env} {lv : LVal}
+    {ty : Ty} :
+    0 < rank →
+    EnvWrite rank env lv ty result →
+    (∀ slot, env.slotAt (LVal.base lv) = some slot →
+      WriteShapeCompat env (LVal.path lv) slot.ty ty) →
+    EnvShapePreserved env result := by
+  intro hrank hwrite hsc
+  refine EnvWrite.rec
+    (motive_1 := fun rank env₁ path oldTy ty env₂ updatedTy _ =>
+      0 < rank → WriteShapeCompat env₁ path oldTy ty →
+        EnvShapePreserved env₁ env₂ ∧ PartialTy.sameShape oldTy updatedTy)
+    (motive_2 := fun rank env path targets ty result _ =>
+      0 < rank →
+      (∀ t, t ∈ targets → ∀ tslot,
+        env.slotAt (LVal.base (prependPath path t)) = some tslot →
+        WriteShapeCompat env (LVal.path (prependPath path t)) tslot.ty ty) →
+        EnvShapePreserved env result)
+    (motive_3 := fun rank env lv ty result _ =>
+      0 < rank →
+      (∀ slot, env.slotAt (LVal.base lv) = some slot →
+        WriteShapeCompat env (LVal.path lv) slot.ty ty) →
+        EnvShapePreserved env result)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite hrank hsc
+  case strong =>
+    intro env old ty hrank0 _hcompat
+    exact absurd hrank0 (Nat.lt_irrefl 0)
+  case weak =>
+    intro env rank old joined ty hjoinTy _hrank hcompat
+    cases hcompat with
+    | leaf hshape =>
+        exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
+  case box =>
+    intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank hcompat
+    cases hcompat with
+    | box hInner =>
+        rcases ih hrank hInner with ⟨hpres, hshape⟩
+        exact ⟨hpres, hshape⟩
+  case mutBorrow =>
+    intro env₁ env₂ rank path targets ty hwrites ih _hrank hcompat
+    cases hcompat with
+    | borrow hTargets =>
+        exact ⟨ih (Nat.succ_pos rank) hTargets, PartialTy.sameShape_refl _⟩
+  case nil =>
+    intro rank env path ty _hrank _hprem
+    exact EnvShapePreserved.refl env
+  case singleton =>
+    intro rank env updated path target ty _hwrite ih hrank hprem
+    exact ih hrank (fun slot hslot => hprem target (by simp) slot hslot)
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      _hwrite _hwrites hjoin ihWrite ihWrites hrank hprem
+    have hupd : EnvShapePreserved env updated :=
+      ihWrite hrank (fun slot hslot => hprem target (by simp) slot hslot)
+    have hrest : EnvShapePreserved env restEnv :=
+      ihWrites hrank
+        (fun t ht slot hslot => hprem t (List.mem_cons_of_mem _ ht) slot hslot)
+    intro x rslot hrslot
+    rcases EnvJoin.lifetimesPreserved_left hjoin x rslot hrslot with ⟨us, hus, _⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x rslot hrslot with ⟨rs, hrs, _⟩
+    rcases EnvJoin.slot_union hjoin hus hrs hrslot with ⟨_, _, hunionSlot⟩
+    rcases hupd x us hus with ⟨es, hes, hShapeUS⟩
+    rcases hrest x rs hrs with ⟨es', hes', hShapeRS⟩
+    have hesEq : es = es' := Option.some.inj (hes.symm.trans hes')
+    subst hesEq
+    have hUSRS : PartialTy.sameShape us.ty rs.ty :=
+      PartialTy.sameShape_trans (PartialTy.sameShape_symm hShapeUS) hShapeRS
+    have hUSc : PartialTy.sameShape us.ty rslot.ty :=
+      partialTyUnion_sameShape_of_sameShape hunionSlot hUSRS
+    exact ⟨es, hes, PartialTy.sameShape_trans hShapeUS hUSc⟩
+  case intro =>
+    intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ih hrank hprem
+    have hsc' : WriteShapeCompat env₁ (LVal.path lv) slot.ty ty := hprem slot hslot
+    rcases ih hrank hsc' with ⟨hpres, hshape⟩
+    exact EnvShapePreserved.update_from_source_slot hpres hslot hshape
+
+/-- Environment strengthening is transitive (an ingredient for the write-result
+strengthening characterization `env ≤ result`). -/
+theorem EnvStrengthens.trans {a b c : Env}
+    (hab : EnvStrengthens a b) (hbc : EnvStrengthens b c) :
+    EnvStrengthens a c := by
+  intro x
+  have h1 := hab x
+  have h2 := hbc x
+  cases hb : b.slotAt x with
+  | none =>
+      cases ha : a.slotAt x with
+      | none =>
+          cases hc : c.slotAt x with
+          | none => trivial
+          | some sc => rw [hb, hc] at h2; simp at h2
+      | some sa => rw [ha, hb] at h1; simp at h1
+  | some sb =>
+      cases ha : a.slotAt x with
+      | none => rw [ha, hb] at h1; simp at h1
+      | some sa =>
+          cases hc : c.slotAt x with
+          | none => rw [hb, hc] at h2; simp at h2
+          | some sc =>
+              rw [ha, hb] at h1
+              rw [hb, hc] at h2
+              exact ⟨h1.1.trans h2.1, partialTyStrengthens_trans h1.2 h2.2⟩
+
+theorem EnvStrengthens.update_from_source_slot {source middle : Env}
+    {x : Name} {slot : EnvSlot} {newTy : PartialTy} :
+    EnvStrengthens source middle →
+    source.slotAt x = some slot →
+    PartialTyStrengthens slot.ty newTy →
+    EnvStrengthens source (middle.update x { slot with ty := newTy }) := by
+  intro hstr hslot hnew y
+  by_cases hy : y = x
+  · have hupd : (middle.update x { slot with ty := newTy }).slotAt y
+        = some { slot with ty := newTy } := by rw [hy]; simp [Env.update]
+    have hsy : source.slotAt y = some slot := by rw [hy]; exact hslot
+    rw [hsy, hupd]
+    exact ⟨rfl, hnew⟩
+  · have hupd : (middle.update x { slot with ty := newTy }).slotAt y
+        = middle.slotAt y := by simp [Env.update, hy]
+    rw [hupd]
+    exact hstr y
+
+/-- A positive-rank `Definition 3.23` write only makes slots more defined:
+`env ≤ result` (result strengthens env — borrow target lists only grow).  This is
+the growth characterization complementing `EnvWrite.shapePreserved`. -/
+theorem EnvWrite.envStrengthens {rank : Nat} {env result : Env} {lv : LVal}
+    {ty : Ty} :
+    0 < rank →
+    EnvWrite rank env lv ty result →
+    EnvStrengthens env result := by
+  intro hrank hwrite
+  refine EnvWrite.rec
+    (motive_1 := fun rank env₁ _path oldTy _ty env₂ updatedTy _ =>
+      0 < rank → EnvStrengthens env₁ env₂ ∧ PartialTyStrengthens oldTy updatedTy)
+    (motive_2 := fun rank env _path _targets _ty result _ =>
+      0 < rank → EnvStrengthens env result)
+    (motive_3 := fun rank env _lv _ty result _ =>
+      0 < rank → EnvStrengthens env result)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite hrank
+  case strong =>
+    intro env old ty hrank0
+    exact absurd hrank0 (Nat.lt_irrefl 0)
+  case weak =>
+    intro env rank old joined ty hjoinTy _hrank
+    exact ⟨EnvStrengthens.refl env, PartialTyUnion.left_strengthens hjoinTy⟩
+  case box =>
+    intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank
+    rcases ih hrank with ⟨hpres, hinner⟩
+    exact ⟨hpres, PartialTyStrengthens.box hinner⟩
+  case mutBorrow =>
+    intro env₁ env₂ rank path targets ty hwrites ih _hrank
+    exact ⟨ih (Nat.succ_pos rank), PartialTyStrengthens.reflex⟩
+  case nil =>
+    intro rank env path ty _hrank
+    exact EnvStrengthens.refl env
+  case singleton =>
+    intro rank env updated path target ty _hwrite ih hrank
+    exact ih hrank
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      _hwrite _hwrites hjoin ihWrite _ihWrites hrank
+    have hupd : EnvStrengthens env updated := ihWrite hrank
+    have hUpdResult : EnvStrengthens updated result := hjoin.1 (by simp)
+    exact EnvStrengthens.trans hupd hUpdResult
+  case intro =>
+    intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ih hrank
+    rcases ih hrank with ⟨hpres, hstr⟩
+    exact EnvStrengthens.update_from_source_slot hpres hslot hstr
+
+/-- Every borrow target appearing in a result slot originates either from the
+same variable's slot in the source env, or from the right-hand type written.
+This is the per-slot growth bound (piece (A) of the coherence closure): writes
+only grow borrow target lists by the rhs's contained-borrow targets. -/
+def BorrowTargetOrigin (env : Env) (rhsTy : Ty) (x : Name) (t : LVal) : Prop :=
+  (∃ slot m T, env.slotAt x = some slot ∧
+    PartialTyContains slot.ty (.borrow m T) ∧ t ∈ T) ∨
+  (∃ m T, PartialTyContains (.ty rhsTy) (.borrow m T) ∧ t ∈ T)
+
+/-- Type-level analogue of `BorrowTargetOrigin` used for the `UpdateAtPath`
+motive: a borrow target in the updated type comes from the old type or the rhs. -/
+def TypeBorrowOrigin (oldTy : PartialTy) (rhsTy : Ty) (t : LVal) : Prop :=
+  (∃ m T, PartialTyContains oldTy (.borrow m T) ∧ t ∈ T) ∨
+  (∃ m T, PartialTyContains (.ty rhsTy) (.borrow m T) ∧ t ∈ T)
+
+theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
+    {rhsTy : Ty} :
+    0 < rank →
+    EnvWrite rank env lv rhsTy result →
+    ∀ x slot m T, result.slotAt x = some slot →
+      PartialTyContains slot.ty (.borrow m T) →
+      ∀ t, t ∈ T → BorrowTargetOrigin env rhsTy x t := by
+  intro hrank hwrite
+  refine EnvWrite.rec
+    (motive_1 := fun rank env₁ _path oldTy ty env₂ updatedTy _ =>
+      0 < rank →
+      (∀ m T, PartialTyContains updatedTy (.borrow m T) →
+        ∀ t, t ∈ T → TypeBorrowOrigin oldTy ty t) ∧
+      (∀ x slot m T, env₂.slotAt x = some slot →
+        PartialTyContains slot.ty (.borrow m T) →
+        ∀ t, t ∈ T → BorrowTargetOrigin env₁ ty x t))
+    (motive_2 := fun rank env _path _targets ty result _ =>
+      0 < rank →
+      ∀ x slot m T, result.slotAt x = some slot →
+        PartialTyContains slot.ty (.borrow m T) →
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+    (motive_3 := fun rank env _lv ty result _ =>
+      0 < rank →
+      ∀ x slot m T, result.slotAt x = some slot →
+        PartialTyContains slot.ty (.borrow m T) →
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite hrank
+  case strong =>
+    intro env old ty h0
+    exact absurd h0 (Nat.lt_irrefl 0)
+  case weak =>
+    intro env rank old joined ty hjoin _hrank
+    refine ⟨?_, ?_⟩
+    · intro m T hcontains t ht
+      rcases PartialTyUnion.contained_borrow_member hjoin hcontains ht with
+        ⟨Tl, hl, htl⟩ | ⟨Tr, hr, htr⟩
+      · exact Or.inl ⟨m, Tl, hl, htl⟩
+      · exact Or.inr ⟨m, Tr, hr, htr⟩
+    · intro x slot m T hslot hcontains t ht
+      exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+  case box =>
+    intro env₁ env₂ rank path inner updatedInner ty _hupd ih hrank
+    rcases ih hrank with ⟨ihType, ihEnv⟩
+    refine ⟨?_, ihEnv⟩
+    intro m T hcontains t ht
+    cases hcontains with
+    | box hinner =>
+        rcases ihType m T hinner t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
+        · exact Or.inl ⟨m₀, T₀, PartialTyContains.box hc₀, ht₀⟩
+        · exact Or.inr hrhs
+  case mutBorrow =>
+    intro env₁ env₂ rank path targets ty hwrites ih _hrank
+    refine ⟨?_, ?_⟩
+    · intro m T hcontains t ht
+      exact Or.inl ⟨m, T, hcontains, ht⟩
+    · exact ih (Nat.succ_pos rank)
+  case nil =>
+    intro rank env path ty _hrank x slot m T hslot hcontains t ht
+    exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+  case singleton =>
+    intro rank env updated path target ty _hwrite ih hrank
+    exact ih hrank
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      _hwrite _hwrites hjoin ihWrite ihWrites hrank x slot m T hslot hcontains t ht
+    rcases EnvJoin.lifetimesPreserved_left hjoin x slot hslot with ⟨us, hus, _⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x slot hslot with ⟨rs, hrs, _⟩
+    rcases EnvJoin.slot_union hjoin hus hrs hslot with ⟨_, _, hunion⟩
+    rcases PartialTyUnion.contained_borrow_member hunion hcontains ht with
+      ⟨Tl, hl, htl⟩ | ⟨Tr, hr, htr⟩
+    · exact ihWrite hrank x us m Tl hus hl t htl
+    · exact ihWrites hrank x rs m Tr hrs hr t htr
+  case intro =>
+    intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ih hrank
+      x rslot m T hrslot hcontains t ht
+    rcases ih hrank with ⟨ihType, ihEnv⟩
+    by_cases hx : x = LVal.base lv
+    · have hreq : rslot = { slot with ty := updatedTy } := by
+        have hlk : (env₂.update (LVal.base lv) { slot with ty := updatedTy }).slotAt x
+            = some { slot with ty := updatedTy } := by rw [hx]; simp [Env.update]
+        rw [hlk] at hrslot; exact (Option.some.inj hrslot).symm
+      rw [hreq] at hcontains
+      rcases ihType m T hcontains t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
+      · exact Or.inl ⟨slot, m₀, T₀, by rw [hx]; exact hslot, hc₀, ht₀⟩
+      · exact Or.inr hrhs
+    · have hru : (env₂.update (LVal.base lv) { slot with ty := updatedTy }).slotAt x
+          = env₂.slotAt x := by simp [Env.update, hx]
+      rw [hru] at hrslot
+      exact ihEnv x rslot m T hrslot hcontains t ht
 
 theorem LValTyping.box_partial_join_bounded {left right join : Env}
     {source : LVal} {leftInner rightInner : PartialTy}
@@ -6167,50 +7250,20 @@ theorem BorrowTargetsWellFormedInSlot.of_partialTyUnion {env : Env}
     ∀ {mutable targets},
       PartialTyContains union (.borrow mutable targets) →
       BorrowTargetsWellFormedInSlot env lifetime targets := by
-  -- Missing finite-target-list closure.  With paper-shaped whole-list target
-  -- typing, side-local borrow well-formedness gives base-slot survival for
-  -- every target in `targets`, but it does not construct the required
-  -- `LValTargetsTyping env targets ...` witness.  Use
-  -- `of_partialTyUnion_of_targetsTyping` when that witness is available.
-  sorry
-
-/--
-Honest finite-union borrow-target preservation.
-
-`PartialTyUnion` can explain where every target mentioned by a contained borrow
-in the union came from, so side-local borrow well-formedness gives the
-base-slot survival facts.  It cannot, by itself, construct the paper's
-whole-list target typing premise `Γ ⊢ u : ⟨T⟩^m`; callers must provide that
-finite target-list typing witness explicitly.
--/
-theorem BorrowTargetsWellFormedInSlot.of_partialTyUnion_of_targetsTyping
-    {env : Env} {left right union : PartialTy} {lifetime : Lifetime}
-    {mutable : Bool} {targets : List LVal}
-    {targetTy : Ty} {targetLifetime : Lifetime} :
-    PartialTyUnion left right union →
-    (∀ {mutable targets},
-      PartialTyContains left (.borrow mutable targets) →
-      BorrowTargetsWellFormedInSlot env lifetime targets) →
-    (∀ {mutable targets},
-      PartialTyContains right (.borrow mutable targets) →
-      BorrowTargetsWellFormedInSlot env lifetime targets) →
-    LValTargetsTyping env targets (.ty targetTy) targetLifetime →
-    targetLifetime ≤ lifetime →
-    PartialTyContains union (.borrow mutable targets) →
-    BorrowTargetsWellFormedInSlot env lifetime targets := by
-  intro hunion hleft hright htargets houtlives hcontains
-  exact ⟨targetTy, targetLifetime, htargets, houtlives, by
-    intro target htarget
-    rcases PartialTyUnion.contained_borrow_member
-        hunion hcontains htarget with hfromLeft | hfromRight
-    · rcases hfromLeft with ⟨leftTargets, hcontainsLeft, htargetLeft⟩
-      rcases hleft hcontainsLeft with
-        ⟨_leftTy, _leftLifetime, _leftTyping, _leftOutlives, hbase⟩
-      exact hbase target htargetLeft
-    · rcases hfromRight with ⟨rightTargets, hcontainsRight, htargetRight⟩
-      rcases hright hcontainsRight with
-        ⟨_rightTy, _rightLifetime, _rightTyping, _rightOutlives, hbase⟩
-      exact hbase target htargetRight⟩
+  -- With the borrow invariant stated per target (Definition 4.8(i)), the union
+  -- case is immediate: rule W-Bor merges the target lists of `left` and `right`,
+  -- so every target of the union's borrow is a target of `left`'s or `right`'s
+  -- borrow, and that side's per-target well-formedness supplies its typing,
+  -- lifetime bound and base-slot survival directly.  No joint target-list typing
+  -- of the merged list is needed (it need not exist; see the note on
+  -- `BorrowTargetsWellFormedInSlot`).
+  intro hunion hleft hright mutable targets hcontains target htarget
+  rcases PartialTyUnion.contained_borrow_member hunion hcontains htarget with
+    hfromLeft | hfromRight
+  · rcases hfromLeft with ⟨leftTargets, hcontainsLeft, htargetLeft⟩
+    exact hleft hcontainsLeft target htargetLeft
+  · rcases hfromRight with ⟨rightTargets, hcontainsRight, htargetRight⟩
+    exact hright hcontainsRight target htargetRight
 
 theorem PartialTyBorrowsWellFormedInSlot.of_partialTyUnion {env : Env}
     {left right union : PartialTy} {lifetime : Lifetime} :
@@ -6261,51 +7314,6 @@ theorem ContainedBorrowsWellFormed.join_of_inSlot {left right join : Env} :
         hright hrightSlot ⟨rightSlot, hrightSlot, hcontainsRight⟩
       simpa [hrightLife] using htargets)
     hcontainsJoin
-
-/--
-Target-list typing records a finite union of the target types.  Any selected
-target therefore has a full type that strengthens the union type.
--/
-theorem lvalTargetsTyping_member_strengthens {env : Env}
-    {targets : List LVal} {unionTy : PartialTy} {lifetime : Lifetime} :
-    LValTargetsTyping env targets unionTy lifetime →
-    ∀ target,
-      target ∈ targets →
-      ∃ ty targetLifetime,
-        LValTyping env target (.ty ty) targetLifetime ∧
-        PartialTyStrengthens (.ty ty) unionTy := by
-  intro htargets
-  refine LValTargetsTyping.rec
-    (motive_1 := fun _ _ _ _ => True)
-    (motive_2 := fun targets unionTy _ _ =>
-      ∀ target,
-        target ∈ targets →
-        ∃ ty targetLifetime,
-          LValTyping env target (.ty ty) targetLifetime ∧
-          PartialTyStrengthens (.ty ty) unionTy)
-    ?var ?box ?borrow ?singleton ?cons htargets
-  · intro _x _slot _hslot
-    trivial
-  · intro _lv _inner _lifetime _htyping _ih
-    trivial
-  · intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-      _htyping _htargets _ihTyping _ihTargets
-    trivial
-  · intro target ty targetLifetime htyping _ihTyping selected hmem
-    simp at hmem
-    subst hmem
-    exact ⟨ty, targetLifetime, htyping, PartialTyStrengthens.reflex⟩
-  · intro target rest headTy headLifetime _restLifetime _lifetime _restTy unionTy
-      hhead _hrest hunion _hintersection _ihHead ihRest selected hmem
-    simp at hmem
-    rcases hmem with hselected | hselected
-    · subst hselected
-      exact ⟨headTy, headLifetime, hhead, PartialTyUnion.left_strengthens hunion⟩
-    · rcases ihRest selected hselected with
-        ⟨ty, selectedLifetime, htyping, hstrength⟩
-      exact ⟨ty, selectedLifetime, htyping,
-        partialTyStrengthens_trans hstrength
-          (PartialTyUnion.right_strengthens hunion)⟩
 
 /--
 Faithful target-list typing construction.
@@ -11692,23 +12700,21 @@ theorem BorrowTargetsWellFormedInSlot.update_of_not_pathConflicts {env : Env}
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
     (∀ target, target ∈ targets → ¬ target ⋈ (.var x)) →
     BorrowTargetsWellFormedInSlot (env.update x slot) slotLifetime targets := by
-  intro hnotWrite htargets hnotTargets
-  rcases htargets with
-    ⟨targetTy, targetLifetime, htargetsTyping, houtlives, hbase⟩
-  exact ⟨targetTy, targetLifetime,
-    (LValTyping.update_of_not_pathConflicts (slot := slot) hnotWrite).2
-      htargetsTyping hnotTargets,
-    houtlives,
-    by
-      intro target htarget
-      rcases hbase target htarget with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-      have hbaseNe : LVal.base target ≠ x := by
-        intro hbaseEq
-        exact hnotTargets target htarget hbaseEq
-      have hbaseSlot' :
-          (env.update x slot).slotAt (LVal.base target) = some baseSlot := by
-        simpa [Env.update, hbaseNe] using hbaseSlot
-      exact ⟨baseSlot, hbaseSlot', hbaseOutlives⟩⟩
+  intro hnotWrite htargets hnotTargets target htarget
+  rcases htargets target htarget with
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+  refine ⟨targetTy, targetLifetime,
+    (LValTyping.update_of_not_pathConflicts (slot := slot) hnotWrite).1
+      htyping (hnotTargets target htarget),
+    houtlives, ?_⟩
+  rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+  have hbaseNe : LVal.base target ≠ x := by
+    intro hbaseEq
+    exact hnotTargets target htarget hbaseEq
+  have hbaseSlot' :
+      (env.update x slot).slotAt (LVal.base target) = some baseSlot := by
+    simpa [Env.update, hbaseNe] using hbaseSlot
+  exact ⟨baseSlot, hbaseSlot', hbaseOutlives⟩
 
 theorem PartialTyBorrowsWellFormedInSlot.update_of_not_pathConflicts {env : Env}
     {x : Name} {slot : EnvSlot} {slotLifetime : Lifetime}
@@ -11813,20 +12819,19 @@ theorem ContainedBorrowsWellFormed.move {env env' : Env} {lv : LVal}
     hwellFormed.1 x containedOldSlot mutable targets hcontainedOldSlot
       ⟨containedOldSlot, hcontainedOldSlot, hcontainsOldTy⟩
   rw [← hlifetimeContained]
-  rcases htargetsOld with
-    ⟨targetTy, targetLifetime, htargetsTyping, houtlives, hbase⟩
   have hnotTargets : ∀ target, target ∈ targets → ¬ target ⋈ lv := by
     intro target htarget
     exact not_pathConflicts_of_not_writeProhibited_contains hnotWrite
       ⟨containedOldSlot, hcontainedOldSlot, hcontainsOldTy⟩ htarget
+  intro target htarget
+  rcases htargetsOld target htarget with
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
   exact ⟨targetTy, targetLifetime,
-    (LValTyping.move_of_not_pathConflicts hmove hnotWrite).2
-      htargetsTyping hnotTargets,
+    (LValTyping.move_of_not_pathConflicts hmove hnotWrite).1
+      htyping (hnotTargets target htarget),
     houtlives,
-    by
-      intro target htarget
-      exact LValBaseOutlives.move_of_not_pathConflicts
-        hmove (hnotTargets target htarget) (hbase target htarget)⟩
+    LValBaseOutlives.move_of_not_pathConflicts
+      hmove (hnotTargets target htarget) hbase⟩
 
 theorem BorrowTargetsWellFormed.move_of_no_pathConflicts {env env' : Env}
     {moved : LVal} {targets : List LVal} {lifetime : Lifetime} :
@@ -11837,15 +12842,17 @@ theorem BorrowTargetsWellFormed.move_of_no_pathConflicts {env env' : Env}
     BorrowTargetsWellFormed env' targets lifetime := by
   intro hmove hnotWrite htargets hnotTargets
   cases htargets with
-  | intro htargetsTyping houtlives hbase =>
-      exact BorrowTargetsWellFormed.intro
-        ((LValTyping.move_of_not_pathConflicts hmove hnotWrite).2
-          htargetsTyping hnotTargets)
-        houtlives
-        (by
-          intro target htarget
-          exact LValBaseOutlives.move_of_not_pathConflicts
-            hmove (hnotTargets target htarget) (hbase target htarget))
+  | intro hmembers =>
+      refine BorrowTargetsWellFormed.intro ?_
+      intro target htarget
+      rcases hmembers target htarget with
+        ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+      exact ⟨targetTy, targetLifetime,
+        (LValTyping.move_of_not_pathConflicts hmove hnotWrite).1
+          htyping (hnotTargets target htarget),
+        houtlives,
+        LValBaseOutlives.move_of_not_pathConflicts
+          hmove (hnotTargets target htarget) hbase⟩
 
 theorem WellFormedTy.move_of_no_pathConflicts {env env' : Env}
     {moved : LVal} {ty : Ty} {lifetime : Lifetime} :
@@ -12707,7 +13714,7 @@ theorem LValTargetsTypingJoinTransport.of_full_and_cons
           hleftOutlives hrightOutlives hjoinHead hjoinRest
 
 theorem BorrowTargetsWellFormedInSlot.join_of_lvalTargetsTypingJoinTransport
-    (htransport : LValTargetsTypingJoinTransport)
+    (htransport : FullLValTypingJoinTransport)
     {left right join : Env} {targets : List LVal}
     {slotLifetime : Lifetime} :
     EnvJoin left right join →
@@ -12719,22 +13726,24 @@ theorem BorrowTargetsWellFormedInSlot.join_of_lvalTargetsTypingJoinTransport
     BorrowTargetsWellFormedInSlot right slotLifetime targets →
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro hjoin hleftContained hrightContained hleftInRight hrightInLeft
-    hleft hright
-  rcases hleft with
-    ⟨leftTy, leftLifetime, hleftTargets, hleftOutlives, hleftBase⟩
-  rcases hright with
-    ⟨rightTy, rightLifetime, hrightTargets, hrightOutlives, _hrightBase⟩
-  rcases htransport.targets hjoin hleftContained hrightContained
-      hleftInRight hrightInLeft hleftTargets hrightTargets hleftOutlives
-      hrightOutlives with
-    ⟨joinTy, joinLifetime, hjoinTargets, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTargets, hjoinOutlives,
-    by
-      intro target htarget
-      exact LValBaseOutlives.join_left hjoin (hleftBase target htarget)⟩
+    hleft hright target htarget
+  -- Per-target invariant: each target is typed in both branches; transport the
+  -- single typing across the join via the single-lval full join transport.  No
+  -- joint target-list typing of the merged list is needed, so the list-level
+  -- cons-union landmark is no longer required here.
+  rcases hleft target htarget with
+    ⟨leftTy, leftLifetime, hleftTyping, hleftOutlives, hleftBase⟩
+  rcases hright target htarget with
+    ⟨rightTy, rightLifetime, hrightTyping, hrightOutlives, _hrightBase⟩
+  rcases htransport.full hjoin hleftContained hrightContained
+      hleftInRight hrightInLeft hleftTyping hrightTyping
+      hleftOutlives hrightOutlives with
+    ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives,
+    LValBaseOutlives.join_left hjoin hleftBase⟩
 
 theorem EnvJoin.preserves_observerTargets_of_lvalTargetsTypingJoinTransport
-    (htransport : LValTargetsTypingJoinTransport)
+    (htransport : FullLValTypingJoinTransport)
     {left right join : Env} {targets : List LVal}
     {slotLifetime : Lifetime} :
     EnvJoin left right join →
@@ -12749,7 +13758,7 @@ theorem EnvJoin.preserves_observerTargets_of_lvalTargetsTypingJoinTransport
     htransport
 
 theorem BorrowTargetsTransport.join_observer
-    (htransport : LValTargetsTypingJoinTransport)
+    (htransport : FullLValTypingJoinTransport)
     {source left right join : Env} :
     EnvJoin left right join →
     ContainedBorrowsWellFormed left →
@@ -12766,7 +13775,7 @@ theorem BorrowTargetsTransport.join_observer
     (hleft htargets) (hright htargets)
 
 theorem ContainedBorrowsWellFormedIn.join_observer
-    (htransport : LValTargetsTypingJoinTransport)
+    (htransport : FullLValTypingJoinTransport)
     {source left right join : Env} :
     EnvJoin left right join →
     ContainedBorrowsWellFormed left →
@@ -12829,7 +13838,7 @@ The `writeBorrowTargets` cons case supplies precisely the missing cross-branch
 premises via its observer-target induction hypotheses.
 -/
 theorem ContainedBorrowsWellFormed.join_of_crossBranchTargets
-    (htransport : LValTargetsTypingJoinTransport)
+    (htransport : FullLValTypingJoinTransport)
     {left right join : Env} :
     EnvJoin left right join →
     ContainedBorrowsWellFormed left →
@@ -12862,7 +13871,7 @@ structure UpdateBorrowInvariantCrossLandmarks : Prop where
     PartialTyBorrowsWellFormedInSlot env lifetime right →
     PartialTyBorrowsWellFormedInSlot env lifetime union
   targetListTypingJoin :
-    LValTargetsTypingJoinTransport
+    FullLValTypingJoinTransport
   envWrite_preserves_core
     {rank : Nat} {env result : Env} {lv : LVal}
     {rhsTy : Ty} {slotLifetime : Lifetime} :
@@ -13038,32 +14047,12 @@ theorem fullLValTypingJoinTransport_appendix96 :
   exact FullLValTypingJoinTransport.of_deref
     derefLValTypingJoinTransport_appendix96
 
-theorem lvalTargetsTypingJoinConsTypeUnionLandmark_appendix96 :
-    LValTargetsTypingJoinConsTypeUnionLandmark := by
-  constructor
-  intro left right join target rest leftHeadTy rightHeadTy leftRestTy rightRestTy
-    leftTy rightTy joinHeadTy joinRestTy leftHeadLifetime rightHeadLifetime
-    leftRestLifetime rightRestLifetime leftLifetime rightLifetime joinHeadLifetime
-    joinRestLifetime current hjoin hleftContained
-    hrightContained hleftInRight hrightInLeft hleftHead hrightHead hleftRest
-    hrightRest hleftUnion hrightUnion hleftIntersection hrightIntersection
-    hleftOutlives hrightOutlives hjoinHead hjoinRest hjoinHeadOutlives
-    hjoinRestOutlives
-  -- Appendix 9.6 target-list cons type assembly: after the head and tail have
-  -- been transported through the environment join, their joined full types must
-  -- have the finite type union required by `T-LvBor`.
-  sorry
-
-theorem lvalTargetsTypingJoinConsLandmark_appendix96 :
-    LValTargetsTypingJoinConsLandmark := by
-  exact LValTargetsTypingJoinConsLandmark.of_typeUnion
-    lvalTargetsTypingJoinConsTypeUnionLandmark_appendix96
-
-theorem lvalTargetsTypingJoinTransport_appendix96 :
-    LValTargetsTypingJoinTransport := by
-  exact LValTargetsTypingJoinTransport.of_full_and_cons
-    fullLValTypingJoinTransport_appendix96
-    lvalTargetsTypingJoinConsLandmark_appendix96
+-- The list-level cons-union join landmark (`LValTargetsTypingJoinConsLandmark`)
+-- and the derived list transport `LValTargetsTypingJoinTransport` are no longer
+-- needed: with the per-target borrow invariant, borrow-target preservation under
+-- joins is established target-by-target via the single-lval
+-- `FullLValTypingJoinTransport`, so no joint target-list typing of the merged
+-- list (and hence no cons type-union) is ever required.
 
 theorem EnvWrite.preserves_core_appendix96
     {rank : Nat} {env result : Env} {lv : LVal}
@@ -13081,11 +14070,13 @@ theorem updateBorrowInvariantCrossLandmarks_appendix96 :
     UpdateBorrowInvariantCrossLandmarks where
   partialTyUnion_preserves_borrows := by
     intro env left right union lifetime hunion hleft hright
-    -- This is the finite-target-list closure obligation discussed above
-    -- `BorrowTargetsWellFormedInSlot.of_partialTyUnion`.
-    sorry
+    -- Now provable: with the per-target borrow invariant
+    -- (`BorrowTargetsWellFormedInSlot`), each target of the union's borrow comes
+    -- from `left` or `right` (rule W-Bor merges the target lists), and that
+    -- side's well-formedness supplies its witness directly.
+    exact PartialTyBorrowsWellFormedInSlot.of_partialTyUnion hunion hleft hright
   targetListTypingJoin :=
-    lvalTargetsTypingJoinTransport_appendix96
+    fullLValTypingJoinTransport_appendix96
   envWrite_preserves_core := by
     intro rank env result lv rhsTy slotLifetime hrank hcontained hrhs hwrite
     exact EnvWrite.preserves_core_appendix96 hrank hcontained hrhs hwrite
@@ -13941,24 +14932,18 @@ theorem BorrowTargetsWellFormedInSlot.dropLifetime_child_of_transport
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
     slotLifetime ≤ parent →
     BorrowTargetsWellFormedInSlot (env.dropLifetime child) slotLifetime targets := by
-  intro hchild htransport htargets hslotParent
-  rcases htargets with
-    ⟨targetTy, targetLifetime, htargetsTyping, htargetOutlivesSlot, hbase⟩
-  have hbaseParent :
-      ∀ target, target ∈ targets → LValBaseOutlives env target parent := by
-    intro target htarget
-    rcases hbase target htarget with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+  intro hchild htransport htargets hslotParent target htarget
+  rcases htargets target htarget with
+    ⟨targetTy, targetLifetime, htyping, htargetOutlivesSlot, hbase⟩
+  have hbaseParent : LValBaseOutlives env target parent := by
+    rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
     exact ⟨baseSlot, hbaseSlot,
       LifetimeOutlives.trans hbaseOutlives hslotParent⟩
-  exact ⟨targetTy, targetLifetime,
-    LValTargetsTyping.dropLifetime_child_of_transport
-      htransport hbaseParent htargetsTyping
+  refine ⟨targetTy, targetLifetime,
+    htransport hbaseParent htyping
       (LifetimeOutlives.trans htargetOutlivesSlot hslotParent),
-    htargetOutlivesSlot,
-    by
-      intro target htarget
-      exact LValBaseOutlives.dropLifetime_child hchild hslotParent
-        (hbase target htarget)⟩
+    htargetOutlivesSlot, ?_⟩
+  exact LValBaseOutlives.dropLifetime_child hchild hslotParent hbase
 
 theorem BorrowTargetsWellFormed.dropLifetime_child_of_transport
     {env : Env} {parent child : Lifetime} {targets : List LVal} :
@@ -13968,15 +14953,18 @@ theorem BorrowTargetsWellFormed.dropLifetime_child_of_transport
     BorrowTargetsWellFormed (env.dropLifetime child) targets parent := by
   intro hchild htransport htargets
   cases htargets with
-  | intro htargetsTyping houtlives hbase =>
-      exact BorrowTargetsWellFormed.intro
-        (LValTargetsTyping.dropLifetime_child_of_transport
-          htransport hbase htargetsTyping houtlives)
-        houtlives
-        (by
-          intro target htarget
-          exact LValBaseOutlives.dropLifetime_child hchild
-            (LifetimeOutlives.refl parent) (hbase target htarget))
+  | intro hmembers =>
+      refine BorrowTargetsWellFormed.intro ?_
+      intro target htarget
+      rcases hmembers target htarget with
+        ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+      have hbaseParent : LValBaseOutlives env target parent := by
+        rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+        exact ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+      refine ⟨targetTy, targetLifetime,
+        htransport hbaseParent htyping houtlives, houtlives, ?_⟩
+      exact LValBaseOutlives.dropLifetime_child hchild
+        (LifetimeOutlives.refl parent) hbase
 
 theorem WellFormedTy.dropLifetime_child_of_transport
     {env : Env} {parent child : Lifetime} {ty : Ty} :
