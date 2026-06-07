@@ -5239,6 +5239,26 @@ theorem ShapeCompatible.symm {env : Env} {left right : PartialTy} :
   | undefLeft _hinner ih => exact ShapeCompatible.undefRight ih
   | undefRight _hinner ih => exact ShapeCompatible.undefLeft ih
 
+/-- `ShapeCompatible` transports along a target-subset on the left borrow: if a
+borrow `&[m]T` is shape-compatible with `b` and `T' ⊆ T`, then `&[m]T'` is too.
+(S-Bor only needs every left target to share the common pointee type; a subset
+still does.)  This is the bridge that specialises a *joint* borrow's
+`ShapeCompatible` to each *member* borrow (member targets ⊆ union targets) — the
+piece the fan-out `hbranch` shape argument needs. -/
+theorem ShapeCompatible.of_subset_targets_left {env : Env} {m : Bool}
+    {T T' : List LVal} {b : PartialTy}
+    (h : ShapeCompatible env (.ty (.borrow m T)) b)
+    (hsub : ∀ t, t ∈ T' → t ∈ T) :
+    ShapeCompatible env (.ty (.borrow m T')) b := by
+  cases h with
+  | borrow hleft hright hsc =>
+      exact ShapeCompatible.borrow (fun t ht => hleft t (hsub t ht)) hright hsc
+  | undefRight hinner =>
+      cases hinner with
+      | borrow hleft hright hsc =>
+          exact ShapeCompatible.undefRight
+            (ShapeCompatible.borrow (fun t ht => hleft t (hsub t ht)) hright hsc)
+
 theorem PartialTyUnion.undef_left_ty {left right union : Ty} :
     PartialTyUnion (.ty left) (.ty right) (.ty union) →
     PartialTyUnion (.undef left) (.ty right) (.undef union) := by
