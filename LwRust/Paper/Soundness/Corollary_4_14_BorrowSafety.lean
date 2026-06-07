@@ -2015,7 +2015,6 @@ checks borrow-safety after extending the output environment with `γ ↦ <T>^l`.
 theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
-    BorrowSafetyPreservationObligations →
     SourceTerm term →
     BorrowSafeEnv env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -2024,7 +2023,8 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
       ∀ gamma,
         env₂.fresh gamma →
         BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hobligations hsource hborrowSafe htyping
+  intro hsource hborrowSafe htyping
+  let hobligations := borrowSafetyPreservationObligations_proved
   exact TermTyping.rec
     (motive_1 := fun env typing lifetime term ty env₂ _ =>
       SourceTerm term →
@@ -2176,14 +2176,13 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
 theorem typingPreservesBorrowSafeResult {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {gamma : Name} :
-    BorrowSafetyPreservationObligations →
     SourceTerm term →
     BorrowSafeEnv env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh gamma →
     BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hobligations hsource hborrowSafe htyping hfresh
-  exact (typingPreservesBorrowSafeResult_global hobligations hsource
+  intro hsource hborrowSafe htyping hfresh
+  exact (typingPreservesBorrowSafeResult_global hsource
     hborrowSafe htyping).2.2 gamma hfresh
 
 /--
@@ -2198,7 +2197,6 @@ theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {gamma : Name} :
     UpdateBorrowInvariantObligations →
-    BorrowSafetyPreservationObligations →
     AssignmentRhsEdgesRanked →
     AssignmentWriteCoherenceObligations →
     DeclarationFreshUpdateCoherent →
@@ -2212,17 +2210,17 @@ theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh gamma →
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hupdateObligations hborrowObligations hrankedAssign hwriteCoherent
+  intro hupdateObligations hrankedAssign hwriteCoherent
     hdeclFresh hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
     htyping hfresh hfreshCoherence
   exact ⟨
     borrowInvariance_of_rankedAssign_and_declFreshCoherence
       hupdateObligations hrankedAssign hwriteCoherent hdeclFresh hrefs hvalidState
       hvalidStoreTyping hwellFormed hsafe htyping hfresh hfreshCoherence,
-    typingPreservesBorrowSafeResult hborrowObligations hsource
+    typingPreservesBorrowSafeResult hsource
       hborrowSafe htyping hfresh⟩
 
 /--
@@ -2237,7 +2235,6 @@ theorem borrowSafety_of_ruleCarriedObligations
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {gamma : Name} :
     UpdateBorrowInvariantObligations →
-    BorrowSafetyPreservationObligations →
     SourceTerm term →
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidState store term →
@@ -2248,16 +2245,16 @@ theorem borrowSafety_of_ruleCarriedObligations
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh gamma →
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hupdateObligations hborrowObligations hsource hrefs hvalidState hvalidStoreTyping
+  intro hupdateObligations hsource hrefs hvalidState hvalidStoreTyping
     hwellFormed hborrowSafe hsafe htyping hfresh hfreshCoherence
   exact ⟨
     borrowInvariance_of_ruleCarriedObligations
       hupdateObligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe
       htyping hfresh hfreshCoherence,
-    typingPreservesBorrowSafeResult hborrowObligations hsource
+    typingPreservesBorrowSafeResult hsource
       hborrowSafe htyping hfresh⟩
 
 end Paper
@@ -2287,7 +2284,6 @@ theorem corollary_4_14_borrowSafety
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) :=
   borrowSafety_of_ruleCarriedObligations
     hupdateObligations
-    borrowSafetyPreservationObligations_proved
     hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
     hfresh hfreshCoherence
 
