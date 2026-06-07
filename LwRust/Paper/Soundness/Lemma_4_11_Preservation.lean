@@ -234,6 +234,38 @@ theorem loc_deref_borrow_resolves_target {store : ProgramStore} {env : Env}
         injection hderefLoc with hLeq
         exact ⟨target, hmem, by rw [← hLeq]; exact hloc⟩
 
+/-- Reverse-abstraction bridge (owned/box case): a store owning reference in a
+variable's slot reflects an env box type at that variable, and the pointed-to
+slot is valid at the box's inner type. -/
+theorem env_box_of_store_var_box {store : ProgramStore} {env : Env}
+    {z : Name} {ℓ : Location} {lifetime : Lifetime} :
+    store ∼ₛ env →
+    store.slotAt (VariableProjection z) =
+      some { value := .value (.ref { location := ℓ, owner := true }),
+             lifetime := lifetime } →
+    ∃ envSlot inner pointee,
+      env.slotAt z = some envSlot ∧
+      (envSlot.ty = .box inner ∨ ∃ ty, envSlot.ty = .ty (.box ty) ∧ inner = .ty ty) ∧
+      store.slotAt ℓ = some pointee ∧
+      ValidPartialValue store pointee.value inner := by
+  intro hsafe hstoreSlot
+  have hdomain : ∃ envSlot, env.slotAt z = some envSlot :=
+    (hsafe.1 z).mp ⟨_, hstoreSlot⟩
+  rcases hdomain with ⟨⟨envTy, envLf⟩, henvSlot⟩
+  rcases hsafe.2 z _ henvSlot with ⟨value, hstoreSlot', hvalid⟩
+  rw [hstoreSlot] at hstoreSlot'
+  have hvalueEq :
+      PartialValue.value (.ref { location := ℓ, owner := true }) = value := by
+    injection hstoreSlot' with hslotEq
+    injection hslotEq with hv _
+    exact hv
+  subst hvalueEq
+  cases hvalid with
+  | box hslot hinner =>
+      exact ⟨_, _, _, henvSlot, Or.inl rfl, hslot, hinner⟩
+  | boxFull hslot hinner =>
+      exact ⟨_, _, _, henvSlot, Or.inr ⟨_, rfl, rfl⟩, hslot, hinner⟩
+
 theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
     {env : Env} :
     ValidRuntimeState store (.val .unit) →
