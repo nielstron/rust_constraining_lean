@@ -4399,6 +4399,35 @@ theorem LValTyping.lifetime_le_of_slotsOutlive {env : Env} {current : Lifetime}
       exact LifetimeIntersection.le_of_le hintersection ihHead ihRest)
     htyping
 
+/-- A target-list typing's union lifetime is bounded by `bound` whenever every
+member lval's own typing lifetime is.  The union lifetime is the iterated LUB
+(`LifetimeIntersection`) of the members, so it is `≤ bound` exactly when `bound`
+is an upper bound of all members (`LifetimeIntersection.le_of_le`).  This is the
+per-member fold used by the deref-borrow lifetime bound in the φ-stratified
+join/contained-borrow bootstrap. -/
+theorem lvalTargetsTyping_le_of_members {e : Env} {bound : Lifetime}
+    {T : List LVal} {pt : PartialTy} {lf : Lifetime}
+    (htgts : LValTargetsTyping e T pt lf)
+    (hmem : ∀ t, t ∈ T → ∀ tt tlf, LValTyping e t (.ty tt) tlf → tlf ≤ bound) :
+    lf ≤ bound := by
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _lv _pt _lf _ => True)
+    (motive_2 := fun T _pt lf _ =>
+      (∀ t, t ∈ T → ∀ tt tlf, LValTyping e t (.ty tt) tlf → tlf ≤ bound) → lf ≤ bound)
+    ?var ?box ?borrow ?singleton ?cons htgts hmem
+  case var => intros; trivial
+  case box => intros; trivial
+  case borrow => intros; trivial
+  case singleton =>
+      intro target ty lifetime htarget _ih hmem
+      exact hmem target (by simp) _ _ htarget
+  case cons =>
+      intro target rest headTy headLife restLife life restTy unionTy
+        hhead _hrest hunion hintersection _ihHead ihRest hmem
+      exact LifetimeIntersection.le_of_le hintersection
+        (hmem target (by simp) _ _ hhead)
+        (ihRest (fun t ht => hmem t (List.mem_cons_of_mem _ ht)))
+
 theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
