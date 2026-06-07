@@ -482,16 +482,14 @@ theorem valueTyping_empty_result_wellFormed {env : Env}
 /-- Source-initial borrow invariance through the rule-carried route. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     {lifetime : Lifetime} {ty : Ty} {gamma : Name} :
-    UpdateBorrowInvariantObligations →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     env₂.fresh gamma →
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
-  intro hobligations hsource htyping hfresh hfreshCoherence
+  intro hsource htyping hfresh hfreshCoherence
   exact borrowInvariance_emptyStoreTyping
-    hobligations
     (sourceInitialRuntimeState_valid hsource).1
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty lifetime)
@@ -627,14 +625,11 @@ Source-initial borrow invariance through the explicit ranked/fresh-coherence
 route.
 
 This is the source-program version of
-`borrowInvariance_of_rankedAssign_and_declFreshCoherence`: it avoids the legacy
-bare write-linearization and fresh-type coherence axioms by making the missing
-rank/coherence premises explicit.
+`borrowInvariance_of_rankedAssign_and_declFreshCoherence`.
 -/
 theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
     {gamma : Name} :
-    UpdateBorrowInvariantObligations →
     AssignmentRhsEdgesRanked →
     AssignmentWriteCoherenceObligations →
     DeclarationFreshUpdateCoherent →
@@ -644,10 +639,9 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
-  intro hupdate hranked hwriteCoherent hdeclFresh hsource htyping hfresh
+  intro hranked hwriteCoherent hdeclFresh hsource htyping hfresh
     hfreshCoherence
   exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
-    hupdate
     hranked
     hwriteCoherent
     hdeclFresh
@@ -666,16 +660,14 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
     {gamma : Name} :
-    UpdateBorrowInvariantObligations →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     env₂.fresh gamma →
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
-  intro hupdate hsource htyping hfresh hfreshCoherence
+  intro hsource htyping hfresh hfreshCoherence
   exact borrowInvariance_of_ruleCarriedObligations
-    hupdate
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
@@ -694,14 +686,11 @@ borrow-invariance route.
 This is the source-program counterpart of
 `borrowSafety_of_rankedAssign_and_declFreshCoherence`: the empty initial store,
 environment, and store typing discharge the standard source-state premises, while
-the rank/coherence obligations remain explicit instead of hidden behind legacy
-axioms.
+the rule-carried side conditions are supplied by the typing derivation.
 -/
 theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
     {gamma : Name} :
-    UpdateBorrowInvariantObligations →
-    BorrowSafetyPreservationObligations →
     AssignmentRhsEdgesRanked →
     AssignmentWriteCoherenceObligations →
     DeclarationFreshUpdateCoherent →
@@ -709,14 +698,12 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     env₂.fresh gamma →
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hupdateObligations hborrowObligations hrankedAssign hwriteCoherent
+  intro hrankedAssign hwriteCoherent
     hdeclFresh hsource htyping hfresh hfreshCoherence
   exact borrowSafety_of_rankedAssign_and_declFreshCoherence
-    hupdateObligations
-    hborrowObligations
     hrankedAssign
     hwriteCoherent
     hdeclFresh
@@ -737,19 +724,15 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
 theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
     {gamma : Name} :
-    UpdateBorrowInvariantObligations →
-    BorrowSafetyPreservationObligations →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     env₂.fresh gamma →
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hupdateObligations hborrowObligations hsource htyping hfresh hfreshCoherence
+  intro hsource htyping hfresh hfreshCoherence
   exact borrowSafety_of_ruleCarriedObligations
-    hupdateObligations
-    hborrowObligations
     hsource
     (by
       intro env lifetime

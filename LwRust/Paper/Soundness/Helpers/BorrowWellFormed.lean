@@ -1408,7 +1408,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hnotWrite hmove x sourceSlot _houtlives hslot
+          _hLv _hvar _hnotWrite hmove x sourceSlot _houtlives hslot
         exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
       (by
         intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
@@ -1450,7 +1450,7 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hshape _hwellRhs hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
+          _hLhs _hRhs _hshape _hwellRhs _hvar hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
           houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
@@ -1498,7 +1498,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hnotWrite hmove x sourceSlot _houtlives hslot
+          _hLv _hvar _hnotWrite hmove x sourceSlot _houtlives hslot
         exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
       (by
         intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
@@ -1540,7 +1540,7 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hshape _hwellRhs hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
+          _hLhs _hRhs _hshape _hwellRhs _hvar hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
           houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with

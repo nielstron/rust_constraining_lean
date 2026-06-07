@@ -1807,7 +1807,7 @@ theorem preservation_assign_context_multistep_runtime
   intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping
     hinnerMulti hassignStep
   cases htyping with
-  | assign hLv hinnerTyping hshape hwellTy hwrite _hranked _hcoh hnotWrite =>
+  | assign hLv hinnerTyping hshape hwellTy _hvar hwrite _hranked _hcoh hnotWrite =>
       rcases hinnerPreservation
           (validRuntimeState_assign_inner hvalidRuntime)
           (validStoreTyping_assign_inner hvalidStoreTyping)

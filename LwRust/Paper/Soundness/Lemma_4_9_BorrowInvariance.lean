@@ -3967,7 +3967,7 @@ theorem typingPreservesWellFormed_of_landmarks
         _htypingEq hwellFormed =>
       ⟨hwellFormed,
         hlandmarks.copy_result_wellFormed hwellFormed hLv hcopy⟩)
-    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv hnotWrite hmove
+    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv _hvar hnotWrite hmove
         _htypingEq hwellFormed =>
       hlandmarks.move_preserves_wellFormed hwellFormed hLv hnotWrite hmove)
     (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hmutable _hwrite
@@ -4004,7 +4004,7 @@ theorem typingPreservesWellFormed_of_landmarks
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcoh)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwellRhs hwrite _hranked _hwriteCoh hnotWrite ih htypingEq
+        hLhs hRhs hshape hwellRhs _hvar hwrite _hranked _hwriteCoh hnotWrite ih htypingEq
         hwellFormed =>
       let result := ih htypingEq hwellFormed
       ⟨hlandmarks.assign_preserves_wellFormed hwellFormed result.1 hLhs
@@ -4025,7 +4025,6 @@ theorem typingPreservesWellFormed_of_landmarks
 The assignment rank/write-coherence facts and declaration fresh-slot coherence
 fact come from the strengthened `T-Assign` and `T-Declare` constructors. -/
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
-    (hobligations : UpdateBorrowInvariantObligations)
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
     {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
@@ -4055,7 +4054,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
         _htypingEq hwellFormed =>
       ⟨hwellFormed, copyTy_result_wellFormed hwellFormed hLv hcopy⟩)
-    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv hnotWrite hmove
+    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv _hvar hnotWrite hmove
         _htypingEq hwellFormed =>
       move_preserves_wellFormed hwellFormed hLv hnotWrite hmove)
     (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hmutable _hwrite
@@ -4092,7 +4091,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwellRhs hwrite hranked hwriteCoh hnotWrite ih htypingEq
+        hLhs hRhs hshape hwellRhs hvar hwrite hranked hwriteCoh hnotWrite ih htypingEq
         hwellFormed =>
       by
         let result := ih htypingEq hwellFormed
@@ -4105,13 +4104,27 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
             hwrite hlinBy hbelow
         have hcoh3 := EnvWrite.preserves_coherent_of_obligations
           result.1.2.2.1 hwriteCoh
-        exact ⟨⟨EnvWrite.preserves_containedBorrowsWellFormed hobligations
-              hwellFormed result.1 hLhs htargetLifetime hRhs hshape hwellRhs
-              hwrite hnotWrite,
-            EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
-            hcoh3,
-            Linearizable.of_linearizedBy hlin3By⟩,
-          WellFormedTy.unit⟩)
+        cases _lhs with
+        | var x =>
+            rcases LValTyping.var_inv hLhs with
+              ⟨sourceSlot, hsourceSlot, _hsourceTy, hsourceLifetime⟩
+            rcases (TermTyping.slot_lifetime_survives.1 hRhs)
+                (by simpa [hsourceLifetime] using htargetLifetime)
+                hsourceSlot with
+              ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
+            have hrhsTargetLifetime : rhsSlot.lifetime = _targetLifetime := by
+              rw [← hrhsLifetime, hsourceLifetime]
+            have hLhsResult : LValTyping _env₂ (.var x) rhsSlot.ty _targetLifetime := by
+              rw [← hrhsTargetLifetime]
+              exact LValTyping.var hrhsSlot
+            exact ⟨⟨EnvWrite.preserves_containedBorrowsWellFormed_var
+                  result.1 hLhsResult hwellRhs hwrite hnotWrite,
+                EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
+                hcoh3,
+                Linearizable.of_linearizedBy hlin3By⟩,
+              WellFormedTy.unit⟩
+        | deref _ =>
+            cases hvar)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -4124,7 +4137,6 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
 theorem borrowInvariance_emptyStoreTyping {store : ProgramStore}
     {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {gamma : Name} :
-    UpdateBorrowInvariantObligations →
     ValidState store term →
     ValidStoreTyping store term StoreTyping.empty →
     WellFormedEnv env₁ lifetime →
@@ -4134,10 +4146,9 @@ theorem borrowInvariance_emptyStoreTyping {store : ProgramStore}
     FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
-  intro hobligations hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
+  intro hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
     hfreshCoherence
   rcases typingPreservesWellFormed_of_ruleCarriedObligations
-    hobligations
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
@@ -4199,7 +4210,6 @@ is for the final result binding `gamma`, which is added after the term has been
 typed.
 -/
 theorem borrowInvariance_of_ruleCarriedObligations
-    (hobligations : UpdateBorrowInvariantObligations)
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {gamma : Name} :
@@ -4216,7 +4226,7 @@ theorem borrowInvariance_of_ruleCarriedObligations
   intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
     hfreshCoherence
   rcases typingPreservesWellFormed_of_ruleCarriedObligations
-      hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
+      hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
     ⟨hwellFormedOutput, hwellFormedTy⟩
   exact borrowInvariance_result_extension_of_coherenceObligations
     hwellFormedOutput hwellFormedTy hfresh hfreshCoherence
@@ -4261,10 +4271,10 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
       preservation_copy_multistep_runtime hwellFormed hsafe hvalidRuntime
         (TermTyping.copy (typing := _typing) hLv hcopy hnotRead) hmulti)
     (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty}
-        hLv hnotWrite hmove store finalStore finalValue hvalidRuntime hvalidStoreTyping
+        hLv hvar hnotWrite hmove store finalStore finalValue hvalidRuntime hvalidStoreTyping
         hwellFormed hsafe hmulti =>
       hobligations.move hvalidRuntime hvalidStoreTyping hwellFormed hsafe
-        (TermTyping.move hLv hnotWrite hmove) hmulti)
+        (TermTyping.move hLv hvar hnotWrite hmove) hmulti)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hmutable hnotWrite
         store finalStore finalValue hvalidRuntime _hvalidStoreTyping _hwellFormed hsafe
         hmulti =>
@@ -4312,7 +4322,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             rw [henv₃]
             exact hpreserved)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwellTy hwrite hranked hcoh hnotWrite _ih store finalStore finalValue
+        hLhs hRhs hshape hwellTy _hvar hwrite hranked hcoh hnotWrite _ih store finalStore finalValue
         hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti =>
       by
         rcases multistep_assign_to_value_inv hmulti with
@@ -4342,7 +4352,6 @@ open LwRust.Paper LwRust.Core
 theorem lemma_4_9_borrowInvariance
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {gamma : Name}
-    (hupdate : UpdateBorrowInvariantObligations)
     (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hvalid : ValidState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
@@ -4354,7 +4363,6 @@ theorem lemma_4_9_borrowInvariance
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime :=
   borrowInvariance_of_ruleCarriedObligations
-    hupdate
     hrefs hvalid hstoreTyping hwellFormed hsafe htyping hfresh hfreshCoherence
 
 end LwRust.Paper.Soundness

@@ -604,10 +604,10 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         hwellFormed hsafe _hstore =>
       progress_copy_typing (typing := _typing) (hwellFormed lifetime) hsafe
         (TermTyping.copy (typing := _typing) hLv hcopy hreadProhibited))
-    (fun {_env₁ _env₂ _typing lifetime _valueLifetime _lv _ty} hLv hwriteProhibited hmove
+    (fun {_env₁ _env₂ _typing lifetime _valueLifetime _lv _ty} hLv hvar hwriteProhibited hmove
         hwellFormed hsafe _hstore =>
       progress_move_typing (typing := _typing) (hwellFormed lifetime) hsafe
-        (TermTyping.move (typing := _typing) hLv hwriteProhibited hmove))
+        (TermTyping.move (typing := _typing) hLv hvar hwriteProhibited hmove))
     (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hmutable hwriteProhibited
         hwellFormed hsafe _hstore =>
       progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
@@ -629,10 +629,10 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwf hwrite hranked hcoh hnotWriteProhibited ih hwellFormed
+        hLhs hRhs hshape hwf hvar hwrite hranked hcoh hnotWriteProhibited ih hwellFormed
         hsafe hstore =>
       progress_assign_typing (hwellFormed lifetime) hsafe hstore
-        (TermTyping.assign hLhs hRhs hshape hwf hwrite hranked hcoh hnotWriteProhibited)
+        (TermTyping.assign hLhs hRhs hshape hwf hvar hwrite hranked hcoh hnotWriteProhibited)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _typing _blockLifetime _term _ty} _hterm ih
         outerLifetime hwellFormed hsafe hstore =>

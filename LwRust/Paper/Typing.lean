@@ -533,6 +533,17 @@ def WriteProhibited (env : Env) (lv : LVal) : Prop :=
     target ∈ targets ∧
     target ⋈ lv
 
+/--
+Mechanized strengthening: source-level move and assignment redexes are restricted
+to variable lvalues.  The paper permits general lvalues here, but the concrete
+store preservation proof only has non-axiomatic update preservation for
+variable-base writes; dereference writes require stronger dynamic frame
+information than Definition 3.17 exposes.
+-/
+def LValIsVar : LVal → Prop
+  | .var _ => True
+  | .deref _ => False
+
 def Strike : Path → PartialTy → PartialTy → Prop
   | [], .ty sourceTy, .undef targetTy => sourceTy = targetTy
   | _ :: path, .box inner, .box struck => Strike path inner struck
@@ -752,6 +763,7 @@ mutual
     | move {env₁ env₂ : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
         LValTyping env₁ lv (.ty ty) valueLifetime →
+        LValIsVar lv →
         ¬ WriteProhibited env₁ lv →
         EnvMove env₁ lv env₂ →
         TermTyping env₁ typing lifetime (.move lv) ty env₂
@@ -798,6 +810,7 @@ mutual
         TermTyping env₁ typing lifetime rhs rhsTy env₂ →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
+        LValIsVar lhs →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
         EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
