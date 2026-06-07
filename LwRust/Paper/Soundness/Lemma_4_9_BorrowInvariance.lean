@@ -11,9 +11,10 @@ Paper statement (Section 4.3):
 > term; and let `T` be a type.  If `Γ₁ ⊢ ⟨t : T⟩^l_σ ⊣ Γ₂`, then `Γ₂[γ ↦ T^l]`
 > is well-formed with respect to `l` for arbitrary `γ ∈ fresh`.
 
-Status: reduced to the Appendix 9.6 update/borrow-invariance facts, packaged as
-`UpdateBorrowInvariantObligations` and discharged by
-`updateBorrowInvariantObligations_appendix96`.
+Status: unconditional as a paper-facing statement, but it depends on the explicit
+fan-out update obligation
+`updateBorrowInvariant_writeBorrowTargets_preserves_containedBorrowsWellFormed`
+through `updateBorrowInvariantObligations_from_sorries`.
 
 The borrow invariant is now mechanised **faithfully per target** (Definition
 4.8(i): each individual target lval `w` of a contained borrow is typable with
@@ -32,21 +33,18 @@ keeps its own per-target typing.  With the per-target statement:
 * the single-lval determinism keystone `lvalTyping_eqv`/`lvalTyping_sameShape`
   (from the linearizability rank φ) is fully proven and unconditional.
 
-Two deep landmark `sorry`s remain inside
-`updateBorrowInvariantObligations_appendix96`, both genuine Appendix 9.6 content
-on the now-sound per-target foundation:
-1. `derefLValTypingJoinConstructorSplitLandmarks_appendix96.borrow_borrow` —
-   transporting a deref-of-borrow (reborrow) typing across an environment join;
-2. `EnvWrite.preserves_core_appendix96` — one-step `EnvWrite` preservation of the
-   contained-borrow / borrow-target-transport invariants.
+The mechanization strengthens the paper's final result-extension phrase
+`γ ∈ fresh`: adding `γ ↦ T^l` must satisfy `FreshUpdateCoherenceObligations`.
+The bare implication from `WellFormedTy Γ₂ T l` is false (`&[]` is syntactically
+well formed but not jointly target-typeable), so this side condition is part of
+the faithful axiom-free statement.
 -/
 
 namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Lemma 4.9, unconditional form (modulo the Appendix 9.6 join sorries inside
-`updateBorrowInvariantObligations_appendix96`). -/
+/-- Lemma 4.9, with the final fresh-result coherence obligation exposed. -/
 theorem lemma_4_9_borrowInvariance
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {gamma : Name}
@@ -56,10 +54,12 @@ theorem lemma_4_9_borrowInvariance
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
-    (hfresh : env₂.fresh gamma) :
+    (hfresh : env₂.fresh gamma)
+    (hfreshCoherence : FreshUpdateCoherenceObligations env₂ gamma ty lifetime) :
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime :=
-  borrowInvariance updateBorrowInvariantObligations_appendix96
-    hrefs hvalid hstoreTyping hwellFormed hsafe htyping hfresh
+  borrowInvariance_of_ruleCarriedObligations
+    updateBorrowInvariantObligations_from_sorries
+    hrefs hvalid hstoreTyping hwellFormed hsafe htyping hfresh hfreshCoherence
 
 end LwRust.Paper.Soundness

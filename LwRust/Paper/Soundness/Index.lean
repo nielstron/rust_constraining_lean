@@ -25,11 +25,11 @@ file states the paper result faithfully, wires it to the mechanization in
 ## Section 4
 
 * `Definitions`                          — Def 4.1–4.8, 4.13
-* `Lemma_4_9_BorrowInvariance`           — Lemma 4.9    (sound per-target invariant; 2 deep App-9.6 landmark sorries)
+* `Lemma_4_9_BorrowInvariance`           — Lemma 4.9    (uses explicit sorried update obligation)
 * `Lemma_4_10_Progress`                  — Lemma 4.10   (proven)
-* `Lemma_4_11_Preservation`              — Lemma 4.11   (conditional: RuntimePreservationObligations)
-* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (conditional: RuntimePreservationObligations)
-* `Corollary_4_14_BorrowSafety`          — Cor 4.14     (conditional: BorrowSafetyPreservationObligations)
+* `Lemma_4_11_Preservation`              — Lemma 4.11   (uses explicit sorried runtime obligations)
+* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (uses explicit sorried runtime obligations)
+* `Corollary_4_14_BorrowSafety`          — Cor 4.14     (uses explicit sorried update/borrow-safety obligations)
 
 ## Appendix 9
 
@@ -38,7 +38,7 @@ file states the paper result faithfully, wires it to the mechanization in
 * `Appendix9.Lemma_9_3_Location`                — proven (location availability)
 * `Appendix9.Corollary_9_4_ReadPreservation`    — proven
 * `Appendix9.Lemma_9_5_DropPreservation`        — in progress
-* `Appendix9.Lemma_9_6_UpdatePreservation`      — in progress (static half mod join sorries)
+* `Appendix9.Lemma_9_6_UpdatePreservation`      — in progress (explicit update/fan-out obligations)
 * `Appendix9.Lemma_9_7_ValueTyping`             — proven
 * `Appendix9.Lemma_9_8_AliasPreservation`       — mechanized for structural fragments
 * `Appendix9.Lemma_9_9_ValuePreservation`       — in progress

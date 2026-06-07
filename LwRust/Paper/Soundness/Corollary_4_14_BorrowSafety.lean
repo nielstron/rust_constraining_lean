@@ -15,20 +15,25 @@ For the calculus core this strengthens to `Γ₂ = Γ₃`, which is the mechaniz
 form below: typing from a well-formed borrow-safe environment yields a
 well-formed *and* borrow-safe result environment.
 
-Status: the `UpdateBorrowInvariantObligations` half (Borrow Invariance, 4.9) is
-supplied via `updateBorrowInvariantObligations_appendix96`; the borrow-safety
-half is **conditional** on `BorrowSafetyPreservationObligations`
-(the value/move/assign/block borrow-safety cases), not yet discharged.
+Status: unconditional as a paper-facing statement, but it depends on explicit
+sorried lemmas through `updateBorrowInvariantObligations_from_sorries` and
+`borrowSafetyPreservationObligations_from_sorries`.  In the borrow-safety half,
+the global mutual term/list induction is source-scoped: `T-Const` only handles
+source values, whose types are borrow-free.  Assignment leaves the local
+`EnvWrite` frame obligation, now with the RHS result-extension invariant made
+explicit.  Move result-extension is proved constructively from the
+`LValTyping`/`Strike` origin lemma; blocks still leave an explicit
+non-borrow-free result-extension obligation.  The final result binding also
+carries `FreshUpdateCoherenceObligations`, because the bare paper phrase
+`γ ∈ fresh` is too weak for the strengthened `Coherent` invariant.
 -/
 
 namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Corollary 4.14, Borrow Safety (core/strengthened form `Γ₂ = Γ₃`),
-conditional on `BorrowSafetyPreservationObligations`. -/
+/-- Corollary 4.14, Borrow Safety (core/strengthened form `Γ₂ = Γ₃`). -/
 theorem corollary_4_14_borrowSafety
-    (hborrowObligations : BorrowSafetyPreservationObligations)
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {gamma : Name}
     (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
@@ -37,12 +42,17 @@ theorem corollary_4_14_borrowSafety
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ∼ₛ env₁)
+    (hsource : SourceTerm term)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
-    (hfresh : env₂.fresh gamma) :
+    (hfresh : env₂.fresh gamma)
+    (hfreshCoherence : FreshUpdateCoherenceObligations env₂ gamma ty lifetime) :
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
         lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) :=
-  borrowSafety updateBorrowInvariantObligations_appendix96 hborrowObligations
-    hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping hfresh
+  borrowSafety_of_ruleCarriedObligations
+    updateBorrowInvariantObligations_from_sorries
+    borrowSafetyPreservationObligations_from_sorries
+    hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
+    hfresh hfreshCoherence
 
 end LwRust.Paper.Soundness

@@ -350,6 +350,11 @@ def PartialTy.vars : PartialTy → List Name
   | .box inner => PartialTy.vars inner
   | .undef _ => []
 
+/-- A fixed rank function witnessing linearizability of an environment. -/
+def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
+  ∀ x slot, env.slotAt x = some slot →
+    ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x
+
 /--
 Definition 11 of `lw_rust_followup`, Linearizable typing.
 
@@ -360,9 +365,7 @@ condition that makes the `LValTyping` recursion (and hence shape-determinism of
 borrow-target unions) terminate.
 -/
 def Linearizable (env : Env) : Prop :=
-  ∃ φ : Name → Nat,
-    ∀ x slot, env.slotAt x = some slot →
-      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x
+  ∃ φ : Name → Nat, LinearizedBy φ env
 
 /-- Structural shape equality of full types, ignoring borrow *target lists* (but
 keeping the `mutable` flag).  Box types are rigid in the strengthening order, so
@@ -424,6 +427,81 @@ def EnvContains (env : Env) (x : Name) (ty : Ty) : Prop :=
   ∃ slot, env.slotAt x = some slot ∧ PartialTyContains slot.ty ty
 
 notation:50 env:51 " ⊢ " x:51 " ↝ " ty:51 => EnvContains env x ty
+
+/--
+Coherence obligations for adding a fresh full-typed slot.
+
+This is deliberately carried by the declaration/result rules rather than
+derived from `WellFormedTy`: a declared borrow type such as `&[]` is syntactically
+well formed in the paper's target-well-formedness premise, but it is not
+lvalue-coherent because empty target lists are not jointly typeable.
+-/
+structure FreshUpdateCoherenceObligations
+    (env : Env) (x : Name) (ty : Ty) (lifetime : Lifetime) : Prop where
+  old_root_transport
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LVal.base lv ≠ x →
+    LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
+      lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ oldBorrowLifetime,
+      LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime
+  fresh_root_coherent
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LVal.base lv = x →
+    LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
+      lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping
+        (env.update x { ty := .ty ty, lifetime := lifetime })
+        targets (.ty targetTy) targetLifetime
+
+/--
+Rank obligation for assignment writes.
+
+Every borrow edge installed from the RHS type must point to a lower-ranked base
+in the pre-write environment.  This is the explicit rule-side replacement for
+assuming that all environment writes preserve linearizability.
+-/
+def EnvWriteRhsBorrowTargetsBelow (φ : Name → Nat) (result : Env) (rhsTy : Ty) : Prop :=
+  ∀ x slot mutable targets target,
+    result.slotAt x = some slot →
+    PartialTyContains slot.ty (.borrow mutable targets) →
+    target ∈ targets →
+    (∃ rhsMutable rhsTargets,
+      PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
+        target ∈ rhsTargets) →
+    φ (LVal.base target) < φ x
+
+/--
+Coherence obligations for assignment writes.
+
+For old roots, borrow typings in the result must transport back to the pre-write
+environment, and coherent target lists from that environment must transport
+forward.  For the written root, the updated path must directly provide the
+joint target-list typing required by coherence.
+-/
+structure EnvWriteCoherenceObligations
+    (env result : Env) (writeBase : Name) : Prop where
+  old_root_transport
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LVal.base lv ≠ writeBase →
+    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
+    (∃ oldBorrowLifetime,
+      LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime) ∧
+      (∀ targetTy targetLifetime,
+        LValTargetsTyping env targets (.ty targetTy) targetLifetime →
+        ∃ resultTargetTy resultTargetLifetime,
+          LValTargetsTyping result targets (.ty resultTargetTy) resultTargetLifetime)
+  written_root_coherent
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LVal.base lv = writeBase →
+    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping result targets (.ty targetTy) targetLifetime
 
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
@@ -579,6 +657,7 @@ mutual
     | strong {env : Env} {old : PartialTy} {ty : Ty} :
         UpdateAtPath 0 env [] old ty env (.ty ty)
     | weak {env : Env} {rank : Nat} {old joined : PartialTy} {ty : Ty} :
+        ShapeCompatible env old (.ty ty) →
         PartialTyJoin old (.ty ty) joined →
         UpdateAtPath (rank + 1) env [] old ty env joined
     | box {env₁ env₂ : Env} {rank : Nat} {path : List Unit}
@@ -591,7 +670,15 @@ mutual
         UpdateAtPath rank env₁ (() :: path) (.ty (.borrow true targets)) ty
           env₂ (.ty (.borrow true targets))
 
-  /-- The joined environment from updating each possible target of a borrow. -/
+  /-- The joined environment from updating each possible target of a borrow.
+
+  Documented strengthening for the mechanization: each non-empty branch carries
+  a full typing for the concrete written lvalue `prependPath path target`.  The
+  bare syntax of `EnvWrite` can reinitialize an `undef` leaf, which would make
+  the two fan-out branches fail to have the same shape.  The assignment rule
+  should only fan out through initialized borrowed targets; carrying this witness
+  here makes that invariant explicit and lets Appendix 9.6 derive branch shape
+  constructively instead of assuming it. -/
   inductive WriteBorrowTargets :
       Nat → Env → List Unit → List LVal → Ty → Env → Prop where
     | nil {rank : Nat} {env : Env} {path : List Unit} {ty : Ty} :
@@ -599,10 +686,14 @@ mutual
     | singleton {rank : Nat} {env updated : Env} {path : List Unit}
         {target : LVal} {ty : Ty} :
         EnvWrite rank env (prependPath path target) ty updated →
+        (∃ leafTy leafLifetime,
+          LValTyping env (prependPath path target) (.ty leafTy) leafLifetime) →
         WriteBorrowTargets rank env path [target] ty updated
     | cons {rank : Nat} {env updated restEnv result : Env} {path : List Unit}
         {target : LVal} {rest : List LVal} {ty : Ty} :
         EnvWrite rank env (prependPath path target) ty updated →
+        (∃ leafTy leafLifetime,
+          LValTyping env (prependPath path target) (.ty leafTy) leafLifetime) →
         WriteBorrowTargets rank env path rest ty restEnv →
         EnvJoin updated restEnv result →
         WriteBorrowTargets rank env path (target :: rest) ty result
@@ -681,6 +772,7 @@ mutual
         env₁.fresh x →
         TermTyping env₁ typing lifetime term ty env₂ →
         env₂.fresh x →
+        FreshUpdateCoherenceObligations env₂ x ty lifetime →
         env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
         TermTyping env₁ typing lifetime (.letMut x term) .unit env₃
     /-- T-Assign. -/
@@ -692,6 +784,8 @@ mutual
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
+        (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
+        EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
 

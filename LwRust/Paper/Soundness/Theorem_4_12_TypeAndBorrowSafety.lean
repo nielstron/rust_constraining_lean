@@ -13,18 +13,17 @@ Paper statement (Section 4.5):
 
 The paper's statement assumes termination; here that is the explicit
 `TerminatesAsValue` witness.  Follows from Lemma 4.10 (Progress) and Lemma 4.11
-(Preservation), so it is **conditional** on the same
-`RuntimePreservationObligations` as Preservation.
+(Preservation).  The paper-facing statement is unconditional, but it depends on
+the explicit sorried runtime lemmas through
+`runtimePreservationObligations_from_sorries`.
 -/
 
 namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Theorem 4.12, Type and Borrow Safety (conditional on the runtime
-preservation obligations). -/
+/-- Theorem 4.12, Type and Borrow Safety. -/
 theorem theorem_4_12_typeAndBorrowSafety
-    (hobligations : RuntimePreservationObligations)
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hvalid : ValidRuntimeState store term)
@@ -38,7 +37,7 @@ theorem theorem_4_12_typeAndBorrowSafety
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety hobligations hvalid hstoreTyping hwellFormed hsafe hstore
-    htyping hterminates
+  typeAndBorrowSafety runtimePreservationObligations_from_sorries hvalid
+    hstoreTyping hwellFormed hsafe hstore htyping hterminates
 
 end LwRust.Paper.Soundness

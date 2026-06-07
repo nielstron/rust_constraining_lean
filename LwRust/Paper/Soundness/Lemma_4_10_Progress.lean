@@ -11,7 +11,7 @@ Paper statement (Section 4.4):
 > If `Γ₁ ⊢ ⟨t₁ : T⟩^l_σ ⊣ Γ₂`, then either `t₁ ∈ Value` or
 > `⟨S₁ ▷ t₁ ⟶ S₂ ▷ t₂⟩^l` for some state `S₂ ▷ t₂`.
 
-Status: **fully proven** (no obligations, no `sorry`).  `OperationalStoreProgress`
+Status: **fully proven** (closed proof, no obligations).  `OperationalStoreProgress`
 is the explicit drop/allocation availability premise the abstract store model
 needs (it holds for all concrete stores, see `ConcreteProgramStore`).
 -/

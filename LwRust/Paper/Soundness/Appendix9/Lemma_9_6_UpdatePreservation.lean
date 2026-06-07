@@ -10,11 +10,10 @@ import LwRust.Paper.Soundness
 
 Status: split into a **static** half and a **runtime** half.
 
-* Static (Definition 4.8 well-formedness preserved by `write₀`): mechanized as
-  `EnvWrite.preserves_wellFormed` / `assign_preserves_wellFormed`, currently
-  gated on `UpdateBorrowInvariantObligations` (the borrow-target join facts —
-  the 5 join `sorry`s being replaced by the `lvalTyping_sameShape`
-  re-derivation).  This is the `T-Assign` case of Lemma 4.9.
+* Static (Definition 4.8 well-formedness preserved by `write₀`): mechanized by
+  the explicit-obligation assignment lemmas in `LwRust.Paper.Soundness`, gated on
+  `UpdateBorrowInvariantObligations` plus the rule-carried RHS-rank and
+  write-coherence premises.  This is the `T-Assign` case of Lemma 4.9.
 * Runtime (safe abstraction preserved by the store `write`): mechanized as
   `storePreservation_assign_var_*_of_preserved` and the redex lemmas
   `preservation_assign_var_envShape_step_runtime_of_preserved`, currently taking

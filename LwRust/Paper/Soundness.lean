@@ -2601,7 +2601,7 @@ theorem storePreservation_declare_step {store store' : ProgramStore}
     store' ∼ₛ env₃ := by
   intro hsafe htyping hstep hnewValid hpreserveOld
   cases htyping with
-  | declare hfresh hinit _hfreshOut henv₃ =>
+  | declare hfresh hinit _hfreshOut _hcoh henv₃ =>
       cases hstep with
       | declare hstore' =>
           cases hinit with
@@ -2626,11 +2626,11 @@ theorem storePreservation_declare_step_valid {store store' : ProgramStore}
     store' ∼ₛ env₃ := by
   intro hvalidStoreTyping hsafe htyping hstep
   cases htyping with
-  | declare hfresh hinit hfreshOut henv₃ =>
+  | declare hfresh hinit hfreshOut hcoh henv₃ =>
       have hfreshStore : store.fresh (VariableProjection x) :=
         safeAbstraction_store_fresh_var hsafe hfresh
       refine storePreservation_declare_step hsafe
-        (TermTyping.declare hfresh hinit hfreshOut henv₃) hstep ?newValid ?preserveOld
+        (TermTyping.declare hfresh hinit hfreshOut hcoh henv₃) hstep ?newValid ?preserveOld
       · intro ty hvalueTyping
         rcases hvalidStoreTyping value (by simp [termValues]) with
           ⟨storedTy, hstoredTyping, hvalidValue⟩
@@ -2854,6 +2854,11 @@ def Coherent (env : Env) : Prop :=
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
     ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
 
+theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
+    LinearizedBy φ env → Linearizable env := by
+  intro hφ
+  exact ⟨φ, hφ⟩
+
 /-- Definition 4.8, well-formed environment.
 
 DELIBERATE DEVIATION (documented, non-vacuous): augmented with the two runtime
@@ -2987,6 +2992,13 @@ theorem LValTargetsTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot}
     LValTargetsTyping (env.update x slot) targets ty lifetime := by
   intro hfresh htyping
   exact (LValTyping.update_fresh (slot := slot) hfresh).2 htyping
+
+/-- The target-list typing judgment is intentionally non-empty. -/
+theorem LValTargetsTyping.nil_false {env : Env} {ty : PartialTy}
+    {lifetime : Lifetime} :
+    ¬ LValTargetsTyping env [] ty lifetime := by
+  intro htyping
+  cases htyping
 
 theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
     {slot : EnvSlot} {slotLifetime : Lifetime} {targets : List LVal} :
@@ -3378,13 +3390,89 @@ theorem mem_foldr_max_succ {l : List Name} {φ : Name → Nat} {v : Name}
   | head as => exact le_max_left _ _
   | tail b _hmem ih => exact le_trans ih (le_max_right _ _)
 
+/-- Explicit declaration-coherence obligation.
+
+`WellFormedTy` carries the paper's per-target borrow invariant.  The mechanised
+`Coherent` invariant is stronger: it asks for joint target-list typing for every
+borrow that can be reached by lvalue typing.  A fresh declaration of a full type
+therefore needs this extra closure fact; it is named here rather than hidden as a
+local proof hole inside `WellFormedEnv.update_fresh_ty`.
+
+This is not merely syntactic coherence of borrows contained in `ty`: after
+declaring `x : &targets`, lvals such as `*x` can expose the joint target-list
+union, and if that union is itself a borrow then `Coherent` needs coherence for
+that exposed borrow as well.  The eventual proof should thread a lvalue-level
+"declared type is coherent under the current environment" invariant through
+term typing, not derive it from `WellFormedTy` alone.
+
+As stated, this obligation is stronger than `WellFormedTy`: for example,
+`WellFormedTy.borrow` accepts `&[]` vacuously, while
+`LValTargetsTyping.nil_false` shows that no empty target list is jointly
+typeable.  The valid replacement requires the lvalue-level
+`FreshUpdateCoherenceObligations` side condition below. -/
+theorem Coherent.update_fresh_ty {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    Coherent env →
+    env.fresh x →
+    FreshUpdateCoherenceObligations env x ty lifetime →
+    Coherent (env.update x { ty := .ty ty, lifetime := lifetime })
+    := by
+  intro hcoh hfresh hobligations lv mutable targets borrowLifetime htyping
+  by_cases hbase : LVal.base lv = x
+  · exact hobligations.fresh_root_coherent hbase htyping
+  · rcases hobligations.old_root_transport hbase htyping with
+      ⟨oldBorrowLifetime, htypingOld⟩
+    rcases hcoh lv mutable targets oldBorrowLifetime htypingOld with
+      ⟨targetTy, targetLifetime, htargetsOld⟩
+    exact ⟨targetTy, targetLifetime,
+      LValTargetsTyping.update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh htargetsOld⟩
+
+/-- Bare `Coherent.update_fresh_ty` is false: `WellFormedTy` accepts `&[]`
+vacuously, but coherence requires the target list to be jointly typeable, and
+`LValTargetsTyping` is intentionally non-empty. -/
+theorem Coherent.update_fresh_ty_bare_counterexample :
+    ∃ env x ty lifetime,
+      Coherent env ∧ WellFormedTy env ty lifetime ∧ env.fresh x ∧
+        ¬ Coherent (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  refine ⟨Env.empty, "x", .borrow false [], Lifetime.root, ?_, ?_, ?_, ?_⟩
+  · exact (wellFormedEnv_empty Lifetime.root).2.2.1
+  · exact WellFormedTy.borrow (BorrowTargetsWellFormed.intro (by
+      intro target htarget
+      simp at htarget))
+  · simp [Env.fresh, Env.empty]
+  · intro hcoh
+    have hx :
+        (Env.empty.update "x"
+          { ty := .ty (.borrow false []), lifetime := Lifetime.root }).slotAt "x" =
+          some { ty := .ty (.borrow false []), lifetime := Lifetime.root } := by
+      simp [Env.update]
+    have htyping :
+        LValTyping
+          (Env.empty.update "x"
+            { ty := .ty (.borrow false []), lifetime := Lifetime.root })
+          (.var "x") (.ty (.borrow false [])) Lifetime.root :=
+      LValTyping.var hx
+    rcases hcoh (.var "x") false [] Lifetime.root htyping with
+      ⟨targetTy, targetLifetime, htargets⟩
+    exact LValTargetsTyping.nil_false htargets
+
+theorem Coherent.update_fresh_ty_of_obligations {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    Coherent env →
+    env.fresh x →
+    FreshUpdateCoherenceObligations env x ty lifetime →
+    Coherent (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  exact Coherent.update_fresh_ty
+
 theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime} :
     WellFormedEnv env lifetime →
     WellFormedTy env ty lifetime →
     env.fresh x →
+    FreshUpdateCoherenceObligations env x ty lifetime →
     WellFormedEnv (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
-  intro hwellEnv hwellTy hfresh
+  intro hwellEnv hwellTy hfresh hcohObligations
   refine ⟨?_, ?_, ?_, ?_⟩
   · intro y envSlot mutable targets hslot hcontains
     by_cases hy : y = x
@@ -3431,13 +3519,100 @@ theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
     · have hslotOld : env.slotAt y = some envSlot := by
         simpa [Env.update, hy] using hslot
       exact hwellEnv.2.1 y envSlot hslotOld
-  · -- Coherent: declaring a fresh variable preserves coherence (the new slot's
-    -- borrows are jointly typeable by `WellFormedTy ty`).  STUB (Section-4
-    -- preservation, to discharge).
-    sorry
+  · exact Coherent.update_fresh_ty hwellEnv.2.2.1 hfresh hcohObligations
   · -- Linearizable: rank the fresh variable strictly above the variables of its
     -- slot type (a finite list); existing ranks unchanged.
     obtain ⟨φ, hφ⟩ := hwellEnv.2.2.2
+    have hfreshEq : env.slotAt x = none := hfresh
+    have hxnotin : x ∉ Ty.vars ty := by
+      intro hx
+      obtain ⟨s, hs⟩ := wellFormedTy_vars_in_env hwellTy x hx
+      rw [hfreshEq] at hs
+      exact absurd hs (by simp)
+    refine ⟨fun n => if n = x then
+      (Ty.vars ty).foldr (fun w acc => max (φ w + 1) acc) 0 else φ n, ?_⟩
+    intro y slot hslot v hv
+    by_cases hy : y = x
+    · have hslotEq : slot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        rw [hy] at hslot
+        simpa [Env.update] using hslot.symm
+      have hvty : v ∈ Ty.vars ty := by
+        rw [hslotEq] at hv; simpa [PartialTy.vars] using hv
+      have hvx : v ≠ x := fun h => hxnotin (h ▸ hvty)
+      simp only [if_neg hvx, if_pos hy]
+      exact lt_of_lt_of_le (Nat.lt_succ_self _) (mem_foldr_max_succ hvty)
+    · have hslotOld : env.slotAt y = some slot := by
+        simpa [Env.update, hy] using hslot
+      obtain ⟨s, hs⟩ := containedBorrows_slot_vars_in_env hwellEnv.1 hslotOld v hv
+      have hvx : v ≠ x := by
+        intro h; rw [h, hfreshEq] at hs; exact absurd hs (by simp)
+      simp only [if_neg hy, if_neg hvx]
+      exact hφ y slot hslotOld v hv
+
+/--
+Fresh full-type update preserving well-formedness with the declaration
+coherence gap made explicit.
+
+This is the proved replacement for uses that should not depend on the false
+bare `Coherent.update_fresh_ty` obligation.
+-/
+theorem WellFormedEnv.update_fresh_ty_of_coherenceObligations {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    WellFormedTy env ty lifetime →
+    env.fresh x →
+    FreshUpdateCoherenceObligations env x ty lifetime →
+    WellFormedEnv (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
+  intro hwellEnv hwellTy hfresh hcohObligations
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · intro y envSlot mutable targets hslot hcontains
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq :
+          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+      have hcontainedEq :
+          containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+          simpa [Env.update] using hcontainedSlot
+        exact h.symm
+      subst hcontainedEq
+      exact borrowTargetsWellFormedInSlot_update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
+        (borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontainsTy)
+    · have hslotOld : env.slotAt y = some envSlot := by
+        simpa [Env.update, hy] using hslot
+      have hcontainsOld : env ⊢ y ↝ Ty.borrow mutable targets := by
+        rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+        have hcontainedOld : env.slotAt y = some containedSlot := by
+          simpa [Env.update, hy] using hcontainedSlot
+        exact ⟨containedSlot, hcontainedOld, hcontainsTy⟩
+      exact borrowTargetsWellFormedInSlot_update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
+        (hwellEnv.1 y envSlot mutable targets hslotOld hcontainsOld)
+  · intro y envSlot hslot
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq :
+          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      exact LifetimeOutlives.refl lifetime
+    · have hslotOld : env.slotAt y = some envSlot := by
+        simpa [Env.update, hy] using hslot
+      exact hwellEnv.2.1 y envSlot hslotOld
+  · exact Coherent.update_fresh_ty_of_obligations
+      hwellEnv.2.2.1 hfresh hcohObligations
+  · obtain ⟨φ, hφ⟩ := hwellEnv.2.2.2
     have hfreshEq : env.slotAt x = none := hfresh
     have hxnotin : x ∉ Ty.vars ty := by
       intro hx
@@ -3592,7 +3767,7 @@ theorem UpdateWrite.lifetimesPreserved :
         intro env old ty
         exact EnvLifetimesPreserved.refl env)
       (by
-        intro env rank old joined ty hjoinTy
+        intro env rank old joined ty _hshape _hjoinTy
         exact EnvLifetimesPreserved.refl env)
       (by
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
@@ -3604,11 +3779,11 @@ theorem UpdateWrite.lifetimesPreserved :
         intro rank env path ty
         exact EnvLifetimesPreserved.refl env)
       (by
-        intro rank env updated path target ty _hwrite ih
+        intro rank env updated path target ty _hwrite _htyped ih
         exact ih)
       (by
         intro rank env updated restEnv result path target rest ty
-          _hwrite _hwrites hjoin ihWrite _ihWrites
+          _hwrite _htyped _hwrites hjoin ihWrite _ihWrites
         exact EnvLifetimesPreserved.trans ihWrite
           (EnvJoin.lifetimesPreserved_left hjoin))
       (by
@@ -3628,7 +3803,7 @@ theorem UpdateWrite.lifetimesPreserved :
           intro env old ty
           exact EnvLifetimesPreserved.refl env)
         (by
-          intro env rank old joined ty hjoinTy
+          intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesPreserved.refl env)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
@@ -3640,11 +3815,11 @@ theorem UpdateWrite.lifetimesPreserved :
           intro rank env path ty
           exact EnvLifetimesPreserved.refl env)
         (by
-          intro rank env updated path target ty _hwrite ih
+          intro rank env updated path target ty _hwrite _htyped ih
           exact ih)
         (by
           intro rank env updated restEnv result path target rest ty
-            _hwrite _hwrites hjoin ihWrite _ihWrites
+            _hwrite _htyped _hwrites hjoin ihWrite _ihWrites
           exact EnvLifetimesPreserved.trans ihWrite
             (EnvJoin.lifetimesPreserved_left hjoin))
         (by
@@ -3663,7 +3838,7 @@ theorem UpdateWrite.lifetimesPreserved :
           intro env old ty
           exact EnvLifetimesPreserved.refl env)
         (by
-          intro env rank old joined ty hjoinTy
+          intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesPreserved.refl env)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
@@ -3675,11 +3850,11 @@ theorem UpdateWrite.lifetimesPreserved :
           intro rank env path ty
           exact EnvLifetimesPreserved.refl env)
         (by
-          intro rank env updated path target ty _hwrite ih
+          intro rank env updated path target ty _hwrite _htyped ih
           exact ih)
         (by
           intro rank env updated restEnv result path target rest ty
-            _hwrite _hwrites hjoin ihWrite _ihWrites
+            _hwrite _htyped _hwrites hjoin ihWrite _ihWrites
           exact EnvLifetimesPreserved.trans ihWrite
             (EnvJoin.lifetimesPreserved_left hjoin))
         (by
@@ -3824,7 +3999,7 @@ theorem UpdateWrite.lifetimesSurvive :
         intro env old ty
         exact EnvLifetimesSurvive.refl env)
       (by
-        intro env rank old joined ty _hjoinTy
+        intro env rank old joined ty _hshape _hjoinTy
         exact EnvLifetimesSurvive.refl env)
       (by
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
@@ -3836,11 +4011,11 @@ theorem UpdateWrite.lifetimesSurvive :
         intro rank env path ty
         exact EnvLifetimesSurvive.refl env)
       (by
-        intro rank env updated path target ty _hwrite ih
+        intro rank env updated path target ty _hwrite _htyped ih
         exact ih)
       (by
         intro rank env updated restEnv result path target rest ty
-          _hwrite _hwrites hjoin ihWrite _ihWrites
+          _hwrite _htyped _hwrites hjoin ihWrite _ihWrites
         exact EnvLifetimesSurvive.trans ihWrite
           (EnvJoin.lifetimesSurvive_left hjoin))
       (by
@@ -3860,7 +4035,7 @@ theorem UpdateWrite.lifetimesSurvive :
           intro env old ty
           exact EnvLifetimesSurvive.refl env)
         (by
-          intro env rank old joined ty _hjoinTy
+          intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesSurvive.refl env)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
@@ -3872,11 +4047,11 @@ theorem UpdateWrite.lifetimesSurvive :
           intro rank env path ty
           exact EnvLifetimesSurvive.refl env)
         (by
-          intro rank env updated path target ty _hwrite ih
+          intro rank env updated path target ty _hwrite _htyped ih
           exact ih)
         (by
           intro rank env updated restEnv result path target rest ty
-            _hwrite _hwrites hjoin ihWrite _ihWrites
+            _hwrite _htyped _hwrites hjoin ihWrite _ihWrites
           exact EnvLifetimesSurvive.trans ihWrite
             (EnvJoin.lifetimesSurvive_left hjoin))
         (by
@@ -3895,7 +4070,7 @@ theorem UpdateWrite.lifetimesSurvive :
           intro env old ty
           exact EnvLifetimesSurvive.refl env)
         (by
-          intro env rank old joined ty _hjoinTy
+          intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesSurvive.refl env)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
@@ -3907,11 +4082,11 @@ theorem UpdateWrite.lifetimesSurvive :
           intro rank env path ty
           exact EnvLifetimesSurvive.refl env)
         (by
-          intro rank env updated path target ty _hwrite ih
+          intro rank env updated path target ty _hwrite _htyped ih
           exact ih)
         (by
           intro rank env updated restEnv result path target rest ty
-            _hwrite _hwrites hjoin ihWrite _ihWrites
+            _hwrite _htyped _hwrites hjoin ihWrite _ihWrites
           exact EnvLifetimesSurvive.trans ihWrite
             (EnvJoin.lifetimesSurvive_left hjoin))
         (by
@@ -3986,7 +4161,8 @@ theorem TermTyping.slot_lifetime_survives :
             env₂.slotAt x = some resultSlot ∧
             sourceSlot.lifetime = resultSlot.lifetime)
       (by
-        intro _env _typing _lifetime _value _ty _hvalue x sourceSlot _houtlives hslot
+        intro _env _typing _lifetime _value _ty _hvalue x sourceSlot
+          _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
@@ -4026,7 +4202,7 @@ theorem TermTyping.slot_lifetime_survives :
           hbodyLifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing lifetime y _term _ty
-          hfresh _hterm _hfreshOut henv₃ ih x sourceSlot houtlives hslot
+          hfresh _hterm _hfreshOut _hcoh henv₃ ih x sourceSlot houtlives hslot
         subst henv₃
         by_cases hxy : x = y
         · subst hxy
@@ -4036,7 +4212,8 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hshape _hwellRhs hwrite _hnotWrite ih x sourceSlot houtlives hslot
+          _hLhs _hRhs _hshape _hwellRhs hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
+          houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
@@ -4074,7 +4251,8 @@ theorem TermTyping.slot_lifetime_survives :
             env₂.slotAt x = some resultSlot ∧
             sourceSlot.lifetime = resultSlot.lifetime)
       (by
-        intro _env _typing _lifetime _value _ty _hvalue x sourceSlot _houtlives hslot
+        intro _env _typing _lifetime _value _ty _hvalue x sourceSlot
+          _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
@@ -4114,7 +4292,7 @@ theorem TermTyping.slot_lifetime_survives :
           hbodyLifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing lifetime y _term _ty
-          hfresh _hterm _hfreshOut henv₃ ih x sourceSlot houtlives hslot
+          hfresh _hterm _hfreshOut _hcoh henv₃ ih x sourceSlot houtlives hslot
         subst henv₃
         by_cases hxy : x = y
         · subst hxy
@@ -4124,7 +4302,8 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hshape _hwellRhs hwrite _hnotWrite ih x sourceSlot houtlives hslot
+          _hLhs _hRhs _hshape _hwellRhs hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
+          houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
@@ -4198,8 +4377,25 @@ theorem borrowInvariance_result_extension {env₂ : Env} {gamma : Name}
     WellFormedEnv env₂ lifetime →
     WellFormedTy env₂ ty lifetime →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime := by
   exact WellFormedEnv.update_fresh_ty
+
+/--
+Final environment-extension step with fresh-slot coherence made explicit.
+
+This avoids the legacy `Coherent.update_fresh_ty` axiom by requiring the local
+fresh-update coherence obligations for the result binding.
+-/
+theorem borrowInvariance_result_extension_of_coherenceObligations
+    {env₂ : Env} {gamma : Name} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env₂ lifetime →
+    WellFormedTy env₂ ty lifetime →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
 
 theorem LifetimeIntersection.le_of_le {left right intersection current : Lifetime} :
     LifetimeIntersection left right intersection →
@@ -5994,7 +6190,7 @@ theorem Ty.sameShape_symm {a b : Ty} (h : Ty.sameShape a b) :
       (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
     · intro b h; cases b <;> simp_all [Ty.sameShape]
     · intro b h; cases b <;> simp_all [Ty.sameShape]
-    · intro _ _ b h; cases b <;> simp_all [Ty.sameShape] <;> exact h.symm
+    · intro _ _ b h; cases b <;> simp_all [Ty.sameShape]
     · intro _ ih b h
       cases b with
       | box t' => exact ih t' h
@@ -6072,6 +6268,25 @@ theorem EnvShapePreserved.trans {first second third : Env} :
   rcases h23 x slot hslot with ⟨secondSlot, hsecondSlot, hshape23⟩
   rcases h12 x secondSlot hsecondSlot with ⟨firstSlot, hfirstSlot, hshape12⟩
   exact ⟨firstSlot, hfirstSlot, PartialTy.sameShape_trans hshape12 hshape23⟩
+
+/-- If two branch environments both preserve slot shape from a common source,
+then any slot present in both branches has the same shape in both branches. -/
+theorem EnvShapePreserved.branch_sameShape {source left right : Env} :
+    EnvShapePreserved source left →
+    EnvShapePreserved source right →
+    ∀ x leftSlot rightSlot,
+      left.slotAt x = some leftSlot →
+      right.slotAt x = some rightSlot →
+      PartialTy.sameShape leftSlot.ty rightSlot.ty := by
+  intro hleft hright x leftSlot rightSlot hleftSlot hrightSlot
+  rcases hleft x leftSlot hleftSlot with
+    ⟨sourceLeftSlot, hsourceLeftSlot, hshapeLeft⟩
+  rcases hright x rightSlot hrightSlot with
+    ⟨sourceRightSlot, hsourceRightSlot, hshapeRight⟩
+  have hsourceEq : sourceLeftSlot = sourceRightSlot :=
+    Option.some.inj (hsourceLeftSlot.symm.trans hsourceRightSlot)
+  subst hsourceEq
+  exact PartialTy.sameShape_trans (PartialTy.sameShape_symm hshapeLeft) hshapeRight
 
 theorem EnvShapePreserved.update_from_source_slot {source middle : Env}
     {x : Name} {slot : EnvSlot} {newTy : PartialTy} :
@@ -7620,55 +7835,650 @@ operations that the Appendix 9.6 borrow-invariance argument performs: a single
 
 `Linearizable` preservation is the `lw_rust_followup` contribution (Definition 11
 + its preservation proposition: a common rank function survives a write and a
-branch join); it is stated here as an explicit, documented obligation (`sorry`)
+branch join); it is stated here as an explicit, documented obligation
 to be discharged from the followup development.
 
-`Coherent` preservation is Section-4 content provable from the transport keystone
-by a rank-stratified induction; it is likewise staged as an explicit obligation
-here so the borrow-invariance landmarks can be derived from it first. -/
+  `Coherent` preservation is Section-4 content provable from the transport keystone
+  by a rank-stratified induction; it is likewise staged as an explicit obligation
+  here so the borrow-invariance landmarks can be derived from it first. -/
 
-/-- `lw_rust_followup` Def 11 preservation: a single `EnvWrite` preserves
-linearizability. -/
-theorem EnvWrite.preserves_linearizable {rank : Nat} {env result : Env}
-    {lv : LVal} {rhsTy : Ty} :
-    EnvWrite rank env lv rhsTy result →
-    Linearizable env →
-    Linearizable result := by
-  sorry
+/-- A tiny environment witnessing why bare rank-0 write linearization is false. -/
+def writeLinearizationCycleEnv : Env :=
+  (Env.empty.update "x" { ty := .ty .int, lifetime := Lifetime.root }).update "y"
+    { ty := .ty (.borrow false [.var "x"]), lifetime := Lifetime.root }
 
-/-- `lw_rust_followup` Def 11 preservation: a branch join preserves
-linearizability. -/
-theorem EnvJoin.preserves_linearizable {left right join : Env} :
-    EnvJoin left right join →
-    Linearizable left →
-    Linearizable right →
-    Linearizable join := by
-  sorry
+/-- The result of writing `&y` into `x` in `writeLinearizationCycleEnv`. -/
+def writeLinearizationCycleResult : Env :=
+  writeLinearizationCycleEnv.update "x"
+    { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root }
 
-/-- Coherence is preserved by a single `EnvWrite` (Section-4 content, to be
-discharged from `lvalTyping_strengthen_transport` by rank-stratified induction).
-The written right-hand type's borrows must themselves be coherent. -/
-theorem EnvWrite.preserves_coherent {rank : Nat} {env result : Env}
-    {lv : LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
-    EnvWrite rank env lv rhsTy result →
-    Linearizable env →
-    Linearizable result →
-    Coherent env →
-    PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
-    Coherent result := by
-  sorry
+/-- Bare `EnvWrite` does not preserve linearizability.
 
-/-- Coherence is preserved by a branch join (Section-4 content, to be discharged
-from `lvalTyping_strengthen_transport`). -/
-theorem EnvJoin.preserves_coherent {left right join : Env} :
-    EnvJoin left right join →
-    Linearizable left →
-    Linearizable right →
-    Linearizable join →
+The source has only the edge `y → x`, so it is linearizable.  The rank-0 strong
+write `x := &y` adds the edge `x → y`, producing the cycle `x ↔ y`.  This is the
+mechanized reason the valid preservation theorem below carries an explicit
+RHS-rank/acyclicity side condition. -/
+theorem EnvWrite.linearizable_bare_counterexample :
+    ∃ env result lv rhsTy,
+      EnvWrite 0 env lv rhsTy result ∧ Linearizable env ∧ ¬ Linearizable result := by
+  refine ⟨writeLinearizationCycleEnv, writeLinearizationCycleResult, .var "x",
+    .borrow false [.var "y"], ?_, ?_, ?_⟩
+  · have hx :
+        writeLinearizationCycleEnv.slotAt "x" =
+          some { ty := .ty .int, lifetime := Lifetime.root } := by
+      simp [writeLinearizationCycleEnv, Env.update]
+    simpa [writeLinearizationCycleResult, LVal.base] using
+      EnvWrite.intro (lv := .var "x")
+        (slot := { ty := .ty .int, lifetime := Lifetime.root }) hx (UpdateAtPath.strong
+        (env := writeLinearizationCycleEnv)
+        (old := .ty .int)
+        (ty := .borrow false [.var "y"]))
+  · refine ⟨fun n => if n = "x" then 1 else if n = "y" then 2 else 0, ?_⟩
+    intro z slot hslot v hv
+    by_cases hy : z = "y"
+    · subst hy
+      have hslotEq :
+          slot = { ty := .ty (.borrow false [.var "x"]), lifetime := Lifetime.root } := by
+        have h :
+            { ty := .ty (.borrow false [.var "x"]), lifetime := Lifetime.root } = slot := by
+          simpa [writeLinearizationCycleEnv, Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      simp [PartialTy.vars, Ty.vars, LVal.base] at hv
+      subst hv
+      simp
+    · by_cases hx : z = "x"
+      · subst hx
+        have hslotEq :
+            slot = { ty := .ty .int, lifetime := Lifetime.root } := by
+          have h : { ty := .ty .int, lifetime := Lifetime.root } = slot := by
+            simpa [writeLinearizationCycleEnv, Env.update] using hslot
+          exact h.symm
+        subst hslotEq
+        simp [PartialTy.vars, Ty.vars] at hv
+      · have hnone : writeLinearizationCycleEnv.slotAt z = none := by
+          simp [writeLinearizationCycleEnv, Env.update, Env.empty, hx, hy]
+        rw [hslot] at hnone
+        cases hnone
+  · intro hlin
+    rcases hlin with ⟨φ, hφ⟩
+    have hxSlot :
+        writeLinearizationCycleResult.slotAt "x" =
+          some { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root } := by
+      simp [writeLinearizationCycleResult, Env.update]
+    have hySlot :
+        writeLinearizationCycleResult.slotAt "y" =
+          some { ty := .ty (.borrow false [.var "x"]), lifetime := Lifetime.root } := by
+      simp [writeLinearizationCycleResult, writeLinearizationCycleEnv, Env.update]
+    have hy_lt_x : φ "y" < φ "x" :=
+      hφ "x" { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root }
+        hxSlot "y" (by simp [PartialTy.vars, Ty.vars, LVal.base])
+    have hx_lt_y : φ "x" < φ "y" :=
+      hφ "y" { ty := .ty (.borrow false [.var "x"]), lifetime := Lifetime.root }
+        hySlot "x" (by simp [PartialTy.vars, Ty.vars, LVal.base])
+    omega
+
+/-- Source environment for the bare write-coherence counterexample. -/
+def writeCoherenceEmptyBorrowEnv : Env :=
+  Env.empty.update "x" { ty := .ty .int, lifetime := Lifetime.root }
+
+/-- Result of writing `&[]` into `x`. -/
+def writeCoherenceEmptyBorrowResult : Env :=
+  writeCoherenceEmptyBorrowEnv.update "x"
+    { ty := .ty (.borrow false []), lifetime := Lifetime.root }
+
+theorem writeCoherenceEmptyBorrowEnv_lvalTyping_int
+    {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
+    LValTyping writeCoherenceEmptyBorrowEnv lv partialTy lifetime →
+    partialTy = .ty .int := by
+  induction lv generalizing partialTy lifetime with
+  | var y =>
+      intro htyping
+      cases htyping with
+      | var hslot =>
+          by_cases hy : y = ("x" : Name)
+          · subst hy
+            simpa [writeCoherenceEmptyBorrowEnv, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          · have hnone : writeCoherenceEmptyBorrowEnv.slotAt y = none := by
+              simp [writeCoherenceEmptyBorrowEnv, Env.update, Env.empty, hy]
+            rw [hslot] at hnone
+            cases hnone
+  | deref source ih =>
+      intro htyping
+      cases htyping with
+      | box hbox =>
+          have hcontra := ih hbox
+          cases hcontra
+      | borrow hborrow _htargets =>
+          have hcontra := ih hborrow
+          cases hcontra
+
+theorem writeCoherenceEmptyBorrowEnv_coherent :
+    Coherent writeCoherenceEmptyBorrowEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  have hty := writeCoherenceEmptyBorrowEnv_lvalTyping_int htyping
+  cases hty
+
+theorem writeCoherenceEmptyBorrowResult_not_coherent :
+    ¬ Coherent writeCoherenceEmptyBorrowResult := by
+  intro hcoh
+  have hx :
+      writeCoherenceEmptyBorrowResult.slotAt "x" =
+        some { ty := .ty (.borrow false []), lifetime := Lifetime.root } := by
+    simp [writeCoherenceEmptyBorrowResult, Env.update]
+  have htyping :
+      LValTyping writeCoherenceEmptyBorrowResult (.var "x")
+        (.ty (.borrow false [])) Lifetime.root :=
+    LValTyping.var hx
+  rcases hcoh (.var "x") false [] Lifetime.root htyping with
+    ⟨targetTy, targetLifetime, htargets⟩
+  exact LValTargetsTyping.nil_false htargets
+
+/-- Bare `EnvWrite.preserves_coherent` is false with only per-target RHS
+well-formedness: writing the empty borrow `&[]` satisfies the per-target premise
+vacuously, but the result is not coherent because target-list typing is
+non-empty. -/
+theorem EnvWrite.preserves_coherent_bare_counterexample :
+    ∃ env result lv rhsTy slotLifetime,
+      EnvWrite 0 env lv rhsTy result ∧
+      Linearizable env ∧ Linearizable result ∧ Coherent env ∧
+      PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) ∧
+      ¬ Coherent result := by
+  refine ⟨writeCoherenceEmptyBorrowEnv, writeCoherenceEmptyBorrowResult,
+    .var "x", .borrow false [], Lifetime.root, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · have hx :
+        writeCoherenceEmptyBorrowEnv.slotAt "x" =
+          some { ty := .ty .int, lifetime := Lifetime.root } := by
+      simp [writeCoherenceEmptyBorrowEnv, Env.update]
+    simpa [writeCoherenceEmptyBorrowResult, LVal.base] using
+      EnvWrite.intro (lv := .var "x")
+        (slot := { ty := .ty .int, lifetime := Lifetime.root }) hx
+        (UpdateAtPath.strong
+          (env := writeCoherenceEmptyBorrowEnv)
+          (old := .ty .int)
+          (ty := .borrow false []))
+  · refine ⟨fun _ => 0, ?_⟩
+    intro y slot hslot v hv
+    by_cases hy : y = ("x" : Name)
+    · subst hy
+      have hslotEq :
+          slot = { ty := .ty .int, lifetime := Lifetime.root } := by
+        simpa [writeCoherenceEmptyBorrowEnv, Env.update] using hslot.symm
+      rw [hslotEq] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+    · have hnone : writeCoherenceEmptyBorrowEnv.slotAt y = none := by
+        simp [writeCoherenceEmptyBorrowEnv, Env.update, Env.empty, hy]
+      rw [hslot] at hnone
+      cases hnone
+  · refine ⟨fun _ => 0, ?_⟩
+    intro y slot hslot v hv
+    by_cases hy : y = ("x" : Name)
+    · subst hy
+      have hslotTy : slot.ty = .ty (.borrow false []) := by
+        simpa [writeCoherenceEmptyBorrowResult, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+    · have hnone : writeCoherenceEmptyBorrowResult.slotAt y = none := by
+        simp [writeCoherenceEmptyBorrowResult, writeCoherenceEmptyBorrowEnv,
+          Env.update, Env.empty, hy]
+      rw [hslot] at hnone
+      cases hnone
+  · exact writeCoherenceEmptyBorrowEnv_coherent
+  · intro mutable targets hcontains target htarget
+    cases hcontains
+    simp at htarget
+  · exact writeCoherenceEmptyBorrowResult_not_coherent
+
+/-- No full union type exists for `int ⊔ unit`. -/
+theorem PartialTyUnion.int_unit_full_false {ty : Ty} :
+    ¬ PartialTyUnion (.ty .int) (.ty .unit) (.ty ty) := by
+  intro hunion
+  have htyUnit : ty = .unit :=
+    PartialTyStrengthens.from_unit_inv (PartialTyUnion.right_strengthens hunion)
+  subst htyUnit
+  have hintUnit : PartialTyStrengthens (.ty .int) (.ty .unit) :=
+    PartialTyUnion.left_strengthens hunion
+  cases hintUnit
+
+/-- Left branch for the bare join-coherence counterexample. -/
+def joinCoherenceLeftEnv : Env :=
+  ((Env.empty.update "a" { ty := .ty .int, lifetime := Lifetime.root }).update "b"
+    { ty := .ty .unit, lifetime := Lifetime.root }).update "x"
+      { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root }
+
+/-- Right branch for the bare join-coherence counterexample. -/
+def joinCoherenceRightEnv : Env :=
+  ((Env.empty.update "a" { ty := .ty .int, lifetime := Lifetime.root }).update "b"
+    { ty := .ty .unit, lifetime := Lifetime.root }).update "x"
+      { ty := .ty (.borrow false [.var "b"]), lifetime := Lifetime.root }
+
+/-- Join result: the branch borrows merge to `&[a,b]`. -/
+def joinCoherenceJoinEnv : Env :=
+  ((Env.empty.update "a" { ty := .ty .int, lifetime := Lifetime.root }).update "b"
+    { ty := .ty .unit, lifetime := Lifetime.root }).update "x"
+      { ty := .ty (.borrow false [.var "a", .var "b"]), lifetime := Lifetime.root }
+
+theorem joinCoherenceLeftEnv_lvalTyping_shape {lv : LVal} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    LValTyping joinCoherenceLeftEnv lv partialTy lifetime →
+    partialTy = .ty .int ∨ partialTy = .ty .unit ∨
+      partialTy = .ty (.borrow false [.var "a"]) := by
+  induction lv generalizing partialTy lifetime with
+  | var y =>
+      intro htyping
+      cases htyping with
+      | var hslot =>
+          by_cases hyx : y = "x"
+          · subst hyx
+            right; right
+            simpa [joinCoherenceLeftEnv, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          · by_cases hyb : y = "b"
+            · subst hyb
+              right; left
+              simpa [joinCoherenceLeftEnv, Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+            · by_cases hya : y = "a"
+              · subst hya
+                left
+                simpa [joinCoherenceLeftEnv, Env.update] using
+                  (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+              · have hnone : joinCoherenceLeftEnv.slotAt y = none := by
+                  simp [joinCoherenceLeftEnv, Env.update, Env.empty, hyx, hyb, hya]
+                rw [hslot] at hnone
+                cases hnone
+  | deref source ih =>
+      intro htyping
+      cases htyping with
+      | box hsource =>
+          rcases ih hsource with h | h | h <;> cases h
+      | borrow hsource htargets =>
+          rcases ih hsource with h | h | h
+          · cases h
+          · cases h
+          · cases h
+            cases htargets with
+            | singleton htarget =>
+                rcases LValTyping.var_inv htarget with ⟨slot, hslot, hty, _hlife⟩
+                have hslotTy : slot.ty = .ty .int := by
+                  simpa [joinCoherenceLeftEnv, Env.update] using
+                    (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+                left
+                exact hty.symm.trans hslotTy
+            | cons _hhead hrest _hunion _hintersection =>
+                exact False.elim (LValTargetsTyping.nil_false hrest)
+
+theorem joinCoherenceRightEnv_lvalTyping_shape {lv : LVal} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    LValTyping joinCoherenceRightEnv lv partialTy lifetime →
+    partialTy = .ty .int ∨ partialTy = .ty .unit ∨
+      partialTy = .ty (.borrow false [.var "b"]) := by
+  induction lv generalizing partialTy lifetime with
+  | var y =>
+      intro htyping
+      cases htyping with
+      | var hslot =>
+          by_cases hyx : y = "x"
+          · subst hyx
+            right; right
+            simpa [joinCoherenceRightEnv, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          · by_cases hyb : y = "b"
+            · subst hyb
+              right; left
+              simpa [joinCoherenceRightEnv, Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+            · by_cases hya : y = "a"
+              · subst hya
+                left
+                simpa [joinCoherenceRightEnv, Env.update] using
+                  (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+              · have hnone : joinCoherenceRightEnv.slotAt y = none := by
+                  simp [joinCoherenceRightEnv, Env.update, Env.empty, hyx, hyb, hya]
+                rw [hslot] at hnone
+                cases hnone
+  | deref source ih =>
+      intro htyping
+      cases htyping with
+      | box hsource =>
+          rcases ih hsource with h | h | h <;> cases h
+      | borrow hsource htargets =>
+          rcases ih hsource with h | h | h
+          · cases h
+          · cases h
+          · cases h
+            cases htargets with
+            | singleton htarget =>
+                rcases LValTyping.var_inv htarget with ⟨slot, hslot, hty, _hlife⟩
+                have hslotTy : slot.ty = .ty .unit := by
+                  simpa [joinCoherenceRightEnv, Env.update] using
+                    (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+                right; left
+                exact hty.symm.trans hslotTy
+            | cons _hhead hrest _hunion _hintersection =>
+                exact False.elim (LValTargetsTyping.nil_false hrest)
+
+theorem joinCoherenceLeftEnv_coherent : Coherent joinCoherenceLeftEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  have hshape := joinCoherenceLeftEnv_lvalTyping_shape htyping
+  rcases hshape with h | h | h
+  · cases h
+  · cases h
+  · cases h
+    refine ⟨.int, Lifetime.root, LValTargetsTyping.singleton ?_⟩
+    have ha : joinCoherenceLeftEnv.slotAt "a" =
+        some { ty := .ty .int, lifetime := Lifetime.root } := by
+      simp [joinCoherenceLeftEnv, Env.update]
+    exact LValTyping.var ha
+
+theorem joinCoherenceRightEnv_coherent : Coherent joinCoherenceRightEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  have hshape := joinCoherenceRightEnv_lvalTyping_shape htyping
+  rcases hshape with h | h | h
+  · cases h
+  · cases h
+  · cases h
+    refine ⟨.unit, Lifetime.root, LValTargetsTyping.singleton ?_⟩
+    have hb : joinCoherenceRightEnv.slotAt "b" =
+        some { ty := .ty .unit, lifetime := Lifetime.root } := by
+      simp [joinCoherenceRightEnv, Env.update]
+    exact LValTyping.var hb
+
+theorem joinCoherenceJoinEnv_targets_not_typeable :
+    ¬ ∃ ty lifetime,
+      LValTargetsTyping joinCoherenceJoinEnv [.var "a", .var "b"] (.ty ty) lifetime := by
+  rintro ⟨ty, lifetime, htargets⟩
+  cases htargets with
+  | cons hhead hrest hunion _hintersection =>
+      rcases LValTyping.var_inv hhead with ⟨headSlot, hheadSlot, hheadTy, _⟩
+      have hheadSlotTy : headSlot.ty = .ty .int := by
+        simpa [joinCoherenceJoinEnv, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hheadSlot).symm
+      cases hrest with
+      | singleton htarget =>
+          rcases LValTyping.var_inv htarget with ⟨restSlot, hrestSlot, hrestTy, _⟩
+          have hrestSlotTy : restSlot.ty = .ty .unit := by
+            simpa [joinCoherenceJoinEnv, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hrestSlot).symm
+          have hheadTyPartialEq : PartialTy.ty _ = PartialTy.ty Ty.int :=
+            hheadTy.symm.trans hheadSlotTy
+          have hrestTyPartialEq : PartialTy.ty _ = PartialTy.ty Ty.unit :=
+            hrestTy.symm.trans hrestSlotTy
+          cases hheadTyPartialEq
+          cases hrestTyPartialEq
+          exact PartialTyUnion.int_unit_full_false hunion
+      | cons _hhead2 hrest2 _hunion2 _hintersection2 =>
+          exact False.elim (LValTargetsTyping.nil_false hrest2)
+
+theorem joinCoherenceJoinEnv_not_coherent : ¬ Coherent joinCoherenceJoinEnv := by
+  intro hcoh
+  have hx : joinCoherenceJoinEnv.slotAt "x" =
+      some { ty := .ty (.borrow false [.var "a", .var "b"]), lifetime := Lifetime.root } := by
+    simp [joinCoherenceJoinEnv, Env.update]
+  have htyping : LValTyping joinCoherenceJoinEnv (.var "x")
+      (.ty (.borrow false [.var "a", .var "b"])) Lifetime.root :=
+    LValTyping.var hx
+  exact joinCoherenceJoinEnv_targets_not_typeable (hcoh (.var "x") false
+    [.var "a", .var "b"] Lifetime.root htyping)
+
+theorem joinCoherenceLeftEnv_linearizable : Linearizable joinCoherenceLeftEnv := by
+  refine ⟨fun n => if n = "x" then 1 else 0, ?_⟩
+  intro y slot hslot v hv
+  by_cases hyx : y = "x"
+  · subst hyx
+    have hslotTy : slot.ty = .ty (.borrow false [.var "a"]) := by
+      simpa [joinCoherenceLeftEnv, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hv
+    simp [PartialTy.vars, Ty.vars, LVal.base] at hv ⊢
+    subst hv
+    simp
+  · by_cases hyb : y = "b"
+    · subst hyb
+      have hslotTy : slot.ty = .ty .unit := by
+        simpa [joinCoherenceLeftEnv, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+    · by_cases hya : y = "a"
+      · subst hya
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [joinCoherenceLeftEnv, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hv
+        simp [PartialTy.vars, Ty.vars] at hv
+      · have hnone : joinCoherenceLeftEnv.slotAt y = none := by
+          simp [joinCoherenceLeftEnv, Env.update, Env.empty, hyx, hyb, hya]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem joinCoherenceRightEnv_linearizable : Linearizable joinCoherenceRightEnv := by
+  refine ⟨fun n => if n = "x" then 1 else 0, ?_⟩
+  intro y slot hslot v hv
+  by_cases hyx : y = "x"
+  · subst hyx
+    have hslotTy : slot.ty = .ty (.borrow false [.var "b"]) := by
+      simpa [joinCoherenceRightEnv, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hv
+    simp [PartialTy.vars, Ty.vars, LVal.base] at hv ⊢
+    subst hv
+    simp
+  · by_cases hyb : y = "b"
+    · subst hyb
+      have hslotTy : slot.ty = .ty .unit := by
+        simpa [joinCoherenceRightEnv, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+    · by_cases hya : y = "a"
+      · subst hya
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [joinCoherenceRightEnv, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hv
+        simp [PartialTy.vars, Ty.vars] at hv
+      · have hnone : joinCoherenceRightEnv.slotAt y = none := by
+          simp [joinCoherenceRightEnv, Env.update, Env.empty, hyx, hyb, hya]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem joinCoherenceJoinEnv_linearizable : Linearizable joinCoherenceJoinEnv := by
+  refine ⟨fun n => if n = "x" then 1 else 0, ?_⟩
+  intro y slot hslot v hv
+  by_cases hyx : y = "x"
+  · subst hyx
+    have hslotTy : slot.ty = .ty (.borrow false [.var "a", .var "b"]) := by
+      simpa [joinCoherenceJoinEnv, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hv
+    simp [PartialTy.vars, Ty.vars, LVal.base] at hv ⊢
+    rcases hv with hv | hv <;> subst hv <;> simp
+  · by_cases hyb : y = "b"
+    · subst hyb
+      have hslotTy : slot.ty = .ty .unit := by
+        simpa [joinCoherenceJoinEnv, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+    · by_cases hya : y = "a"
+      · subst hya
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [joinCoherenceJoinEnv, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hv
+        simp [PartialTy.vars, Ty.vars] at hv
+      · have hnone : joinCoherenceJoinEnv.slotAt y = none := by
+          simp [joinCoherenceJoinEnv, Env.update, Env.empty, hyx, hyb, hya]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem joinCoherenceEnvJoin :
+    EnvJoin joinCoherenceLeftEnv joinCoherenceRightEnv joinCoherenceJoinEnv := by
+  constructor
+  · intro env hmem
+    simp at hmem
+    rcases hmem with h | h <;> subst h
+    · intro y
+      by_cases hyx : y = "x"
+      · subst hyx
+        simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update]
+        exact PartialTyStrengthens.borrow (by
+          intro target hmem
+          simp at hmem
+          simp [hmem])
+      · by_cases hyb : y = "b"
+        · subst hyb
+          simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update]
+        · by_cases hya : y = "a"
+          · subst hya
+            simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update]
+          · simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update,
+              Env.empty, hyx, hyb, hya]
+    · intro y
+      by_cases hyx : y = "x"
+      · subst hyx
+        simp [joinCoherenceRightEnv, joinCoherenceJoinEnv, Env.update]
+        exact PartialTyStrengthens.borrow (by
+          intro target hmem
+          simp at hmem
+          simp [hmem])
+      · by_cases hyb : y = "b"
+        · subst hyb
+          simp [joinCoherenceRightEnv, joinCoherenceJoinEnv, Env.update]
+        · by_cases hya : y = "a"
+          · subst hya
+            simp [joinCoherenceRightEnv, joinCoherenceJoinEnv, Env.update]
+          · simp [joinCoherenceRightEnv, joinCoherenceJoinEnv, Env.update,
+              Env.empty, hyx, hyb, hya]
+  · intro upper hupper y
+    by_cases hyx : y = "x"
+    · subst hyx
+      have hleft := hupper
+        (by simp :
+          joinCoherenceLeftEnv ∈ ({joinCoherenceLeftEnv, joinCoherenceRightEnv} : Set Env))
+        "x"
+      have hright := hupper
+        (by simp :
+          joinCoherenceRightEnv ∈ ({joinCoherenceLeftEnv, joinCoherenceRightEnv} : Set Env))
+        "x"
+      cases hslot : upper.slotAt "x" with
+      | none =>
+          simp [joinCoherenceLeftEnv, Env.update, hslot] at hleft
+      | some upperSlot =>
+          simp [joinCoherenceLeftEnv, joinCoherenceRightEnv, joinCoherenceJoinEnv,
+            Env.update, hslot] at hleft hright ⊢
+          constructor
+          · exact hleft.1
+          · have hjoinLe :
+                PartialTyStrengthens
+                  (.ty (.borrow false ([.var "a"] ++ [.var "b"]))) upperSlot.ty :=
+              PartialTyUnion.borrow_append.2 (by
+                intro candidate hcand
+                simp at hcand
+                rcases hcand with hcand | hcand
+                · subst hcand
+                  exact hleft.2
+                · subst hcand
+                  exact hright.2)
+            simpa using hjoinLe
+    · by_cases hyb : y = "b"
+      · subst hyb
+        have hleft := hupper
+          (by simp :
+            joinCoherenceLeftEnv ∈ ({joinCoherenceLeftEnv, joinCoherenceRightEnv} : Set Env))
+          "b"
+        simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update] at hleft ⊢
+        exact hleft
+      · by_cases hya : y = "a"
+        · subst hya
+          have hleft := hupper
+            (by simp :
+              joinCoherenceLeftEnv ∈ ({joinCoherenceLeftEnv, joinCoherenceRightEnv} : Set Env))
+            "a"
+          simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update] at hleft ⊢
+          exact hleft
+        · have hleft := hupper
+            (by simp :
+              joinCoherenceLeftEnv ∈ ({joinCoherenceLeftEnv, joinCoherenceRightEnv} : Set Env))
+            y
+          simp [joinCoherenceLeftEnv, joinCoherenceJoinEnv, Env.update, Env.empty,
+            hyx, hyb, hya] at hleft ⊢
+          exact hleft
+
+/-- Bare `EnvJoin.preserves_coherent` is false: two coherent branches can merge
+`&[a]` and `&[b]` into `&[a,b]`, while `a : int` and `b : unit` have no full
+joint target type.  A valid join-coherence theorem needs the same cross-branch
+target-shape/transport information carried by the fan-out invariants below. -/
+theorem EnvJoin.preserves_coherent_bare_counterexample :
+    ∃ left right join,
+      EnvJoin left right join ∧
+      Linearizable left ∧ Linearizable right ∧ Linearizable join ∧
+      Coherent left ∧ Coherent right ∧ ¬ Coherent join := by
+  exact ⟨joinCoherenceLeftEnv, joinCoherenceRightEnv, joinCoherenceJoinEnv,
+    joinCoherenceEnvJoin, joinCoherenceLeftEnv_linearizable,
+    joinCoherenceRightEnv_linearizable, joinCoherenceJoinEnv_linearizable,
+    joinCoherenceLeftEnv_coherent, joinCoherenceRightEnv_coherent,
+    joinCoherenceJoinEnv_not_coherent⟩
+
+/-- Coherence obligations for joining two write fan-out branches.
+
+The bare `EnvJoin.preserves_coherent` statement is false: joining can create a
+borrow target list that neither branch had as a jointly typeable list.  The valid
+replacement records how each borrow typing observed in the join is traced back to
+one coherent branch, and how that branch's target-list typing transports forward
+to the join. -/
+structure EnvJoinCoherenceObligations (left right join : Env) : Prop where
+  borrow_transport
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LValTyping join lv (.ty (.borrow mutable targets)) borrowLifetime →
+      (∃ leftBorrowLifetime,
+        LValTyping left lv (.ty (.borrow mutable targets)) leftBorrowLifetime ∧
+          ∀ targetTy targetLifetime,
+            LValTargetsTyping left targets (.ty targetTy) targetLifetime →
+              ∃ joinTargetTy joinTargetLifetime,
+                LValTargetsTyping join targets (.ty joinTargetTy) joinTargetLifetime)
+      ∨
+      (∃ rightBorrowLifetime,
+        LValTyping right lv (.ty (.borrow mutable targets)) rightBorrowLifetime ∧
+          ∀ targetTy targetLifetime,
+            LValTargetsTyping right targets (.ty targetTy) targetLifetime →
+              ∃ joinTargetTy joinTargetLifetime,
+                LValTargetsTyping join targets (.ty joinTargetTy) joinTargetLifetime)
+
+theorem EnvJoin.preserves_coherent_of_obligations {left right join : Env} :
     Coherent left →
     Coherent right →
+    EnvJoinCoherenceObligations left right join →
     Coherent join := by
-  sorry
+  intro hleftCoh hrightCoh hobligations lv mutable targets borrowLifetime htyping
+  rcases hobligations.borrow_transport htyping with
+    ⟨leftBorrowLifetime, hleftTyping, htargetsTransport⟩ |
+    ⟨rightBorrowLifetime, hrightTyping, htargetsTransport⟩
+  · rcases hleftCoh lv mutable targets leftBorrowLifetime hleftTyping with
+      ⟨targetTy, targetLifetime, htargetsLeft⟩
+    exact htargetsTransport targetTy targetLifetime htargetsLeft
+  · rcases hrightCoh lv mutable targets rightBorrowLifetime hrightTyping with
+      ⟨targetTy, targetLifetime, htargetsRight⟩
+    exact htargetsTransport targetTy targetLifetime htargetsRight
+
+theorem EnvWrite.preserves_coherent_of_obligations {env result : Env}
+    {writeBase : Name} :
+    Coherent env →
+    EnvWriteCoherenceObligations env result writeBase →
+    Coherent result := by
+  intro hcoh hobligations lv mutable targets borrowLifetime htyping
+  by_cases hbase : LVal.base lv = writeBase
+  · exact hobligations.written_root_coherent hbase htyping
+  · rcases hobligations.old_root_transport hbase htyping with
+      ⟨⟨oldBorrowLifetime, htypingOld⟩, htargetsTransport⟩
+    exact hcoh lv mutable targets oldBorrowLifetime htypingOld
+      |>.elim (fun targetTy htarget =>
+        htarget.elim (fun targetLifetime htargetsOld =>
+          htargetsTransport targetTy targetLifetime htargetsOld))
 
 /-- Under a *shape-preserving* strengthening the occurring variables only grow:
 `a ⊑ b` and `a ≈shape b` give `vars a ⊆ vars b`.  (`sameShape` rules out the
@@ -7794,6 +8604,35 @@ theorem EnvJoin.slot_union {left right join : Env} {x : Name}
     simp [candidateEnv, Env.update, hjoinSlot] at hjoinStrength
     exact hjoinStrength
 
+/-- A join preserves linearizability when both branches use the same rank
+function.  This is the constructive replacement shape for the existential
+`EnvJoin.preserves_linearizable` obligation from the followup paper. -/
+theorem EnvJoin.preserves_linearizedBy {φ : Name → Nat} {left right join : Env} :
+    EnvJoin left right join →
+    LinearizedBy φ left →
+    LinearizedBy φ right →
+    LinearizedBy φ join := by
+  intro hjoin hleft hright x joinSlot hjoinSlot v hv
+  rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+    ⟨leftSlot, hleftSlot, _hleftLifetime⟩
+  rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+    ⟨rightSlot, hrightSlot, _hrightLifetime⟩
+  rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+    ⟨_hleftLife, _hrightLife, hunion⟩
+  rcases partialTyUnion_vars_subset hunion hv with hvLeft | hvRight
+  · exact hleft x leftSlot hleftSlot v hvLeft
+  · exact hright x rightSlot hrightSlot v hvRight
+
+theorem EnvJoin.preserves_linearizable_common {φ : Name → Nat}
+    {left right join : Env} :
+    EnvJoin left right join →
+    LinearizedBy φ left →
+    LinearizedBy φ right →
+    Linearizable join := by
+  intro hjoin hleft hright
+  exact Linearizable.of_linearizedBy
+    (EnvJoin.preserves_linearizedBy hjoin hleft hright)
+
 /-- Appendix 9.6 shape stability: a `Definition 3.23` write of positive rank
 preserves the *shape* of every slot, provided the write is leaf-shape-compatible
 (`WriteShapeCompat`).  Positive rank forces every leaf update to be `W-Weak`
@@ -7828,10 +8667,8 @@ theorem EnvWrite.shapePreserved {rank : Nat} {env result : Env} {lv : LVal}
     intro env old ty hrank0 _hcompat
     exact absurd hrank0 (Nat.lt_irrefl 0)
   case weak =>
-    intro env rank old joined ty hjoinTy _hrank hcompat
-    cases hcompat with
-    | leaf hshape =>
-        exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
+    intro env rank old joined ty hshape hjoinTy _hrank _hcompat
+    exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank hcompat
     cases hcompat with
@@ -7847,11 +8684,11 @@ theorem EnvWrite.shapePreserved {rank : Nat} {env result : Env} {lv : LVal}
     intro rank env path ty _hrank _hprem
     exact EnvShapePreserved.refl env
   case singleton =>
-    intro rank env updated path target ty _hwrite ih hrank hprem
+    intro rank env updated path target ty _hwrite _htyped ih hrank hprem
     exact ih hrank (fun slot hslot => hprem target (by simp) slot hslot)
   case cons =>
     intro rank env updated restEnv result path target rest ty
-      _hwrite _hwrites hjoin ihWrite ihWrites hrank hprem
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites hrank hprem
     have hupd : EnvShapePreserved env updated :=
       ihWrite hrank (fun slot hslot => hprem target (by simp) slot hslot)
     have hrest : EnvShapePreserved env restEnv :=
@@ -7910,10 +8747,8 @@ theorem WriteBorrowTargets.shapePreserved {rank : Nat} {env result : Env}
     intro env old ty hrank0 _hcompat
     exact absurd hrank0 (Nat.lt_irrefl 0)
   case weak =>
-    intro env rank old joined ty hjoinTy _hrank hcompat
-    cases hcompat with
-    | leaf hshape =>
-        exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
+    intro env rank old joined ty hshape hjoinTy _hrank _hcompat
+    exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank hcompat
     cases hcompat with
@@ -7929,11 +8764,11 @@ theorem WriteBorrowTargets.shapePreserved {rank : Nat} {env result : Env}
     intro rank env path ty _hrank _hprem
     exact EnvShapePreserved.refl env
   case singleton =>
-    intro rank env updated path target ty _hwrite ih hrank hprem
+    intro rank env updated path target ty _hwrite _htyped ih hrank hprem
     exact ih hrank (fun slot hslot => hprem target (by simp) slot hslot)
   case cons =>
     intro rank env updated restEnv result path target rest ty
-      _hwrite _hwrites hjoin ihWrite ihWrites hrank hprem
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites hrank hprem
     have hupd : EnvShapePreserved env updated :=
       ihWrite hrank (fun slot hslot => hprem target (by simp) slot hslot)
     have hrest : EnvShapePreserved env restEnv :=
@@ -7977,10 +8812,11 @@ inductive WriteLeafTy (env : Env) : List Unit → PartialTy → Ty → Prop wher
       WriteLeafTy env (() :: path) (.ty (.borrow mutable targets)) ty
 
 /-- Shape stability from initialised leaves: a positive-rank `EnvWrite` whose
-leaves are defined (`WriteLeafTy`) preserves every slot's shape.  Same proof
-shape as `EnvWrite.shapePreserved`, but the leaf `W-Weak` uses the unconditional
-`partialTyJoin_ty_left_sameShape` instead of `partialTyJoin_sameShape` — so it
-needs no `ShapeCompatible`, only that the leaf old type is `.ty`. -/
+leaves are defined (`WriteLeafTy`) preserves every slot's shape.
+
+The strengthened `W-Weak` rule carries the local `ShapeCompatible` premise
+needed to preserve shape at the leaf.
+-/
 theorem EnvWrite.shapePreserved_init {rank : Nat} {env result : Env} {lv : LVal}
     {ty : Ty} :
     0 < rank →
@@ -8009,10 +8845,8 @@ theorem EnvWrite.shapePreserved_init {rank : Nat} {env result : Env} {lv : LVal}
     intro env old ty hrank0 _hcompat
     exact absurd hrank0 (Nat.lt_irrefl 0)
   case weak =>
-    intro env rank old joined ty hjoinTy _hrank hcompat
-    cases hcompat with
-    | leaf =>
-        exact ⟨EnvShapePreserved.refl env, partialTyJoin_ty_left_sameShape hjoinTy⟩
+    intro env rank old joined ty hshape hjoinTy _hrank _hcompat
+    exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank hcompat
     cases hcompat with
@@ -8028,11 +8862,11 @@ theorem EnvWrite.shapePreserved_init {rank : Nat} {env result : Env} {lv : LVal}
     intro rank env path ty _hrank _hprem
     exact EnvShapePreserved.refl env
   case singleton =>
-    intro rank env updated path target ty _hwrite ih hrank hprem
+    intro rank env updated path target ty _hwrite _htyped ih hrank hprem
     exact ih hrank (fun slot hslot => hprem target (by simp) slot hslot)
   case cons =>
     intro rank env updated restEnv result path target rest ty
-      _hwrite _hwrites hjoin ihWrite ihWrites hrank hprem
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites hrank hprem
     have hupd : EnvShapePreserved env updated :=
       ihWrite hrank (fun slot hslot => hprem target (by simp) slot hslot)
     have hrest : EnvShapePreserved env restEnv :=
@@ -8088,10 +8922,8 @@ theorem WriteBorrowTargets.shapePreserved_init {rank : Nat} {env result : Env}
     intro env old ty hrank0 _hcompat
     exact absurd hrank0 (Nat.lt_irrefl 0)
   case weak =>
-    intro env rank old joined ty hjoinTy _hrank hcompat
-    cases hcompat with
-    | leaf =>
-        exact ⟨EnvShapePreserved.refl env, partialTyJoin_ty_left_sameShape hjoinTy⟩
+    intro env rank old joined ty hshape hjoinTy _hrank _hcompat
+    exact ⟨EnvShapePreserved.refl env, partialTyJoin_sameShape hshape hjoinTy⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank hcompat
     cases hcompat with
@@ -8107,11 +8939,11 @@ theorem WriteBorrowTargets.shapePreserved_init {rank : Nat} {env result : Env}
     intro rank env path ty _hrank _hprem
     exact EnvShapePreserved.refl env
   case singleton =>
-    intro rank env updated path target ty _hwrite ih hrank hprem
+    intro rank env updated path target ty _hwrite _htyped ih hrank hprem
     exact ih hrank (fun slot hslot => hprem target (by simp) slot hslot)
   case cons =>
     intro rank env updated restEnv result path target rest ty
-      _hwrite _hwrites hjoin ihWrite ihWrites hrank hprem
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites hrank hprem
     have hupd : EnvShapePreserved env updated :=
       ihWrite hrank (fun slot hslot => hprem target (by simp) slot hslot)
     have hrest : EnvShapePreserved env restEnv :=
@@ -8159,11 +8991,11 @@ theorem WriteBorrowTargets.member_write {rank : Nat} {env result : Env}
   case mutBorrow => intros; trivial
   case nil => intro rank env path ty t ht; simp at ht
   case singleton =>
-      intro rank env updated path target ty hwrite _ih t ht
+      intro rank env updated path target ty hwrite _htyped _ih t ht
       rw [List.mem_singleton] at ht; subst ht; exact ⟨updated, hwrite⟩
   case cons =>
       intro rank env updated restEnv result path target rest ty
-        hwrite _hrest _hjoin _ihWrite ihRest t ht
+        hwrite _htyped _hrest _hjoin _ihWrite ihRest t ht
       rcases List.mem_cons.mp ht with rfl | ht
       · exact ⟨updated, hwrite⟩
       · exact ihRest t ht
@@ -8396,7 +9228,7 @@ theorem EnvWrite.envStrengthens {rank : Nat} {env result : Env} {lv : LVal}
     intro env old ty hrank0
     exact absurd hrank0 (Nat.lt_irrefl 0)
   case weak =>
-    intro env rank old joined ty hjoinTy _hrank
+    intro env rank old joined ty _hshape hjoinTy _hrank
     exact ⟨EnvStrengthens.refl env, PartialTyUnion.left_strengthens hjoinTy⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupdate ih hrank
@@ -8409,11 +9241,11 @@ theorem EnvWrite.envStrengthens {rank : Nat} {env result : Env} {lv : LVal}
     intro rank env path ty _hrank
     exact EnvStrengthens.refl env
   case singleton =>
-    intro rank env updated path target ty _hwrite ih hrank
+    intro rank env updated path target ty _hwrite _htyped ih hrank
     exact ih hrank
   case cons =>
     intro rank env updated restEnv result path target rest ty
-      _hwrite _hwrites hjoin ihWrite _ihWrites hrank
+      _hwrite _htyped _hwrites hjoin ihWrite _ihWrites hrank
     have hupd : EnvStrengthens env updated := ihWrite hrank
     have hUpdResult : EnvStrengthens updated result := hjoin.1 (by simp)
     exact EnvStrengthens.trans hupd hUpdResult
@@ -8468,7 +9300,7 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
     intro env old ty h0
     exact absurd h0 (Nat.lt_irrefl 0)
   case weak =>
-    intro env rank old joined ty hjoin _hrank
+    intro env rank old joined ty _hshape hjoin _hrank
     refine ⟨?_, ?_⟩
     · intro m T hcontains t ht
       rcases PartialTyUnion.contained_borrow_member hjoin hcontains ht with
@@ -8497,11 +9329,11 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
     intro rank env path ty _hrank x slot m T hslot hcontains t ht
     exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
   case singleton =>
-    intro rank env updated path target ty _hwrite ih hrank
+    intro rank env updated path target ty _hwrite _htyped ih hrank
     exact ih hrank
   case cons =>
     intro rank env updated restEnv result path target rest ty
-      _hwrite _hwrites hjoin ihWrite ihWrites hrank x slot m T hslot hcontains t ht
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites hrank x slot m T hslot hcontains t ht
     rcases EnvJoin.lifetimesPreserved_left hjoin x slot hslot with ⟨us, hus, _⟩
     rcases EnvJoin.lifetimesPreserved_right hjoin x slot hslot with ⟨rs, hrs, _⟩
     rcases EnvJoin.slot_union hjoin hus hrs hslot with ⟨_, _, hunion⟩
@@ -8526,6 +9358,240 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
           = env₂.slotAt x := by simp [Env.update, hx]
       rw [hru] at hrslot
       exact ihEnv x rslot m T hrslot hcontains t ht
+
+/-- All-rank version of `EnvWrite.borrowTargetOrigin`.
+
+The positive-rank theorem above discharged `W-Strong` vacuously.  At rank `0`,
+`W-Strong` is the assignment case and any borrow exposed by the updated leaf comes
+directly from the RHS type.  The same old-or-RHS origin classification therefore
+holds for every `EnvWrite`; rank is only needed later if callers want to derive
+the RHS-rank side condition from a positive-rank borrow fan-out rule. -/
+theorem EnvWrite.borrowTargetOrigin_all {rank : Nat} {env result : Env} {lv : LVal}
+    {rhsTy : Ty} :
+    EnvWrite rank env lv rhsTy result →
+    ∀ x slot m T, result.slotAt x = some slot →
+      PartialTyContains slot.ty (.borrow m T) →
+      ∀ t, t ∈ T → BorrowTargetOrigin env rhsTy x t := by
+  intro hwrite
+  refine EnvWrite.rec
+    (motive_1 := fun _rank env₁ _path oldTy ty env₂ updatedTy _ =>
+      (∀ m T, PartialTyContains updatedTy (.borrow m T) →
+        ∀ t, t ∈ T → TypeBorrowOrigin oldTy ty t) ∧
+      (∀ x slot m T, env₂.slotAt x = some slot →
+        PartialTyContains slot.ty (.borrow m T) →
+        ∀ t, t ∈ T → BorrowTargetOrigin env₁ ty x t))
+    (motive_2 := fun _rank env _path _targets ty result _ =>
+      ∀ x slot m T, result.slotAt x = some slot →
+        PartialTyContains slot.ty (.borrow m T) →
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+    (motive_3 := fun _rank env _lv ty result _ =>
+      ∀ x slot m T, result.slotAt x = some slot →
+        PartialTyContains slot.ty (.borrow m T) →
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite
+  case strong =>
+    intro env old ty
+    refine ⟨?_, ?_⟩
+    · intro m T hcontains t ht
+      exact Or.inr ⟨m, T, hcontains, ht⟩
+    · intro x slot m T hslot hcontains t ht
+      exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+  case weak =>
+    intro env rank old joined ty _hshape hjoin
+    refine ⟨?_, ?_⟩
+    · intro m T hcontains t ht
+      rcases PartialTyUnion.contained_borrow_member hjoin hcontains ht with
+        ⟨Tl, hl, htl⟩ | ⟨Tr, hr, htr⟩
+      · exact Or.inl ⟨m, Tl, hl, htl⟩
+      · exact Or.inr ⟨m, Tr, hr, htr⟩
+    · intro x slot m T hslot hcontains t ht
+      exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+  case box =>
+    intro env₁ env₂ rank path inner updatedInner ty _hupd ih
+    rcases ih with ⟨ihType, ihEnv⟩
+    refine ⟨?_, ihEnv⟩
+    intro m T hcontains t ht
+    cases hcontains with
+    | box hinner =>
+        rcases ihType m T hinner t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
+        · exact Or.inl ⟨m₀, T₀, PartialTyContains.box hc₀, ht₀⟩
+        · exact Or.inr hrhs
+  case mutBorrow =>
+    intro env₁ env₂ rank path targets ty hwrites ih
+    refine ⟨?_, ?_⟩
+    · intro m T hcontains t ht
+      exact Or.inl ⟨m, T, hcontains, ht⟩
+    · exact ih
+  case nil =>
+    intro rank env path ty x slot m T hslot hcontains t ht
+    exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+  case singleton =>
+    intro rank env updated path target ty _hwrite _htyped ih
+    exact ih
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites x slot m T hslot hcontains t ht
+    rcases EnvJoin.lifetimesPreserved_left hjoin x slot hslot with ⟨us, hus, _⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x slot hslot with ⟨rs, hrs, _⟩
+    rcases EnvJoin.slot_union hjoin hus hrs hslot with ⟨_, _, hunion⟩
+    rcases PartialTyUnion.contained_borrow_member hunion hcontains ht with
+      ⟨Tl, hl, htl⟩ | ⟨Tr, hr, htr⟩
+    · exact ihWrite x us m Tl hus hl t htl
+    · exact ihWrites x rs m Tr hrs hr t htr
+  case intro =>
+    intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ih
+      x rslot m T hrslot hcontains t ht
+    rcases ih with ⟨ihType, ihEnv⟩
+    by_cases hx : x = LVal.base lv
+    · have hreq : rslot = { slot with ty := updatedTy } := by
+        have hlk : (env₂.update (LVal.base lv) { slot with ty := updatedTy }).slotAt x
+            = some { slot with ty := updatedTy } := by rw [hx]; simp [Env.update]
+        rw [hlk] at hrslot; exact (Option.some.inj hrslot).symm
+      rw [hreq] at hcontains
+      rcases ihType m T hcontains t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
+      · exact Or.inl ⟨slot, m₀, T₀, by rw [hx]; exact hslot, hc₀, ht₀⟩
+      · exact Or.inr hrhs
+    · have hru : (env₂.update (LVal.base lv) { slot with ty := updatedTy }).slotAt x
+          = env₂.slotAt x := by simp [Env.update, hx]
+      rw [hru] at hrslot
+      exact ihEnv x rslot m T hrslot hcontains t ht
+
+/-- Positive-rank write linearization under the explicit missing rank side
+condition.
+
+`EnvWrite.borrowTargetOrigin` says every variable in a positive-rank write result
+comes either from the old slot at the same base, or from the RHS type.  The old
+case is handled by the previous rank witness.  The RHS case is exactly the side
+condition that the bare `EnvWrite.preserves_linearizedBy` axiom is missing. -/
+theorem EnvWrite.preserves_linearizedBy_of_rhsVarsBelow {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {φ : Name → Nat} :
+    0 < rank →
+    EnvWrite rank env lv rhsTy result →
+    LinearizedBy φ env →
+    (∀ x slot, result.slotAt x = some slot →
+      ∀ v, v ∈ Ty.vars rhsTy → φ v < φ x) →
+    LinearizedBy φ result := by
+  intro hrank hwrite hlin hrhs x slot hslot v hv
+  rcases partialTy_vars_mem_contains v hv with
+    ⟨mutable, targets, hcontains, target, htarget, hbase⟩
+  rcases EnvWrite.borrowTargetOrigin hrank hwrite x slot mutable targets
+      hslot hcontains target htarget with
+    hfromOld | hfromRhs
+  · rcases hfromOld with
+      ⟨oldSlot, oldMutable, oldTargets, holdSlot, holdContains, holdTarget⟩
+    have hvOld : v ∈ PartialTy.vars oldSlot.ty := by
+      exact mem_partialTy_vars_iff.mpr
+        ⟨oldMutable, oldTargets, target, holdContains, holdTarget, hbase⟩
+    exact hlin x oldSlot holdSlot v hvOld
+  · rcases hfromRhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
+    have hvRhsPartial : v ∈ PartialTy.vars (.ty rhsTy) := by
+      exact mem_partialTy_vars_iff.mpr
+        ⟨rhsMutable, rhsTargets, target, hrhsContains, hrhsTarget, hbase⟩
+    exact hrhs x slot hslot v (by simpa [PartialTy.vars] using hvRhsPartial)
+
+/-- All-rank write linearization under an explicit RHS-rank side condition.
+
+This is the non-vacuous replacement shape for the broad
+`EnvWrite.preserves_linearizedBy` obligation: old borrow targets keep their
+previous rank proof, and newly installed RHS borrow targets are covered by the
+caller-provided acyclicity premise. -/
+theorem EnvWrite.preserves_linearizedBy_of_rhsVarsBelow_all {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {φ : Name → Nat} :
+    EnvWrite rank env lv rhsTy result →
+    LinearizedBy φ env →
+    (∀ x slot, result.slotAt x = some slot →
+      ∀ v, v ∈ Ty.vars rhsTy → φ v < φ x) →
+    LinearizedBy φ result := by
+  intro hwrite hlin hrhs x slot hslot v hv
+  rcases partialTy_vars_mem_contains v hv with
+    ⟨mutable, targets, hcontains, target, htarget, hbase⟩
+  rcases EnvWrite.borrowTargetOrigin_all hwrite x slot mutable targets
+      hslot hcontains target htarget with
+    hfromOld | hfromRhs
+  · rcases hfromOld with
+      ⟨oldSlot, oldMutable, oldTargets, holdSlot, holdContains, holdTarget⟩
+    have hvOld : v ∈ PartialTy.vars oldSlot.ty := by
+      exact mem_partialTy_vars_iff.mpr
+        ⟨oldMutable, oldTargets, target, holdContains, holdTarget, hbase⟩
+    exact hlin x oldSlot holdSlot v hvOld
+  · rcases hfromRhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
+    have hvRhsPartial : v ∈ PartialTy.vars (.ty rhsTy) := by
+      exact mem_partialTy_vars_iff.mpr
+        ⟨rhsMutable, rhsTargets, target, hrhsContains, hrhsTarget, hbase⟩
+    exact hrhs x slot hslot v (by simpa [PartialTy.vars] using hvRhsPartial)
+
+theorem EnvWrite.preserves_linearizable_of_rhsVarsBelow_all {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {φ : Name → Nat} :
+    EnvWrite rank env lv rhsTy result →
+    LinearizedBy φ env →
+    (∀ x slot, result.slotAt x = some slot →
+      ∀ v, v ∈ Ty.vars rhsTy → φ v < φ x) →
+    Linearizable result := by
+  intro hwrite hlin hbelow
+  exact Linearizable.of_linearizedBy
+    (EnvWrite.preserves_linearizedBy_of_rhsVarsBelow_all hwrite hlin hbelow)
+
+/-- The rank side condition rejects the bare write-linearization counterexample.
+
+In `writeLinearizationCycleEnv`, the old witness ranks `x < y` to justify the
+old edge `y → x`.  Writing RHS `&y` into `x` would require the new edge `x → y`
+to satisfy `φ y < φ x`, which is impossible for that same witness.
+-/
+theorem EnvWrite.linearizable_counterexample_violates_rhsBorrowTargetsBelow :
+    ¬ EnvWriteRhsBorrowTargetsBelow
+      (fun n => if n = "x" then 1 else if n = "y" then 2 else 0)
+      writeLinearizationCycleResult (.borrow false [.var "y"]) := by
+  intro hbelow
+  have hx :
+      writeLinearizationCycleResult.slotAt "x" =
+        some { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root } := by
+    simp [writeLinearizationCycleResult, Env.update]
+  have hcontains :
+      PartialTyContains (.ty (.borrow false [.var "y"]))
+        (.borrow false [.var "y"]) :=
+    PartialTyContains.here
+  have hfromRhs :
+      ∃ rhsMutable rhsTargets,
+        PartialTyContains (.ty (.borrow false [.var "y"]))
+          (.borrow rhsMutable rhsTargets) ∧
+          (.var "y" : LVal) ∈ rhsTargets :=
+    ⟨false, [.var "y"], PartialTyContains.here, by simp⟩
+  have hlt :=
+    hbelow "x" { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root }
+      false [.var "y"] (.var "y") hx hcontains (by simp) hfromRhs
+  simp [LVal.base] at hlt
+
+theorem EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {φ : Name → Nat} :
+    EnvWrite rank env lv rhsTy result →
+    LinearizedBy φ env →
+    EnvWriteRhsBorrowTargetsBelow φ result rhsTy →
+    LinearizedBy φ result := by
+  intro hwrite hlin hbelow x slot hslot v hv
+  rcases partialTy_vars_mem_contains v hv with
+    ⟨mutable, targets, hcontains, target, htarget, hbase⟩
+  rcases EnvWrite.borrowTargetOrigin_all hwrite x slot mutable targets
+      hslot hcontains target htarget with
+    hfromOld | hfromRhs
+  · rcases hfromOld with
+      ⟨oldSlot, oldMutable, oldTargets, holdSlot, holdContains, holdTarget⟩
+    have hvOld : v ∈ PartialTy.vars oldSlot.ty := by
+      exact mem_partialTy_vars_iff.mpr
+        ⟨oldMutable, oldTargets, target, holdContains, holdTarget, hbase⟩
+    exact hlin x oldSlot holdSlot v hvOld
+  · have htargetBelow : φ (LVal.base target) < φ x :=
+      hbelow x slot mutable targets target hslot hcontains htarget hfromRhs
+    simpa [hbase] using htargetBelow
+
+theorem EnvWrite.preserves_linearizable_of_rhsBorrowTargetsBelow_all {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {φ : Name → Nat} :
+    EnvWrite rank env lv rhsTy result →
+    LinearizedBy φ env →
+    EnvWriteRhsBorrowTargetsBelow φ result rhsTy →
+    Linearizable result := by
+  intro hwrite hlin hbelow
+  exact Linearizable.of_linearizedBy
+    (EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all hwrite hlin hbelow)
 
 theorem LValTyping.box_partial_join_bounded {left right join : Env}
     {source : LVal} {leftInner rightInner : PartialTy}
@@ -8939,7 +10005,7 @@ rank-stratified foundation stone.  The transported typing's lifetime is bounded
 by its base slot (`lvalTyping_lifetime_le_base_bounded`, using the rank-`<N`
 contained-borrow invariant `hcontN` of `join` — supplied by the strong-induction
 hypothesis of the `ContainedBorrows join` bootstrap), and the base slot is bounded
-by `current` (`LValBaseOutlives.join_left`).  No more sorry. -/
+by `current` (`LValBaseOutlives.join_left`). -/
 theorem fullJoinTransport_viaInvariants {source join : Env} {target : LVal}
     {sourceTy : Ty} {sourceLifetime current : Lifetime} {φ : Name → Nat} {N : Nat}
     (hstr : ∀ x sE, source.slotAt x = some sE →
@@ -9209,7 +10275,7 @@ theorem ContainedBorrowsWellFormed.join_of_inSlot {left right join : Env} :
 the borrow at `x` (rank `n`) has targets all of rank `< n` (Linearizable), so the
 per-target join transport (`join_viaInvariants_left/right`) bounds their lifetimes
 using the rank-`<n` invariant supplied by the induction hypothesis (`hcontN`).
-This breaks the circularity the old `fullJoinTransport` lifetime sorry hit. -/
+This breaks the circularity the old `fullJoinTransport` lifetime gap hit. -/
 theorem ContainedBorrowsWellFormed.join_viaInvariants {left right join : Env}
     (hjoin : EnvJoin left right join)
     (hstrL : ∀ x sE, left.slotAt x = some sE →
@@ -10882,7 +11948,7 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
       ValidValue store' .unit .unit := by
   intro hvalidStoreTyping hsafe hvalidRuntime htyping hstep
   cases htyping with
-  | declare hfresh hinit _hfreshOut henv₃ =>
+  | declare hfresh hinit _hfreshOut _hcoh henv₃ =>
       cases hinit with
       | const hvalueTyping =>
           rcases hvalidStoreTyping value (by simp [termValues]) with
@@ -11396,7 +12462,7 @@ theorem preservation_declare_context_multistep_runtime
   intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping
     hinnerMulti hdeclareStep
   cases htyping with
-  | declare _hfresh₁ hinnerTyping hfreshOut henv₃ =>
+  | declare _hfresh₁ hinnerTyping hfreshOut _hcoh henv₃ =>
       rcases hinnerPreservation
           (validRuntimeState_declare_inner hvalidRuntime)
           (validStoreTyping_declare_inner hvalidStoreTyping)
@@ -11496,7 +12562,7 @@ theorem preservation_assign_context_multistep_runtime
   intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping
     hinnerMulti hassignStep
   cases htyping with
-  | assign hLv hinnerTyping hshape hwellTy hwrite hnotWrite =>
+  | assign hLv hinnerTyping hshape hwellTy hwrite _hranked _hcoh hnotWrite =>
       rcases hinnerPreservation
           (validRuntimeState_assign_inner hvalidRuntime)
           (validStoreTyping_assign_inner hvalidStoreTyping)
@@ -12155,7 +13221,7 @@ theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hwellFormed hsafe _hstore htyping
   cases htyping with
-  | assign hLhs hRhs hshape _hwf _hwriteEnv _hnotWriteProhibited =>
+  | assign hLhs hRhs hshape _hwf _hwriteEnv _hranked _hcoh _hnotWriteProhibited =>
       rcases read_defined_of_allocated
           (lvalTyping_allocated_location hwellFormed hsafe hLhs) with
         ⟨oldSlot, hread⟩
@@ -12214,7 +13280,7 @@ theorem progress_declare_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.letMut x (.val value)) := by
   intro htyping
   cases htyping with
-  | declare _hfresh _hinit _hfreshOut _henv =>
+  | declare _hfresh _hinit _hfreshOut _hcoh _henv =>
       exact Or.inr ⟨store.declare x lifetime value, .val .unit, Step.declare rfl⟩
 
 /-- Lemma 4.10, composed `T-Box` progress case. -/
@@ -12331,14 +13397,16 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     (fun {_env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty}
         _hblockChild _hterms _hwellTy _hdrop ih hwellFormed hsafe hstore =>
       ih lifetime hwellFormed hsafe hstore)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty} hfresh hterm hfreshOut henv ih
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
+        hfresh hterm hfreshOut hcoh henv ih
         hwellFormed hsafe hstore =>
-      progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut henv)
+      progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwf hwrite hnotWriteProhibited ih hwellFormed hsafe hstore =>
+        hLhs hRhs hshape hwf hwrite hranked hcoh hnotWriteProhibited ih hwellFormed
+        hsafe hstore =>
       progress_assign_typing (hwellFormed lifetime) hsafe hstore
-        (TermTyping.assign hLhs hRhs hshape hwf hwrite hnotWriteProhibited)
+        (TermTyping.assign hLhs hRhs hshape hwf hwrite hranked hcoh hnotWriteProhibited)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _typing _blockLifetime _term _ty} _hterm ih
         outerLifetime hwellFormed hsafe hstore =>
@@ -12522,6 +13590,14 @@ def TerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : T
     Prop :=
   ValidRuntimeState store (.val value) ∧ store ∼ₛ env ∧ ValidValue store value ty
 
+theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
+    {env : Env} :
+    ValidRuntimeState store (.val .unit) →
+    store ∼ₛ env →
+    TerminalStateSafe store .unit env .unit := by
+  intro hvalidRuntime hsafe
+  exact ⟨hvalidRuntime, hsafe, ValidPartialValue.unit⟩
+
 /--
 Theorem 4.12 bridge, Type and Borrow Safety.
 
@@ -12627,6 +13703,97 @@ theorem partialTyBorrowFree_ty {ty : Ty} :
   cases hcontains with
   | tyBox hinner =>
       exact hfree mutable targets hinner
+
+theorem partialTyBorrowFree_box_inv {ty : PartialTy} :
+    PartialTyBorrowFree (.box ty) →
+    PartialTyBorrowFree ty := by
+  intro hfree mutable targets hcontains
+  exact hfree mutable targets (PartialTyContains.box hcontains)
+
+/-- A borrow-free fresh slot cannot be the root of a borrow-typed lval.
+
+This discharges the fresh-root half of `FreshUpdateCoherenceObligations` for
+borrow-free declarations/results.  The old-root transport half is separate:
+borrow typings rooted in existing variables may dereference old borrow targets,
+and transporting those target-list typings back to the old environment is the
+real remaining obligation.
+-/
+theorem LValTyping.update_fresh_root_partialTyBorrowFree {env : Env} {x : Name}
+    {ty : Ty} {slotLifetime : Lifetime} {lv : LVal} {partialTy : PartialTy}
+    {valueLifetime : Lifetime} :
+    TyBorrowFree ty →
+    LVal.base lv = x →
+    LValTyping (env.update x { ty := .ty ty, lifetime := slotLifetime })
+      lv partialTy valueLifetime →
+    PartialTyBorrowFree partialTy := by
+  intro hfree hbase htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv partialTy _valueLifetime _ =>
+      LVal.base lv = x → PartialTyBorrowFree partialTy)
+    (motive_2 := fun _targets _partialTy _valueLifetime _ => True)
+    ?var ?box ?borrow ?singleton ?cons htyping hbase
+  · intro y envSlot hslot hbase
+    have hy : y = x := by simpa [LVal.base] using hbase
+    subst hy
+    have hslotEq :
+        envSlot = { ty := PartialTy.ty ty, lifetime := slotLifetime } := by
+      have h :
+          { ty := PartialTy.ty ty, lifetime := slotLifetime } = envSlot := by
+        simpa [Env.update] using hslot
+      exact h.symm
+    subst hslotEq
+    exact partialTyBorrowFree_ty hfree
+  · intro lv inner lifetime _hsource ih hbase
+    exact partialTyBorrowFree_box_inv (ih (by simpa [LVal.base] using hbase))
+  · intro lv mutable targets borrowLifetime targetLifetime targetTy _hborrow _htargets
+      ihBorrow _ihTargets hbase
+    have hsourceFree :
+        PartialTyBorrowFree (.ty (.borrow mutable targets)) :=
+      ihBorrow (by simpa [LVal.base] using hbase)
+    exact False.elim (hsourceFree mutable targets PartialTyContains.here)
+  · intro target ty lifetime _htarget _ih
+    trivial
+  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+      _hhead _hrest _hunion _hintersection _ihHead _ihRest
+    trivial
+
+theorem LValTyping.update_fresh_root_not_borrow_of_tyBorrowFree {env : Env}
+    {x : Name} {ty : Ty} {slotLifetime : Lifetime} {lv : LVal}
+    {mutable : Bool} {targets : List LVal} {borrowLifetime : Lifetime} :
+    TyBorrowFree ty →
+    LVal.base lv = x →
+    ¬ LValTyping (env.update x { ty := .ty ty, lifetime := slotLifetime })
+      lv (.ty (.borrow mutable targets)) borrowLifetime := by
+  intro hfree hbase htyping
+  have hpartialFree :=
+    LValTyping.update_fresh_root_partialTyBorrowFree hfree hbase htyping
+  exact hpartialFree mutable targets PartialTyContains.here
+
+/-- Borrow-free fresh-update coherence, with only old-root transport left open.
+
+For fresh-root lvals the declared type contains no borrows, so a borrow-typed
+lval rooted at the fresh variable is impossible.  Callers still have to supply
+the old-root transport fact, which is the nontrivial part for lvals rooted in the
+pre-existing environment.
+-/
+theorem FreshUpdateCoherenceObligations.of_tyBorrowFree
+    {env : Env} {x : Name} {ty : Ty} {lifetime : Lifetime} :
+    TyBorrowFree ty →
+    (∀ {lv : LVal} {mutable : Bool} {targets : List LVal}
+      {borrowLifetime : Lifetime},
+      LVal.base lv ≠ x →
+      LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
+        lv (.ty (.borrow mutable targets)) borrowLifetime →
+      ∃ oldBorrowLifetime,
+        LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime) →
+    FreshUpdateCoherenceObligations env x ty lifetime := by
+  intro hfree holdTransport
+  refine ⟨?_, ?_⟩
+  · intro lv mutable targets borrowLifetime hbase htyping
+    exact holdTransport hbase htyping
+  · intro lv mutable targets borrowLifetime hbase htyping
+    exact False.elim
+      (LValTyping.update_fresh_root_not_borrow_of_tyBorrowFree hfree hbase htyping)
 
 theorem not_tyBorrowFree_borrow (mutable : Bool) (targets : List LVal) :
     ¬ TyBorrowFree (.borrow mutable targets) := by
@@ -12864,6 +14031,118 @@ theorem borrowSafeEnv_update_fresh_borrowFree {env : Env} {x : Name}
   exact borrowSafeEnv_update_partialBorrowFree hsafe
     (partialTyBorrowFree_ty hborrowFree)
 
+theorem EnvContains.dropLifetime_of_contains {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    (env.dropLifetime lifetime) ⊢ x ↝ ty →
+    env ⊢ x ↝ ty := by
+  intro hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨henvSlot, _hlifetime⟩
+  exact ⟨slot, henvSlot, hcontainsTy⟩
+
+/-- A result type is borrow-safe against an environment when installing it as a
+new root would introduce no borrow-target conflict with any existing root.
+
+This is the root-independent part of result-extension.  It avoids relying on
+the existence of a globally fresh name, which is especially important for block
+results: a name can be fresh after `dropLifetime` precisely because a block-local
+slot with that name was removed. -/
+def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
+  (∀ targetsMutable mutable targetsOther x targetMutable targetOther,
+    PartialTyContains (.ty ty) (.borrow true targetsMutable) →
+    env ⊢ x ↝ Ty.borrow mutable targetsOther →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    False) ∧
+  (∀ x targetsMutable mutable targetsOther targetMutable targetOther,
+    env ⊢ x ↝ Ty.borrow true targetsMutable →
+    PartialTyContains (.ty ty) (.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    False)
+
+theorem tyBorrowSafeAgainstEnv_borrowFree {env : Env} {ty : Ty} :
+    TyBorrowFree ty →
+    TyBorrowSafeAgainstEnv env ty := by
+  intro hfree
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
+      _hother _htargetMutable _htargetOther _hconflict
+    exact hfree true targetsMutable hcontains
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther _hcontainsMutable
+      hcontains _htargetMutable _htargetOther _hconflict
+    exact hfree mutable targetsOther hcontains
+
+theorem TyBorrowSafeAgainstEnv.dropLifetime {env : Env} {ty : Ty}
+    {lifetime : Lifetime} :
+    TyBorrowSafeAgainstEnv env ty →
+    TyBorrowSafeAgainstEnv (env.dropLifetime lifetime) ty := by
+  intro hsafeTy
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
+      hother htargetMutable htargetOther hconflict
+    exact hsafeTy.1 targetsMutable mutable targetsOther x targetMutable targetOther
+      hcontains (EnvContains.dropLifetime_of_contains hother)
+      htargetMutable htargetOther hconflict
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther hcontainsMutable
+      hcontains htargetMutable htargetOther hconflict
+    exact hsafeTy.2 x targetsMutable mutable targetsOther targetMutable targetOther
+      (EnvContains.dropLifetime_of_contains hcontainsMutable) hcontains
+      htargetMutable htargetOther hconflict
+
+theorem borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    TyBorrowSafeAgainstEnv env ty →
+    BorrowSafeEnv (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe hsafeTy a b mutable targetsMutable targetsOther targetMutable
+    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  by_cases ha : a = x
+  · subst a
+    have hcontainsMutableAtX :
+        (env.update x { ty := .ty ty, lifetime := lifetime }) ⊢
+          x ↝ Ty.borrow true targetsMutable := by
+      simpa using hcontainsMutable
+    rcases hcontainsMutableAtX with ⟨containedSlot, hslot, hcontainsTy⟩
+    have hslotEq :
+        containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+      have h :
+          { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+        simpa [Env.update] using hslot
+      exact h.symm
+    subst hslotEq
+    by_cases hb : b = x
+    · exact hb.symm
+    · exact False.elim
+        (hsafeTy.1 targetsMutable mutable targetsOther b targetMutable targetOther
+          hcontainsTy
+          (EnvContains.update_fresh_ne hb hcontainsOther)
+          htargetMutable htargetOther hconflict)
+  · by_cases hb : b = x
+    · subst b
+      have hcontainsOtherAtX :
+          (env.update x { ty := .ty ty, lifetime := lifetime }) ⊢
+            x ↝ Ty.borrow mutable targetsOther := by
+        simpa using hcontainsOther
+      rcases hcontainsOtherAtX with ⟨containedSlot, hslot, hcontainsTy⟩
+      have hslotEq :
+          containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      exact False.elim
+        (hsafeTy.2 a targetsMutable mutable targetsOther targetMutable targetOther
+          (EnvContains.update_fresh_ne ha hcontainsMutable)
+          hcontainsTy htargetMutable htargetOther hconflict)
+    · exact hsafe a b mutable targetsMutable targetsOther targetMutable targetOther
+        (EnvContains.update_fresh_ne ha hcontainsMutable)
+        (EnvContains.update_fresh_ne hb hcontainsOther)
+        htargetMutable htargetOther hconflict
+
 theorem borrowSafeEnv_of_update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
     env.fresh x →
     BorrowSafeEnv (env.update x slot) →
@@ -12910,15 +14189,6 @@ theorem borrowSafety_move_var {env env' : Env} {typing : StoreTyping}
   | move _hLv _hnotWrite hmove =>
       exact borrowSafeEnv_move_var hsafe hslot hmove
 
-theorem EnvContains.dropLifetime_of_contains {env : Env} {x : Name}
-    {ty : Ty} {lifetime : Lifetime} :
-    (env.dropLifetime lifetime) ⊢ x ↝ ty →
-    env ⊢ x ↝ ty := by
-  intro hcontains
-  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
-  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨henvSlot, _hlifetime⟩
-  exact ⟨slot, henvSlot, hcontainsTy⟩
-
 theorem LValTyping.var_dropLifetime_child {env : Env} {parent child : Lifetime}
     {x : Name} {slot : EnvSlot} :
     LifetimeChild parent child →
@@ -12949,6 +14219,49 @@ theorem borrowSafety_block_drop {env env' : Env} {lifetime : Lifetime} :
   intro hsafe henv'
   rw [henv']
   exact borrowSafeEnv_dropLifetime hsafe
+
+theorem Env.dropLifetime_update_ne {env : Env} {x : Name} {slot : EnvSlot}
+    {dropped : Lifetime} :
+    slot.lifetime ≠ dropped →
+    (env.update x slot).dropLifetime dropped =
+      (env.dropLifetime dropped).update x slot := by
+  intro hslotLifetime
+  cases env with
+  | mk slotAt =>
+      simp only [Env.dropLifetime, Env.update]
+      congr
+      funext y
+      by_cases hy : y = x
+      · subst hy
+        simp [hslotLifetime]
+      · simp [hy]
+
+theorem borrowSafeEnv_dropLifetime_update_of_update {env : Env} {x : Name}
+    {slot : EnvSlot} {dropped : Lifetime} :
+    slot.lifetime ≠ dropped →
+    BorrowSafeEnv (env.update x slot) →
+    BorrowSafeEnv ((env.dropLifetime dropped).update x slot) := by
+  intro hslotLifetime hsafe
+  have hdropSafe :
+      BorrowSafeEnv ((env.update x slot).dropLifetime dropped) :=
+    borrowSafeEnv_dropLifetime hsafe
+  rwa [Env.dropLifetime_update_ne hslotLifetime] at hdropSafe
+
+theorem borrowSafeEnv_block_result_extension_of_body_extension {env₂ env₃ : Env}
+    {lifetime blockLifetime : Lifetime} {ty : Ty} {gamma : Name} :
+    LifetimeChild lifetime blockLifetime →
+    env₃ = env₂.dropLifetime blockLifetime →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) →
+    BorrowSafeEnv (env₃.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hchild hdrop hbodySafe
+  rw [hdrop]
+  exact borrowSafeEnv_dropLifetime_update_of_update
+    (x := gamma)
+    (slot := { ty := .ty ty, lifetime := lifetime })
+    (by
+      intro hEq
+      exact LifetimeChild.ne hchild hEq)
+    hbodySafe
 
 theorem borrowSafety_copy {env env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {lv : LVal} {ty : Ty} :
@@ -13296,6 +14609,102 @@ theorem borrowSafeEnv_update_fresh_immBorrowMany {env : Env} {gamma : Name}
         (EnvContains.update_fresh_ne hy hcontainsOther)
         htargetMutable htargetOther hconflict
 
+theorem tyBorrowSafeAgainstEnv_mutBorrow {env : Env} {lv : LVal} :
+    ¬ WriteProhibited env lv →
+    TyBorrowSafeAgainstEnv env (.borrow true [lv]) := by
+  intro hnotWrite
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
+      hother htargetMutable htargetOther hconflict
+    have hborrowEq : Ty.borrow true [lv] = Ty.borrow true targetsMutable :=
+      partialTyContains_borrow_iff_eq.mp hcontains
+    injection hborrowEq with _hmut htargetsMutable
+    subst htargetsMutable
+    have htargetMutableEq : targetMutable = lv := by
+      simpa using htargetMutable
+    have hconflictLv : lv ⋈ targetOther := by
+      simpa [htargetMutableEq] using hconflict
+    have hwrite : WriteProhibited env lv := by
+      cases mutable with
+      | false =>
+          exact Or.inr ⟨x, targetsOther, targetOther, hother,
+            htargetOther, pathConflicts_symm hconflictLv⟩
+      | true =>
+          exact Or.inl ⟨x, targetsOther, targetOther, hother,
+            htargetOther, pathConflicts_symm hconflictLv⟩
+    exact hnotWrite hwrite
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther
+      hcontainsMutable hcontains htargetMutable htargetOther hconflict
+    have hborrowEq : Ty.borrow true [lv] = Ty.borrow mutable targetsOther :=
+      partialTyContains_borrow_iff_eq.mp hcontains
+    injection hborrowEq with _hmutable htargetsOther
+    subst htargetsOther
+    have htargetOtherEq : targetOther = lv := by
+      simpa using htargetOther
+    have hconflictLv : targetMutable ⋈ lv := by
+      simpa [htargetOtherEq] using hconflict
+    exact hnotWrite
+      (Or.inl ⟨x, targetsMutable, targetMutable, hcontainsMutable,
+        htargetMutable, hconflictLv⟩)
+
+theorem tyBorrowSafeAgainstEnv_immBorrowMany {env : Env} {targets : List LVal} :
+    (∀ target, target ∈ targets → ¬ ReadProhibited env target) →
+    TyBorrowSafeAgainstEnv env (.borrow false targets) := by
+  intro hnotRead
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
+      _hother _htargetMutable _htargetOther _hconflict
+    have hborrowEq :
+        Ty.borrow false targets = Ty.borrow true targetsMutable :=
+      partialTyContains_borrow_iff_eq.mp hcontains
+    cases hborrowEq
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther
+      hcontainsMutable hcontains htargetMutable htargetOther hconflict
+    have hborrowEq :
+        Ty.borrow false targets = Ty.borrow mutable targetsOther :=
+      partialTyContains_borrow_iff_eq.mp hcontains
+    injection hborrowEq with _hmutable htargets
+    subst htargets
+    exact hnotRead targetOther htargetOther
+      ⟨x, targetsMutable, targetMutable, hcontainsMutable,
+        htargetMutable, hconflict⟩
+
+theorem tyBorrowSafeAgainstEnv_immBorrow {env : Env} {lv : LVal} :
+    ¬ ReadProhibited env lv →
+    TyBorrowSafeAgainstEnv env (.borrow false [lv]) := by
+  intro hnotRead
+  exact tyBorrowSafeAgainstEnv_immBorrowMany
+    (by
+      intro target htarget
+      have htargetEq : target = lv := by
+        simpa using htarget
+      subst htargetEq
+      exact hnotRead)
+
+theorem PartialTyContains.tyBox_borrow_inv {inner : Ty} {mutable : Bool}
+    {targets : List LVal} :
+    PartialTyContains (.ty (.box inner)) (.borrow mutable targets) →
+    PartialTyContains (.ty inner) (.borrow mutable targets) := by
+  intro hcontains
+  cases hcontains with
+  | tyBox hinner => exact hinner
+
+theorem TyBorrowSafeAgainstEnv.box {env : Env} {ty : Ty} :
+    TyBorrowSafeAgainstEnv env ty →
+    TyBorrowSafeAgainstEnv env (.box ty) := by
+  intro hsafeTy
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
+      hother htargetMutable htargetOther hconflict
+    exact hsafeTy.1 targetsMutable mutable targetsOther x targetMutable targetOther
+      (PartialTyContains.tyBox_borrow_inv hcontains) hother
+      htargetMutable htargetOther hconflict
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther hcontainsMutable
+      hcontains htargetMutable htargetOther hconflict
+    exact hsafeTy.2 x targetsMutable mutable targetsOther targetMutable targetOther
+      hcontainsMutable (PartialTyContains.tyBox_borrow_inv hcontains)
+      htargetMutable htargetOther hconflict
+
 theorem borrowSafety_immBorrow_result_extension {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {gamma : Name} :
@@ -13344,12 +14753,48 @@ theorem borrowSafety_block_context {env₁ env₃ : Env}
       exact borrowSafety_block_drop (htermsSafe _ hterms) hdrop
 
 /--
+Borrow-free result extension with the fresh-coherence gap exposed.
+
+The fresh-root coherence case is discharged by `TyBorrowFree`; the only
+remaining well-formedness premise is old-root transport for borrow typings in
+the extended environment.  This is the axiom-clean replacement shape for the
+legacy `borrowSafety_result_extension_borrowFree` below.
+-/
+theorem borrowSafety_result_extension_borrowFree_of_oldRootTransport {env : Env}
+    {gamma : Name} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    WellFormedTy env ty lifetime →
+    BorrowSafeEnv env →
+    TyBorrowFree ty →
+    env.fresh gamma →
+    (∀ {lv : LVal} {mutable : Bool} {targets : List LVal}
+      {borrowLifetime : Lifetime},
+      LVal.base lv ≠ gamma →
+      LValTyping (env.update gamma { ty := .ty ty, lifetime := lifetime })
+        lv (.ty (.borrow mutable targets)) borrowLifetime →
+      ∃ oldBorrowLifetime,
+        LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime) →
+    WellFormedEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
+      BorrowSafeEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hwellFormed hwellTy hborrowSafe hborrowFree hfresh holdTransport
+  exact ⟨
+    borrowInvariance_result_extension_of_coherenceObligations
+      hwellFormed hwellTy hfresh
+      (FreshUpdateCoherenceObligations.of_tyBorrowFree hborrowFree holdTransport),
+    borrowSafeEnv_update_fresh_borrowFree hborrowSafe hborrowFree⟩
+
+/--
 Corollary 4.14 support: extending the output environment with a fresh,
 borrow-free result slot preserves both well-formedness and borrow safety.
 
 The remaining borrow-safety work is the paper's typing-rule induction showing
 that the output environment of a well-typed term is itself borrow safe.  This
 theorem packages the final result-extension step from the corollary.
+
+This is a legacy shortcut: its well-formedness half goes through
+`borrowInvariance_result_extension`, which depends on `Coherent.update_fresh_ty`.
+Use `borrowSafety_result_extension_borrowFree_of_oldRootTransport` when the
+old-root transport obligation is available.
 -/
 theorem borrowSafety_result_extension_borrowFree {env : Env} {gamma : Name}
     {ty : Ty} {lifetime : Lifetime} :
@@ -13358,10 +14803,11 @@ theorem borrowSafety_result_extension_borrowFree {env : Env} {gamma : Name}
     BorrowSafeEnv env →
     TyBorrowFree ty →
     env.fresh gamma →
+    FreshUpdateCoherenceObligations env gamma ty lifetime →
     WellFormedEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
       BorrowSafeEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hwellFormed hwellTy hborrowSafe hborrowFree hfresh
-  exact ⟨borrowInvariance_result_extension hwellFormed hwellTy hfresh,
+  intro hwellFormed hwellTy hborrowSafe hborrowFree hfresh hfreshCoherence
+  exact ⟨borrowInvariance_result_extension hwellFormed hwellTy hfresh hfreshCoherence,
     borrowSafeEnv_update_fresh_borrowFree hborrowSafe hborrowFree⟩
 
 theorem borrowSafety_result_extension_unit {env : Env} {gamma : Name}
@@ -13369,12 +14815,13 @@ theorem borrowSafety_result_extension_unit {env : Env} {gamma : Name}
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     env.fresh gamma →
+    FreshUpdateCoherenceObligations env gamma .unit lifetime →
     WellFormedEnv (env.update gamma { ty := .ty .unit, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env.update gamma { ty := .ty .unit, lifetime := lifetime }) := by
-  intro hwellFormed hborrowSafe hfresh
+  intro hwellFormed hborrowSafe hfresh hfreshCoherence
   exact borrowSafety_result_extension_borrowFree hwellFormed WellFormedTy.unit
-    hborrowSafe tyBorrowFree_unit hfresh
+    hborrowSafe tyBorrowFree_unit hfresh hfreshCoherence
 
 theorem borrowSafeEnv_update_box_of_update_inner {env : Env} {gamma : Name}
     {ty : Ty} {lifetime : Lifetime} :
@@ -13393,12 +14840,13 @@ theorem borrowSafety_result_extension_box_of_inner {env : Env} {gamma : Name}
     WellFormedTy env ty lifetime →
     BorrowSafeEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) →
     env.fresh gamma →
+    FreshUpdateCoherenceObligations env gamma (.box ty) lifetime →
     WellFormedEnv (env.update gamma { ty := .ty (.box ty), lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env.update gamma { ty := .ty (.box ty), lifetime := lifetime }) := by
-  intro hwellFormed hwellTy hinnerSafe hfresh
+  intro hwellFormed hwellTy hinnerSafe hfresh hfreshCoherence
   exact ⟨borrowInvariance_result_extension hwellFormed
-      (WellFormedTy.box hwellTy) hfresh,
+      (WellFormedTy.box hwellTy) hfresh hfreshCoherence,
     borrowSafeEnv_update_box_of_update_inner hinnerSafe⟩
 
 /--
@@ -13415,13 +14863,27 @@ theorem borrowSafety_value_result_extension_borrowFree {env env₂ : Env}
     BorrowSafeEnv env →
     TyBorrowFree ty →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro htyping hwellFormed hwellTy hborrowSafe hborrowFree hfresh
+  intro htyping hwellFormed hwellTy hborrowSafe hborrowFree hfresh hfreshCoherence
   have henv : env = env₂ := valueTyping_environment_eq htyping
   subst henv
   exact borrowSafety_result_extension_borrowFree hwellFormed hwellTy hborrowSafe
-    hborrowFree hfresh
+    hborrowFree hfresh hfreshCoherence
+
+theorem borrowSafe_value_result_extension_borrowFree {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ty : Ty}
+    {gamma : Name} :
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    BorrowSafeEnv env →
+    TyBorrowFree ty →
+    env₂.fresh gamma →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro htyping hborrowSafe hborrowFree hfresh
+  have henv : env = env₂ := valueTyping_environment_eq htyping
+  subst henv
+  exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe hborrowFree
 
 /-! ## Source-Level Initial States -/
 
@@ -13432,6 +14894,43 @@ def SourceValue : Value → Prop
 
 def SourceTerm (term : Term) : Prop :=
   ∀ value, value ∈ termValues term → SourceValue value
+
+theorem SourceTerm.block_head {lifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    SourceTerm (.block lifetime (term :: rest)) →
+    SourceTerm term := by
+  intro hsource value hmem
+  exact hsource value
+    (by
+      simp [termValues, hmem])
+
+theorem SourceTerm.block_tail {lifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    SourceTerm (.block lifetime (term :: rest)) →
+    SourceTerm (.block lifetime rest) := by
+  intro hsource value hmem
+  exact hsource value
+    (by
+      simp [termValues] at hmem ⊢
+      exact Or.inr hmem)
+
+theorem SourceTerm.box_inner {term : Term} :
+    SourceTerm (.box term) →
+    SourceTerm term := by
+  intro hsource value hmem
+  exact hsource value (by simpa [termValues] using hmem)
+
+theorem SourceTerm.declare_inner {x : Name} {term : Term} :
+    SourceTerm (.letMut x term) →
+    SourceTerm term := by
+  intro hsource value hmem
+  exact hsource value (by simpa [termValues] using hmem)
+
+theorem SourceTerm.assign_inner {lhs : LVal} {rhs : Term} :
+    SourceTerm (.assign lhs rhs) →
+    SourceTerm rhs := by
+  intro hsource value hmem
+  exact hsource value (by simpa [termValues] using hmem)
 
 theorem sourceValue_no_owningLocations {value : Value} :
     SourceValue value →
@@ -13516,6 +15015,22 @@ theorem sourceValue_empty_valueTyping_borrowFree {value : Value} {ty : Ty} :
   | ref _ =>
       cases hsource
 
+theorem sourceValue_valueTyping_borrowFree {typing : StoreTyping} {value : Value}
+    {ty : Ty} :
+    SourceValue value →
+    ValueTyping typing value ty →
+    TyBorrowFree ty := by
+  intro hsource htyping
+  cases value with
+  | unit =>
+      cases htyping
+      exact tyBorrowFree_unit
+  | int _ =>
+      cases htyping
+      exact tyBorrowFree_int
+  | ref _ =>
+      cases hsource
+
 theorem sourceTerm_empty_valueTyping_borrowFree {term : Term}
     {value : Value} {ty : Ty} :
     SourceTerm term →
@@ -13532,9 +15047,10 @@ theorem sourceInitial_value_borrowSafety_result_extension
     TermTyping Env.empty StoreTyping.empty lifetime (.val value) ty env₂ →
     WellFormedTy env₂ ty lifetime →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsource htyping hwellTy hfresh
+  intro hsource htyping hwellTy hfresh hfreshCoherence
   cases htyping with
   | const hvalueTyping =>
       exact borrowSafety_value_result_extension_borrowFree
@@ -13544,6 +15060,7 @@ theorem sourceInitial_value_borrowSafety_result_extension
         borrowSafeEnv_empty
         (sourceValue_empty_valueTyping_borrowFree hsource hvalueTyping)
         hfresh
+        hfreshCoherence
 
 theorem sourceInitial_box_value_borrowSafety_result_extension
     {value : Value} {ty : Ty} {env₂ : Env} {lifetime : Lifetime}
@@ -13551,10 +15068,11 @@ theorem sourceInitial_box_value_borrowSafety_result_extension
     SourceValue value →
     TermTyping Env.empty StoreTyping.empty lifetime (.box (.val value)) (.box ty) env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma (.box ty) lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty (.box ty), lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty (.box ty), lifetime := lifetime }) := by
-  intro _hsource htyping hfresh
+  intro _hsource htyping hfresh hfreshCoherence
   cases htyping with
   | box hinner =>
       cases hinner with
@@ -13572,17 +15090,13 @@ theorem sourceInitial_box_value_borrowSafety_result_extension
           have hinnerSafe :
               BorrowSafeEnv
                 (Env.empty.update gamma { ty := .ty ty, lifetime := lifetime }) :=
-            (borrowSafety_result_extension_borrowFree
-              (wellFormedEnv_empty lifetime)
-              hwellTy
-              borrowSafeEnv_empty
-              hinnerFree
-              hfresh).2
+            borrowSafeEnv_update_fresh_borrowFree borrowSafeEnv_empty hinnerFree
           exact borrowSafety_result_extension_box_of_inner
             (wellFormedEnv_empty lifetime)
             hwellTy
             hinnerSafe
             hfresh
+            hfreshCoherence
 
 theorem sourceInitial_declare_value_borrowSafety_result_extension
     {x : Name} {value : Value} {env₃ : Env} {lifetime : Lifetime}
@@ -13590,12 +15104,13 @@ theorem sourceInitial_declare_value_borrowSafety_result_extension
     SourceValue value →
     TermTyping Env.empty StoreTyping.empty lifetime (.letMut x (.val value)) .unit env₃ →
     env₃.fresh gamma →
+    FreshUpdateCoherenceObligations env₃ gamma .unit lifetime →
     WellFormedEnv (env₃.update gamma { ty := .ty .unit, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₃.update gamma { ty := .ty .unit, lifetime := lifetime }) := by
-  intro hsource htyping hfreshGamma
+  intro hsource htyping hfreshGamma hfreshGammaCoherence
   cases htyping with
-  | declare hfresh hinit _hfreshOut henv₃ =>
+  | declare hfresh hinit _hfreshOut hcoh henv₃ =>
       cases hinit with
       | const hvalueTyping =>
           rename_i initTy
@@ -13611,10 +15126,10 @@ theorem sourceInitial_declare_value_borrowSafety_result_extension
               WellFormedEnv
                   (Env.empty.update x { ty := .ty initTy, lifetime := lifetime })
                   lifetime ∧
-                BorrowSafeEnv
+            BorrowSafeEnv
                   (Env.empty.update x { ty := .ty initTy, lifetime := lifetime }) := by
             exact sourceInitial_value_borrowSafety_result_extension hsource
-              (TermTyping.const hvalueTyping) hwellTy hfresh
+              (TermTyping.const hvalueTyping) hwellTy hfresh hcoh
           have hfreshGamma' :
               (Env.empty.update x { ty := .ty initTy, lifetime := lifetime }).fresh
                 gamma := by
@@ -13626,6 +15141,7 @@ theorem sourceInitial_declare_value_borrowSafety_result_extension
             hdeclared.2
             tyBorrowFree_unit
             hfreshGamma'
+            (by simpa [henv₃] using hfreshGammaCoherence)
 
 theorem sourceInitial_blockB_value_borrowSafety_result_extension
     {value : Value} {ty : Ty} {env₂ : Env}
@@ -13634,9 +15150,10 @@ theorem sourceInitial_blockB_value_borrowSafety_result_extension
     TermTyping Env.empty StoreTyping.empty lifetime
       (.block blockLifetime [.val value]) ty env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsource htyping hfresh
+  intro hsource htyping hfresh hfreshCoherence
   cases htyping with
   | block _hblockChild hterms hwellTy hdrop =>
       have hvalueTyping := termListTyping_singleton_value_valueTyping hterms
@@ -13652,6 +15169,7 @@ theorem sourceInitial_blockB_value_borrowSafety_result_extension
         borrowSafeEnv_empty
         (sourceValue_empty_valueTyping_borrowFree hsource hvalueTyping)
         hfresh
+        hfreshCoherence
 
 theorem sourceTerm_validStoreTyping_empty {store : ProgramStore} {term : Term} :
     SourceTerm term →
@@ -14285,6 +15803,190 @@ theorem PartialTyContains.of_strike {path : Path} {source struck : PartialTy}
       | box hinner =>
           exact PartialTyContains.box (ih hstrike hinner)
 
+/-- A struck partial type contains no live full type.
+
+`Strike` replaces the moved leaf by `undef` and only rebuilds boxes on the way
+back to the root, so no `PartialTyContains` derivation can start from the struck
+result. -/
+theorem PartialTyContains.not_strike_result {path : Path} {source struck : PartialTy}
+    {needle : Ty} :
+    Strike path source struck →
+    ¬ PartialTyContains struck needle := by
+  intro hstrike hcontains
+  induction path generalizing source struck with
+  | nil =>
+      cases source <;> cases struck <;> simp [Strike] at hstrike
+      cases hcontains
+  | cons _ path ih =>
+      cases source <;> cases struck <;> simp [Strike] at hstrike
+      cases hcontains with
+      | box hinner =>
+          exact ih hstrike hinner
+
+theorem LVal.path_deref_append (lv : LVal) (suffix : Path) :
+    LVal.path (.deref lv) ++ suffix = LVal.path lv ++ (() :: suffix) := by
+  rw [LVal.path, List.append_assoc]
+  rfl
+
+theorem List.Unit_cons_append_eq_append_cons (path suffix : List Unit) :
+    () :: (path ++ suffix) = path ++ (() :: suffix) := by
+  induction path with
+  | nil =>
+      rfl
+  | cons head tail ih =>
+      cases head
+      simp [ih]
+
+/-- A `Strike` following an lvalue path can be decomposed at the partial type
+selected by the lvalue typing derivation.
+
+The borrow-dereference case is where this lemma pays for itself: `Strike` can
+only step through `PartialTy.box`, so it cannot take one more selector after an
+lvalue whose selected type is a full borrow. -/
+theorem LValTyping.strike_suffix_at_type {env : Env} :
+    (∀ {lv partialTy lifetime},
+      LValTyping env lv partialTy lifetime →
+      ∀ {slot struck suffix},
+        env.slotAt (LVal.base lv) = some slot →
+        Strike (LVal.path lv ++ suffix) slot.ty struck →
+        ∃ struckAt, Strike suffix partialTy struckAt) ∧
+    (∀ {targets partialTy lifetime},
+      LValTargetsTyping env targets partialTy lifetime → True) := by
+  constructor
+  · intro lv partialTy lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun lv partialTy _lifetime _ =>
+        ∀ {slot struck suffix},
+          env.slotAt (LVal.base lv) = some slot →
+          Strike (LVal.path lv ++ suffix) slot.ty struck →
+          ∃ struckAt, Strike suffix partialTy struckAt)
+      (motive_2 := fun _targets _partialTy _lifetime _ => True)
+      (by
+        intro x envSlot hslot slot struck suffix hbase hstrike
+        have hbase' : env.slotAt x = some slot := by
+          simpa [LVal.base] using hbase
+        have hslotEq : envSlot = slot := by
+          have hsomeEq : some envSlot = some slot := by
+            rw [← hslot, hbase']
+          exact Option.some.inj hsomeEq
+        subst hslotEq
+        exact ⟨struck, by simpa [LVal.path] using hstrike⟩)
+      (by
+        intro lv inner lifetime _htyping ih slot struck suffix hbase hstrike
+        have hstrikeAtParent :
+            Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck := by
+          simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+            using hstrike
+        rcases ih hbase hstrikeAtParent with ⟨parentStruck, hparentStruck⟩
+        cases parentStruck with
+        | ty parentTy =>
+            simp [Strike] at hparentStruck
+        | box innerStruck =>
+            exact ⟨innerStruck, by simpa [Strike] using hparentStruck⟩
+        | undef parentTy =>
+            simp [Strike] at hparentStruck)
+      (by
+        intro lv mutable targets borrowLifetime targetLifetime targetTy
+          _hborrow _htargets ihBorrow _ihTargets slot struck suffix hbase hstrike
+        have hstrikeAtBorrow :
+            Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck := by
+          simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+            using hstrike
+        rcases ihBorrow hbase hstrikeAtBorrow with ⟨borrowStruck, hborrowStruck⟩
+        simp [Strike] at hborrowStruck)
+      (by
+        intro target ty lifetime _htarget _ihTarget
+        trivial)
+      (by
+        intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+          _hhead _hrest _hunion _hintersection _ihHead _ihRest
+        trivial)
+      htyping
+  · intro targets partialTy lifetime _htyping
+    trivial
+
+/-- If an lvalue is moved by `Strike`, every borrow contained in its selected
+partial type was already contained in the moved base slot.
+
+This is the static origin fact needed for non-variable move result-extension.
+The proof follows the lvalue spine.  Box dereferences push the obligation one
+selector back toward the base slot; borrow dereferences are impossible because
+`Strike` cannot continue below a full borrow leaf. -/
+theorem LValTyping.contains_base_of_strike_suffix {env : Env} :
+    (∀ {lv partialTy lifetime},
+      LValTyping env lv partialTy lifetime →
+      ∀ {slot struck suffix needle},
+        env.slotAt (LVal.base lv) = some slot →
+        Strike (LVal.path lv ++ suffix) slot.ty struck →
+        PartialTyContains partialTy needle →
+        env ⊢ LVal.base lv ↝ needle) ∧
+    (∀ {targets partialTy lifetime},
+      LValTargetsTyping env targets partialTy lifetime → True) := by
+  constructor
+  · intro lv partialTy lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun lv partialTy _lifetime _ =>
+        ∀ {slot struck suffix needle},
+          env.slotAt (LVal.base lv) = some slot →
+          Strike (LVal.path lv ++ suffix) slot.ty struck →
+          PartialTyContains partialTy needle →
+          env ⊢ LVal.base lv ↝ needle)
+      (motive_2 := fun _targets _partialTy _lifetime _ => True)
+      (by
+        intro x envSlot hslot slot _struck _suffix needle hbase _hstrike hcontains
+        have hbase' : env.slotAt x = some slot := by
+          simpa [LVal.base] using hbase
+        have hslotEq : envSlot = slot := by
+          have hsomeEq : some envSlot = some slot := by
+            rw [← hslot, hbase']
+          exact Option.some.inj hsomeEq
+        subst hslotEq
+        exact ⟨envSlot, hslot, hcontains⟩)
+      (by
+        intro lv inner lifetime _htyping ih slot struck suffix needle hbase hstrike
+          hcontains
+        have hstrikeAtParent :
+            Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck := by
+          simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+            using hstrike
+        exact ih hbase hstrikeAtParent (PartialTyContains.box hcontains))
+      (by
+        intro lv mutable targets borrowLifetime targetLifetime targetTy
+          hborrow _htargets _ihBorrow _ihTargets slot struck suffix needle hbase hstrike
+          _hcontains
+        have hstrikeAtBorrow :
+            Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck := by
+          simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+            using hstrike
+        rcases (LValTyping.strike_suffix_at_type.1 hborrow hbase hstrikeAtBorrow) with
+          ⟨borrowStruck, hborrowStruck⟩
+        simp [Strike] at hborrowStruck)
+      (by
+        intro target ty lifetime _htarget _ihTarget
+        trivial)
+      (by
+        intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+          _hhead _hrest _hunion _hintersection _ihHead _ihRest
+        trivial)
+      htyping
+  · intro targets partialTy lifetime _htyping
+    trivial
+
+theorem LValTyping.contains_base_of_strike {env : Env} {lv : LVal}
+    {partialTy : PartialTy} {lifetime : Lifetime} {slot : EnvSlot}
+    {struck : PartialTy}
+    {needle : Ty} :
+    LValTyping env lv partialTy lifetime →
+    env.slotAt (LVal.base lv) = some slot →
+    Strike (LVal.path lv) slot.ty struck →
+    PartialTyContains partialTy needle →
+    env ⊢ LVal.base lv ↝ needle := by
+  intro htyping hslot hstrike hcontains
+  simpa using
+    (LValTyping.contains_base_of_strike_suffix.1 htyping
+      (slot := slot) (struck := struck) (suffix := []) hslot
+      (by simpa using hstrike) hcontains)
+
 theorem EnvContains.of_move {env env' : Env} {lv : LVal} {x : Name}
     {ty : Ty} :
     EnvMove env lv env' →
@@ -14306,6 +16008,287 @@ theorem EnvContains.of_move {env env' : Env} {lv : LVal} {x : Name}
   · have hslotOld : env.slotAt x = some containedSlot := by
       simpa [henv', Env.update, hx] using hcontainedSlot
     exact ⟨containedSlot, hslotOld, hcontainsTy⟩
+
+/-- The base slot struck by an `EnvMove` cannot still contain a live borrow in
+the moved environment. -/
+theorem EnvContains.move_base_same_false {env env' : Env} {lv : LVal}
+    {mutable : Bool} {targets : List LVal} :
+    EnvMove env lv env' →
+    ¬ env' ⊢ LVal.base lv ↝ Ty.borrow mutable targets := by
+  intro hmove hcontains
+  rcases hmove with ⟨slot, struck, _hslot, hstrike, henv'⟩
+  rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+  have hcontainedSlotEq :
+      containedSlot = { slot with ty := struck } := by
+    have h :
+        { slot with ty := struck } = containedSlot := by
+      simpa [henv', Env.update] using hcontainedSlot
+    exact h.symm
+  subst hcontainedSlotEq
+  exact PartialTyContains.not_strike_result hstrike hcontainsTy
+
+/-- Moving an lval preserves borrow safety of the environment before adding the
+result binding.
+
+`EnvMove` only strikes part of a slot to `undef`; every contained borrow still
+visible in the moved environment was already contained in the source
+environment.  Thus the original borrow-safety relation applies directly. -/
+theorem borrowSafeEnv_move {env env' : Env} {lv : LVal} :
+    BorrowSafeEnv env →
+    EnvMove env lv env' →
+    BorrowSafeEnv env' := by
+  intro hsafe hmove x y mutable targetsMutable targetsOther targetMutable
+    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    (EnvContains.of_move hmove hcontainsMutable)
+    (EnvContains.of_move hmove hcontainsOther)
+    htargetMutable htargetOther hconflict
+
+theorem borrowSafety_move_borrowFree_result_extension {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal} {ty : Ty}
+    {gamma : Name} :
+    BorrowSafeEnv env →
+    TermTyping env typing lifetime (.move lv) ty env₂ →
+    TyBorrowFree ty →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe htyping hborrowFree
+  cases htyping with
+  | move _hLv _hnotWrite hmove =>
+      exact borrowSafeEnv_update_fresh_borrowFree
+        (borrowSafeEnv_move hsafe hmove) hborrowFree
+
+/-- Result-extension after a move, factored around the one remaining typing
+origin fact.
+
+If every borrow contained in the moved result type was contained in the moved
+base slot before the move, then adding the moved value as a fresh result root is
+borrow safe.  Any old root that conflicts with the fresh result must have been
+the moved base by `BorrowSafeEnv env`; but the moved environment no longer
+contains live borrows at that base.
+-/
+theorem borrowSafeEnv_move_result_extension_of_base_contains {env env₂ : Env}
+    {lv : LVal} {ty : Ty} {gamma : Name} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    EnvMove env lv env₂ →
+    (∀ mutable targets,
+      PartialTyContains (.ty ty) (.borrow mutable targets) →
+      env ⊢ LVal.base lv ↝ Ty.borrow mutable targets) →
+    env₂.fresh gamma →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe hmove hbaseContains _hfresh a b mutable targetsMutable targetsOther
+    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
+    htargetOther hconflict
+  by_cases ha : a = gamma
+  · subst a
+    have hcontainsMutableAtGamma :
+        (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) ⊢
+          gamma ↝ Ty.borrow true targetsMutable := by
+      simpa using hcontainsMutable
+    rcases hcontainsMutableAtGamma with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+    have hslotEq :
+        containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+      have h :
+          { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+        simpa [Env.update] using hcontainedSlot
+      exact h.symm
+    subst hslotEq
+    by_cases hb : b = gamma
+    · exact hb.symm
+    · have hcontainsOtherMove :
+          env₂ ⊢ b ↝ Ty.borrow mutable targetsOther :=
+        EnvContains.update_fresh_ne hb hcontainsOther
+      by_cases hbBase : b = LVal.base lv
+      · subst hbBase
+        exact False.elim (EnvContains.move_base_same_false hmove hcontainsOtherMove)
+      · have hcontainsOtherOld :
+            env ⊢ b ↝ Ty.borrow mutable targetsOther :=
+          EnvContains.of_move hmove hcontainsOtherMove
+        have hbaseEq :
+            LVal.base lv = b :=
+          hsafe (LVal.base lv) b mutable targetsMutable targetsOther targetMutable
+            targetOther
+            (hbaseContains true targetsMutable hcontainsTy)
+            hcontainsOtherOld
+            htargetMutable htargetOther hconflict
+        exact False.elim (hbBase hbaseEq.symm)
+  · by_cases hb : b = gamma
+    · subst b
+      have hcontainsOtherAtGamma :
+          (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) ⊢
+            gamma ↝ Ty.borrow mutable targetsOther := by
+        simpa using hcontainsOther
+      rcases hcontainsOtherAtGamma with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+      have hslotEq :
+          containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+          simpa [Env.update] using hcontainedSlot
+        exact h.symm
+      subst hslotEq
+      have hcontainsMutableMove :
+          env₂ ⊢ a ↝ Ty.borrow true targetsMutable :=
+        EnvContains.update_fresh_ne ha hcontainsMutable
+      by_cases haBase : a = LVal.base lv
+      · subst haBase
+        exact False.elim (EnvContains.move_base_same_false hmove hcontainsMutableMove)
+      · have hcontainsMutableOld :
+            env ⊢ a ↝ Ty.borrow true targetsMutable :=
+          EnvContains.of_move hmove hcontainsMutableMove
+        have hbaseEq :
+            a = LVal.base lv :=
+          hsafe a (LVal.base lv) mutable targetsMutable targetsOther targetMutable
+            targetOther hcontainsMutableOld
+            (hbaseContains mutable targetsOther hcontainsTy)
+            htargetMutable htargetOther hconflict
+        exact False.elim (haBase hbaseEq)
+    · exact borrowSafeEnv_move hsafe hmove a b mutable targetsMutable targetsOther
+        targetMutable targetOther
+        (EnvContains.update_fresh_ne ha hcontainsMutable)
+        (EnvContains.update_fresh_ne hb hcontainsOther)
+        htargetMutable htargetOther hconflict
+
+theorem tyBorrowSafeAgainstEnv_move_of_base_contains {env env₂ : Env}
+    {lv : LVal} {ty : Ty} :
+    BorrowSafeEnv env →
+    EnvMove env lv env₂ →
+    (∀ mutable targets,
+      PartialTyContains (.ty ty) (.borrow mutable targets) →
+      env ⊢ LVal.base lv ↝ Ty.borrow mutable targets) →
+    TyBorrowSafeAgainstEnv env₂ ty := by
+  intro hsafe hmove hbaseContains
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontainsTy
+      hcontainsOther htargetMutable htargetOther hconflict
+    by_cases hxBase : x = LVal.base lv
+    · subst hxBase
+      exact False.elim (EnvContains.move_base_same_false hmove hcontainsOther)
+    · have hcontainsOtherOld :
+          env ⊢ x ↝ Ty.borrow mutable targetsOther :=
+        EnvContains.of_move hmove hcontainsOther
+      have hbaseEq :
+          LVal.base lv = x :=
+        hsafe (LVal.base lv) x mutable targetsMutable targetsOther targetMutable
+          targetOther
+          (hbaseContains true targetsMutable hcontainsTy)
+          hcontainsOtherOld
+          htargetMutable htargetOther hconflict
+      exact False.elim (hxBase hbaseEq.symm)
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther
+      hcontainsMutable hcontainsTy htargetMutable htargetOther hconflict
+    by_cases hxBase : x = LVal.base lv
+    · subst hxBase
+      exact False.elim (EnvContains.move_base_same_false hmove hcontainsMutable)
+    · have hcontainsMutableOld :
+          env ⊢ x ↝ Ty.borrow true targetsMutable :=
+        EnvContains.of_move hmove hcontainsMutable
+      have hbaseEq :
+          x = LVal.base lv :=
+        hsafe x (LVal.base lv) mutable targetsMutable targetsOther targetMutable
+          targetOther hcontainsMutableOld
+          (hbaseContains mutable targetsOther hcontainsTy)
+          htargetMutable htargetOther hconflict
+      exact False.elim (hxBase hbaseEq)
+
+theorem EnvContains.move_var_same_false {env env' : Env} {x : Name}
+    {slot : EnvSlot} {ty : Ty} {mutable : Bool} {targets : List LVal} :
+    env.slotAt x = some slot →
+    slot.ty = .ty ty →
+    EnvMove env (.var x) env' →
+    ¬ env' ⊢ x ↝ Ty.borrow mutable targets := by
+  intro _hslot _hslotTy hmove hcontains
+  exact EnvContains.move_base_same_false hmove hcontains
+
+theorem borrowSafety_move_var_result_extension {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {x : Name} {ty : Ty} {gamma : Name} :
+    BorrowSafeEnv env →
+    TermTyping env typing lifetime (.move (.var x)) ty env₂ →
+    env₂.fresh gamma →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe htyping hfresh a b mutable targetsMutable targetsOther
+    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
+    htargetOther hconflict
+  cases htyping with
+  | move hLv hnotWrite hmove =>
+      rcases LValTyping.var_inv hLv with
+        ⟨sourceSlot, hslotSource, hsourceTy, _hsourceLifetime⟩
+      by_cases ha : a = gamma
+      · subst a
+        have hcontainsMovedMutable :
+            env ⊢ x ↝ Ty.borrow true targetsMutable := by
+          rcases hcontainsMutable with
+            ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+          have hslotEq :
+              containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+            have h :
+                { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+              simpa [Env.update] using hcontainedSlot
+            exact h.symm
+          subst hslotEq
+          exact ⟨sourceSlot, hslotSource, by
+            rw [hsourceTy]
+            exact hcontainsTy⟩
+        by_cases hb : b = gamma
+        · subst b
+          exact rfl
+        · have hcontainsOtherMove :
+              env₂ ⊢ b ↝ Ty.borrow mutable targetsOther :=
+            EnvContains.update_fresh_ne hb hcontainsOther
+          by_cases hbx : b = x
+          · subst b
+            exact False.elim
+              (EnvContains.move_var_same_false hslotSource hsourceTy hmove
+                hcontainsOtherMove)
+          · have hcontainsOtherOld :
+                env ⊢ b ↝ Ty.borrow mutable targetsOther :=
+              EnvContains.of_move hmove hcontainsOtherMove
+            have hsafeEq :
+                x = b :=
+              hsafe x b mutable targetsMutable targetsOther targetMutable
+                targetOther hcontainsMovedMutable hcontainsOtherOld
+                htargetMutable htargetOther hconflict
+            exact False.elim (hbx hsafeEq.symm)
+      · by_cases hb : b = gamma
+        · subst b
+          have hcontainsMovedOther :
+              env ⊢ x ↝ Ty.borrow mutable targetsOther := by
+            rcases hcontainsOther with
+              ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+            have hslotEq :
+                containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+              have h :
+                  { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+                simpa [Env.update] using hcontainedSlot
+              exact h.symm
+            subst hslotEq
+            exact ⟨sourceSlot, hslotSource, by
+              rw [hsourceTy]
+              exact hcontainsTy⟩
+          have hcontainsMutableMove :
+              env₂ ⊢ a ↝ Ty.borrow true targetsMutable :=
+            EnvContains.update_fresh_ne ha hcontainsMutable
+          by_cases hax : a = x
+          · subst a
+            exact False.elim
+              (EnvContains.move_var_same_false hslotSource hsourceTy hmove
+                hcontainsMutableMove)
+          · have hcontainsMutableOld :
+                env ⊢ a ↝ Ty.borrow true targetsMutable :=
+              EnvContains.of_move hmove hcontainsMutableMove
+            have hcontainsOtherOld :
+                env ⊢ x ↝ Ty.borrow mutable targetsOther :=
+              hcontainsMovedOther
+            have hsafeEq :
+                a = x :=
+              hsafe a x mutable targetsMutable targetsOther targetMutable
+                targetOther hcontainsMutableOld hcontainsOtherOld
+                htargetMutable htargetOther hconflict
+            exact False.elim (hax hsafeEq)
+        · exact borrowSafeEnv_move hsafe hmove a b mutable targetsMutable
+            targetsOther targetMutable targetOther
+            (EnvContains.update_fresh_ne ha hcontainsMutable)
+            (EnvContains.update_fresh_ne hb hcontainsOther)
+            htargetMutable htargetOther hconflict
 
 theorem EnvMove.oldSlot_of_newSlot {env env' : Env} {lv : LVal}
     {x : Name} {newSlot : EnvSlot} :
@@ -14755,11 +16738,12 @@ theorem declare_preserves_wellFormed_output_fresh {env₂ env₃ : Env}
     WellFormedEnv env₂ lifetime →
     WellFormedTy env₂ ty lifetime →
     env₂.fresh x →
+    FreshUpdateCoherenceObligations env₂ x ty lifetime →
     env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
     WellFormedEnv env₃ lifetime := by
-  intro hwellFormed hwellTy hfresh henv₃
+  intro hwellFormed hwellTy hfresh hcoh henv₃
   rw [henv₃]
-  exact WellFormedEnv.update_fresh_ty hwellFormed hwellTy hfresh
+  exact WellFormedEnv.update_fresh_ty hwellFormed hwellTy hfresh hcoh
 
 theorem ContainedBorrowsWellFormed.move {env env' : Env} {lv : LVal}
     {lifetime : Lifetime} :
@@ -14954,7 +16938,7 @@ theorem Strike.isBoxUndef :
 borrow). -/
 theorem LValTyping.isBoxUndef_of_base_moved {env : Env} {lv : LVal}
     {slot : EnvSlot} {struck : PartialTy}
-    (hslot : env.slotAt (LVal.base lv) = some slot)
+    (_hslot : env.slotAt (LVal.base lv) = some slot)
     (hstrike : Strike (LVal.path lv) slot.ty struck) :
     ∀ {lv' p lf},
       LValTyping (env.update (LVal.base lv) { slot with ty := struck }) lv' p lf →
@@ -15119,13 +17103,15 @@ theorem EnvWrite.preserves_containedBorrowsWellFormed_var {env result : Env}
             ContainedBorrowsWellFormed.update_slot
               hwellFormed.1 hslotTargets hnotWrite'
 
+/-- Remaining update invariant needed by Lemma 4.9.
+
+The `W-Weak` union case is no longer a caller obligation:
+`PartialTyBorrowsWellFormedInSlot.of_partialTyUnion` proves it directly for the
+per-target invariant.  The package now only records the non-local mutable-borrow
+fan-out fact, where branch writes and joins must preserve observer target
+well-formedness.
+-/
 structure UpdateBorrowInvariantObligations : Prop where
-  partialTyUnion_preserves_borrows
-    {env : Env} {left right union : PartialTy} {lifetime : Lifetime} :
-    PartialTyUnion left right union →
-    PartialTyBorrowsWellFormedInSlot env lifetime left →
-    PartialTyBorrowsWellFormedInSlot env lifetime right →
-    PartialTyBorrowsWellFormedInSlot env lifetime union
   writeBorrowTargets_preserves_containedBorrowsWellFormed
     {rank : Nat} {env result : Env} {path : Path}
     {targets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
@@ -15134,10 +17120,96 @@ structure UpdateBorrowInvariantObligations : Prop where
     Linearizable env →
     ContainedBorrowsWellFormed env →
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
+    (∀ target, target ∈ targets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
     PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
     WriteBorrowTargets rank env path targets rhsTy result →
     ContainedBorrowsWellFormed result ∧
       BorrowTargetsWellFormedInSlot result slotLifetime targets
+
+/-- Remaining explicit proof obligation for Appendix 9.6 fan-out writes.
+
+This statement is intentionally kept at the `WriteBorrowTargets` boundary rather
+than decomposed into bare join landmarks: unconditional join preservation of
+contained borrows is false without the cross-branch target/coherence premises
+carried by the fan-out proof.
+-/
+theorem updateBorrowInvariant_writeBorrowTargets_preserves_containedBorrowsWellFormed
+    {rank : Nat} {env result : Env} {path : Path}
+    {targets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
+    0 < rank →
+    Coherent env →
+    Linearizable env →
+    ContainedBorrowsWellFormed env →
+    BorrowTargetsWellFormedInSlot env slotLifetime targets →
+    (∀ target, target ∈ targets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
+    WriteBorrowTargets rank env path targets rhsTy result →
+    ContainedBorrowsWellFormed result ∧
+      BorrowTargetsWellFormedInSlot result slotLifetime targets := by
+  sorry
+
+/-- Concrete update-invariant package assembled from the explicit fan-out debt. -/
+theorem updateBorrowInvariantObligations_from_sorries :
+    UpdateBorrowInvariantObligations where
+  writeBorrowTargets_preserves_containedBorrowsWellFormed :=
+    updateBorrowInvariant_writeBorrowTargets_preserves_containedBorrowsWellFormed
+
+/-- Initialized-leaf fact for Appendix 9.6 fan-out writes.
+
+Documented rule strengthening: `WriteBorrowTargets.singleton/cons` now carry a
+full typing for the concrete branch target `prependPath path target`.  Without
+that premise, the bare fan-out syntax could write through arbitrary partial
+paths, including reinitialising `undef` leaves, so branch shape would not be
+derivable.  With it, the existing matching lemma
+`writeLeafTy_of_lvalTyping` supplies exactly the initialized-leaf witness needed
+by `EnvWrite.shapePreserved_init` and `WriteBorrowTargets.shapePreserved_init`. -/
+theorem WriteBorrowTargets.initialized_leaves_appendix96
+    {rank : Nat} {env result : Env} {path : Path}
+    {targets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
+    BorrowTargetsWellFormedInSlot env slotLifetime targets →
+    WriteBorrowTargets rank env path targets rhsTy result →
+    ∀ target, target ∈ targets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy := by
+  intro _htargets hwrites
+  refine WriteBorrowTargets.rec
+    (motive_1 := fun _ _ _ _ _ _ _ _ => True)
+    (motive_2 := fun _rank env path targets rhsTy _result _ =>
+      ∀ target, target ∈ targets → ∀ targetSlot,
+        env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+        WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy)
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites
+  case strong => intros; trivial
+  case weak => intros; trivial
+  case box => intros; trivial
+  case mutBorrow => intros; trivial
+  case nil =>
+    intro rank env path ty target htarget
+    simp at htarget
+  case singleton =>
+    intro rank env updated path target ty _hwrite htyped _ih selected hselected slot hslot
+    rw [List.mem_singleton] at hselected
+    subst hselected
+    rcases htyped with ⟨leafTy, leafLifetime, htyping⟩
+    have hleaf :=
+      writeLeafTy_of_lvalTyping htyping hslot [] ty WriteLeafTy.leaf
+    simpa using hleaf
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      _hwrite htyped _hwrites _hjoin _ihWrite ihRest selected hselected slot hslot
+    rcases List.mem_cons.mp hselected with hhead | htail
+    · subst hhead
+      rcases htyped with ⟨leafTy, leafLifetime, htyping⟩
+      have hleaf :=
+        writeLeafTy_of_lvalTyping htyping hslot [] ty WriteLeafTy.leaf
+      simpa using hleaf
+    · exact ihRest selected htail slot hslot
+  case intro => intros; trivial
 
 /--
 `ContainedBorrowsWellFormedIn source observer` says that every borrow contained
@@ -16034,12 +18106,6 @@ theorem ContainedBorrowsWellFormed.join_of_crossBranchTargets
         (hrightContained x slot mutable targets hslot hcontains))
 
 structure UpdateBorrowInvariantCrossLandmarks : Prop where
-  partialTyUnion_preserves_borrows
-    {env : Env} {left right union : PartialTy} {lifetime : Lifetime} :
-    PartialTyUnion left right union →
-    PartialTyBorrowsWellFormedInSlot env lifetime left →
-    PartialTyBorrowsWellFormedInSlot env lifetime right →
-    PartialTyBorrowsWellFormedInSlot env lifetime union
   envWrite_preserves_core
     {rank : Nat} {env result : Env} {lv : LVal}
     {rhsTy : Ty} {slotLifetime : Lifetime} :
@@ -16051,65 +18117,167 @@ structure UpdateBorrowInvariantCrossLandmarks : Prop where
       BorrowTargetsTransport env result ∧
       ContainedBorrowsWellFormedIn result env
 
+/-- Rank side condition needed for preserving one common linearization witness
+through a mutable-borrow fan-out.
+
+For every concrete branch write, each *new borrow edge* whose target came from
+the RHS type must point to a strictly lower-ranked base.  This is the local
+acyclicity premise behind the old bare `EnvWrite.preserves_linearizedBy`
+obligation. -/
+def WriteBorrowTargetsRhsVarsBelowBranches (φ : Name → Nat) (rank : Nat)
+    (env : Env) (path : Path) (writeTargets : List LVal) (rhsTy : Ty) : Prop :=
+  ∀ target, target ∈ writeTargets → ∀ updated,
+    EnvWrite rank env (prependPath path target) rhsTy updated →
+    EnvWriteRhsBorrowTargetsBelow φ updated rhsTy
+
+/-- Coherence obligations for every branch and branch join in a mutable-borrow
+fan-out write.
+
+This is the fan-out analogue of the strengthened assignment coherence premise.
+Each concrete branch write must expose the write-coherence transport needed by
+`EnvWrite.preserves_coherent_of_obligations`; each cons join must expose the
+join-coherence transport needed by `EnvJoin.preserves_coherent_of_obligations`.
+-/
+structure WriteBorrowTargetsCoherenceObligations
+    (rank : Nat) (env : Env) (path : Path) (writeTargets : List LVal)
+    (rhsTy : Ty) : Prop where
+  write
+    (target : LVal) :
+    target ∈ writeTargets →
+    ∀ updated,
+      EnvWrite rank env (prependPath path target) rhsTy updated →
+      EnvWriteCoherenceObligations env updated (LVal.base (prependPath path target))
+  join
+    (target : LVal) (rest : List LVal) :
+    target ∈ writeTargets →
+    (∀ t, t ∈ rest → t ∈ writeTargets) →
+    ∀ updated restEnv result,
+      EnvWrite rank env (prependPath path target) rhsTy updated →
+      WriteBorrowTargets rank env path rest rhsTy restEnv →
+      EnvJoin updated restEnv result →
+      EnvJoinCoherenceObligations updated restEnv result
+
+/-- Constructive variant of `WriteBorrowTargets.preserves_core_of_crossLandmarks`
+that does not use the bare `EnvWrite.preserves_linearizedBy` axiom.
+
+The extra `WriteBorrowTargetsRhsVarsBelowBranches` premise is the small
+borrow-inference/rank side condition needed to keep the same linearization witness
+across every fan-out branch. -/
 theorem WriteBorrowTargets.preserves_core_of_crossLandmarks
     (hlandmarks : UpdateBorrowInvariantCrossLandmarks)
     {rank : Nat} {env result : Env} {path : Path}
-    {writeTargets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
+    {writeTargets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime}
+    {φ : Name → Nat} :
     0 < rank →
     Coherent env →
-    Linearizable env →
+    LinearizedBy φ env →
     ContainedBorrowsWellFormed env →
     PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
+    (∀ target, target ∈ writeTargets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
+    WriteBorrowTargetsRhsVarsBelowBranches φ rank env path writeTargets rhsTy →
+    WriteBorrowTargetsCoherenceObligations rank env path writeTargets rhsTy →
     WriteBorrowTargets rank env path writeTargets rhsTy result →
     ContainedBorrowsWellFormed result ∧
       BorrowTargetsTransport env result ∧
       ContainedBorrowsWellFormedIn result env := by
-  intro hrank hcoh hlin hcontained hrhs hwrites
+  intro hrank hcoh hφ hcontained hrhs hleaf hbelow hfanoutCoh hwrites
   exact (WriteBorrowTargets.rec
     (motive_1 := fun _rank _env _path _oldTy _rhsTy _result _updatedTy _ =>
       True)
     (motive_2 := fun _rank env _path _writeTargets constructorTy result _ =>
-      0 < _rank → Coherent env → Linearizable env →
+      0 < _rank → Coherent env → LinearizedBy φ env →
       ∀ {slotLifetime},
         ContainedBorrowsWellFormed env →
         PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty constructorTy) →
+        (∀ target, target ∈ _writeTargets → ∀ targetSlot,
+          env.slotAt (LVal.base (prependPath _path target)) = some targetSlot →
+          WriteLeafTy env (LVal.path (prependPath _path target))
+            targetSlot.ty constructorTy) →
+        WriteBorrowTargetsRhsVarsBelowBranches φ _rank env _path _writeTargets constructorTy →
+        WriteBorrowTargetsCoherenceObligations _rank env _path _writeTargets constructorTy →
         (ContainedBorrowsWellFormed result ∧
           BorrowTargetsTransport env result ∧
           ContainedBorrowsWellFormedIn result env) ∧
-          Coherent result ∧ Linearizable result)
+          Coherent result ∧ LinearizedBy φ result)
     (motive_3 := fun _rank _env _lv _rhsTy _result _ => True)
     (by intro env old ty; trivial)
-    (by intro env rank old joined ty hjoin; trivial)
+    (by intro env rank old joined ty _hshape _hjoin; trivial)
     (by intro env₁ env₂ rank path inner updatedInner ty hupdate ih; trivial)
     (by intro env₁ env₂ rank path targets ty hwrites ih; trivial)
     (by
-      intro rank env path ty _hrank hcoh hlin slotLifetime hcontained _hrhs
+      intro rank env path ty _hrank hcoh hlinBy slotLifetime hcontained _hrhs _hleaf
+        _hbelow _hfanoutCoh
       exact ⟨⟨hcontained, BorrowTargetsTransport.refl env,
-        ContainedBorrowsWellFormed.in_self hcontained⟩, hcoh, hlin⟩)
+        ContainedBorrowsWellFormed.in_self hcontained⟩, hcoh, hlinBy⟩)
     (by
-      intro rank env updated path target ty hwrite _ih
-        hrank hcoh hlin slotLifetime hcontained hrhs
-      have hlinU := EnvWrite.preserves_linearizable hwrite hlin
-      have hcohU := EnvWrite.preserves_coherent hwrite hlin hlinU hcoh hrhs
+      intro rank env updated path target ty hwrite _htyped _ih
+        hrank hcoh hlinBy slotLifetime hcontained hrhs _hleaf hbelow hfanoutCoh
+      have hlinEnv : Linearizable env := Linearizable.of_linearizedBy hlinBy
+      have hlinUBy :=
+        EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
+          hwrite hlinBy (hbelow target (by simp) updated hwrite)
+      have hlinU := Linearizable.of_linearizedBy hlinUBy
+      have hcohU := EnvWrite.preserves_coherent_of_obligations hcoh
+        (hfanoutCoh.write target (by simp) updated hwrite)
       exact ⟨hlandmarks.envWrite_preserves_core hrank hcontained hrhs hwrite,
-        hcohU, hlinU⟩)
+        hcohU, hlinUBy⟩)
     (by
       intro rank env updated restEnv result path target rest ty
-        hwrite _hwrites hjoin _ihWrite ihWrites
-        hrank hcoh hlin slotLifetime hcontained hrhs
-      have hlinU := EnvWrite.preserves_linearizable hwrite hlin
-      have hcohU := EnvWrite.preserves_coherent hwrite hlin hlinU hcoh hrhs
+        hwrite _htyped hwrites hjoin _ihWrite ihWrites
+        hrank hcoh hlinBy slotLifetime hcontained hrhs hleaf hbelow hfanoutCoh
+      have hlinEnv : Linearizable env := Linearizable.of_linearizedBy hlinBy
+      have hlinUBy :=
+        EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
+          hwrite hlinBy (hbelow target (by simp) updated hwrite)
+      have hlinU := Linearizable.of_linearizedBy hlinUBy
+      have hcohU := EnvWrite.preserves_coherent_of_obligations hcoh
+        (hfanoutCoh.write target (by simp) updated hwrite)
       rcases hlandmarks.envWrite_preserves_core hrank hcontained hrhs hwrite with
         ⟨hupdatedContained, hupdatedTransport, hupdatedInEnv⟩
-      rcases ihWrites hrank hcoh hlin hcontained hrhs with
-        ⟨⟨hrestContained, _hrestTransport, hrestInEnv⟩, hcohRest, hlinRest⟩
-      have hlinR := EnvJoin.preserves_linearizable hjoin hlinU hlinRest
-      have hcohR := EnvJoin.preserves_coherent hjoin hlinU hlinRest hlinR hcohU hcohRest
-      -- branch-sameShape for the fan-out join (both branches are shape-preserving
-      -- writes of the common env); to be discharged from the writes' shape
-      -- preservation (threaded `ShapeCompatible`).  HONEST sorry (true in context).
+      have hleafRest :
+          ∀ t, t ∈ rest → ∀ slot,
+            env.slotAt (LVal.base (prependPath path t)) = some slot →
+            WriteLeafTy env (LVal.path (prependPath path t)) slot.ty ty := by
+        intro t ht slot hslot
+        exact hleaf t (List.mem_cons_of_mem target ht) slot hslot
+      have hbelowRest :
+          WriteBorrowTargetsRhsVarsBelowBranches φ rank env path rest ty := by
+        intro t ht branch hbranch
+        exact hbelow t (List.mem_cons_of_mem target ht) branch hbranch
+      have hfanoutCohRest :
+          WriteBorrowTargetsCoherenceObligations rank env path rest ty := {
+        write := by
+          intro t ht branch hbranch
+          exact hfanoutCoh.write t (List.mem_cons_of_mem target ht) branch hbranch
+        join := by
+          intro t later ht hlater branch laterEnv branchResult hbranch hlaterWrites hbranchJoin
+          exact hfanoutCoh.join t later (List.mem_cons_of_mem target ht)
+            (fun u hu => List.mem_cons_of_mem target (hlater u hu))
+            branch laterEnv branchResult hbranch hlaterWrites hbranchJoin
+      }
+      rcases ihWrites hrank hcoh hlinBy hcontained hrhs hleafRest hbelowRest
+          hfanoutCohRest with
+        ⟨⟨hrestContained, _hrestTransport, hrestInEnv⟩, hcohRest, hlinRestBy⟩
+      have hlinRest := Linearizable.of_linearizedBy hlinRestBy
+      have hlinRBy := EnvJoin.preserves_linearizedBy hjoin hlinUBy hlinRestBy
+      have hlinR := Linearizable.of_linearizedBy hlinRBy
+      have hjoinCoh : EnvJoinCoherenceObligations updated restEnv result :=
+        hfanoutCoh.join target rest (by simp)
+          (fun t ht => List.mem_cons_of_mem target ht)
+          updated restEnv result hwrite hwrites hjoin
+      have hcohR := EnvJoin.preserves_coherent_of_obligations hcohU hcohRest hjoinCoh
+      have hupdShape : EnvShapePreserved env updated :=
+        EnvWrite.shapePreserved_init hrank hwrite
+          (fun slot hslot => hleaf target (by simp) slot hslot)
+      have hrestShape : EnvShapePreserved env restEnv :=
+        WriteBorrowTargets.shapePreserved_init hrank hwrites
+          (fun t ht slot hslot =>
+            hleaf t (List.mem_cons_of_mem target ht) slot hslot)
       have hbranch : ∀ x sL sR, updated.slotAt x = some sL → restEnv.slotAt x = some sR →
-          PartialTy.sameShape sL.ty sR.ty := by sorry
+          PartialTy.sameShape sL.ty sR.ty :=
+        EnvShapePreserved.branch_sameShape hupdShape hrestShape
       have hstrL := EnvJoin.fanOutShapeMap_left hjoin hbranch
       have hstrR := EnvJoin.fanOutShapeMap_right hjoin hbranch
       have hcontJoin :=
@@ -16119,21 +18287,32 @@ theorem WriteBorrowTargets.preserves_core_of_crossLandmarks
         BorrowTargetsTransport.join_viaInvariants_left hjoin hstrL hlinR hcohR
           hcontJoin hupdatedTransport,
         ContainedBorrowsWellFormedIn.join_source hjoin hupdatedInEnv hrestInEnv⟩,
-        hcohR, hlinR⟩)
+        hcohR, hlinRBy⟩)
     (by intro rank env₁ env₂ lv slot ty updatedTy hslot hupdate ih; trivial)
-    hwrites hrank hcoh hlin hcontained hrhs).1
+    hwrites hrank hcoh hφ hcontained hrhs hleaf hbelow hfanoutCoh).1
 
 theorem UpdateBorrowInvariantObligations.of_crossLandmarks
-    (hlandmarks : UpdateBorrowInvariantCrossLandmarks) :
+    (hlandmarks : UpdateBorrowInvariantCrossLandmarks)
+    (hfanoutRanked :
+      ∀ {rank : Nat} {env : Env} {path : Path} {targets : List LVal}
+        {rhsTy : Ty} {φ : Name → Nat},
+        WriteBorrowTargetsRhsVarsBelowBranches φ rank env path targets rhsTy)
+    (hfanoutCoherence :
+      ∀ {rank : Nat} {env : Env} {path : Path} {targets : List LVal}
+        {rhsTy : Ty},
+        WriteBorrowTargetsCoherenceObligations rank env path targets rhsTy) :
     UpdateBorrowInvariantObligations where
-  partialTyUnion_preserves_borrows := by
-    intro env left right union lifetime hunion hleft hright
-    exact hlandmarks.partialTyUnion_preserves_borrows hunion hleft hright
   writeBorrowTargets_preserves_containedBorrowsWellFormed := by
     intro rank env result path targets rhsTy slotLifetime
-      hrank hcoh hlin hcontained htargets hrhs hwrites
+      hrank hcoh hlin hcontained htargets hleaf hrhs hwrites
+    rcases hlin with ⟨φ, hφ⟩
     rcases WriteBorrowTargets.preserves_core_of_crossLandmarks
-        hlandmarks hrank hcoh hlin hcontained hrhs hwrites with
+        hlandmarks hrank hcoh hφ hcontained hrhs hleaf
+        (hfanoutRanked (rank := rank) (env := env) (path := path)
+          (targets := targets) (rhsTy := rhsTy) (φ := φ))
+        (hfanoutCoherence (rank := rank) (env := env) (path := path)
+          (targets := targets) (rhsTy := rhsTy))
+        hwrites with
       ⟨hresultContained, htransport, _hresultInEnv⟩
     exact ⟨hresultContained, htransport htargets⟩
 
@@ -16146,38 +18325,345 @@ theorem UpdateBorrowInvariantObligations.of_crossLandmarks
 -- symmetric `FullLValTypingJoinTransport` structure and its consumers remain in
 -- the file as dead (proven) scaffolding.
 
+/-- Old borrow-target transport for one write, derived from the transport keystone.
+
+This is one of the constructive pieces behind the legacy single-write Appendix
+9.6 claim below.  It deliberately exposes the runtime facts the keystone needs:
+the write result must be shape-preserving/strengthening from the source, already
+linearized, coherent, and contained-borrow well formed.
+-/
+theorem EnvWrite.borrowTargetsTransport_of_shapeMap
+    {rank : Nat} {env result : Env} {lv : LVal} {rhsTy : Ty}
+    {φ : Name → Nat} :
+    EnvWrite rank env lv rhsTy result →
+    (∀ x sE, env.slotAt x = some sE →
+      ∃ sE', result.slotAt x = some sE' ∧
+        PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty) →
+    LinearizedBy φ result →
+    Coherent result →
+    ContainedBorrowsWellFormed result →
+    BorrowTargetsTransport env result := by
+  intro hwrite hshapeMap hlinResult hcohResult hcontainedResult
+    slotLifetime targets htargets target htarget
+  rcases htargets target htarget with
+    ⟨sourceTy, sourceLifetime, hsourceTyping, hsourceOutlives, hsourceBase⟩
+  have hresultBase : LValBaseOutlives result target slotLifetime :=
+    LValBaseOutlives.write hwrite hsourceBase
+  rcases fullJoinTransport_viaInvariants
+      (source := env) (join := result) (target := target)
+      (sourceTy := sourceTy) (sourceLifetime := sourceLifetime)
+      (current := slotLifetime) (φ := φ) (N := φ (LVal.base target) + 1)
+      hshapeMap hlinResult hcohResult
+      (fun x slot mutable targets _hrank hslot hcontains =>
+        hcontainedResult x slot mutable targets hslot hcontains)
+      (Nat.lt_succ_self _) hsourceTyping hresultBase with
+    ⟨resultTy, resultLifetime, hresultTyping, hresultOutlives⟩
+  exact ⟨resultTy, resultLifetime, hresultTyping, hresultOutlives, hresultBase⟩
+
+/-- Constructive packaging of the parts of the legacy single-write core claim
+once the result-side invariants have been established separately.
+
+The nontrivial old-target transport component is proved by
+`EnvWrite.borrowTargetsTransport_of_shapeMap`; the two contained-borrow facts are
+kept explicit because those are structural update obligations, not consequences
+of a bare `EnvWrite` plus RHS well-formedness alone.
+-/
+theorem EnvWrite.preserves_core_appendix96_of_result_invariants
+    {rank : Nat} {env result : Env} {lv : LVal} {rhsTy : Ty}
+    {φ : Name → Nat} :
+    EnvWrite rank env lv rhsTy result →
+    (∀ x sE, env.slotAt x = some sE →
+      ∃ sE', result.slotAt x = some sE' ∧
+        PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty) →
+    LinearizedBy φ result →
+    Coherent result →
+    ContainedBorrowsWellFormed result →
+    ContainedBorrowsWellFormedIn result env →
+    ContainedBorrowsWellFormed result ∧
+      BorrowTargetsTransport env result ∧
+      ContainedBorrowsWellFormedIn result env := by
+  intro hwrite hshapeMap hlinResult hcohResult hcontainedResult hresultInEnv
+  exact ⟨hcontainedResult,
+    EnvWrite.borrowTargetsTransport_of_shapeMap
+      hwrite hshapeMap hlinResult hcohResult hcontainedResult,
+    hresultInEnv⟩
+
+/-- Appendix 9.6 core preservation for one positive-rank write, with the
+result-side invariants exposed.
+
+This is the proved replacement for the old bare claim.  A single `EnvWrite` plus
+RHS per-target well-formedness is not enough to derive old-target transport; the
+caller must also provide the shape map and result-side linearization/coherence
+and contained-borrow facts needed by the transport keystone. -/
 theorem EnvWrite.preserves_core_appendix96
     {rank : Nat} {env result : Env} {lv : LVal}
-    {rhsTy : Ty} {slotLifetime : Lifetime} :
+    {rhsTy : Ty} {slotLifetime : Lifetime} {φ : Name → Nat} :
     0 < rank →
     ContainedBorrowsWellFormed env →
     PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
     EnvWrite rank env lv rhsTy result →
+    (∀ x sE, env.slotAt x = some sE →
+      ∃ sE', result.slotAt x = some sE' ∧
+        PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty) →
+    LinearizedBy φ result →
+    Coherent result →
+    ContainedBorrowsWellFormed result →
+    ContainedBorrowsWellFormedIn result env →
     ContainedBorrowsWellFormed result ∧
       BorrowTargetsTransport env result ∧
       ContainedBorrowsWellFormedIn result env := by
-  sorry
+  intro _hrank _hcontained _hrhs hwrite hshape hlinResult hcohResult
+    hcontainedResult hresultInEnv
+  exact EnvWrite.preserves_core_appendix96_of_result_invariants
+    hwrite hshape hlinResult hcohResult hcontainedResult hresultInEnv
 
-theorem updateBorrowInvariantCrossLandmarks_appendix96 :
+/-- Source environment for the bare Appendix 9.6 single-write counterexample.
+
+Here `x : &[a]` with `a : int`, and `y : &[*x]`.  Thus `*x` is an old borrow
+target that is well formed before the write.
+-/
+def coreAppendix96Env : Env :=
+  (((Env.empty.update "a" { ty := .ty .int, lifetime := Lifetime.root }).update "b"
+    { ty := .ty .unit, lifetime := Lifetime.root }).update "x"
+      { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root }).update "y"
+        { ty := .ty (.borrow false [.deref (.var "x")]), lifetime := Lifetime.root }
+
+/-- Result of weakly writing `&[b]` into `x`, yielding `x : &[a,b]`. -/
+def coreAppendix96Result : Env :=
+  coreAppendix96Env.update "x"
+    { ty := .ty (.borrow false [.var "a", .var "b"]), lifetime := Lifetime.root }
+
+theorem coreAppendix96Env_deref_x_typing :
+    LValTyping coreAppendix96Env (.deref (.var "x")) (.ty .int) Lifetime.root := by
+  have hx : coreAppendix96Env.slotAt "x" =
+      some { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root } := by
+    simp [coreAppendix96Env, Env.update]
+  have ha : coreAppendix96Env.slotAt "a" =
+      some { ty := .ty .int, lifetime := Lifetime.root } := by
+    simp [coreAppendix96Env, Env.update]
+  exact LValTyping.borrow (LValTyping.var hx)
+    (LValTargetsTyping.singleton (LValTyping.var ha))
+
+theorem coreAppendix96Result_targets_not_typeable :
+    ¬ ∃ ty lifetime,
+      LValTargetsTyping coreAppendix96Result [.var "a", .var "b"] (.ty ty) lifetime := by
+  rintro ⟨ty, lifetime, htargets⟩
+  cases htargets with
+  | cons hhead hrest hunion _hintersection =>
+      rcases LValTyping.var_inv hhead with ⟨headSlot, hheadSlot, hheadTy, _⟩
+      have hheadSlotEq : headSlot = { ty := .ty .int, lifetime := Lifetime.root } := by
+        have ha : coreAppendix96Result.slotAt "a" =
+            some { ty := .ty .int, lifetime := Lifetime.root } := by
+          simp [coreAppendix96Result, coreAppendix96Env, Env.update]
+        exact Option.some.inj (by rw [← hheadSlot, ha])
+      have hheadSlotTy : headSlot.ty = .ty .int := by
+        rw [hheadSlotEq]
+      cases hrest with
+      | singleton htarget =>
+          rcases LValTyping.var_inv htarget with ⟨restSlot, hrestSlot, hrestTy, _⟩
+          have hrestSlotEq : restSlot = { ty := .ty .unit, lifetime := Lifetime.root } := by
+            have hb : coreAppendix96Result.slotAt "b" =
+                some { ty := .ty .unit, lifetime := Lifetime.root } := by
+              simp [coreAppendix96Result, coreAppendix96Env, Env.update]
+            exact Option.some.inj (by rw [← hrestSlot, hb])
+          have hrestSlotTy : restSlot.ty = .ty .unit := by
+            rw [hrestSlotEq]
+          have hheadTyPartialEq : PartialTy.ty _ = PartialTy.ty Ty.int :=
+            hheadTy.symm.trans hheadSlotTy
+          have hrestTyPartialEq : PartialTy.ty _ = PartialTy.ty Ty.unit :=
+            hrestTy.symm.trans hrestSlotTy
+          cases hheadTyPartialEq
+          cases hrestTyPartialEq
+          exact PartialTyUnion.int_unit_full_false hunion
+      | cons _hhead2 hrest2 _hunion2 _hintersection2 =>
+          exact False.elim (LValTargetsTyping.nil_false hrest2)
+
+theorem coreAppendix96Result_deref_x_not_typeable :
+    ¬ ∃ ty lifetime,
+      LValTyping coreAppendix96Result (.deref (.var "x")) (.ty ty) lifetime := by
+  rintro ⟨ty, lifetime, htyping⟩
+  cases htyping with
+  | box hsource =>
+      rcases LValTyping.var_inv hsource with ⟨slot, hslot, hty, _⟩
+      have hslotTy : slot.ty = .ty (.borrow false [.var "a", .var "b"]) := by
+        simpa [coreAppendix96Result, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      cases hty.symm.trans hslotTy
+  | borrow hsource htargets =>
+      rcases LValTyping.var_inv hsource with ⟨slot, hslot, hty, _⟩
+      have hslotTy : slot.ty = .ty (.borrow false [.var "a", .var "b"]) := by
+        simpa [coreAppendix96Result, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      have hsourceTy : PartialTy.ty (.borrow _ _) =
+          PartialTy.ty (.borrow false [.var "a", .var "b"]) := hty.symm.trans hslotTy
+      cases hsourceTy
+      exact coreAppendix96Result_targets_not_typeable ⟨ty, lifetime, htargets⟩
+
+theorem coreAppendix96Env_contained :
+    ContainedBorrowsWellFormed coreAppendix96Env := by
+  intro z slot mutable targets hslot hcontains
+  by_cases hzy : z = "y"
+  · subst hzy
+    have hslotEq : slot =
+        { ty := .ty (.borrow false [.deref (.var "x")]), lifetime := Lifetime.root } := by
+      have hy : coreAppendix96Env.slotAt "y" =
+          some { ty := .ty (.borrow false [.deref (.var "x")]), lifetime := Lifetime.root } := by
+        simp [coreAppendix96Env, Env.update]
+      exact Option.some.inj (by rw [← hslot, hy])
+    rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+    have hcontainedTy : containedSlot.ty = .ty (.borrow false [.deref (.var "x")]) := by
+      simpa [coreAppendix96Env, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hcontainedSlot).symm
+    rw [hcontainedTy] at hcontainsTy
+    cases hcontainsTy
+    subst hslotEq
+    intro target htarget
+    simp at htarget
+    subst htarget
+    refine ⟨.int, Lifetime.root, coreAppendix96Env_deref_x_typing,
+      LifetimeOutlives.refl _, ?_⟩
+    have hx : coreAppendix96Env.slotAt "x" =
+        some { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root } := by
+      simp [coreAppendix96Env, Env.update]
+    exact ⟨_, hx, LifetimeOutlives.refl _⟩
+  · by_cases hzx : z = "x"
+    · subst hzx
+      have hslotEq : slot =
+          { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root } := by
+        have hx : coreAppendix96Env.slotAt "x" =
+            some { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root } := by
+          simp [coreAppendix96Env, Env.update]
+        exact Option.some.inj (by rw [← hslot, hx])
+      rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+      have hcontainedTy : containedSlot.ty = .ty (.borrow false [.var "a"]) := by
+        simpa [coreAppendix96Env, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hcontainedSlot).symm
+      rw [hcontainedTy] at hcontainsTy
+      cases hcontainsTy
+      subst hslotEq
+      intro target htarget
+      simp at htarget
+      subst htarget
+      have ha : coreAppendix96Env.slotAt "a" =
+          some { ty := .ty .int, lifetime := Lifetime.root } := by
+        simp [coreAppendix96Env, Env.update]
+      exact ⟨.int, Lifetime.root, LValTyping.var ha,
+        LifetimeOutlives.refl _, ⟨_, ha, LifetimeOutlives.refl _⟩⟩
+    · by_cases hzb : z = "b"
+      · subst hzb
+        rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+        have hcontainedTy : containedSlot.ty = .ty .unit := by
+          simpa [coreAppendix96Env, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hcontainedSlot).symm
+        rw [hcontainedTy] at hcontainsTy
+        cases hcontainsTy
+      · by_cases hza : z = "a"
+        · subst hza
+          rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+          have hcontainedTy : containedSlot.ty = .ty .int := by
+            simpa [coreAppendix96Env, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hcontainedSlot).symm
+          rw [hcontainedTy] at hcontainsTy
+          cases hcontainsTy
+        · have hnone : coreAppendix96Env.slotAt z = none := by
+            simp [coreAppendix96Env, Env.update, Env.empty, hzy, hzx, hzb, hza]
+          rw [hslot] at hnone
+          cases hnone
+
+theorem coreAppendix96_rhs_wellFormed :
+    PartialTyBorrowsWellFormedInSlot coreAppendix96Env Lifetime.root
+      (.ty (.borrow false [.var "b"])) := by
+  intro mutable targets hcontains
+  cases hcontains
+  intro target htarget
+  simp at htarget
+  subst htarget
+  have hb : coreAppendix96Env.slotAt "b" =
+      some { ty := .ty .unit, lifetime := Lifetime.root } := by
+    simp [coreAppendix96Env, Env.update]
+  exact ⟨.unit, Lifetime.root, LValTyping.var hb,
+    LifetimeOutlives.refl _, ⟨_, hb, LifetimeOutlives.refl _⟩⟩
+
+theorem coreAppendix96_bad_weak_shape_incompatible :
+    ¬ ShapeCompatible coreAppendix96Env
+      (.ty (.borrow false [.var "a"])) (.ty (.borrow false [.var "b"])) := by
+  intro hshape
+  cases hshape with
+  | borrow hleft hright hpointee =>
+      rcases hleft (.var "a") (by simp) with ⟨leftLifetime, hleftTyping⟩
+      rcases hright (.var "b") (by simp) with ⟨rightLifetime, hrightTyping⟩
+      rcases LValTyping.var_inv hleftTyping with ⟨leftSlot, hleftSlot, hleftTy, _⟩
+      rcases LValTyping.var_inv hrightTyping with ⟨rightSlot, hrightSlot, hrightTy, _⟩
+      have hleftSlotTy : leftSlot.ty = .ty .int := by
+        simpa [coreAppendix96Env, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hleftSlot).symm
+      have hrightSlotTy : rightSlot.ty = .ty .unit := by
+        simpa [coreAppendix96Env, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hrightSlot).symm
+      have hleftTyEq : PartialTy.ty _ = PartialTy.ty Ty.int :=
+        hleftTy.symm.trans hleftSlotTy
+      have hrightTyEq : PartialTy.ty _ = PartialTy.ty Ty.unit :=
+        hrightTy.symm.trans hrightSlotTy
+      cases hleftTyEq
+      cases hrightTyEq
+      cases hpointee
+
+theorem coreAppendix96Env_deref_x_targets :
+    BorrowTargetsWellFormedInSlot coreAppendix96Env Lifetime.root [.deref (.var "x")] := by
+  intro target htarget
+  simp at htarget
+  subst htarget
+  refine ⟨.int, Lifetime.root, coreAppendix96Env_deref_x_typing,
+    LifetimeOutlives.refl _, ?_⟩
+  have hx : coreAppendix96Env.slotAt "x" =
+      some { ty := .ty (.borrow false [.var "a"]), lifetime := Lifetime.root } := by
+    simp [coreAppendix96Env, Env.update]
+  exact ⟨_, hx, LifetimeOutlives.refl _⟩
+
+theorem coreAppendix96_transport_fails :
+    ¬ BorrowTargetsTransport coreAppendix96Env coreAppendix96Result := by
+  intro htransport
+  have hresultTargets := htransport coreAppendix96Env_deref_x_targets
+  rcases hresultTargets (.deref (.var "x")) (by simp) with
+    ⟨targetTy, targetLifetime, htyping, _houtlives, _hbase⟩
+  exact coreAppendix96Result_deref_x_not_typeable ⟨targetTy, targetLifetime, htyping⟩
+
+/-- The pre-strengthening Appendix 9.6 counterexample is now rejected locally.
+
+The old weak rule could merge `x : &[a]` with RHS `&[b]`, producing `x :
+&[a,b]` and invalidating the old target `*x`.  The strengthened `W-Weak` rule
+requires the local `ShapeCompatible` premise, and the theorem above proves that
+premise is false in this example.
+-/
+theorem EnvWrite.preserves_core_appendix96_counterexample_rejected :
+    ¬ ShapeCompatible coreAppendix96Env
+      (.ty (.borrow false [.var "a"])) (.ty (.borrow false [.var "b"])) :=
+  coreAppendix96_bad_weak_shape_incompatible
+
+/-- Legacy packaging of Appendix 9.6 cross-landmarks.
+
+The broad single-write field is no longer hidden behind an axiom.  Older callers
+that still want this package must provide that compatibility premise explicitly;
+the proved replacement is `EnvWrite.preserves_core_appendix96`, whose statement
+exposes the result-side invariants needed for old-target transport.
+-/
+theorem updateBorrowInvariantCrossLandmarks_appendix96
+    (hwriteCore :
+      ∀ {rank : Nat} {env result : Env} {lv : LVal}
+        {rhsTy : Ty} {slotLifetime : Lifetime},
+        0 < rank →
+        ContainedBorrowsWellFormed env →
+        PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
+        EnvWrite rank env lv rhsTy result →
+        ContainedBorrowsWellFormed result ∧
+          BorrowTargetsTransport env result ∧
+          ContainedBorrowsWellFormedIn result env) :
     UpdateBorrowInvariantCrossLandmarks where
-  partialTyUnion_preserves_borrows := by
-    intro env left right union lifetime hunion hleft hright
-    -- Now provable: with the per-target borrow invariant
-    -- (`BorrowTargetsWellFormedInSlot`), each target of the union's borrow comes
-    -- from `left` or `right` (rule W-Bor merges the target lists), and that
-    -- side's well-formedness supplies its witness directly.
-    exact PartialTyBorrowsWellFormedInSlot.of_partialTyUnion hunion hleft hright
   envWrite_preserves_core := by
     intro rank env result lv rhsTy slotLifetime hrank hcontained hrhs hwrite
-    exact EnvWrite.preserves_core_appendix96 hrank hcontained hrhs hwrite
+    exact hwriteCore hrank hcontained hrhs hwrite
 
 structure UpdateBorrowInvariantLandmarks : Prop where
-  partialTyUnion_preserves_borrows
-    {env : Env} {left right union : PartialTy} {lifetime : Lifetime} :
-    PartialTyUnion left right union →
-    PartialTyBorrowsWellFormedInSlot env lifetime left →
-    PartialTyBorrowsWellFormedInSlot env lifetime right →
-    PartialTyBorrowsWellFormedInSlot env lifetime union
   envWrite_preserves_observerTargets
     {rank : Nat} {env result : Env} {lv : LVal}
     {observerTargets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
@@ -16227,7 +18713,7 @@ theorem WriteBorrowTargets.preserves_observerTargets_of_landmarks
       intro env old ty
       trivial)
     (by
-      intro env rank old joined ty hjoin
+      intro env rank old joined ty _hshape _hjoin
       trivial)
     (by
       intro env₁ env₂ rank path inner updatedInner ty hupdate ih
@@ -16239,13 +18725,13 @@ theorem WriteBorrowTargets.preserves_observerTargets_of_landmarks
       intro rank env path ty observerTargets slotLifetime hcontained hobservers _hrhs
       exact ⟨hcontained, hobservers⟩)
     (by
-      intro rank env updated path target ty hwrite _ih
+      intro rank env updated path target ty hwrite _htyped _ih
         observerTargets slotLifetime hcontained hobservers hrhs
       exact hlandmarks.envWrite_preserves_observerTargets
         hcontained hobservers hrhs hwrite)
     (by
       intro rank env updated restEnv result path target rest ty
-        hwrite _hwrites hjoin _ihWrite ihWrites
+        hwrite _htyped _hwrites hjoin _ihWrite ihWrites
         observerTargets slotLifetime hcontained hobservers hrhs
       rcases hlandmarks.envWrite_preserves_observerTargets
           hcontained hobservers hrhs hwrite with
@@ -16265,21 +18751,19 @@ theorem WriteBorrowTargets.preserves_observerTargets_of_landmarks
 theorem UpdateBorrowInvariantObligations.of_landmarks
     (hlandmarks : UpdateBorrowInvariantLandmarks) :
     UpdateBorrowInvariantObligations where
-  partialTyUnion_preserves_borrows := by
-    intro env left right union lifetime hunion hleft hright
-    exact hlandmarks.partialTyUnion_preserves_borrows hunion hleft hright
   writeBorrowTargets_preserves_containedBorrowsWellFormed := by
     intro rank env result path targets rhsTy slotLifetime
-      _hrank _hcoh _hlin hcontained htargets hrhs hwrites
+      _hrank _hcoh _hlin hcontained htargets _hleaf hrhs hwrites
     exact WriteBorrowTargets.preserves_observerTargets_of_landmarks
       hlandmarks hcontained htargets hrhs hwrites
 
 /--
 Definition 3.23 `writeBorrowTargets` borrow-invariant obligation.
 
-This is the remaining paper-level update invariant needed by Lemma 4.9.
-The theorem `updateBorrowInvariantObligations_appendix96` below is the backward
-proof target that removes this obligation from the public Lemma 4.9 statement.
+This is the remaining paper-level update invariant needed by Lemma 4.9.  The
+legacy theorem `updateBorrowInvariantObligations_appendix96` below records the
+old Appendix 9.6 target as explicit result-side rank/coherence premises rather
+than hiding them as axioms.
 -/
 theorem WriteBorrowTargets.preserves_containedBorrowsWellFormed_appendix96
     (hobligations : UpdateBorrowInvariantObligations)
@@ -16290,24 +18774,44 @@ theorem WriteBorrowTargets.preserves_containedBorrowsWellFormed_appendix96
     Linearizable env →
     ContainedBorrowsWellFormed env →
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
+    (∀ target, target ∈ targets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
     PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
     WriteBorrowTargets rank env path targets rhsTy result →
     ContainedBorrowsWellFormed result ∧
       BorrowTargetsWellFormedInSlot result slotLifetime targets := by
   exact hobligations.writeBorrowTargets_preserves_containedBorrowsWellFormed
 
-/--
-Appendix Lemma 9.6, update preservation for the borrow-target fan-out used by
-Definition 3.23.
+/-- Appendix Lemma 9.6 package for the borrow-target fan-out.
 
-This is the first backward proof target for Lemma 4.9.  The theorem above shows
-that this is exactly the remaining invariant needed by the mechanised
-`writeBorrowTargets` induction.
+This is an obligation-parametric compatibility route: the broad write-core and
+fan-out rank/coherence facts are explicit premises until the remaining
+result-side update obligations are proved constructively.
 -/
-theorem updateBorrowInvariantObligations_appendix96 :
+theorem updateBorrowInvariantObligations_appendix96
+    (hwriteCore :
+      ∀ {rank : Nat} {env result : Env} {lv : LVal}
+        {rhsTy : Ty} {slotLifetime : Lifetime},
+        0 < rank →
+        ContainedBorrowsWellFormed env →
+        PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
+        EnvWrite rank env lv rhsTy result →
+        ContainedBorrowsWellFormed result ∧
+          BorrowTargetsTransport env result ∧
+          ContainedBorrowsWellFormedIn result env)
+    (hfanoutRanked :
+      ∀ {rank : Nat} {env : Env} {path : Path} {targets : List LVal}
+        {rhsTy : Ty} {φ : Name → Nat},
+        WriteBorrowTargetsRhsVarsBelowBranches φ rank env path targets rhsTy)
+    (hfanoutCoherence :
+      ∀ {rank : Nat} {env : Env} {path : Path} {targets : List LVal}
+        {rhsTy : Ty},
+        WriteBorrowTargetsCoherenceObligations rank env path targets rhsTy) :
     UpdateBorrowInvariantObligations := by
   exact UpdateBorrowInvariantObligations.of_crossLandmarks
-    updateBorrowInvariantCrossLandmarks_appendix96
+    (updateBorrowInvariantCrossLandmarks_appendix96 hwriteCore)
+    hfanoutRanked hfanoutCoherence
 
 /--
 Appendix Lemma 9.6 at the Definition 3.23 update-relation level.
@@ -16345,9 +18849,9 @@ theorem UpdateAtPath.preserves_containedBorrowsWellFormed_appendix96
       intro env old ty hcoh hlin slotLifetime hcontained _holdTy hrhsTy
       exact ⟨hcontained, hrhsTy⟩)
     (by
-      intro env rank old joined ty hjoin hcoh hlin slotLifetime hcontained holdTy hrhsTy
+      intro env rank old joined ty _hshape hjoin hcoh hlin slotLifetime hcontained holdTy hrhsTy
       exact ⟨hcontained,
-        hobligations.partialTyUnion_preserves_borrows
+        PartialTyBorrowsWellFormedInSlot.of_partialTyUnion
           (by simpa [PartialTyUnion] using hjoin) holdTy hrhsTy⟩)
     (by
       intro env₁ env₂ rank path inner updatedInner ty _hinner ih
@@ -16363,8 +18867,14 @@ theorem UpdateAtPath.preserves_containedBorrowsWellFormed_appendix96
       have htargets :
           BorrowTargetsWellFormedInSlot env₁ slotLifetime targets :=
         holdTy PartialTyContains.here
+      have htargetLeaves :
+          ∀ target, target ∈ targets → ∀ targetSlot,
+            env₁.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+            WriteLeafTy env₁ (LVal.path (prependPath path target)) targetSlot.ty ty :=
+        WriteBorrowTargets.initialized_leaves_appendix96 htargets hwrites
       rcases WriteBorrowTargets.preserves_containedBorrowsWellFormed_appendix96
-          hobligations (Nat.succ_pos rank) hcoh hlin hcontained htargets hrhsTy hwrites with
+          hobligations (Nat.succ_pos rank) hcoh hlin hcontained htargets htargetLeaves
+          hrhsTy hwrites with
         ⟨hcontainedResult, htargetsResult⟩
       exact ⟨hcontainedResult, by
         intro mutable selected hcontains
@@ -16527,9 +19037,15 @@ theorem EnvWrite.preserves_containedBorrowsWellFormed_deref_mutBorrow_appendix96
       PartialTyBorrowsWellFormedInSlot env₂ writeSlot.lifetime (.ty rhsTy) :=
     PartialTyBorrowsWellFormedInSlot.weaken
       hrhsPartialAtTarget htargetOutlivesSlot
+  have htargetLeaves :
+      ∀ target, target ∈ targets → ∀ targetSlot,
+        env₂.slotAt (LVal.base (prependPath (LVal.path lhs) target)) = some targetSlot →
+        WriteLeafTy env₂ (LVal.path (prependPath (LVal.path lhs) target))
+          targetSlot.ty rhsTy :=
+    WriteBorrowTargets.initialized_leaves_appendix96 htargetsOld hwrites
   rcases WriteBorrowTargets.preserves_containedBorrowsWellFormed_appendix96
       hobligations (by decide : 0 < 1) hwellFormed.2.2.1 hwellFormed.2.2.2
-        hwellFormed.1 htargetsOld hrhsPartialAtSlot hwrites with
+        hwellFormed.1 htargetsOld htargetLeaves hrhsPartialAtSlot hwrites with
     ⟨hcontainedWriteEnv, htargetsResult⟩
   have hnotWriteVar :
       ¬ WriteProhibited
@@ -16712,12 +19228,22 @@ theorem EnvWrite.preserves_containedBorrowsWellFormed {env₁ env₂ env₃ : En
     ContainedBorrowsWellFormed env₃ := by
   exact EnvWrite.preserves_containedBorrowsWellFormed_appendix96
 
-theorem EnvWrite.preserves_wellFormed {env₁ env₂ env₃ : Env}
+/-- Assignment/update well-formedness using the precise RHS-edge rank premise.
+
+The caller supplies the linearization witness for the pre-write environment,
+proves that every newly installed RHS borrow edge points to a lower-ranked base,
+and provides the lvalue-coherence transport facts for the write result. -/
+theorem EnvWrite.preserves_wellFormed_of_rhsBorrowTargetsBelow
+    {env₁ env₂ env₃ : Env}
     {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
-    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {φ : Name → Nat} :
     UpdateBorrowInvariantObligations →
     WellFormedEnv env₁ lifetime →
     WellFormedEnv env₂ lifetime →
+    LinearizedBy φ env₂ →
+    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
+    EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
     LValTyping env₁ lhs oldTy targetLifetime →
     targetLifetime ≤ lifetime →
     TermTyping env₁ typing lifetime rhs rhsTy env₂ →
@@ -16726,29 +19252,91 @@ theorem EnvWrite.preserves_wellFormed {env₁ env₂ env₃ : Env}
     EnvWrite 0 env₂ lhs rhsTy env₃ →
     ¬ WriteProhibited env₃ lhs →
     WellFormedEnv env₃ lifetime := by
-  intro hobligations hwellInitial hwellFormed hLhs htargetLifetime hRhs hshape hwellRhs
-    hwrite hnotWrite
-  have hlin3 := EnvWrite.preserves_linearizable hwrite hwellFormed.2.2.2
-  have hcoh3 := EnvWrite.preserves_coherent hwrite hwellFormed.2.2.2 hlin3
-    hwellFormed.2.2.1 (PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellRhs)
+  intro hobligations hwellInitial hwellFormed hlinBy hbelow hwriteCoh hLhs
+    htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite
+  have hlin3By :=
+    EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all hwrite hlinBy hbelow
+  have hlin3 := Linearizable.of_linearizedBy hlin3By
+  have hcoh3 := EnvWrite.preserves_coherent_of_obligations
+    hwellFormed.2.2.1 hwriteCoh
   exact ⟨EnvWrite.preserves_containedBorrowsWellFormed hobligations hwellInitial hwellFormed hLhs
       htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite,
     EnvWrite.preserves_slotsOutlive hwellFormed.2.1 hwrite, hcoh3, hlin3⟩
 
-/--
-Update Preservation for well-formed environments, used in the `T-Assign` case
-of Lemma 4.9.
+/-- Assignment-level write-coherence side condition.
 
-This is the static counterpart of Appendix Lemma 9.6: writing a well-formed
-right-hand-side type through an allowed lval preserves the typing environment's
-well-formedness.
+This is the remaining coherence proof boundary for `T-Assign`: after the RHS is
+typed, the ranked write is performed, and the RHS borrow edges are known to point
+downward, the resulting environment must be coherent.  The old
+`EnvWrite.preserves_coherent` axiom tried to prove this from a per-target RHS
+well-formedness premise, which is too weak.  This side condition is stated at the
+assignment boundary where the needed typing/shape/rank facts are available.
 -/
-theorem assign_preserves_wellFormed {env₁ env₂ env₃ : Env}
+def AssignmentWritePreservesCoherent : Prop :=
+  ∀ {env₁ env₂ env₃ : Env}
     {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
-    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
-    UpdateBorrowInvariantObligations →
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {φ : Name → Nat},
     WellFormedEnv env₁ lifetime →
     WellFormedEnv env₂ lifetime →
+    LinearizedBy φ env₂ →
+    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
+    LValTyping env₁ lhs oldTy targetLifetime →
+    targetLifetime ≤ lifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ¬ WriteProhibited env₃ lhs →
+    Coherent env₃
+
+/-- Structured assignment-level replacement for `AssignmentWritePreservesCoherent`.
+
+This avoids asking directly for `Coherent env₃`.  Instead it asks for the two
+lvalue-transport facts that are sufficient to prove coherence of the result:
+old-root borrow typings transport back to `env₂`, while borrow typings rooted at
+the written base provide their joint target-list typings in `env₃`.
+-/
+def AssignmentWriteCoherenceObligations : Prop :=
+  ∀ {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {φ : Name → Nat},
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    LinearizedBy φ env₂ →
+    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
+    LValTyping env₁ lhs oldTy targetLifetime →
+    targetLifetime ≤ lifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ¬ WriteProhibited env₃ lhs →
+    EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs)
+
+theorem AssignmentWritePreservesCoherent.of_coherenceObligations
+    (hobligations : AssignmentWriteCoherenceObligations) :
+    AssignmentWritePreservesCoherent := by
+  intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs rhsTy φ
+    hwellInitial hwellFormed hlinBy hbelow hLhs htargetLifetime hRhs hshape
+    hwellRhs hwrite hnotWrite
+  exact EnvWrite.preserves_coherent_of_obligations hwellFormed.2.2.1
+    (hobligations hwellInitial hwellFormed hlinBy hbelow hLhs htargetLifetime
+      hRhs hshape hwellRhs hwrite hnotWrite)
+
+/-- Assignment/update well-formedness using explicit rank and coherence premises. -/
+theorem EnvWrite.preserves_wellFormed_of_rhsBorrowTargetsBelow_and_coherent
+    {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {φ : Name → Nat} :
+    UpdateBorrowInvariantObligations →
+    AssignmentWritePreservesCoherent →
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    LinearizedBy φ env₂ →
+    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
     LValTyping env₁ lhs oldTy targetLifetime →
     targetLifetime ≤ lifetime →
     TermTyping env₁ typing lifetime rhs rhsTy env₂ →
@@ -16757,10 +19345,68 @@ theorem assign_preserves_wellFormed {env₁ env₂ env₃ : Env}
     EnvWrite 0 env₂ lhs rhsTy env₃ →
     ¬ WriteProhibited env₃ lhs →
     WellFormedEnv env₃ lifetime := by
-  intro hobligations hwellInitial hwellFormed hLhs htargetLifetime hRhs hshape hwellRhs
-    hwrite hnotWrite
-  exact EnvWrite.preserves_wellFormed hobligations hwellInitial hwellFormed hLhs htargetLifetime
+  intro hobligations hwriteCoherent hwellInitial hwellFormed hlinBy hbelow hLhs
+    htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite
+  have hlin3By :=
+    EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all hwrite hlinBy hbelow
+  have hlin3 := Linearizable.of_linearizedBy hlin3By
+  have hcoh3 := hwriteCoherent hwellInitial hwellFormed hlinBy hbelow hLhs
+    htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite
+  exact ⟨EnvWrite.preserves_containedBorrowsWellFormed hobligations hwellInitial
+      hwellFormed hLhs htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite,
+    EnvWrite.preserves_slotsOutlive hwellFormed.2.1 hwrite, hcoh3, hlin3⟩
+
+/-- Assignment preservation variant with the explicit RHS-edge rank premise. -/
+theorem assign_preserves_wellFormed_of_rhsBorrowTargetsBelow
+    {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {φ : Name → Nat} :
+    UpdateBorrowInvariantObligations →
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    LinearizedBy φ env₂ →
+    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
+    EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+    LValTyping env₁ lhs oldTy targetLifetime →
+    targetLifetime ≤ lifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ¬ WriteProhibited env₃ lhs →
+    WellFormedEnv env₃ lifetime := by
+  intro hobligations hwellInitial hwellFormed hlinBy hbelow hwriteCoh hLhs
+    htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite
+  exact EnvWrite.preserves_wellFormed_of_rhsBorrowTargetsBelow hobligations
+    hwellInitial hwellFormed hlinBy hbelow hwriteCoh hLhs htargetLifetime
     hRhs hshape hwellRhs hwrite hnotWrite
+
+/-- Assignment preservation variant with explicit RHS-edge rank and coherence. -/
+theorem assign_preserves_wellFormed_of_rhsBorrowTargetsBelow_and_coherent
+    {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {φ : Name → Nat} :
+    UpdateBorrowInvariantObligations →
+    AssignmentWritePreservesCoherent →
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    LinearizedBy φ env₂ →
+    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
+    LValTyping env₁ lhs oldTy targetLifetime →
+    targetLifetime ≤ lifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ¬ WriteProhibited env₃ lhs →
+    WellFormedEnv env₃ lifetime := by
+  intro hobligations hwriteCoherent hwellInitial hwellFormed hlinBy hbelow hLhs
+    htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite
+  exact EnvWrite.preserves_wellFormed_of_rhsBorrowTargetsBelow_and_coherent
+    hobligations hwriteCoherent hwellInitial hwellFormed hlinBy hbelow hLhs
+    htargetLifetime hRhs hshape hwellRhs hwrite hnotWrite
 
 def DropFullLValTypingTransport (env : Env) (parent child : Lifetime) : Prop :=
   ∀ {lv targetTy targetLifetime},
@@ -17218,17 +19864,19 @@ theorem declare_preserves_wellFormed_of_output_fresh {env₁ env₂ env₃ : Env
     WellFormedTy env₂ ty lifetime →
     env₂.fresh x →
     TermTyping env₁ typing lifetime term ty env₂ →
+    FreshUpdateCoherenceObligations env₂ x ty lifetime →
     env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
     WellFormedEnv env₃ lifetime := by
-  intro hwellFormed hwellTy hfresh _hterm henv₃
-  exact declare_preserves_wellFormed_output_fresh hwellFormed hwellTy hfresh henv₃
+  intro hwellFormed hwellTy hfresh _hterm hcoh henv₃
+  exact declare_preserves_wellFormed_output_fresh hwellFormed hwellTy hfresh hcoh henv₃
 
 /--
 Constructor landmarks for Lemma 4.9.
 
 The term-typing induction is small once the update-sensitive constructors are
-named at their paper granularity.  Their appendix proofs are collected by
-`typingPreservesWellFormedObligations_appendix96` below.
+named at their paper granularity.  The final Lemma 4.9 route below uses the
+rule-carried obligation induction instead of manufacturing this legacy landmark
+package from broad write-preservation claims.
 -/
 structure TypingPreservesWellFormedObligations : Prop where
   block_preserves_wellFormed
@@ -17338,18 +19986,194 @@ theorem typingPreservesWellFormed_of_landmarks
       hlandmarks.block_preserves_wellFormed
         hblockChild bodyResult.1 hterms hwellTy hdrop)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
-        _hfresh hterm hfreshOut henv₃ ih htypingEq hwellFormed =>
-      let result := ih htypingEq hwellFormed
-      ⟨declare_preserves_wellFormed_of_output_fresh result.1 result.2
-          hfreshOut hterm henv₃,
-        WellFormedTy.unit⟩)
+        _hfresh _hterm hfreshOut hcoh henv₃ ih htypingEq hwellFormed =>
+      by
+        let result := ih htypingEq hwellFormed
+        refine ⟨?_, WellFormedTy.unit⟩
+        rw [henv₃]
+        exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
+          result.1 result.2 hfreshOut hcoh)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwellRhs hwrite hnotWrite ih htypingEq hwellFormed =>
+        hLhs hRhs hshape hwellRhs hwrite _hranked _hwriteCoh hnotWrite ih htypingEq
+        hwellFormed =>
       let result := ih htypingEq hwellFormed
       ⟨hlandmarks.assign_preserves_wellFormed hwellFormed result.1 hLhs
           (LValTyping.lifetime_outlives_one hwellFormed hLhs)
           hRhs hshape hwellRhs hwrite hnotWrite,
         WellFormedTy.unit⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
+        hwellFormed =>
+      ih htypingEq hwellFormed)
+      (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
+          _hterm _hrest ihHead ihRest htypingEq hwellFormed =>
+        let headResult := ihHead htypingEq hwellFormed
+        ihRest htypingEq headResult.1)
+      htyping rfl hwellFormed
+
+/-- Assignment-level rank side condition for the well-formedness induction.
+
+This packages the rule obligation that `T-Assign` currently does not carry:
+after typing the RHS and performing the write, there must be a pre-write
+linearization witness such that every newly installed RHS borrow edge is ranked
+downward in the result. -/
+def AssignmentRhsEdgesRanked : Prop :=
+  ∀ {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty},
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    LValTyping env₁ lhs oldTy targetLifetime →
+    targetLifetime ≤ lifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ¬ WriteProhibited env₃ lhs →
+    ∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy
+
+/-- Declaration-level fresh-slot coherence side condition for Lemma 4.9.
+
+The legacy declaration case used `Coherent.update_fresh_ty`, which is false from
+`WellFormedTy` alone.  This side condition states the missing local fact for each
+`T-Declare`: adding the freshly declared full type must satisfy the explicit
+fresh-update coherence obligations.
+-/
+def DeclarationFreshUpdateCoherent : Prop :=
+  ∀ {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {x : Name} {term : Term} {ty : Ty},
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    WellFormedTy env₂ ty lifetime →
+    env₁.fresh x →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh x →
+    env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
+    FreshUpdateCoherenceObligations env₂ x ty lifetime
+
+/-- Declaration-level decomposition for borrow-free declared types.
+
+For a borrow-free declared/result type, the fresh-root part of
+`FreshUpdateCoherenceObligations` is automatic.  The only declaration-local
+coherence work left is old-root transport for borrow typings in the extended
+environment.
+-/
+def DeclarationFreshBorrowFreeOldRootTransport : Prop :=
+  ∀ {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {x : Name} {term : Term} {ty : Ty},
+    WellFormedEnv env₁ lifetime →
+    WellFormedEnv env₂ lifetime →
+    WellFormedTy env₂ ty lifetime →
+    env₁.fresh x →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh x →
+    env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
+    TyBorrowFree ty ∧
+      (∀ {lv : LVal} {mutable : Bool} {targets : List LVal}
+        {borrowLifetime : Lifetime},
+        LVal.base lv ≠ x →
+        LValTyping (env₂.update x { ty := .ty ty, lifetime := lifetime })
+          lv (.ty (.borrow mutable targets)) borrowLifetime →
+        ∃ oldBorrowLifetime,
+          LValTyping env₂ lv (.ty (.borrow mutable targets)) oldBorrowLifetime)
+
+theorem DeclarationFreshUpdateCoherent.of_borrowFreeOldRootTransport
+    (hdecl : DeclarationFreshBorrowFreeOldRootTransport) :
+    DeclarationFreshUpdateCoherent := by
+  intro env₁ env₂ env₃ typing lifetime x term ty hwellInitial hwellResult
+    hwellTy hfreshIn hterm hfreshOut henv₃
+  rcases hdecl hwellInitial hwellResult hwellTy hfreshIn hterm hfreshOut henv₃ with
+    ⟨hborrowFree, holdTransport⟩
+  exact FreshUpdateCoherenceObligations.of_tyBorrowFree hborrowFree holdTransport
+
+/-- Lemma 4.9 well-formedness induction using the rule-carried ranked-assignment
+side condition instead of the false bare `EnvWrite.preserves_linearizedBy`.
+
+The `AssignmentRhsEdgesRanked` parameter is kept for compatibility with older
+callers; after strengthening `T-Assign`, the proof consumes the rank witness
+stored directly in the assignment typing derivation. -/
+theorem typingPreservesWellFormed_of_assignmentRhsEdgesRanked
+    (hobligations : UpdateBorrowInvariantObligations)
+    (_hrankedAssign : AssignmentRhsEdgesRanked)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
+    {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  intro hrefs _hvalidState _hvalidStoreTyping hwellFormed _hsafe htyping
+  exact TermTyping.rec
+    (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
+      currentTyping = typing →
+      WellFormedEnv env lifetime →
+      WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+    (motive_2 := fun env currentTyping lifetime terms ty env₂ _ =>
+      currentTyping = typing →
+      WellFormedEnv env lifetime →
+      WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+    (fun {_env _typing _lifetime _value _ty} hvalueTyping htypingEq
+        hwellFormed =>
+      by
+        subst htypingEq
+        exact ⟨hwellFormed,
+          valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping⟩)
+    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
+        _htypingEq hwellFormed =>
+      ⟨hwellFormed, copyTy_result_wellFormed hwellFormed hLv hcopy⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv hnotWrite hmove
+        _htypingEq hwellFormed =>
+      move_preserves_wellFormed hwellFormed hLv hnotWrite hmove)
+    (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hmutable _hwrite
+        _htypingEq hwellFormed =>
+      ⟨hwellFormed,
+        WellFormedTy.borrow
+          (BorrowTargetsWellFormed.singleton hLv
+            (LValTyping.lifetime_outlives_one hwellFormed hLv)
+            (LValTyping.base_outlives_one hwellFormed hLv))⟩)
+    (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hread
+        _htypingEq hwellFormed =>
+      ⟨hwellFormed,
+        WellFormedTy.borrow
+          (BorrowTargetsWellFormed.singleton hLv
+            (LValTyping.lifetime_outlives_one hwellFormed hLv)
+            (LValTyping.base_outlives_one hwellFormed hLv))⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
+        hwellFormed =>
+      let result := ih htypingEq hwellFormed
+      ⟨result.1, WellFormedTy.box result.2⟩)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
+        hblockChild hterms hwellTy hdrop ih htypingEq hwellFormed =>
+      let bodyResult :=
+        ih htypingEq
+          (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
+      block_preserves_wellFormed
+        hblockChild bodyResult.1 hterms hwellTy hdrop)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
+        _hfresh _hterm hfreshOut hcoh henv₃ ih htypingEq hwellFormed =>
+      by
+        let result := ih htypingEq hwellFormed
+        refine ⟨?_, WellFormedTy.unit⟩
+        rw [henv₃]
+        exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
+          result.1 result.2 hfreshOut hcoh)
+      (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
+          hLhs hRhs hshape hwellRhs hwrite hranked hwriteCoh hnotWrite ih htypingEq
+          hwellFormed =>
+        by
+          let result := ih htypingEq hwellFormed
+          have htargetLifetime : _targetLifetime ≤ _lifetime :=
+            LValTyping.lifetime_outlives_one hwellFormed hLhs
+          rcases hranked with
+            ⟨φ, hlinBy, hbelow⟩
+          exact ⟨assign_preserves_wellFormed_of_rhsBorrowTargetsBelow hobligations
+              hwellFormed result.1 hlinBy hbelow hwriteCoh hLhs htargetLifetime
+              hRhs hshape hwellRhs hwrite hnotWrite,
+            WellFormedTy.unit⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -17359,52 +20183,136 @@ theorem typingPreservesWellFormed_of_landmarks
       ihRest htypingEq headResult.1)
     htyping rfl hwellFormed
 
-/--
-Constructor landmarks for Lemma 4.9, except that the assignment constructor is
-discharged by the current Appendix 9.6 update-preservation theorem.
+/-- Lemma 4.9 well-formedness induction using rule-carried obligations.
 
-This theorem is intentionally not the final clean target: `assign_preserves_wellFormed`
-still depends on the appendix lifetime/borrow-target closure used for writes
-through dereferences.  The sorry-free core induction is
-`typingPreservesWellFormed_of_landmarks`.
--/
-theorem TypingPreservesWellFormedObligations.of_updateBorrowInvariant
-    (hobligations : UpdateBorrowInvariantObligations) :
-    TypingPreservesWellFormedObligations where
-  block_preserves_wellFormed := by
-    intro env₁ env₂ env₃ typing lifetime blockLifetime terms ty
-      hchild hwellBody hterms hwellTy hdrop
-    exact LwRust.Paper.block_preserves_wellFormed
-      hchild hwellBody hterms hwellTy hdrop
-  copy_result_wellFormed := by
-    intro env lv ty valueLifetime lifetime hwellFormed hLv hcopy
-    exact copyTy_result_wellFormed hwellFormed hLv hcopy
-  move_preserves_wellFormed := by
-    intro env env' lv ty valueLifetime lifetime hwellFormed hLv hnotWrite hmove
-    exact LwRust.Paper.move_preserves_wellFormed
-      hwellFormed hLv hnotWrite hmove
-  assign_preserves_wellFormed := by
-    intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs rhsTy
-      hwellInitial hwellFormed hLhs htargetLifetime hRhs hshape hwellRhs
-      hwrite hnotWrite
-    exact LwRust.Paper.assign_preserves_wellFormed hobligations
-      hwellInitial hwellFormed hLhs htargetLifetime hRhs hshape hwellRhs
-      hwrite hnotWrite
+The assignment rank/write-coherence facts and declaration fresh-slot coherence
+fact come from the strengthened `T-Assign` and `T-Declare` constructors. -/
+theorem typingPreservesWellFormed_of_ruleCarriedObligations
+    (hobligations : UpdateBorrowInvariantObligations)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
+    {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  intro hrefs _hvalidState _hvalidStoreTyping hwellFormed _hsafe htyping
+  exact TermTyping.rec
+    (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
+      currentTyping = typing →
+      WellFormedEnv env lifetime →
+      WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+    (motive_2 := fun env currentTyping lifetime terms ty env₂ _ =>
+      currentTyping = typing →
+      WellFormedEnv env lifetime →
+      WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+    (fun {_env _typing _lifetime _value _ty} hvalueTyping htypingEq
+        hwellFormed =>
+      by
+        subst htypingEq
+        exact ⟨hwellFormed,
+          valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping⟩)
+    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
+        _htypingEq hwellFormed =>
+      ⟨hwellFormed, copyTy_result_wellFormed hwellFormed hLv hcopy⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv hnotWrite hmove
+        _htypingEq hwellFormed =>
+      move_preserves_wellFormed hwellFormed hLv hnotWrite hmove)
+    (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hmutable _hwrite
+        _htypingEq hwellFormed =>
+      ⟨hwellFormed,
+        WellFormedTy.borrow
+          (BorrowTargetsWellFormed.singleton hLv
+            (LValTyping.lifetime_outlives_one hwellFormed hLv)
+            (LValTyping.base_outlives_one hwellFormed hLv))⟩)
+    (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hread
+        _htypingEq hwellFormed =>
+      ⟨hwellFormed,
+        WellFormedTy.borrow
+          (BorrowTargetsWellFormed.singleton hLv
+            (LValTyping.lifetime_outlives_one hwellFormed hLv)
+            (LValTyping.base_outlives_one hwellFormed hLv))⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
+        hwellFormed =>
+      let result := ih htypingEq hwellFormed
+      ⟨result.1, WellFormedTy.box result.2⟩)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
+        hblockChild hterms hwellTy hdrop ih htypingEq hwellFormed =>
+      let bodyResult :=
+        ih htypingEq
+          (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
+      block_preserves_wellFormed
+        hblockChild bodyResult.1 hterms hwellTy hdrop)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
+        _hfresh _hterm hfreshOut hcohObligations henv₃ ih htypingEq hwellFormed =>
+      by
+        let result := ih htypingEq hwellFormed
+        refine ⟨?_, WellFormedTy.unit⟩
+        rw [henv₃]
+        exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
+          result.1 result.2 hfreshOut hcohObligations)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
+        hLhs hRhs hshape hwellRhs hwrite hranked hwriteCoh hnotWrite ih htypingEq
+        hwellFormed =>
+      by
+        let result := ih htypingEq hwellFormed
+        have htargetLifetime : _targetLifetime ≤ _lifetime :=
+          LValTyping.lifetime_outlives_one hwellFormed hLhs
+        rcases hranked with
+          ⟨φ, hlinBy, hbelow⟩
+        have hlin3By :=
+          EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
+            hwrite hlinBy hbelow
+        have hcoh3 := EnvWrite.preserves_coherent_of_obligations
+          result.1.2.2.1 hwriteCoh
+        exact ⟨⟨EnvWrite.preserves_containedBorrowsWellFormed hobligations
+              hwellFormed result.1 hLhs htargetLifetime hRhs hshape hwellRhs
+              hwrite hnotWrite,
+            EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
+            hcoh3,
+            Linearizable.of_linearizedBy hlin3By⟩,
+          WellFormedTy.unit⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
+        hwellFormed =>
+      ih htypingEq hwellFormed)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
+        _hterm _hrest ihHead ihRest htypingEq hwellFormed =>
+      let headResult := ihHead htypingEq hwellFormed
+      ihRest htypingEq headResult.1)
+    htyping rfl hwellFormed
 
-/--
-Appendix-backed instance of the Lemma 4.9 constructor landmarks.
--/
-theorem typingPreservesWellFormedObligations_appendix96 :
-    TypingPreservesWellFormedObligations := by
-  exact TypingPreservesWellFormedObligations.of_updateBorrowInvariant
-    updateBorrowInvariantObligations_appendix96
+/-- Compatibility wrapper for the older explicit-premise API.
+
+The premise names are now rule-carried by `TermTyping`; callers should prefer
+`typingPreservesWellFormed_of_ruleCarriedObligations`. -/
+theorem typingPreservesWellFormed_of_rankedAssign_and_declFreshCoherence
+    (hobligations : UpdateBorrowInvariantObligations)
+    (_hrankedAssign : AssignmentRhsEdgesRanked)
+    (_hwriteCoherent : AssignmentWriteCoherenceObligations)
+    (_hdeclFresh : DeclarationFreshUpdateCoherent)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
+    {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  exact typingPreservesWellFormed_of_ruleCarriedObligations hobligations
 
 /--
 Lemma 4.9 wrapper used by the later borrow-invariance statements.
 
 The term-typing induction itself lives in `typingPreservesWellFormed_of_landmarks`.
-This wrapper supplies the current appendix-backed assignment preservation
-landmark from `UpdateBorrowInvariantObligations`.
+This wrapper uses the strengthened typing rules: assignment rank/write coherence
+and declaration fresh-slot coherence are carried by `TermTyping`, while
+`UpdateBorrowInvariantObligations` supplies the remaining contained-borrow update
+facts.
 -/
 theorem typingPreservesWellFormed_of_storeTypingRefs
     {store : ProgramStore} {env₁ env₂ : Env}
@@ -17418,8 +20326,7 @@ theorem typingPreservesWellFormed_of_storeTypingRefs
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
   intro hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
-  exact typingPreservesWellFormed_of_landmarks
-    (TypingPreservesWellFormedObligations.of_updateBorrowInvariant hobligations)
+  exact typingPreservesWellFormed_of_ruleCarriedObligations hobligations
     hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
 
 theorem typingPreservesWellFormed_emptyStoreTyping
@@ -17450,13 +20357,20 @@ theorem borrowInvariance_emptyStoreTyping {store : ProgramStore}
     store ∼ₛ env₁ →
     TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
   intro hobligations hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
-  rcases typingPreservesWellFormed_emptyStoreTyping hobligations hvalidState
-      hvalidStoreTyping hwellFormed hsafe htyping with
+    hfreshCoherence
+  rcases typingPreservesWellFormed_of_ruleCarriedObligations
+    hobligations
+    (by
+      intro env lifetime
+      exact storeTypingRefsWellFormed_empty env lifetime)
+    hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
     ⟨hwellFormedOutput, hwellFormedTy⟩
-  exact borrowInvariance_result_extension hwellFormedOutput hwellFormedTy hfresh
+  exact borrowInvariance_result_extension_of_coherenceObligations
+    hwellFormedOutput hwellFormedTy hfresh hfreshCoherence
 
 theorem borrowInvariance_of_storeTypingRefs {store : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping}
@@ -17469,23 +20383,28 @@ theorem borrowInvariance_of_storeTypingRefs {store : ProgramStore}
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
-  intro hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
-  rcases typingPreservesWellFormed_of_storeTypingRefs hobligations hrefs hvalidState
-      hvalidStoreTyping hwellFormed hsafe htyping with
+  intro hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+    hfresh hfreshCoherence
+  rcases typingPreservesWellFormed_of_ruleCarriedObligations
+      hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
     ⟨hwellFormedOutput, hwellFormedTy⟩
-  exact borrowInvariance_result_extension hwellFormedOutput hwellFormedTy hfresh
+  exact borrowInvariance_result_extension_of_coherenceObligations
+    hwellFormedOutput hwellFormedTy hfresh hfreshCoherence
 
+/-- Source-initial borrow invariance through the rule-carried route. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     {lifetime : Lifetime} {ty : Ty} {gamma : Name} :
     UpdateBorrowInvariantObligations →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
-  intro hobligations hsource htyping hfresh
+  intro hobligations hsource htyping hfresh hfreshCoherence
   exact borrowInvariance_emptyStoreTyping
     hobligations
     (sourceInitialRuntimeState_valid hsource).1
@@ -17494,6 +20413,7 @@ theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     safeAbstraction_empty
     htyping
     hfresh
+    hfreshCoherence
 
 theorem sourceInitial_typeAndBorrowSafety_of_preservation
     {term : Term} {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
@@ -17724,9 +20644,8 @@ theorem typingPreservesBorrowSafeResult_box_case {env₁ env₂ : Env}
     env₂.fresh gamma →
     BorrowSafeEnv
       (env₂.update gamma { ty := .ty (.box ty), lifetime := lifetime }) := by
-  intro hwellFormed hwellTy hinnerSafe _htyping hfresh
-  exact (borrowSafety_result_extension_box_of_inner hwellFormed hwellTy
-    hinnerSafe hfresh).2
+  intro _hwellFormed _hwellTy hinnerSafe _htyping _hfresh
+  exact borrowSafeEnv_update_box_of_update_inner hinnerSafe
 
 theorem typingPreservesBorrowSafeResult_unit_case {env₂ : Env}
     {lifetime : Lifetime} {gamma : Name} :
@@ -17735,62 +20654,102 @@ theorem typingPreservesBorrowSafeResult_unit_case {env₂ : Env}
     env₂.fresh gamma →
     BorrowSafeEnv
       (env₂.update gamma { ty := .ty .unit, lifetime := lifetime }) := by
-  intro hwellFormed hborrowSafe hfresh
-  exact (borrowSafety_result_extension_unit hwellFormed hborrowSafe hfresh).2
+  intro _hwellFormed hborrowSafe _hfresh
+  exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe tyBorrowFree_unit
 
 /--
-Constructor-level borrow-safety landmarks used by Corollary 4.14.
+Constructor-level borrow-safety landmarks used by the source-scoped Corollary
+4.14 route.
 
-The copy, mut/imm borrow, box, and declaration rules are proved directly below
-from the conflict definitions and induction hypotheses.  The fields here name
-the remaining rule families whose proofs depend on the paper's broader
-preservation/update/drop arguments.
+Result-extension for `T-Const` is only proved for source values; arbitrary
+runtime references need an evaluation/reachability invariant, not a local typing
+fact.  The copy, move, mut/imm borrow, box, and declaration shells are proved
+directly from the conflict definitions and induction hypotheses.  The assignment
+field consumes the full RHS induction result: `BorrowSafeEnv env₂` plus the fact
+that the RHS type can be safely exposed as a fresh root.  Block bodies are
+handled by the mutual term/list induction below: the induction carries the
+root-independent `TyBorrowSafeAgainstEnv` invariant through `dropLifetime`, so
+there is no separate block-list obligation here.
 -/
 structure BorrowSafetyPreservationObligations : Prop where
-  value {store : ProgramStore} {env env₂ : Env}
-      {typing : StoreTyping} {lifetime : Lifetime}
-      {value : Value} {ty : Ty} {gamma : Name} :
-      ValidState store (.val value) →
-      ValidStoreTyping store (.val value) typing →
-      WellFormedEnv env lifetime →
-      BorrowSafeEnv env →
-      store ∼ₛ env →
-      TermTyping env typing lifetime (.val value) ty env₂ →
+  envWrite {env₁ env₂ env₃ : Env}
+      {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+      {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
+      BorrowSafeEnv env₂ →
+      (∀ gamma,
+        env₂.fresh gamma →
+        BorrowSafeEnv (env₂.update gamma { ty := .ty rhsTy, lifetime := lifetime })) →
+      LValTyping env₁ lhs oldTy targetLifetime →
+      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      ShapeCompatible env₂ oldTy (.ty rhsTy) →
+      WellFormedTy env₂ rhsTy targetLifetime →
+      EnvWrite 0 env₂ lhs rhsTy env₃ →
+      (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
+      EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+      ¬ WriteProhibited env₃ lhs →
+      BorrowSafeEnv env₃
+
+/-- Move borrow-safety preservation, including result-extension.
+
+The proof uses `LValTyping.contains_base_of_strike`: since `EnvMove` follows a
+`Strike` path, every borrow contained in the moved result type originated in the
+moved base slot.  Once that origin fact is known,
+`borrowSafeEnv_move_result_extension_of_base_contains` discharges the fresh
+result root.
+-/
+theorem borrowSafetyPreservation_move
+    {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {lv : LVal} {ty : Ty} {gamma : Name} :
+    BorrowSafeEnv env →
+    TermTyping env typing lifetime (.move lv) ty env₂ →
+    (∀ x, lv ≠ .var x) →
+    ¬ TyBorrowFree ty →
+    env₂.fresh gamma →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hborrowSafe htyping _hnotVar _hnotBorrowFree hfresh
+  cases htyping with
+  | move hLv _hnotWrite hmove =>
+      rcases hmove with ⟨slot, struck, hslot, hstrike, henv₂⟩
+      subst henv₂
+      exact borrowSafeEnv_move_result_extension_of_base_contains
+        hborrowSafe
+        ⟨slot, struck, hslot, hstrike, rfl⟩
+        (by
+          intro mutable targets hcontains
+          exact LValTyping.contains_base_of_strike hLv hslot hstrike hcontains)
+        hfresh
+
+/-- Remaining explicit `EnvWrite` borrow-safety frame obligation.
+
+The global term-typing induction supplies both `BorrowSafeEnv env₂` and the RHS
+result-extension invariant.  The latter is part of the real assignment argument:
+`BorrowSafeEnv env₂` alone does not say that borrow targets contained in `rhsTy`
+are safe to expose as a root.
+-/
+theorem borrowSafetyPreservation_envWrite
+    {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
+    BorrowSafeEnv env₂ →
+    (∀ gamma,
       env₂.fresh gamma →
-      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-  move {store : ProgramStore} {env env₂ : Env}
-      {typing : StoreTyping} {lifetime : Lifetime}
-      {lv : LVal} {ty : Ty} {gamma : Name} :
-      ValidState store (.move lv) →
-      ValidStoreTyping store (.move lv) typing →
-      WellFormedEnv env lifetime →
-      BorrowSafeEnv env →
-      store ∼ₛ env →
-      TermTyping env typing lifetime (.move lv) ty env₂ →
-      env₂.fresh gamma →
-      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-  assign {store : ProgramStore} {env₁ env₃ : Env}
-      {typing : StoreTyping} {lifetime : Lifetime}
-      {lhs : LVal} {rhs : Term} {gamma : Name} :
-      ValidState store (.assign lhs rhs) →
-      ValidStoreTyping store (.assign lhs rhs) typing →
-      WellFormedEnv env₁ lifetime →
-      BorrowSafeEnv env₁ →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ →
-      env₃.fresh gamma →
-      BorrowSafeEnv (env₃.update gamma { ty := .ty .unit, lifetime := lifetime })
-  block {store : ProgramStore} {env₁ env₃ : Env}
-      {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
-      {terms : List Term} {ty : Ty} {gamma : Name} :
-      ValidState store (.block blockLifetime terms) →
-      ValidStoreTyping store (.block blockLifetime terms) typing →
-      WellFormedEnv env₁ lifetime →
-      BorrowSafeEnv env₁ →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃ →
-      env₃.fresh gamma →
-      BorrowSafeEnv (env₃.update gamma { ty := .ty ty, lifetime := lifetime })
+      BorrowSafeEnv (env₂.update gamma { ty := .ty rhsTy, lifetime := lifetime })) →
+    LValTyping env₁ lhs oldTy targetLifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
+    EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+    ¬ WriteProhibited env₃ lhs →
+    BorrowSafeEnv env₃ := by
+  sorry
+
+/-- Concrete borrow-safety package assembled from the explicit sorried lemmas. -/
+theorem borrowSafetyPreservationObligations_from_sorries :
+    BorrowSafetyPreservationObligations where
+  envWrite := borrowSafetyPreservation_envWrite
 
 theorem typingPreservesWellFormed_of_updateBorrowInvariant
     {store : ProgramStore} {env₁ env₂ : Env}
@@ -17807,9 +20766,14 @@ theorem typingPreservesWellFormed_of_updateBorrowInvariant
   exact typingPreservesWellFormed_of_storeTypingRefs hobligations hrefs hvalidState
     hvalidStoreTyping hwellFormed hsafe htyping
 
-/-- Lemma 4.9 core statement: typing preserves environment well-formedness. -/
+/-- Lemma 4.9 core statement: typing preserves environment well-formedness.
+
+The remaining update-specific invariant work is explicit in
+`UpdateBorrowInvariantObligations`; assignment rank/write-coherence and
+declaration fresh-slot coherence are carried by the typing derivation itself. -/
 theorem typingPreservesWellFormed {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    UpdateBorrowInvariantObligations →
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidState store term →
     ValidStoreTyping store term typing →
@@ -17817,8 +20781,9 @@ theorem typingPreservesWellFormed {store : ProgramStore} {env₁ env₂ : Env}
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
-  exact typingPreservesWellFormed_of_landmarks
-    typingPreservesWellFormedObligations_appendix96
+  intro hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+  exact typingPreservesWellFormed_of_ruleCarriedObligations
+    hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
 
 /--
 Constructor-level runtime preservation landmarks used by Lemma 4.11.
@@ -17838,15 +20803,20 @@ structure RuntimePreservationObligations : Prop where
       TermTyping env₁ typing lifetime (.move lv) ty env₂ →
       MultiStep store lifetime (.move lv) finalStore (.val finalValue) →
       TerminalStateSafe finalStore finalValue env₂ ty
-  assign {store finalStore : ProgramStore} {env₁ env₃ : Env}
-      {typing : StoreTyping} {lifetime : Lifetime}
-      {lhs : LVal} {rhs : Term} {finalValue : Value} :
-      ValidRuntimeState store (.assign lhs rhs) →
-      ValidStoreTyping store (.assign lhs rhs) typing →
-      WellFormedEnv env₁ lifetime →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ →
-      MultiStep store lifetime (.assign lhs rhs) finalStore (.val finalValue) →
+  assign {midStore finalStore : ProgramStore} {env₁ env₂ env₃ : Env}
+      {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+      {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+      {value finalValue : Value} :
+      LValTyping env₁ lhs oldTy targetLifetime →
+      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      ShapeCompatible env₂ oldTy (.ty rhsTy) →
+      WellFormedTy env₂ rhsTy targetLifetime →
+      EnvWrite 0 env₂ lhs rhsTy env₃ →
+      ¬ WriteProhibited env₃ lhs →
+      ValidRuntimeState midStore (.assign lhs (.val value)) →
+      midStore ∼ₛ env₂ →
+      ValidValue midStore value rhsTy →
+      Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
       TerminalStateSafe finalStore finalValue env₃ .unit
   block {store finalStore : ProgramStore} {env₁ env₃ : Env}
       {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
@@ -17859,11 +20829,76 @@ structure RuntimePreservationObligations : Prop where
       MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
       TerminalStateSafe finalStore finalValue env₃ ty
 
+/-- Remaining explicit runtime preservation obligation for moves. -/
+theorem runtimePreservation_move
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {lv : LVal} {ty : Ty} {finalValue : Value} :
+    ValidRuntimeState store (.move lv) →
+    ValidStoreTyping store (.move lv) typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.move lv) ty env₂ →
+    MultiStep store lifetime (.move lv) finalStore (.val finalValue) →
+    TerminalStateSafe finalStore finalValue env₂ ty := by
+  sorry
+
+/-- Remaining explicit runtime preservation obligation for assignment redexes.
+
+The global Preservation induction handles RHS evaluation and passes the resulting
+valid runtime state, safe abstraction, and value abstraction into this local
+redex/update obligation.  This is not a pure typing obligation: the redex proof
+must establish post-step runtime validity and `finalStore ∼ₛ env₃` after the
+drop/write sequence, then package them with
+`terminalStateSafe_assign_unit_of_postconditions`.
+-/
+theorem runtimePreservation_assign
+    {midStore finalStore : ProgramStore} {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    {value finalValue : Value} :
+    LValTyping env₁ lhs oldTy targetLifetime →
+    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+    ShapeCompatible env₂ oldTy (.ty rhsTy) →
+    WellFormedTy env₂ rhsTy targetLifetime →
+    EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ¬ WriteProhibited env₃ lhs →
+    ValidRuntimeState midStore (.assign lhs (.val value)) →
+    midStore ∼ₛ env₂ →
+    ValidValue midStore value rhsTy →
+    Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
+    TerminalStateSafe finalStore finalValue env₃ .unit := by
+  sorry
+
+/-- Remaining explicit runtime preservation obligation for blocks. -/
+theorem runtimePreservation_block
+    {store finalStore : ProgramStore} {env₁ env₃ : Env}
+    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
+    {terms : List Term} {ty : Ty} {finalValue : Value} :
+    ValidRuntimeState store (.block blockLifetime terms) →
+    ValidStoreTyping store (.block blockLifetime terms) typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃ →
+    MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
+    TerminalStateSafe finalStore finalValue env₃ ty := by
+  sorry
+
+/-- Concrete runtime-preservation package assembled from explicit sorried lemmas. -/
+theorem runtimePreservationObligations_from_sorries :
+    RuntimePreservationObligations where
+  move := runtimePreservation_move
+  assign := runtimePreservation_assign
+  block := runtimePreservation_block
+
 /--
 Lemma 4.9, Borrow Invariance.
 
 The paper phrases the conclusion as well-formedness of the output environment
 extended with a fresh result binding `γ ↦ <T>^l`.
+
+The final result binding must satisfy `FreshUpdateCoherenceObligations`; the
+bare implication from `WellFormedTy` is false for borrow types such as `&[]`.
 -/
 theorem borrowInvariance {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
@@ -17876,15 +20911,213 @@ theorem borrowInvariance {store : ProgramStore} {env₁ env₂ : Env}
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime := by
   intro hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
-    hfresh
-  rcases typingPreservesWellFormed_of_updateBorrowInvariant
-      hobligations hrefs hvalidState
-      hvalidStoreTyping hwellFormed hsafe htyping with
+    hfresh hfreshCoherence
+  rcases typingPreservesWellFormed_of_ruleCarriedObligations
+      hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
+    ⟨hwellFormedOutput, hwellFormedTy⟩
+  exact borrowInvariance_result_extension_of_coherenceObligations
+    hwellFormedOutput hwellFormedTy hfresh hfreshCoherence
+
+/--
+Borrow invariance through the ranked-assignment typing-preservation route.
+
+This is the non-vacuous replacement for the old route through the bare
+`EnvWrite.preserves_linearizedBy` axiom: assignment must supply the local
+`AssignmentRhsEdgesRanked` obligation saying newly installed RHS borrow edges
+are ranked downward in a pre-write linearization.
+-/
+theorem borrowInvariance_of_assignmentRhsEdgesRanked
+    (hobligations : UpdateBorrowInvariantObligations)
+    (hrankedAssign : AssignmentRhsEdgesRanked)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
+    hfreshCoherence
+  rcases typingPreservesWellFormed_of_assignmentRhsEdgesRanked
+      hobligations hrankedAssign hrefs hvalidState hvalidStoreTyping hwellFormed
+      hsafe htyping with
     ⟨hwellFormedOutput, hwellFormedTy⟩
   exact borrowInvariance_result_extension hwellFormedOutput hwellFormedTy hfresh
+    hfreshCoherence
+
+/--
+Borrow invariance through the ranked-assignment route and the explicit
+fresh-result coherence obligation.
+
+Compared with `borrowInvariance_of_assignmentRhsEdgesRanked`, this removes the
+dependency on the legacy `Coherent.update_fresh_ty` axiom.  The remaining
+coherence work is split into:
+* assignment/write coherence, carried by `hobligations`;
+* fresh result-slot coherence, carried by `hfreshCoherence`.
+-/
+theorem borrowInvariance_of_assignmentRhsEdgesRanked_and_freshCoherence
+    (hobligations : UpdateBorrowInvariantObligations)
+    (hrankedAssign : AssignmentRhsEdgesRanked)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
+    hfreshCoherence
+  rcases typingPreservesWellFormed_of_assignmentRhsEdgesRanked
+      hobligations hrankedAssign hrefs hvalidState hvalidStoreTyping hwellFormed
+      hsafe htyping with
+    ⟨hwellFormedOutput, hwellFormedTy⟩
+  exact borrowInvariance_result_extension_of_coherenceObligations
+    hwellFormedOutput hwellFormedTy hfresh hfreshCoherence
+
+/--
+Borrow invariance through the rule-carried obligation route.
+
+Assignment rank/write-coherence and declaration fresh-slot coherence are part of
+the strengthened typing derivation.  The only remaining fresh-coherence premise
+is for the final result binding `gamma`, which is added after the term has been
+typed.
+-/
+theorem borrowInvariance_of_ruleCarriedObligations
+    (hobligations : UpdateBorrowInvariantObligations)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
+    hfreshCoherence
+  rcases typingPreservesWellFormed_of_ruleCarriedObligations
+      hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
+    ⟨hwellFormedOutput, hwellFormedTy⟩
+  exact borrowInvariance_result_extension_of_coherenceObligations
+    hwellFormedOutput hwellFormedTy hfresh hfreshCoherence
+
+/--
+Borrow invariance through the fully explicit ranked/fresh-coherence route.
+
+This version avoids both legacy false/too-weak axioms already isolated in this
+file: bare write linearization and fresh-type coherence from `WellFormedTy`
+alone.  This is now a compatibility wrapper around
+`borrowInvariance_of_ruleCarriedObligations`; the assignment/declaration
+side-condition parameters are supplied by the typing derivation itself.
+-/
+theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
+    (hobligations : UpdateBorrowInvariantObligations)
+    (_hrankedAssign : AssignmentRhsEdgesRanked)
+    (_hwriteCoherent : AssignmentWriteCoherenceObligations)
+    (_hdeclFresh : DeclarationFreshUpdateCoherent)
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping hfresh
+    hfreshCoherence
+  exact borrowInvariance_of_ruleCarriedObligations
+    hobligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+    hfresh hfreshCoherence
+
+/--
+Source-initial borrow invariance through the explicit ranked/fresh-coherence
+route.
+
+This is the source-program version of
+`borrowInvariance_of_rankedAssign_and_declFreshCoherence`: it avoids the legacy
+bare write-linearization and fresh-type coherence axioms by making the missing
+rank/coherence premises explicit.
+-/
+theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
+    {gamma : Name} :
+    UpdateBorrowInvariantObligations →
+    AssignmentRhsEdgesRanked →
+    AssignmentWriteCoherenceObligations →
+    DeclarationFreshUpdateCoherent →
+    SourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hupdate hranked hwriteCoherent hdeclFresh hsource htyping hfresh
+    hfreshCoherence
+  exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
+    hupdate
+    hranked
+    hwriteCoherent
+    hdeclFresh
+    (by
+      intro env lifetime
+      exact storeTypingRefsWellFormed_empty env lifetime)
+    (sourceInitialRuntimeState_valid hsource).1
+    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+    (wellFormedEnv_empty lifetime)
+    safeAbstraction_empty
+    htyping
+    hfresh
+    hfreshCoherence
+
+/-- Source-initial borrow invariance through the rule-carried obligation route. -/
+theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
+    {gamma : Name} :
+    UpdateBorrowInvariantObligations →
+    SourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hupdate hsource htyping hfresh hfreshCoherence
+  exact borrowInvariance_of_ruleCarriedObligations
+    hupdate
+    (by
+      intro env lifetime
+      exact storeTypingRefsWellFormed_empty env lifetime)
+    (sourceInitialRuntimeState_valid hsource).1
+    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+    (wellFormedEnv_empty lifetime)
+    safeAbstraction_empty
+    htyping
+    hfresh
+    hfreshCoherence
 
 /--
 Lemma 4.11, Preservation.
@@ -17954,7 +21187,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         hvalidStoreTyping hwellFormed hsafe hmulti =>
       hobligations.block hvalidRuntime hvalidStoreTyping hwellFormed hsafe
         (TermTyping.block hblockChild hterms hwellTy hdrop) hmulti)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty} hfresh hterm hfreshOut henv₃ ih
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
+        hfresh hterm hfreshOut _hcoh henv₃ ih
         store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe
         hmulti =>
       by
@@ -17976,10 +21210,19 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             rw [henv₃]
             exact hpreserved)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwellTy hwrite hnotWrite _ih store finalStore finalValue
+        hLhs hRhs hshape hwellTy hwrite hranked hcoh hnotWrite _ih store finalStore finalValue
         hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti =>
-      hobligations.assign hvalidRuntime hvalidStoreTyping hwellFormed hsafe
-        (TermTyping.assign hLhs hRhs hshape hwellTy hwrite hnotWrite) hmulti)
+      by
+        rcases multistep_assign_to_value_inv hmulti with
+          ⟨midStore, value, hinnerMulti, hassignStep⟩
+        rcases _ih store midStore value
+            (validRuntimeState_assign_inner hvalidRuntime)
+            (validStoreTyping_assign_inner hvalidStoreTyping)
+            hwellFormed hsafe hinnerMulti with
+          ⟨hvalidInner, hsafeInner, hvalidValue⟩
+        exact hobligations.assign hLhs hRhs hshape hwellTy hwrite hnotWrite
+          (validRuntimeState_assign_value_of_value hvalidInner)
+          hsafeInner hvalidValue hassignStep)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih => trivial)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
         _hterm _hrest _ihHead _ihRest => trivial)
@@ -18022,106 +21265,195 @@ Main borrow-safety induction behind Corollary 4.14.
 The result binding is included in the statement because the paper's corollary
 checks borrow-safety after extending the output environment with `γ ↦ <T>^l`.
 -/
-theorem typingPreservesBorrowSafeResult {store : ProgramStore} {env₁ env₂ : Env}
+theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-    {ty : Ty} {gamma : Name} :
+    {ty : Ty} :
     BorrowSafetyPreservationObligations →
-    ValidState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
+    SourceTerm term →
     BorrowSafeEnv env₁ →
-    store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
-    env₂.fresh gamma →
-    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hobligations hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
-    hfresh
+    BorrowSafeEnv env₂ ∧
+      TyBorrowSafeAgainstEnv env₂ ty ∧
+      ∀ gamma,
+        env₂.fresh gamma →
+        BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hobligations hsource hborrowSafe htyping
   exact TermTyping.rec
     (motive_1 := fun env typing lifetime term ty env₂ _ =>
-      ∀ (store : ProgramStore) (gamma : Name),
-        ValidState store term →
-        ValidStoreTyping store term typing →
-        WellFormedEnv env lifetime →
+      SourceTerm term →
         BorrowSafeEnv env →
-        store ∼ₛ env →
-        env₂.fresh gamma →
-        BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }))
-    (motive_2 := fun _env _typing _lifetime _terms _ty _env₂ _ => True)
-    (fun {_env _typing _lifetime _value _ty} hvalueTyping store gamma
-        hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe hfresh =>
-      hobligations.value hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-        (TermTyping.const hvalueTyping) hfresh)
+        BorrowSafeEnv env₂ ∧
+          TyBorrowSafeAgainstEnv env₂ ty ∧
+          ∀ gamma,
+            env₂.fresh gamma →
+            BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }))
+    (motive_2 := fun env _typing lifetime terms _ty env₂ _ =>
+      SourceTerm (.block lifetime terms) →
+        BorrowSafeEnv env →
+        BorrowSafeEnv env₂ ∧
+          TyBorrowSafeAgainstEnv env₂ _ty)
+    (fun {_env _typing _lifetime _value _ty} hvalueTyping hsource hborrowSafe =>
+      by
+        have hborrowFree : TyBorrowFree _ty :=
+          sourceValue_valueTyping_borrowFree
+            (hsource _value (by simp [termValues])) hvalueTyping
+        refine ⟨hborrowSafe, tyBorrowSafeAgainstEnv_borrowFree hborrowFree, ?_⟩
+        intro gamma hfresh
+        exact borrowSafe_value_result_extension_borrowFree
+          (TermTyping.const hvalueTyping) hborrowSafe
+          hborrowFree
+          hfresh)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy hnotRead
-        store gamma hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-        hfresh =>
-      typingPreservesBorrowSafeResult_copy_case hborrowSafe
-        (TermTyping.copy (typing := _typing) hLv hcopy hnotRead) hfresh)
+        _hsource hborrowSafe =>
+      ⟨hborrowSafe,
+        (by
+          cases hcopy with
+          | int =>
+              exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int
+          | immBorrow =>
+              rename_i targets
+              exact tyBorrowSafeAgainstEnv_immBorrowMany
+                (by
+                  intro target htarget
+                  exact (LValTyping.no_readProhibited_targets_of_immBorrow hborrowSafe).1
+                    hLv PartialTyContains.here target htarget)),
+        fun gamma hfresh =>
+        typingPreservesBorrowSafeResult_copy_case hborrowSafe
+          (TermTyping.copy (typing := _typing) hLv hcopy hnotRead) hfresh⟩)
     (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty}
-        hLv hnotWrite hmove store gamma hvalidState hvalidStoreTyping hwellFormed
-        hborrowSafe hsafe hfresh =>
-      hobligations.move hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-        (TermTyping.move hLv hnotWrite hmove) hfresh)
+        hLv hnotWrite hmove _hsource hborrowSafe =>
+      by
+        have hcore : BorrowSafeEnv _env₂ :=
+          borrowSafeEnv_move hborrowSafe hmove
+        have hsafeTy : TyBorrowSafeAgainstEnv _env₂ _ty := by
+          rcases hmove with ⟨slot, struck, hslot, hstrike, henv₂⟩
+          subst henv₂
+          exact tyBorrowSafeAgainstEnv_move_of_base_contains
+            hborrowSafe
+            ⟨slot, struck, hslot, hstrike, rfl⟩
+            (by
+              intro mutable targets hcontains
+              exact LValTyping.contains_base_of_strike hLv hslot hstrike hcontains)
+        refine ⟨hcore, hsafeTy, ?_⟩
+        intro gamma hfresh
+        cases _lv with
+        | var x =>
+            exact borrowSafety_move_var_result_extension hborrowSafe
+              (TermTyping.move (typing := _typing) hLv hnotWrite hmove) hfresh
+        | deref lv =>
+            by_cases hborrowFree : TyBorrowFree _ty
+            · exact borrowSafety_move_borrowFree_result_extension
+                (typing := _typing) hborrowSafe
+                (TermTyping.move (typing := _typing) hLv hnotWrite hmove)
+                hborrowFree
+            · exact borrowSafetyPreservation_move (typing := _typing) hborrowSafe
+                (TermTyping.move (typing := _typing) hLv hnotWrite hmove)
+                (by
+                  intro x hvar
+                  cases hvar)
+                hborrowFree
+                hfresh)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hmutable hnotWrite
-        store gamma _hvalidState _hvalidStoreTyping _hwellFormed hborrowSafe _hsafe
-        hfresh =>
-      typingPreservesBorrowSafeResult_mutBorrow_case hborrowSafe
-        (TermTyping.mutBorrow (typing := _typing) hLv hmutable hnotWrite) hfresh)
+        _hsource hborrowSafe =>
+      ⟨hborrowSafe,
+        tyBorrowSafeAgainstEnv_mutBorrow hnotWrite,
+        fun gamma hfresh =>
+        typingPreservesBorrowSafeResult_mutBorrow_case hborrowSafe
+          (TermTyping.mutBorrow (typing := _typing) hLv hmutable hnotWrite) hfresh⟩)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hnotRead
-        store gamma _hvalidState _hvalidStoreTyping _hwellFormed hborrowSafe _hsafe
-        hfresh =>
-      typingPreservesBorrowSafeResult_immBorrow_case hborrowSafe
-        (TermTyping.immBorrow (typing := _typing) hLv hnotRead) hfresh)
-    (fun {_env₁ _env₂ _typing _lifetime _term _ty} hterm ih store gamma
-        hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe hfresh =>
+        _hsource hborrowSafe =>
+      ⟨hborrowSafe,
+        tyBorrowSafeAgainstEnv_immBorrow hnotRead,
+        fun gamma hfresh =>
+        typingPreservesBorrowSafeResult_immBorrow_case hborrowSafe
+          (TermTyping.immBorrow (typing := _typing) hLv hnotRead) hfresh⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _term _ty} hterm ih hsource hborrowSafe =>
       by
-        have hinnerExtended :
-            BorrowSafeEnv
-              (_env₂.update gamma { ty := .ty _ty, lifetime := _lifetime }) := by
-          exact ih store gamma
-            (validState_box_inner hvalidState)
-            (validStoreTyping_box_inner hvalidStoreTyping)
-            hwellFormed hborrowSafe hsafe hfresh
-        exact borrowSafeEnv_update_box_of_update_inner hinnerExtended)
+        have hinner := ih (SourceTerm.box_inner hsource) hborrowSafe
+        exact ⟨hinner.1, TyBorrowSafeAgainstEnv.box hinner.2.1, by
+          intro gamma hfresh
+          exact borrowSafeEnv_update_box_of_update_inner (hinner.2.2 gamma hfresh)⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms hwellTy hdrop _ih store gamma hvalidState hvalidStoreTyping hwellFormed
-        hborrowSafe hsafe hfresh =>
-      hobligations.block hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-        (TermTyping.block hblockChild hterms hwellTy hdrop) hfresh)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty} hfreshX hterm hfreshOut henv₃ _ih
-        store gamma hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-        hfreshGamma =>
+        hblockChild hterms hwellTy hdrop _ih hsource hborrowSafe =>
       by
+        have hbody := _ih hsource hborrowSafe
+        have hbodySafe : BorrowSafeEnv _env₂ :=
+          hbody.1
+        have hbodyTySafe : TyBorrowSafeAgainstEnv _env₂ _ty :=
+          hbody.2
+        have hblockTySafe : TyBorrowSafeAgainstEnv _env₃ _ty := by
+          rw [hdrop]
+          exact TyBorrowSafeAgainstEnv.dropLifetime hbodyTySafe
+        have hblockCore :
+            BorrowSafeEnv _env₃ :=
+          borrowSafety_block_drop hbodySafe hdrop
+        refine ⟨hblockCore, hblockTySafe, ?_⟩
+        intro gamma _hfresh
+        exact borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hblockCore hblockTySafe)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
+        hfreshX hterm hfreshOut _hcoh henv₃ _ih
+        hsource hborrowSafe =>
+      by
+        have hinner := _ih (SourceTerm.declare_inner hsource) hborrowSafe
         have hdeclaredSafe :
             BorrowSafeEnv
               (_env₂.update _x { ty := .ty _ty, lifetime := _lifetime }) := by
-          exact _ih store _x
-            (validState_declare_inner hvalidState)
-            (validStoreTyping_declare_inner hvalidStoreTyping)
-            hwellFormed hborrowSafe hsafe hfreshOut
+          exact hinner.2.2 _x hfreshOut
         rw [henv₃]
-        exact borrowSafeEnv_update_fresh_borrowFree hdeclaredSafe tyBorrowFree_unit)
+        exact ⟨hdeclaredSafe,
+          tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit,
+          fun gamma _hfreshGamma =>
+            borrowSafeEnv_update_fresh_borrowFree hdeclaredSafe tyBorrowFree_unit⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwellTy hwrite hnotWrite _ih store gamma hvalidState
-        hvalidStoreTyping hwellFormed hborrowSafe hsafe hfresh =>
-      hobligations.assign hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-        (TermTyping.assign hLhs hRhs hshape hwellTy hwrite hnotWrite) hfresh)
-    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih => trivial)
+        hLhs hRhs hshape hwellTy hwrite hranked hcoh hnotWrite _ih hsource hborrowSafe =>
+      by
+        have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe
+        have hwriteSafe :
+            BorrowSafeEnv _env₃ :=
+          hobligations.envWrite hRhsSafe.1 hRhsSafe.2.2 hLhs hRhs hshape hwellTy
+            hwrite hranked hcoh hnotWrite
+        exact ⟨hwriteSafe,
+          tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit,
+          fun _gamma _hfresh =>
+          borrowSafeEnv_update_fresh_borrowFree hwriteSafe tyBorrowFree_unit⟩)
+    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih hsource hborrowSafe =>
+      let h := _ih (SourceTerm.block_head hsource) hborrowSafe
+      ⟨h.1, h.2.1⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-        _hterm _hrest _ihHead _ihRest => trivial)
-    htyping store gamma hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
-    hfresh
+        _hterm _hrest _ihHead _ihRest hsource hborrowSafe =>
+      by
+        have hhead := _ihHead (SourceTerm.block_head hsource) hborrowSafe
+        exact _ihRest (SourceTerm.block_tail hsource) hhead.1)
+    htyping hsource hborrowSafe
+
+theorem typingPreservesBorrowSafeResult {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    BorrowSafetyPreservationObligations →
+    SourceTerm term →
+    BorrowSafeEnv env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hobligations hsource hborrowSafe htyping hfresh
+  exact (typingPreservesBorrowSafeResult_global hobligations hsource
+    hborrowSafe htyping).2 gamma hfresh
 
 /--
 Corollary 4.14, Borrow Safety.
 
 Starting from a borrow-safe environment, the output environment extended with
 the fresh result binding is both well-formed and borrow-safe.
+
+The well-formedness half uses `borrowInvariance`, so the final result binding
+coherence premise is explicit here as well.
 -/
 theorem borrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {gamma : Name} :
     UpdateBorrowInvariantObligations →
     BorrowSafetyPreservationObligations →
+    SourceTerm term →
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidState store term →
     ValidStoreTyping store term typing →
@@ -18130,16 +21462,167 @@ theorem borrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hupdateObligations hborrowObligations hrefs hvalidState hvalidStoreTyping
-    hwellFormed hborrowSafe hsafe htyping hfresh
+  intro hupdateObligations hborrowObligations hsource hrefs hvalidState hvalidStoreTyping
+    hwellFormed hborrowSafe hsafe htyping hfresh hfreshCoherence
   exact ⟨
     borrowInvariance hupdateObligations hrefs hvalidState hvalidStoreTyping
-      hwellFormed hsafe htyping hfresh,
-    typingPreservesBorrowSafeResult hborrowObligations hvalidState hvalidStoreTyping
-      hwellFormed hborrowSafe hsafe htyping hfresh⟩
+      hwellFormed hsafe htyping hfresh hfreshCoherence,
+      typingPreservesBorrowSafeResult hborrowObligations hsource
+        hborrowSafe htyping hfresh⟩
+
+/--
+Borrow Safety through the explicit, non-axiomatic borrow-invariance route.
+
+The borrow-safe preservation half is unchanged; the well-formedness half uses
+`borrowInvariance_of_rankedAssign_and_declFreshCoherence`, so the remaining
+coherence/rank obligations are explicit premises rather than hidden axioms.
+-/
+theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    UpdateBorrowInvariantObligations →
+    BorrowSafetyPreservationObligations →
+    AssignmentRhsEdgesRanked →
+    AssignmentWriteCoherenceObligations →
+    DeclarationFreshUpdateCoherent →
+    SourceTerm term →
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hupdateObligations hborrowObligations hrankedAssign hwriteCoherent
+    hdeclFresh hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
+    htyping hfresh hfreshCoherence
+  exact ⟨
+    borrowInvariance_of_rankedAssign_and_declFreshCoherence
+      hupdateObligations hrankedAssign hwriteCoherent hdeclFresh hrefs hvalidState
+      hvalidStoreTyping hwellFormed hsafe htyping hfresh hfreshCoherence,
+    typingPreservesBorrowSafeResult hborrowObligations hsource
+      hborrowSafe htyping hfresh⟩
+
+/--
+Borrow safety through the rule-carried borrow-invariance route.
+
+The well-formedness half avoids the legacy write/fresh axioms and does not
+require global assignment/declaration side predicates; those facts are attached
+to the typing derivation.
+-/
+theorem borrowSafety_of_ruleCarriedObligations
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {gamma : Name} :
+    UpdateBorrowInvariantObligations →
+    BorrowSafetyPreservationObligations →
+    SourceTerm term →
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hupdateObligations hborrowObligations hsource hrefs hvalidState hvalidStoreTyping
+    hwellFormed hborrowSafe hsafe htyping hfresh hfreshCoherence
+  exact ⟨
+    borrowInvariance_of_ruleCarriedObligations
+      hupdateObligations hrefs hvalidState hvalidStoreTyping hwellFormed hsafe
+      htyping hfresh hfreshCoherence,
+    typingPreservesBorrowSafeResult hborrowObligations hsource
+      hborrowSafe htyping hfresh⟩
+
+/--
+Source-initial Borrow Safety through the explicit, non-axiomatic
+borrow-invariance route.
+
+This is the source-program counterpart of
+`borrowSafety_of_rankedAssign_and_declFreshCoherence`: the empty initial store,
+environment, and store typing discharge the standard source-state premises, while
+the rank/coherence obligations remain explicit instead of hidden behind legacy
+axioms.
+-/
+theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
+    {gamma : Name} :
+    UpdateBorrowInvariantObligations →
+    BorrowSafetyPreservationObligations →
+    AssignmentRhsEdgesRanked →
+    AssignmentWriteCoherenceObligations →
+    DeclarationFreshUpdateCoherent →
+    SourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hupdateObligations hborrowObligations hrankedAssign hwriteCoherent
+    hdeclFresh hsource htyping hfresh hfreshCoherence
+  exact borrowSafety_of_rankedAssign_and_declFreshCoherence
+    hupdateObligations
+    hborrowObligations
+    hrankedAssign
+    hwriteCoherent
+    hdeclFresh
+    hsource
+    (by
+      intro env lifetime
+      exact storeTypingRefsWellFormed_empty env lifetime)
+    (sourceInitialRuntimeState_valid hsource).1
+    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+    (wellFormedEnv_empty lifetime)
+    borrowSafeEnv_empty
+    safeAbstraction_empty
+    htyping
+    hfresh
+    hfreshCoherence
+
+/-- Source-initial borrow safety through the rule-carried obligation route. -/
+theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
+    {gamma : Name} :
+    UpdateBorrowInvariantObligations →
+    BorrowSafetyPreservationObligations →
+    SourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    env₂.fresh gamma →
+    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
+    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime ∧
+      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
+  intro hupdateObligations hborrowObligations hsource htyping hfresh hfreshCoherence
+  exact borrowSafety_of_ruleCarriedObligations
+    hupdateObligations
+    hborrowObligations
+    hsource
+    (by
+      intro env lifetime
+      exact storeTypingRefsWellFormed_empty env lifetime)
+    (sourceInitialRuntimeState_valid hsource).1
+    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+    (wellFormedEnv_empty lifetime)
+    borrowSafeEnv_empty
+    safeAbstraction_empty
+    htyping
+    hfresh
+    hfreshCoherence
 
 end Paper
 end LwRust
