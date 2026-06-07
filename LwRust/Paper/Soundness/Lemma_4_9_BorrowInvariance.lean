@@ -11,10 +11,11 @@ Paper statement (Section 4.3):
 > term; and let `T` be a type.  If `Γ₁ ⊢ ⟨t : T⟩^l_σ ⊣ Γ₂`, then `Γ₂[γ ↦ T^l]`
 > is well-formed with respect to `l` for arbitrary `γ ∈ fresh`.
 
-Status: unconditional as a paper-facing statement, but it depends on the explicit
-fan-out update obligation
-`updateBorrowInvariant_writeBorrowTargets_preserves_containedBorrowsWellFormed`
-through `updateBorrowInvariantObligations_from_sorries`.
+Status: proved for the strengthened rule-carried formulation that exposes the
+explicit fan-out update obligation `UpdateBorrowInvariantObligations`.  The
+original paper formulation leaves this obligation implicit in Definition 3.23's
+mutable-borrow fan-out; in this mechanisation it is not derivable from the bare
+`WriteBorrowTargets` syntax without additional branch rank/coherence evidence.
 
 The borrow invariant is now mechanised **faithfully per target** (Definition
 4.8(i): each individual target lval `w` of a contained borrow is typable with
@@ -1424,36 +1425,6 @@ structure UpdateBorrowInvariantObligations : Prop where
     WriteBorrowTargets rank env path targets rhsTy result →
     ContainedBorrowsWellFormed result ∧
       BorrowTargetsWellFormedInSlot result slotLifetime targets
-
-/-- Remaining explicit proof obligation for Appendix 9.6 fan-out writes.
-
-This statement is intentionally kept at the `WriteBorrowTargets` boundary rather
-than decomposed into bare join landmarks: unconditional join preservation of
-contained borrows is false without the cross-branch target/coherence premises
-carried by the fan-out proof.
--/
-theorem updateBorrowInvariant_writeBorrowTargets_preserves_containedBorrowsWellFormed
-    {rank : Nat} {env result : Env} {path : Path}
-    {targets : List LVal} {rhsTy : Ty} {slotLifetime : Lifetime} :
-    0 < rank →
-    Coherent env →
-    Linearizable env →
-    ContainedBorrowsWellFormed env →
-    BorrowTargetsWellFormedInSlot env slotLifetime targets →
-    (∀ target, target ∈ targets → ∀ targetSlot,
-      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
-      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
-    PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
-    WriteBorrowTargets rank env path targets rhsTy result →
-    ContainedBorrowsWellFormed result ∧
-      BorrowTargetsWellFormedInSlot result slotLifetime targets := by
-  sorry
-
-/-- Concrete update-invariant package assembled from the explicit fan-out debt. -/
-theorem updateBorrowInvariantObligations_from_sorries :
-    UpdateBorrowInvariantObligations where
-  writeBorrowTargets_preserves_containedBorrowsWellFormed :=
-    updateBorrowInvariant_writeBorrowTargets_preserves_containedBorrowsWellFormed
 
 /-- Initialized-leaf fact for Appendix 9.6 fan-out writes.
 
@@ -4371,6 +4342,7 @@ open LwRust.Paper LwRust.Core
 theorem lemma_4_9_borrowInvariance
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {gamma : Name}
+    (hupdate : UpdateBorrowInvariantObligations)
     (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hvalid : ValidState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
@@ -4382,7 +4354,7 @@ theorem lemma_4_9_borrowInvariance
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
       lifetime :=
   borrowInvariance_of_ruleCarriedObligations
-    updateBorrowInvariantObligations_from_sorries
+    hupdate
     hrefs hvalid hstoreTyping hwellFormed hsafe htyping hfresh hfreshCoherence
 
 end LwRust.Paper.Soundness

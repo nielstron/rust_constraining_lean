@@ -17,7 +17,28 @@ store-side groundwork is mechanized:
 * `preservation_blockB_value_multistep_runtime_of_drop_preserved`,
   `preservation_blockB_value_multistep_runtime_no_slots` — the safe-abstraction
   half, currently taking the per-variable drop-preservation facts as hypotheses.
+* `lemma_9_5_value_drops_frame` — recursive value drops preserve a value
+  abstraction when the drop avoids every reached location.
 
 The remaining work is to discharge those `∀ x, … survives the drop` hypotheses
 into a single `drop(S, l) ∼ drop(Γ, l)` statement.
 -/
+
+namespace LwRust.Paper.Soundness
+
+open LwRust.Paper LwRust.Core
+
+/--
+Appendix 9.5 support: recursive drops preserve a value abstraction when every
+location inspected by that abstraction is avoided by the drop derivation.
+-/
+theorem lemma_9_5_value_drops_frame {store store' : ProgramStore}
+    {values : List PartialValue} {value : Value} {ty : Ty} :
+    Drops store values store' →
+    ValidValue store value ty →
+    (∀ location, RuntimeFrame.Reaches store (.value value) (.ty ty) location →
+      DropsAvoids store values location) →
+    ValidValue store' value ty :=
+  RuntimeFrame.validValue_drops_of_avoids_reaches
+
+end LwRust.Paper.Soundness

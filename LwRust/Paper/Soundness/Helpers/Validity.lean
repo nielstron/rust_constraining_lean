@@ -208,6 +208,43 @@ def StoreOwnersAllocated (store : ProgramStore) : Prop :=
     ∃ slot, store.slotAt owned = some slot
 
 /--
+Store-side owner-target invariant for the abstract store.
+
+Operationally, owning references are produced by `boxAt`, and `boxAt` always
+allocates a heap location.  The abstract `ProgramStore` can otherwise contain
+synthetic owning references to variable locations; those states are too broad for
+the lifetime-drop preservation statement, because recursive owner dropping may
+erase an outer variable that `Γ.dropLifetime` keeps.
+-/
+def StoreOwnerTargetsHeap (store : ProgramStore) : Prop :=
+  ∀ owned,
+    ProgramStore.Owns store owned →
+    ∃ address, owned = .heap address
+
+/--
+Heap slots are created only by `boxAt`, which records them at `Lifetime.root`.
+This excludes abstract stores with heap allocations in a block child lifetime;
+such states would make `R-BlockB` erase heap ownership that the result value may
+still carry.
+-/
+def HeapSlotsRootLifetime (store : ProgramStore) : Prop :=
+  ∀ address slot,
+    store.slotAt (.heap address) = some slot →
+    slot.lifetime = Lifetime.root
+
+def PartialValueOwnerTargetsHeap (value : PartialValue) : Prop :=
+  ∀ owned, owned ∈ partialValueOwningLocations value →
+    ∃ address, owned = .heap address
+
+def ValueOwnerTargetsHeap (value : Value) : Prop :=
+  ∀ owned, owned ∈ valueOwningLocations value →
+    ∃ address, owned = .heap address
+
+def TermOwnerTargetsHeap (term : Term) : Prop :=
+  ∀ owned, owned ∈ termOwningLocations term →
+    ∃ address, owned = .heap address
+
+/--
 No store owner points at a location allocated in `lifetime`.  This is the
 runtime side condition needed for preserving owner allocation through
 `drop(S, lifetime)` with an abstract store.
@@ -232,11 +269,13 @@ def ValidState (store : ProgramStore) (term : Term) : Prop :=
 /--
 Runtime validity package used by the mechanised preservation proof.
 
-`ValidState` follows Definition 4.3.  `StoreOwnersAllocated` makes explicit the
-allocation invariant that the paper's store model leaves implicit.
+`ValidState` follows Definition 4.3.  The store and term owner side conditions
+make explicit the allocation/heap-origin invariants that the paper's store model
+leaves implicit.
 -/
 def ValidRuntimeState (store : ProgramStore) (term : Term) : Prop :=
-  ValidState store term ∧ StoreOwnersAllocated store
+  ValidState store term ∧ StoreOwnersAllocated store ∧ StoreOwnerTargetsHeap store ∧
+  HeapSlotsRootLifetime store ∧ TermOwnerTargetsHeap term
 
 theorem ValidState.validStore {store : ProgramStore} {term : Term} :
     ValidState store term → ValidStore store := by
@@ -264,7 +303,145 @@ theorem ValidRuntimeState.validState {store : ProgramStore} {term : Term} :
 theorem ValidRuntimeState.storeOwnersAllocated {store : ProgramStore} {term : Term} :
     ValidRuntimeState store term → StoreOwnersAllocated store := by
   intro hvalid
-  exact hvalid.2
+  exact hvalid.2.1
+
+theorem ValidRuntimeState.storeOwnerTargetsHeap {store : ProgramStore} {term : Term} :
+    ValidRuntimeState store term → StoreOwnerTargetsHeap store := by
+  intro hvalid
+  exact hvalid.2.2.1
+
+theorem ValidRuntimeState.heapSlotsRootLifetime {store : ProgramStore} {term : Term} :
+    ValidRuntimeState store term → HeapSlotsRootLifetime store := by
+  intro hvalid
+  exact hvalid.2.2.2.1
+
+theorem ValidRuntimeState.termOwnerTargetsHeap {store : ProgramStore} {term : Term} :
+    ValidRuntimeState store term → TermOwnerTargetsHeap term := by
+  intro hvalid
+  exact hvalid.2.2.2.2
+
+theorem TermOwnerTargetsHeap.value {value : Value} :
+    TermOwnerTargetsHeap (.val value) → ValueOwnerTargetsHeap value := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem LifetimeChild.child_ne_root {parent child : Lifetime} :
+    LifetimeChild parent child →
+    child ≠ Lifetime.root := by
+  intro hchild heq
+  rcases hchild with ⟨label, hpath⟩
+  have hlen := congrArg (fun lifetime : Lifetime => lifetime.path.length) heq
+  simp [Lifetime.root, hpath] at hlen
+
+theorem lifetimeDropOwnersDisjoint_of_heapRootLifetime {store : ProgramStore}
+    {parent child : Lifetime} :
+    StoreOwnerTargetsHeap store →
+    HeapSlotsRootLifetime store →
+    LifetimeChild parent child →
+    LifetimeDropOwnersDisjoint store child := by
+  intro hownersHeap hheapRoot hchild location slot hslot hlifetime howns
+  rcases hownersHeap location howns with ⟨address, hlocation⟩
+  subst hlocation
+  have hroot : slot.lifetime = Lifetime.root := hheapRoot address slot hslot
+  exact LifetimeChild.child_ne_root hchild (hlifetime ▸ hroot)
+
+theorem ValueOwnerTargetsHeap.partial {value : Value} :
+    ValueOwnerTargetsHeap value → PartialValueOwnerTargetsHeap (.value value) := by
+  intro hvalue owned hmem
+  exact hvalue owned (by simpa [partialValueOwningLocations] using hmem)
+
+@[simp] theorem termOwnerTargetsHeap_unit :
+    TermOwnerTargetsHeap (.val .unit) := by
+  intro owned hmem
+  simp [termOwningLocations, termValues, valueOwningLocations, valueOwnedLocation?] at hmem
+
+@[simp] theorem termOwnerTargetsHeap_borrowed_ref {location : Location} :
+    TermOwnerTargetsHeap (.val (.ref { location := location, owner := false })) := by
+  intro owned hmem
+  simp [termOwningLocations, termValues, valueOwningLocations, valueOwnedLocation?] at hmem
+
+theorem termOwnerTargetsHeap_value_nonOwner {value : Value} :
+    valueOwnedLocation? value = none →
+    TermOwnerTargetsHeap (.val value) := by
+  intro hnonOwner owned hmem
+  simp [termOwningLocations, termValues, valueOwningLocations, hnonOwner] at hmem
+
+theorem termOwnerTargetsHeap_value_of_store_read
+    {store : ProgramStore} {lv : LVal} {value : Value} {lifetime : Lifetime} :
+    StoreOwnerTargetsHeap store →
+    store.read lv = some { value := .value value, lifetime := lifetime } →
+    TermOwnerTargetsHeap (.val value) := by
+  intro hheap hread owned hmem
+  unfold ProgramStore.read at hread
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hread
+  | some storage =>
+      cases hslot : store.slotAt storage with
+      | none =>
+          simp [hloc, hslot] at hread
+      | some slot =>
+          simp [hloc, hslot] at hread
+          have hslotEq :
+              slot = { value := .value value, lifetime := lifetime } := by
+            simpa using hread
+          exact hheap owned
+            ⟨storage, lifetime, by
+              have hvalue := eq_owningRef_of_mem_valueOwningLocations
+                (by simpa [termOwningLocations, termValues] using hmem)
+              subst hvalue
+              simpa [hslotEq] using hslot⟩
+
+theorem termOwnerTargetsHeap_box_inner {term : Term} :
+    TermOwnerTargetsHeap (.box term) →
+    TermOwnerTargetsHeap term := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem termOwnerTargetsHeap_box_value_of_value {value : Value} :
+    TermOwnerTargetsHeap (.val value) →
+    TermOwnerTargetsHeap (.box (.val value)) := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem termOwnerTargetsHeap_declare_value_of_value {x : Name} {value : Value} :
+    TermOwnerTargetsHeap (.val value) →
+    TermOwnerTargetsHeap (.letMut x (.val value)) := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem termOwnerTargetsHeap_declare_inner {x : Name} {term : Term} :
+    TermOwnerTargetsHeap (.letMut x term) →
+    TermOwnerTargetsHeap term := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem termOwnerTargetsHeap_assign_value_of_value {lhs : LVal} {value : Value} :
+    TermOwnerTargetsHeap (.val value) →
+    TermOwnerTargetsHeap (.assign lhs (.val value)) := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem termOwnerTargetsHeap_assign_inner {lhs : LVal} {rhs : Term} :
+    TermOwnerTargetsHeap (.assign lhs rhs) →
+    TermOwnerTargetsHeap rhs := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem termOwnerTargetsHeap_block_tail {blockLifetime : Lifetime}
+    {value : Value} {next : Term} {rest : List Term} :
+    TermOwnerTargetsHeap (.block blockLifetime (.val value :: next :: rest)) →
+    TermOwnerTargetsHeap (.block blockLifetime (next :: rest)) := by
+  intro hterm owned hmem
+  exact hterm owned (by
+    simp [termOwningLocations, termValues] at hmem ⊢
+    exact Or.inr hmem)
+
+theorem termOwnerTargetsHeap_block_value {blockLifetime : Lifetime} {value : Value} :
+    TermOwnerTargetsHeap (.block blockLifetime [.val value]) →
+    TermOwnerTargetsHeap (.val value) := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
 
 theorem validState_box_inner {store : ProgramStore} {term : Term} :
     ValidState store (.box term) →
@@ -276,7 +453,11 @@ theorem validRuntimeState_box_inner {store : ProgramStore} {term : Term} :
     ValidRuntimeState store (.box term) →
     ValidRuntimeState store term := by
   intro hvalid
-  exact ⟨validState_box_inner hvalid.1, hvalid.2⟩
+  exact ⟨validState_box_inner hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_box_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
 theorem validState_box_value_of_value {store : ProgramStore} {value : Value} :
     ValidState store (.val value) →
@@ -288,7 +469,12 @@ theorem validRuntimeState_box_value_of_value {store : ProgramStore} {value : Val
     ValidRuntimeState store (.val value) →
     ValidRuntimeState store (.box (.val value)) := by
   intro hvalid
-  exact ⟨validState_box_value_of_value hvalid.1, hvalid.2⟩
+  exact ⟨validState_box_value_of_value hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_box_value_of_value
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
 theorem validState_declare_value_of_value {store : ProgramStore} {x : Name}
     {value : Value} :
@@ -302,7 +488,12 @@ theorem validRuntimeState_declare_value_of_value {store : ProgramStore} {x : Nam
     ValidRuntimeState store (.val value) →
     ValidRuntimeState store (.letMut x (.val value)) := by
   intro hvalid
-  exact ⟨validState_declare_value_of_value hvalid.1, hvalid.2⟩
+  exact ⟨validState_declare_value_of_value hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_declare_value_of_value
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
 theorem validState_declare_inner {store : ProgramStore} {x : Name} {term : Term} :
     ValidState store (.letMut x term) →
@@ -315,7 +506,11 @@ theorem validRuntimeState_declare_inner {store : ProgramStore} {x : Name}
     ValidRuntimeState store (.letMut x term) →
     ValidRuntimeState store term := by
   intro hvalid
-  exact ⟨validState_declare_inner hvalid.1, hvalid.2⟩
+  exact ⟨validState_declare_inner hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_declare_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
 theorem validState_assign_value_of_value {store : ProgramStore} {lhs : LVal}
     {value : Value} :
@@ -329,7 +524,12 @@ theorem validRuntimeState_assign_value_of_value {store : ProgramStore} {lhs : LV
     ValidRuntimeState store (.val value) →
     ValidRuntimeState store (.assign lhs (.val value)) := by
   intro hvalid
-  exact ⟨validState_assign_value_of_value hvalid.1, hvalid.2⟩
+  exact ⟨validState_assign_value_of_value hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_assign_value_of_value
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
 theorem validState_assign_inner {store : ProgramStore} {lhs : LVal} {rhs : Term} :
     ValidState store (.assign lhs rhs) →
@@ -342,7 +542,11 @@ theorem validRuntimeState_assign_inner {store : ProgramStore} {lhs : LVal}
     ValidRuntimeState store (.assign lhs rhs) →
     ValidRuntimeState store rhs := by
   intro hvalid
-  exact ⟨validState_assign_inner hvalid.1, hvalid.2⟩
+  exact ⟨validState_assign_inner hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_assign_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
 theorem ValidRuntimeState.validStore {store : ProgramStore} {term : Term} :
     ValidRuntimeState store term → ValidStore store := by
@@ -441,6 +645,17 @@ theorem invalidStore_duplicateOwner {owned storage₁ storage₂ : Location}
   rcases howns with ⟨storage, lifetime, hslot⟩
   simp [ProgramStore.empty] at hslot
 
+@[simp] theorem storeOwnerTargetsHeap_empty :
+    StoreOwnerTargetsHeap ProgramStore.empty := by
+  intro owned howns
+  rcases howns with ⟨storage, lifetime, hslot⟩
+  simp [ProgramStore.empty] at hslot
+
+@[simp] theorem heapSlotsRootLifetime_empty :
+    HeapSlotsRootLifetime ProgramStore.empty := by
+  intro address slot hslot
+  simp [ProgramStore.empty] at hslot
+
 theorem not_owns_of_fresh_of_storeOwnersAllocated {store : ProgramStore}
     {owned : Location} :
     StoreOwnersAllocated store →
@@ -481,6 +696,44 @@ theorem owns_erase {store : ProgramStore} {owned erased : Location} :
   rcases howns with ⟨storage, hownsAt⟩
   rcases ownsAt_erase hownsAt with ⟨_hne, hstoreOwnsAt⟩
   exact ⟨storage, hstoreOwnsAt⟩
+
+theorem storeOwnerTargetsHeap_erase {store : ProgramStore} {erased : Location} :
+    StoreOwnerTargetsHeap store →
+    StoreOwnerTargetsHeap (store.erase erased) := by
+  intro hheap owned howns
+  exact hheap owned (owns_erase howns)
+
+theorem heapSlotsRootLifetime_erase {store : ProgramStore} {erased : Location} :
+    HeapSlotsRootLifetime store →
+    HeapSlotsRootLifetime (store.erase erased) := by
+  intro hroot address slot hslot
+  by_cases herased : erased = .heap address
+  · subst herased
+    simp [ProgramStore.erase] at hslot
+  · have hcandidate : (.heap address : Location) ≠ erased := by
+      intro hcandidate
+      exact herased hcandidate.symm
+    exact hroot address slot (by
+      simpa [ProgramStore.erase, hcandidate] using hslot)
+
+theorem not_owns_var_of_storeOwnerTargetsHeap {store : ProgramStore} {x : Name} :
+    StoreOwnerTargetsHeap store →
+    ¬ ProgramStore.Owns store (.var x) := by
+  intro hheap howns
+  rcases hheap (.var x) howns with ⟨address, hlocation⟩
+  cases hlocation
+
+theorem lifetimeDropOwnersDisjoint_of_heapOwnerTargets {store : ProgramStore}
+    {lifetime : Lifetime} :
+    StoreOwnerTargetsHeap store →
+    (∀ address slot,
+      store.slotAt (.heap address) = some slot →
+      slot.lifetime ≠ lifetime) →
+    LifetimeDropOwnersDisjoint store lifetime := by
+  intro hheap hheapLifetime location slot hslot hlifetime howns
+  rcases hheap location howns with ⟨address, hlocation⟩
+  subst hlocation
+  exact hheapLifetime address slot hslot hlifetime
 
 /--
 If a valid store has an owning reference to `owned` at `storage`, then erasing
@@ -544,6 +797,62 @@ theorem storeOwnersAllocated_update {store : ProgramStore}
     · exact ⟨allocatedSlot, by
         simpa [ProgramStore.update, howned] using hallocatedSlot⟩
 
+theorem storeOwnerTargetsHeap_update {store : ProgramStore}
+    {updatedLocation : Location} {slot : StoreSlot} :
+    StoreOwnerTargetsHeap store →
+    PartialValueOwnerTargetsHeap slot.value →
+    StoreOwnerTargetsHeap (store.update updatedLocation slot) := by
+  intro hheap hslotHeap owned howns
+  rcases howns with ⟨storage, slotLifetime, hslot⟩
+  by_cases hstorage : storage = updatedLocation
+  · have hnewSlot :
+        slot = { value := .value (owningRef owned), lifetime := slotLifetime } := by
+      simpa [ProgramStore.update, hstorage] using hslot
+    exact hslotHeap owned
+      (mem_partialValueOwningLocations_of_eq_owningRef
+        (by simpa using congrArg StoreSlot.value hnewSlot))
+  · have holdOwns : ProgramStore.Owns store owned := by
+      exact ⟨storage, slotLifetime, by
+        simpa [ProgramStore.update, hstorage] using hslot⟩
+    exact hheap owned holdOwns
+
+theorem heapSlotsRootLifetime_update {store : ProgramStore}
+    {updatedLocation : Location} {slot : StoreSlot} :
+    HeapSlotsRootLifetime store →
+    (∀ address, updatedLocation = .heap address → slot.lifetime = Lifetime.root) →
+    HeapSlotsRootLifetime (store.update updatedLocation slot) := by
+  intro hroot hslotRoot address heapSlot hheapSlot
+  by_cases hupdated : updatedLocation = .heap address
+  · subst hupdated
+    have hslotEq : slot = heapSlot := by
+      simpa [ProgramStore.update] using hheapSlot
+    subst hslotEq
+    exact hslotRoot address rfl
+  · have hcandidate : (.heap address : Location) ≠ updatedLocation := by
+      intro hcandidate
+      exact hupdated hcandidate.symm
+    exact hroot address heapSlot (by
+      simpa [ProgramStore.update, hcandidate] using hheapSlot)
+
+theorem heapSlotsRootLifetime_update_var {store : ProgramStore}
+    {x : Name} {slot : StoreSlot} :
+    HeapSlotsRootLifetime store →
+    HeapSlotsRootLifetime (store.update (.var x) slot) := by
+  intro hroot
+  exact heapSlotsRootLifetime_update hroot (by
+    intro address hvar
+    cases hvar)
+
+theorem heapSlotsRootLifetime_update_heap_root {store : ProgramStore}
+    {address : Nat} {value : PartialValue} :
+    HeapSlotsRootLifetime store →
+    HeapSlotsRootLifetime
+      (store.update (.heap address) { value := value, lifetime := Lifetime.root }) := by
+  intro hroot
+  exact heapSlotsRootLifetime_update hroot (by
+    intro otherAddress _hheap
+    rfl)
+
 /-- Updating a store slot to `undef` cannot create a new owning reference. -/
 theorem ownsAt_update_undef {store : ProgramStore} {updated owned storage : Location}
     {updatedLifetime : Lifetime} :
@@ -578,6 +887,26 @@ theorem storeOwnersAllocated_update_undef {store : ProgramStore} {updated : Loca
   exact storeOwnersAllocated_update hallocated (by
     intro owned hmem
     simp [partialValueOwningLocations] at hmem)
+
+theorem storeOwnerTargetsHeap_update_undef {store : ProgramStore} {updated : Location}
+    {updatedLifetime : Lifetime} :
+    StoreOwnerTargetsHeap store →
+    StoreOwnerTargetsHeap (store.update updated { value := .undef, lifetime := updatedLifetime }) := by
+  intro hheap
+  exact storeOwnerTargetsHeap_update hheap (by
+    intro owned hmem
+    simp [partialValueOwningLocations] at hmem)
+
+theorem heapSlotsRootLifetime_update_undef_existing {store : ProgramStore}
+    {updated : Location} {updatedLifetime : Lifetime} :
+    HeapSlotsRootLifetime store →
+    store.slotAt updated = some { value := .undef, lifetime := updatedLifetime } →
+    HeapSlotsRootLifetime (store.update updated { value := .undef, lifetime := updatedLifetime }) := by
+  intro hroot hslot
+  exact heapSlotsRootLifetime_update hroot (by
+    intro address hupdated
+    subst hupdated
+    exact hroot address { value := .undef, lifetime := updatedLifetime } hslot)
 
 /-- Writing `undef` through an lval preserves store validity. -/
 theorem validStore_write_undef {store store' : ProgramStore} {lv : LVal} :
@@ -616,6 +945,53 @@ theorem storeOwnersAllocated_write_undef {store store' : ProgramStore} {lv : LVa
           simp [hloc, hslot] at hwrite
           subst hwrite
           exact storeOwnersAllocated_update_undef hallocated
+
+theorem storeOwnerTargetsHeap_write_undef {store store' : ProgramStore} {lv : LVal} :
+    StoreOwnerTargetsHeap store →
+    store.write lv .undef = some store' →
+    StoreOwnerTargetsHeap store' := by
+  intro hheap hwrite
+  unfold ProgramStore.write at hwrite
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hwrite
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none =>
+          simp [hloc, hslot] at hwrite
+      | some slot =>
+          simp [hloc, hslot] at hwrite
+          subst hwrite
+          exact storeOwnerTargetsHeap_update_undef hheap
+
+theorem heapSlotsRootLifetime_write {store store' : ProgramStore} {lv : LVal}
+    {value : PartialValue} :
+    HeapSlotsRootLifetime store →
+    store.write lv value = some store' →
+    HeapSlotsRootLifetime store' := by
+  intro hroot hwrite
+  unfold ProgramStore.write at hwrite
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hwrite
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none =>
+          simp [hloc, hslot] at hwrite
+      | some oldSlot =>
+          simp [hloc, hslot] at hwrite
+          subst hwrite
+          exact heapSlotsRootLifetime_update hroot (by
+            intro address hlocation
+            subst hlocation
+            exact hroot address oldSlot hslot)
+
+theorem heapSlotsRootLifetime_write_undef {store store' : ProgramStore} {lv : LVal} :
+    HeapSlotsRootLifetime store →
+    store.write lv .undef = some store' →
+    HeapSlotsRootLifetime store' := by
+  intro hroot hwrite
+  exact heapSlotsRootLifetime_write hroot hwrite
 
 /--
 If an owning value is moved out of an lval and the lval is overwritten with
@@ -676,6 +1052,46 @@ theorem drops_validStore {store store' : ProgramStore} {values : List PartialVal
       intro hvalid
       exact ih (validStore_erase hvalid)
 
+theorem drops_storeOwnerTargetsHeap {store store' : ProgramStore}
+    {values : List PartialValue} :
+    Drops store values store' →
+    StoreOwnerTargetsHeap store →
+    StoreOwnerTargetsHeap store' := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro hheap
+      exact hheap
+  | nonOwner _hnonOwner _hdrops ih =>
+      intro hheap
+      exact ih hheap
+  | ownerMissing _howner _hmissing _hdrops ih =>
+      intro hheap
+      exact ih hheap
+  | ownerPresent _howner _hslot _hdrops ih =>
+      intro hheap
+      exact ih (storeOwnerTargetsHeap_erase hheap)
+
+theorem drops_heapSlotsRootLifetime {store store' : ProgramStore}
+    {values : List PartialValue} :
+    Drops store values store' →
+    HeapSlotsRootLifetime store →
+    HeapSlotsRootLifetime store' := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro hroot
+      exact hroot
+  | nonOwner _hnonOwner _hdrops ih =>
+      intro hroot
+      exact ih hroot
+  | ownerMissing _howner _hmissing _hdrops ih =>
+      intro hroot
+      exact ih hroot
+  | ownerPresent _howner _hslot _hdrops ih =>
+      intro hroot
+      exact ih (heapSlotsRootLifetime_erase hroot)
+
 /-- Dropping values never creates an allocated slot. -/
 theorem drops_slotAt_of_slotAt {store store' : ProgramStore}
     {values : List PartialValue} {location : Location} {slot : StoreSlot} :
@@ -702,6 +1118,61 @@ theorem drops_slotAt_of_slotAt {store store' : ProgramStore}
       · subst hlocation
         simp [ProgramStore.erase] at herased
       · simpa [ProgramStore.erase, hlocation] using herased
+
+theorem drops_no_slot_of_mem_owning_ref {store store' : ProgramStore}
+    {values : List PartialValue} {location : Location} :
+    Drops store values store' →
+    (.value (.ref { location := location, owner := true })) ∈ values →
+    (∃ slot, store.slotAt location = some slot) →
+    ¬ ∃ slot, store'.slotAt location = some slot := by
+  intro hdrops
+  induction hdrops generalizing location with
+  | nil =>
+      intro hmem _hslot
+      simp at hmem
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hmem hslot hfinal
+      simp at hmem
+      rcases hmem with hhead | hrest
+      · subst hhead
+        exact not_partialValueNonOwner_owning_ref
+          (ref := { location := location, owner := true }) rfl hnonOwner
+      · exact ih hrest hslot hfinal
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hmem hslot hfinal
+      rename_i storeBefore storeAfter ref rest
+      simp at hmem
+      rcases hmem with hhead | hrest
+      · cases hhead
+        rcases hslot with ⟨slot, hslot⟩
+        rw [hslot] at hmissing
+        cases hmissing
+      · exact ih hrest hslot hfinal
+  | ownerPresent howner hpresent _hdrops ih =>
+      intro hmem hslot hfinal
+      rename_i storeBefore storeAfter ref erasedSlot rest
+      simp at hmem
+      rcases hmem with hhead | hrest
+      · cases hhead
+        rcases hfinal with ⟨finalSlot, hfinalSlot⟩
+        have herased :
+            (storeBefore.erase location).slotAt location = some finalSlot :=
+          drops_slotAt_of_slotAt _hdrops hfinalSlot
+        simp [ProgramStore.erase] at herased
+      · by_cases hrefLocation : ref.location = location
+        · subst hrefLocation
+          rcases hfinal with ⟨finalSlot, hfinalSlot⟩
+          have herased :
+              (storeBefore.erase ref.location).slotAt ref.location = some finalSlot :=
+            drops_slotAt_of_slotAt _hdrops hfinalSlot
+          simp [ProgramStore.erase] at herased
+        · have herasedSlot : ∃ slot, (storeBefore.erase ref.location).slotAt location = some slot := by
+            rcases hslot with ⟨slot, hslot⟩
+            have hcandidate : location ≠ ref.location := by
+              intro hcandidate
+              exact hrefLocation hcandidate.symm
+            exact ⟨slot, by simpa [ProgramStore.erase, hcandidate] using hslot⟩
+          exact ih (by simp [hrest]) herasedSlot hfinal
 
 /--
 `DropsAvoids S ψ ℓ` records that the recursive drop of `ψ` never erases
@@ -779,6 +1250,111 @@ theorem dropsAvoids_slotAt_preserved {store store' : ProgramStore}
               (storeBefore.erase ref.location).slotAt location = some slot := by
             simpa [ProgramStore.erase, hne.symm] using hslot
           exact ih havoidsRest herasedSlot
+
+theorem partialValueOwnerTargetsHeap_of_slot {store : ProgramStore}
+    {location : Location} {slot : StoreSlot} :
+    StoreOwnerTargetsHeap store →
+    store.slotAt location = some slot →
+    PartialValueOwnerTargetsHeap slot.value := by
+  intro hheap hslot owned hmem
+  have hslotValue : slot.value = .value (owningRef owned) :=
+    eq_owningRef_of_mem_partialValueOwningLocations hmem
+  exact hheap owned ⟨location, slot.lifetime, by
+    cases slot with
+    | mk slotValue slotLifetime =>
+        cases hslotValue
+        simpa using hslot⟩
+
+theorem dropsAvoids_var_of_ownerTargetsHeap
+    {store store' : ProgramStore} {values : List PartialValue} {x : Name} :
+    Drops store values store' →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
+    DropsAvoids store values (.var x) := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro _hheap _hvalues
+      exact DropsAvoids.nil
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hheap hvalues
+      exact DropsAvoids.nonOwner hnonOwner
+        (ih hheap (by
+          intro value hmem
+          exact hvalues value (by simp [hmem])))
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hheap hvalues
+      exact DropsAvoids.ownerMissing howner hmissing
+        (ih hheap (by
+          intro value hmem
+          exact hvalues value (by simp [hmem])))
+  | ownerPresent howner hslot _hdrops ih =>
+      intro hheap hvalues
+      rename_i storeBefore storeAfter ref slot rest
+      have hheadHeap : ∃ address, ref.location = .heap address := by
+        exact hvalues (.value (.ref ref)) (by simp) ref.location
+          (mem_partialValueOwningLocations_ref_true howner)
+      have hrefNeVar : ref.location ≠ .var x := by
+        intro href
+        rcases hheadHeap with ⟨address, hheapLocation⟩
+        rw [href] at hheapLocation
+        cases hheapLocation
+      have hslotHeap : PartialValueOwnerTargetsHeap slot.value :=
+        partialValueOwnerTargetsHeap_of_slot hheap hslot
+      exact DropsAvoids.ownerPresent howner hslot hrefNeVar
+        (ih (storeOwnerTargetsHeap_erase hheap) (by
+          intro value hmem
+          simp at hmem
+          rcases hmem with hvalue | hrest
+          · subst hvalue
+            exact hslotHeap
+          · exact hvalues value (by simp [hrest])))
+
+theorem dropsAvoids_var_of_not_owning_var
+    {store store' : ProgramStore} {values : List PartialValue} {x : Name} :
+    Drops store values store' →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ values → (.var x) ∉ partialValueOwningLocations value) →
+    DropsAvoids store values (.var x) := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro _hheap _hvalues
+      exact DropsAvoids.nil
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hheap hvalues
+      exact DropsAvoids.nonOwner hnonOwner
+        (ih hheap (by
+          intro value hmem
+          exact hvalues value (by simp [hmem])))
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hheap hvalues
+      exact DropsAvoids.ownerMissing howner hmissing
+        (ih hheap (by
+          intro value hmem
+          exact hvalues value (by simp [hmem])))
+  | ownerPresent howner hslot _hdrops ih =>
+      intro hheap hvalues
+      rename_i storeBefore storeAfter ref slot rest
+      have hrefNeVar : ref.location ≠ .var x := by
+        intro href
+        exact hvalues (.value (.ref ref)) (by simp)
+          (by
+            simpa [href] using mem_partialValueOwningLocations_ref_true howner)
+      have hslotHeap : PartialValueOwnerTargetsHeap slot.value :=
+        partialValueOwnerTargetsHeap_of_slot hheap hslot
+      have hslotNotVar : (.var x) ∉ partialValueOwningLocations slot.value := by
+        intro hmem
+        rcases hslotHeap (.var x) hmem with ⟨address, hlocation⟩
+        cases hlocation
+      exact DropsAvoids.ownerPresent howner hslot hrefNeVar
+        (ih (storeOwnerTargetsHeap_erase hheap) (by
+          intro value hmem
+          simp at hmem
+          rcases hmem with hvalue | hrest
+          · subst hvalue
+            exact hslotNotVar
+          · exact hvalues value (by simp [hrest])))
 
 /-- Dropping a non-owning partial value leaves the store unchanged. -/
 theorem drops_partialValue_nonOwner_eq {store store' : ProgramStore}
@@ -862,6 +1438,26 @@ theorem dropsLifetime_validStore {store store' : ProgramStore} {lifetime : Lifet
   | intro _hdropSet hdrops =>
       exact drops_validStore hdrops hvalid
 
+theorem dropsLifetime_storeOwnerTargetsHeap {store store' : ProgramStore}
+    {lifetime : Lifetime} :
+    DropsLifetime store lifetime store' →
+    StoreOwnerTargetsHeap store →
+    StoreOwnerTargetsHeap store' := by
+  intro hdrops hheap
+  cases hdrops with
+  | intro _hdropSet hdrops =>
+      exact drops_storeOwnerTargetsHeap hdrops hheap
+
+theorem dropsLifetime_heapSlotsRootLifetime {store store' : ProgramStore}
+    {lifetime : Lifetime} :
+    DropsLifetime store lifetime store' →
+    HeapSlotsRootLifetime store →
+    HeapSlotsRootLifetime store' := by
+  intro hdrops hroot
+  cases hdrops with
+  | intro _hdropSet hdrops =>
+      exact drops_heapSlotsRootLifetime hdrops hroot
+
 /-- Dropping a lifetime never creates an allocated slot. -/
 theorem dropsLifetime_slotAt_of_slotAt {store store' : ProgramStore}
     {lifetime : Lifetime} {location : Location} {slot : StoreSlot} :
@@ -872,6 +1468,48 @@ theorem dropsLifetime_slotAt_of_slotAt {store store' : ProgramStore}
   cases hdrops with
   | intro _hdropSet hdrops =>
       exact drops_slotAt_of_slotAt hdrops hslot
+
+theorem dropsLifetime_slot_not_dropped {store store' : ProgramStore}
+    {lifetime : Lifetime} {location : Location} {slot : StoreSlot} :
+    DropsLifetime store lifetime store' →
+    store'.slotAt location = some slot →
+    slot.lifetime ≠ lifetime := by
+  intro hdrops hslotFinal hlifetime
+  cases hdrops with
+  | intro hdropSet hdrops =>
+      have hslotInitial : store.slotAt location = some slot :=
+        drops_slotAt_of_slotAt hdrops hslotFinal
+      have hmem :=
+        (hdropSet (PartialValue.value (.ref { location := location, owner := true }))).mpr
+          ⟨location, slot, hslotInitial, hlifetime, rfl⟩
+      exact drops_no_slot_of_mem_owning_ref hdrops hmem ⟨slot, hslotInitial⟩
+        ⟨slot, hslotFinal⟩
+
+theorem dropsLifetime_preserves_var_slot_of_not_lifetime
+    {store store' : ProgramStore} {lifetime : Lifetime} {x : Name} {slot : StoreSlot} :
+    DropsLifetime store lifetime store' →
+    StoreOwnerTargetsHeap store →
+    store.slotAt (.var x) = some slot →
+    slot.lifetime ≠ lifetime →
+    store'.slotAt (.var x) = some slot := by
+  intro hdrops hheap hslot hlifetime
+  cases hdrops with
+  | intro hdropSet hdrops =>
+      exact dropsAvoids_slotAt_preserved hdrops
+        (dropsAvoids_var_of_not_owning_var hdrops hheap (by
+          intro dropValue hmem hownsVar
+          rcases (hdropSet dropValue).mp hmem with
+            ⟨location, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
+          have howned : (.var x : Location) = location :=
+            eq_location_of_mem_lifetime_drop_value hdropValue hownsVar
+          subst howned
+          have hdropSlotEq : dropSlot = slot := by
+            rw [hslot] at hdropSlot
+            injection hdropSlot with hdropSlotEq
+            exact hdropSlotEq.symm
+          subst hdropSlotEq
+          exact hlifetime hdropLifetime))
+        hslot
 
 /--
 If no allocated store slot has lifetime `m`, then the lifetime drop
@@ -1230,6 +1868,26 @@ theorem storeOwnersAllocated_write {store store' : ProgramStore} {lv : LVal}
           simp [hloc, hslot] at hwrite
           subst hwrite
           exact storeOwnersAllocated_update hallocated hvalueAllocated
+
+theorem storeOwnerTargetsHeap_write {store store' : ProgramStore} {lv : LVal}
+    {value : PartialValue} :
+    StoreOwnerTargetsHeap store →
+    PartialValueOwnerTargetsHeap value →
+    store.write lv value = some store' →
+    StoreOwnerTargetsHeap store' := by
+  intro hheap hvalueHeap hwrite
+  unfold ProgramStore.write at hwrite
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hwrite
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none =>
+          simp [hloc, hslot] at hwrite
+      | some oldSlot =>
+          simp [hloc, hslot] at hwrite
+          subst hwrite
+          exact storeOwnerTargetsHeap_update hheap hvalueHeap
 
 /-- Lemma 9.8, `R-BlockB` valid-state preservation fragment. -/
 theorem validState_blockB {store store' : ProgramStore}

@@ -57,6 +57,12 @@ theorem sourceTerm_validTerm {term : Term} :
   intro hsource
   simp [ValidTerm, sourceTerm_no_owningLocations hsource]
 
+theorem sourceTerm_ownerTargetsHeap {term : Term} :
+    SourceTerm term →
+    TermOwnerTargetsHeap term := by
+  intro hsource owned hmem
+  simp [sourceTerm_no_owningLocations hsource] at hmem
+
 theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
     SourceValue value →
     ∃ ty, ValueTyping StoreTyping.empty value ty ∧ ValidValue store value ty := by
@@ -255,7 +261,9 @@ theorem sourceInitialRuntimeState_valid {term : Term} :
     SourceTerm term →
     ValidRuntimeState ProgramStore.empty term := by
   intro hsource
-  exact ⟨sourceInitialState_valid hsource, storeOwnersAllocated_empty⟩
+  exact ⟨sourceInitialState_valid hsource, storeOwnersAllocated_empty,
+    storeOwnerTargetsHeap_empty, heapSlotsRootLifetime_empty,
+    sourceTerm_ownerTargetsHeap hsource⟩
 
 /--
 Source-level empty-store programs satisfy the initial hypotheses used by the

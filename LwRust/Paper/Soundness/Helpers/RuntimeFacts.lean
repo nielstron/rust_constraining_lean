@@ -1443,16 +1443,18 @@ theorem EnvWrite.envStrengthens {rank : Nat} {env result : Env} {lv : LVal}
 same variable's slot in the source env, or from the right-hand type written.
 This is the per-slot growth bound (piece (A) of the coherence closure): writes
 only grow borrow target lists by the rhs's contained-borrow targets. -/
-def BorrowTargetOrigin (env : Env) (rhsTy : Ty) (x : Name) (t : LVal) : Prop :=
-  (∃ slot m T, env.slotAt x = some slot ∧
-    PartialTyContains slot.ty (.borrow m T) ∧ t ∈ T) ∨
-  (∃ m T, PartialTyContains (.ty rhsTy) (.borrow m T) ∧ t ∈ T)
+def BorrowTargetOrigin
+    (env : Env) (rhsTy : Ty) (x : Name) (mutable : Bool) (t : LVal) : Prop :=
+  (∃ slot T, env.slotAt x = some slot ∧
+    PartialTyContains slot.ty (.borrow mutable T) ∧ t ∈ T) ∨
+  (∃ T, PartialTyContains (.ty rhsTy) (.borrow mutable T) ∧ t ∈ T)
 
 /-- Type-level analogue of `BorrowTargetOrigin` used for the `UpdateAtPath`
 motive: a borrow target in the updated type comes from the old type or the rhs. -/
-def TypeBorrowOrigin (oldTy : PartialTy) (rhsTy : Ty) (t : LVal) : Prop :=
-  (∃ m T, PartialTyContains oldTy (.borrow m T) ∧ t ∈ T) ∨
-  (∃ m T, PartialTyContains (.ty rhsTy) (.borrow m T) ∧ t ∈ T)
+def TypeBorrowOrigin
+    (oldTy : PartialTy) (rhsTy : Ty) (mutable : Bool) (t : LVal) : Prop :=
+  (∃ T, PartialTyContains oldTy (.borrow mutable T) ∧ t ∈ T) ∨
+  (∃ T, PartialTyContains (.ty rhsTy) (.borrow mutable T) ∧ t ∈ T)
 
 theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
     {rhsTy : Ty} :
@@ -1460,26 +1462,26 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
     EnvWrite rank env lv rhsTy result →
     ∀ x slot m T, result.slotAt x = some slot →
       PartialTyContains slot.ty (.borrow m T) →
-      ∀ t, t ∈ T → BorrowTargetOrigin env rhsTy x t := by
+      ∀ t, t ∈ T → BorrowTargetOrigin env rhsTy x m t := by
   intro hrank hwrite
   refine EnvWrite.rec
     (motive_1 := fun rank env₁ _path oldTy ty env₂ updatedTy _ =>
       0 < rank →
       (∀ m T, PartialTyContains updatedTy (.borrow m T) →
-        ∀ t, t ∈ T → TypeBorrowOrigin oldTy ty t) ∧
+        ∀ t, t ∈ T → TypeBorrowOrigin oldTy ty m t) ∧
       (∀ x slot m T, env₂.slotAt x = some slot →
         PartialTyContains slot.ty (.borrow m T) →
-        ∀ t, t ∈ T → BorrowTargetOrigin env₁ ty x t))
+        ∀ t, t ∈ T → BorrowTargetOrigin env₁ ty x m t))
     (motive_2 := fun rank env _path _targets ty result _ =>
       0 < rank →
       ∀ x slot m T, result.slotAt x = some slot →
         PartialTyContains slot.ty (.borrow m T) →
-        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x m t)
     (motive_3 := fun rank env _lv ty result _ =>
       0 < rank →
       ∀ x slot m T, result.slotAt x = some slot →
         PartialTyContains slot.ty (.borrow m T) →
-        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x m t)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite hrank
   case strong =>
     intro env old ty h0
@@ -1490,10 +1492,10 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
     · intro m T hcontains t ht
       rcases PartialTyUnion.contained_borrow_member hjoin hcontains ht with
         ⟨Tl, hl, htl⟩ | ⟨Tr, hr, htr⟩
-      · exact Or.inl ⟨m, Tl, hl, htl⟩
-      · exact Or.inr ⟨m, Tr, hr, htr⟩
+      · exact Or.inl ⟨Tl, hl, htl⟩
+      · exact Or.inr ⟨Tr, hr, htr⟩
     · intro x slot m T hslot hcontains t ht
-      exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+      exact Or.inl ⟨slot, T, hslot, hcontains, ht⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupd ih hrank
     rcases ih hrank with ⟨ihType, ihEnv⟩
@@ -1501,18 +1503,18 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
     intro m T hcontains t ht
     cases hcontains with
     | box hinner =>
-        rcases ihType m T hinner t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
-        · exact Or.inl ⟨m₀, T₀, PartialTyContains.box hc₀, ht₀⟩
+        rcases ihType m T hinner t ht with ⟨T₀, hc₀, ht₀⟩ | hrhs
+        · exact Or.inl ⟨T₀, PartialTyContains.box hc₀, ht₀⟩
         · exact Or.inr hrhs
   case mutBorrow =>
     intro env₁ env₂ rank path targets ty hwrites ih _hrank
     refine ⟨?_, ?_⟩
     · intro m T hcontains t ht
-      exact Or.inl ⟨m, T, hcontains, ht⟩
+      exact Or.inl ⟨T, hcontains, ht⟩
     · exact ih (Nat.succ_pos rank)
   case nil =>
     intro rank env path ty _hrank x slot m T hslot hcontains t ht
-    exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+    exact Or.inl ⟨slot, T, hslot, hcontains, ht⟩
   case singleton =>
     intro rank env updated path target ty _hwrite _htyped ih hrank
     exact ih hrank
@@ -1536,8 +1538,8 @@ theorem EnvWrite.borrowTargetOrigin {rank : Nat} {env result : Env} {lv : LVal}
             = some { slot with ty := updatedTy } := by rw [hx]; simp [Env.update]
         rw [hlk] at hrslot; exact (Option.some.inj hrslot).symm
       rw [hreq] at hcontains
-      rcases ihType m T hcontains t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
-      · exact Or.inl ⟨slot, m₀, T₀, by rw [hx]; exact hslot, hc₀, ht₀⟩
+      rcases ihType m T hcontains t ht with ⟨T₀, hc₀, ht₀⟩ | hrhs
+      · exact Or.inl ⟨slot, T₀, by rw [hx]; exact hslot, hc₀, ht₀⟩
       · exact Or.inr hrhs
     · have hru : (env₂.update (LVal.base lv) { slot with ty := updatedTy }).slotAt x
           = env₂.slotAt x := by simp [Env.update, hx]
@@ -1556,41 +1558,41 @@ theorem EnvWrite.borrowTargetOrigin_all {rank : Nat} {env result : Env} {lv : LV
     EnvWrite rank env lv rhsTy result →
     ∀ x slot m T, result.slotAt x = some slot →
       PartialTyContains slot.ty (.borrow m T) →
-      ∀ t, t ∈ T → BorrowTargetOrigin env rhsTy x t := by
+      ∀ t, t ∈ T → BorrowTargetOrigin env rhsTy x m t := by
   intro hwrite
   refine EnvWrite.rec
     (motive_1 := fun _rank env₁ _path oldTy ty env₂ updatedTy _ =>
       (∀ m T, PartialTyContains updatedTy (.borrow m T) →
-        ∀ t, t ∈ T → TypeBorrowOrigin oldTy ty t) ∧
+        ∀ t, t ∈ T → TypeBorrowOrigin oldTy ty m t) ∧
       (∀ x slot m T, env₂.slotAt x = some slot →
         PartialTyContains slot.ty (.borrow m T) →
-        ∀ t, t ∈ T → BorrowTargetOrigin env₁ ty x t))
+        ∀ t, t ∈ T → BorrowTargetOrigin env₁ ty x m t))
     (motive_2 := fun _rank env _path _targets ty result _ =>
       ∀ x slot m T, result.slotAt x = some slot →
         PartialTyContains slot.ty (.borrow m T) →
-        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x m t)
     (motive_3 := fun _rank env _lv ty result _ =>
       ∀ x slot m T, result.slotAt x = some slot →
         PartialTyContains slot.ty (.borrow m T) →
-        ∀ t, t ∈ T → BorrowTargetOrigin env ty x t)
+        ∀ t, t ∈ T → BorrowTargetOrigin env ty x m t)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite
   case strong =>
     intro env old ty
     refine ⟨?_, ?_⟩
     · intro m T hcontains t ht
-      exact Or.inr ⟨m, T, hcontains, ht⟩
+      exact Or.inr ⟨T, hcontains, ht⟩
     · intro x slot m T hslot hcontains t ht
-      exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+      exact Or.inl ⟨slot, T, hslot, hcontains, ht⟩
   case weak =>
     intro env rank old joined ty _hshape hjoin
     refine ⟨?_, ?_⟩
     · intro m T hcontains t ht
       rcases PartialTyUnion.contained_borrow_member hjoin hcontains ht with
         ⟨Tl, hl, htl⟩ | ⟨Tr, hr, htr⟩
-      · exact Or.inl ⟨m, Tl, hl, htl⟩
-      · exact Or.inr ⟨m, Tr, hr, htr⟩
+      · exact Or.inl ⟨Tl, hl, htl⟩
+      · exact Or.inr ⟨Tr, hr, htr⟩
     · intro x slot m T hslot hcontains t ht
-      exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+      exact Or.inl ⟨slot, T, hslot, hcontains, ht⟩
   case box =>
     intro env₁ env₂ rank path inner updatedInner ty _hupd ih
     rcases ih with ⟨ihType, ihEnv⟩
@@ -1598,18 +1600,18 @@ theorem EnvWrite.borrowTargetOrigin_all {rank : Nat} {env result : Env} {lv : LV
     intro m T hcontains t ht
     cases hcontains with
     | box hinner =>
-        rcases ihType m T hinner t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
-        · exact Or.inl ⟨m₀, T₀, PartialTyContains.box hc₀, ht₀⟩
+        rcases ihType m T hinner t ht with ⟨T₀, hc₀, ht₀⟩ | hrhs
+        · exact Or.inl ⟨T₀, PartialTyContains.box hc₀, ht₀⟩
         · exact Or.inr hrhs
   case mutBorrow =>
     intro env₁ env₂ rank path targets ty hwrites ih
     refine ⟨?_, ?_⟩
     · intro m T hcontains t ht
-      exact Or.inl ⟨m, T, hcontains, ht⟩
+      exact Or.inl ⟨T, hcontains, ht⟩
     · exact ih
   case nil =>
     intro rank env path ty x slot m T hslot hcontains t ht
-    exact Or.inl ⟨slot, m, T, hslot, hcontains, ht⟩
+    exact Or.inl ⟨slot, T, hslot, hcontains, ht⟩
   case singleton =>
     intro rank env updated path target ty _hwrite _htyped ih
     exact ih
@@ -1633,8 +1635,8 @@ theorem EnvWrite.borrowTargetOrigin_all {rank : Nat} {env result : Env} {lv : LV
             = some { slot with ty := updatedTy } := by rw [hx]; simp [Env.update]
         rw [hlk] at hrslot; exact (Option.some.inj hrslot).symm
       rw [hreq] at hcontains
-      rcases ihType m T hcontains t ht with ⟨m₀, T₀, hc₀, ht₀⟩ | hrhs
-      · exact Or.inl ⟨slot, m₀, T₀, by rw [hx]; exact hslot, hc₀, ht₀⟩
+      rcases ihType m T hcontains t ht with ⟨T₀, hc₀, ht₀⟩ | hrhs
+      · exact Or.inl ⟨slot, T₀, by rw [hx]; exact hslot, hc₀, ht₀⟩
       · exact Or.inr hrhs
     · have hru : (env₂.update (LVal.base lv) { slot with ty := updatedTy }).slotAt x
           = env₂.slotAt x := by simp [Env.update, hx]
@@ -1663,15 +1665,15 @@ theorem EnvWrite.preserves_linearizedBy_of_rhsVarsBelow {rank : Nat}
       hslot hcontains target htarget with
     hfromOld | hfromRhs
   · rcases hfromOld with
-      ⟨oldSlot, oldMutable, oldTargets, holdSlot, holdContains, holdTarget⟩
+      ⟨oldSlot, oldTargets, holdSlot, holdContains, holdTarget⟩
     have hvOld : v ∈ PartialTy.vars oldSlot.ty := by
       exact mem_partialTy_vars_iff.mpr
-        ⟨oldMutable, oldTargets, target, holdContains, holdTarget, hbase⟩
+        ⟨mutable, oldTargets, target, holdContains, holdTarget, hbase⟩
     exact hlin x oldSlot holdSlot v hvOld
-  · rcases hfromRhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
+  · rcases hfromRhs with ⟨rhsTargets, hrhsContains, hrhsTarget⟩
     have hvRhsPartial : v ∈ PartialTy.vars (.ty rhsTy) := by
       exact mem_partialTy_vars_iff.mpr
-        ⟨rhsMutable, rhsTargets, target, hrhsContains, hrhsTarget, hbase⟩
+        ⟨mutable, rhsTargets, target, hrhsContains, hrhsTarget, hbase⟩
     exact hrhs x slot hslot v (by simpa [PartialTy.vars] using hvRhsPartial)
 
 /-- All-rank write linearization under an explicit RHS-rank side condition.
@@ -1694,15 +1696,15 @@ theorem EnvWrite.preserves_linearizedBy_of_rhsVarsBelow_all {rank : Nat}
       hslot hcontains target htarget with
     hfromOld | hfromRhs
   · rcases hfromOld with
-      ⟨oldSlot, oldMutable, oldTargets, holdSlot, holdContains, holdTarget⟩
+      ⟨oldSlot, oldTargets, holdSlot, holdContains, holdTarget⟩
     have hvOld : v ∈ PartialTy.vars oldSlot.ty := by
       exact mem_partialTy_vars_iff.mpr
-        ⟨oldMutable, oldTargets, target, holdContains, holdTarget, hbase⟩
+        ⟨mutable, oldTargets, target, holdContains, holdTarget, hbase⟩
     exact hlin x oldSlot holdSlot v hvOld
-  · rcases hfromRhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
+  · rcases hfromRhs with ⟨rhsTargets, hrhsContains, hrhsTarget⟩
     have hvRhsPartial : v ∈ PartialTy.vars (.ty rhsTy) := by
       exact mem_partialTy_vars_iff.mpr
-        ⟨rhsMutable, rhsTargets, target, hrhsContains, hrhsTarget, hbase⟩
+        ⟨mutable, rhsTargets, target, hrhsContains, hrhsTarget, hbase⟩
     exact hrhs x slot hslot v (by simpa [PartialTy.vars] using hvRhsPartial)
 
 theorem EnvWrite.preserves_linearizable_of_rhsVarsBelow_all {rank : Nat}
@@ -1742,7 +1744,7 @@ theorem EnvWrite.linearizable_counterexample_violates_rhsBorrowTargetsBelow :
           (.var "y" : LVal) ∈ rhsTargets :=
     ⟨false, [.var "y"], PartialTyContains.here, by simp⟩
   have hlt :=
-    hbelow "x" { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root }
+    hbelow.1 "x" { ty := .ty (.borrow false [.var "y"]), lifetime := Lifetime.root }
       false [.var "y"] (.var "y") hx hcontains (by simp) hfromRhs
   simp [LVal.base] at hlt
 
@@ -1759,13 +1761,16 @@ theorem EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all {rank : Nat
       hslot hcontains target htarget with
     hfromOld | hfromRhs
   · rcases hfromOld with
-      ⟨oldSlot, oldMutable, oldTargets, holdSlot, holdContains, holdTarget⟩
+      ⟨oldSlot, oldTargets, holdSlot, holdContains, holdTarget⟩
     have hvOld : v ∈ PartialTy.vars oldSlot.ty := by
       exact mem_partialTy_vars_iff.mpr
-        ⟨oldMutable, oldTargets, target, holdContains, holdTarget, hbase⟩
+        ⟨mutable, oldTargets, target, holdContains, holdTarget, hbase⟩
     exact hlin x oldSlot holdSlot v hvOld
   · have htargetBelow : φ (LVal.base target) < φ x :=
-      hbelow x slot mutable targets target hslot hcontains htarget hfromRhs
+      hbelow.1 x slot mutable targets target hslot hcontains htarget
+        (by
+          rcases hfromRhs with ⟨rhsTargets, hrhsContains, hrhsTarget⟩
+          exact ⟨mutable, rhsTargets, hrhsContains, hrhsTarget⟩)
     simpa [hbase] using htargetBelow
 
 theorem EnvWrite.preserves_linearizable_of_rhsBorrowTargetsBelow_all {rank : Nat}
@@ -2796,7 +2801,12 @@ theorem preservation_refl_runtime_value {store : ProgramStore} {env env₂ : Env
   intro hvalidRuntime hvalidStoreTyping hsafe htyping
   rcases preservation_refl_value hvalidRuntime.1 hvalidStoreTyping hsafe htyping with
     ⟨hvalidState, hsafe₂, hvalidValue⟩
-  exact ⟨⟨hvalidState, hvalidRuntime.2⟩, hsafe₂, hvalidValue⟩
+  exact ⟨⟨hvalidState,
+      ValidRuntimeState.storeOwnersAllocated hvalidRuntime,
+      ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+      ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+      ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime⟩,
+    hsafe₂, hvalidValue⟩
 
 /--
 Lemma 4.11, multistep terminal preservation when the initial term is already a

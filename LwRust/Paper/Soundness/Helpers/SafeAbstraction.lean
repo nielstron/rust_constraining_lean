@@ -401,6 +401,168 @@ theorem safeAbstraction_dropsLifetime_no_slots {store store' : ProgramStore}
   rw [hstore, henv]
   exact hsafe
 
+/-! ### A concrete lifetime-drop boundary
+
+The abstract `ProgramStore` permits an owning reference to point at a variable
+location.  That is more general than the operational states produced by `box`,
+where owning references target heap locations.  The following tiny store shows
+why the general Lemma 9.5 lifetime-drop proof cannot be recovered from the
+current store validity interface alone: dropping the inner-lifetime variable `x`
+recursively drops the outer-lifetime variable `y`, while `Γ.dropLifetime` keeps
+`y`.
+-/
+
+def dropCounterInner : Lifetime := [0, 0]
+
+def dropCounterOuter : Lifetime := [0]
+
+def dropCounterXSlot : StoreSlot :=
+  { value := .value (.ref { location := .var "y", owner := true }),
+    lifetime := dropCounterInner }
+
+def dropCounterYSlot : StoreSlot :=
+  { value := .value .unit, lifetime := dropCounterOuter }
+
+def dropCounterStore : ProgramStore :=
+  (ProgramStore.empty.update (.var "x") dropCounterXSlot).update (.var "y")
+    dropCounterYSlot
+
+def dropCounterStoreAfter : ProgramStore :=
+  (dropCounterStore.erase (.var "x")).erase (.var "y")
+
+def dropCounterEnv : Env :=
+  (Env.empty.update "x"
+      { ty := .box (.ty .unit), lifetime := dropCounterInner }).update "y"
+    { ty := .ty .unit, lifetime := dropCounterOuter }
+
+theorem dropCounter_dropsLifetime :
+    DropsLifetime dropCounterStore dropCounterInner dropCounterStoreAfter := by
+  refine ProgramStore.DropsLifetime.intro (dropSet := [
+      .value (.ref { location := .var "x", owner := true })]) ?dropSet ?drops
+  · intro value
+    constructor
+    · intro hmem
+      simp at hmem
+      subst hmem
+      exact ⟨.var "x", dropCounterXSlot, by
+          simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot],
+        rfl, rfl⟩
+    · intro h
+      rcases h with ⟨location, slot, hslot, hlifetime, hvalue⟩
+      have hlocation : location = .var "x" := by
+        by_cases hx : location = .var "x"
+        · exact hx
+        · by_cases hy : location = .var "y"
+          · subst hy
+            simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot] at hslot
+            subst hslot
+            simp [dropCounterInner, dropCounterOuter] at hlifetime
+          · cases location with
+            | var name =>
+                simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot, hx, hy] at hslot
+            | heap address =>
+                simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot] at hslot
+      subst hlocation
+      simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot] at hslot
+      subst hslot
+      simp [hvalue]
+  · refine ProgramStore.Drops.ownerPresent (ref := { location := .var "x", owner := true })
+      (slot := dropCounterXSlot) rfl ?xSlot ?tail
+    · simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot]
+    · refine ProgramStore.Drops.ownerPresent (ref := { location := .var "y", owner := true })
+        (slot := dropCounterYSlot) rfl ?ySlot ?unitTail
+      · simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot, ProgramStore.erase]
+      · refine ProgramStore.Drops.nonOwner ?unitNonOwner ProgramStore.Drops.nil
+        intro ref
+        cases ref with
+        | mk location owner =>
+            cases location <;> cases owner <;> simp [dropCounterYSlot]
+
+theorem dropCounter_safeAbstraction :
+    dropCounterStore ∼ₛ dropCounterEnv := by
+  constructor
+  · intro name
+    constructor
+    · intro hstore
+      by_cases hx : name = "x"
+      · subst hx
+        exact ⟨{ ty := .box (.ty .unit), lifetime := dropCounterInner }, by
+          simp [dropCounterEnv]⟩
+      · by_cases hy : name = "y"
+        · subst hy
+          exact ⟨{ ty := .ty .unit, lifetime := dropCounterOuter }, by
+            simp [dropCounterEnv]⟩
+        · rcases hstore with ⟨slot, hslot⟩
+          simp [dropCounterStore, VariableProjection, dropCounterXSlot,
+            dropCounterYSlot, hx, hy] at hslot
+    · intro henv
+      by_cases hx : name = "x"
+      · subst hx
+        exact ⟨dropCounterXSlot, by
+          simp [dropCounterStore, VariableProjection, dropCounterXSlot,
+            dropCounterYSlot]⟩
+      · by_cases hy : name = "y"
+        · subst hy
+          exact ⟨dropCounterYSlot, by
+            simp [dropCounterStore, VariableProjection, dropCounterXSlot,
+              dropCounterYSlot]⟩
+        · rcases henv with ⟨envSlot, henvSlot⟩
+          simp [dropCounterEnv, Env.empty, hx, hy] at henvSlot
+  · intro name envSlot henv
+    by_cases hx : name = "x"
+    · subst hx
+      have henvSlot :
+          envSlot = { ty := .box (.ty .unit), lifetime := dropCounterInner } := by
+        simpa [dropCounterEnv, Env.update] using henv.symm
+      subst henvSlot
+      exact ⟨.value (.ref { location := .var "y", owner := true }), by
+          simp [dropCounterStore, VariableProjection, dropCounterXSlot,
+            dropCounterYSlot],
+        ValidPartialValue.box (location := .var "y") (slot := dropCounterYSlot) (by
+          simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot])
+          ValidPartialValue.unit⟩
+    · by_cases hy : name = "y"
+      · subst hy
+        have henvSlot :
+            envSlot = { ty := .ty .unit, lifetime := dropCounterOuter } := by
+          simpa [dropCounterEnv, Env.update] using henv.symm
+        subst henvSlot
+        exact ⟨.value .unit, by
+            simp [dropCounterStore, VariableProjection, dropCounterXSlot,
+              dropCounterYSlot],
+          ValidPartialValue.unit⟩
+      · simp [dropCounterEnv, Env.empty, hx, hy] at henv
+
+theorem dropCounter_not_safeAfterDrop :
+    ¬ dropCounterStoreAfter ∼ₛ dropCounterEnv.dropLifetime dropCounterInner := by
+  intro hsafe
+  have henvY :
+      (dropCounterEnv.dropLifetime dropCounterInner).slotAt "y" =
+        some { ty := .ty .unit, lifetime := dropCounterOuter } := by
+    simp [dropCounterEnv, Env.dropLifetime, Env.update, dropCounterInner,
+      dropCounterOuter]
+  rcases hsafe.2 "y" { ty := .ty .unit, lifetime := dropCounterOuter } henvY with
+    ⟨value, hslot, _hvalid⟩
+  simp [dropCounterStoreAfter, dropCounterStore, ProgramStore.erase, VariableProjection,
+    dropCounterXSlot, dropCounterYSlot] at hslot
+
+theorem dropCounter_not_storeOwnerTargetsHeap :
+    ¬ StoreOwnerTargetsHeap dropCounterStore := by
+  intro hheap
+  have hownsY : ProgramStore.Owns dropCounterStore (.var "y") := by
+    exact ⟨.var "x", dropCounterInner, by
+      simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot, owningRef]⟩
+  rcases hheap (.var "y") hownsY with ⟨address, hheapLocation⟩
+  cases hheapLocation
+
+theorem dropCounter_safe_dropLifetime_fails :
+    ∃ store store' env lifetime,
+      store ∼ₛ env ∧ DropsLifetime store lifetime store' ∧
+        ¬ store' ∼ₛ env.dropLifetime lifetime := by
+  exact ⟨dropCounterStore, dropCounterStoreAfter, dropCounterEnv, dropCounterInner,
+    dropCounter_safeAbstraction, dropCounter_dropsLifetime,
+    dropCounter_not_safeAfterDrop⟩
+
 @[simp] theorem Env.dropLifetime_slotAt_eq_some {env : Env} {x : Name}
     {slot : EnvSlot} {lifetime : Lifetime} :
     (env.dropLifetime lifetime).slotAt x = some slot ↔
@@ -601,6 +763,26 @@ theorem dropLifetime_storeDomain_of_envSurvivor {store store' : ProgramStore}
     exact congrArg StoreSlot.lifetime hslotEq
   exact ⟨slot, hpreserve slot hslot (by simpa [hslotLifetime] using hlifetime)⟩
 
+theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap
+    {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} {x : Name} :
+    store ∼ₛ env →
+    DropsLifetime store lifetime store' →
+    StoreOwnerTargetsHeap store →
+    (∃ envSlot, (env.dropLifetime lifetime).slotAt x = some envSlot) →
+    ∃ slot, store'.slotAt (VariableProjection x) = some slot := by
+  intro hsafe hdrops hheap henvDomain
+  rcases henvDomain with ⟨envSlot, henvDropped⟩
+  rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
+    ⟨henv, hlifetime⟩
+  rcases (hsafe.1 x).mpr ⟨envSlot, henv⟩ with ⟨slot, hslot⟩
+  have hslotLifetime : slot.lifetime = envSlot.lifetime := by
+    rcases hsafe.2 x envSlot henv with ⟨value, hsafeSlot, _hvalid⟩
+    rw [hslot] at hsafeSlot
+    injection hsafeSlot with hslotEq
+    exact congrArg StoreSlot.lifetime hslotEq
+  exact ⟨slot, dropsLifetime_preserves_var_slot_of_not_lifetime hdrops hheap hslot
+    (by simpa [hslotLifetime] using hlifetime)⟩
+
 /--
 Domain component of Lemma 9.5.  This packages the two store-side facts needed
 to align runtime lifetime drops with Definition 3.20's environment drop.
@@ -623,6 +805,22 @@ theorem dropLifetime_domain_equiv_of_slot_preservation
   constructor
   · exact dropLifetime_envDomain_of_storeSurvivor hsafe hdrops (hnotDropped x)
   · exact dropLifetime_storeDomain_of_envSurvivor hsafe (hpreserve x)
+
+theorem dropLifetime_domain_equiv_of_ownerTargetsHeap
+    {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    store ∼ₛ env →
+    DropsLifetime store lifetime store' →
+    StoreOwnerTargetsHeap store →
+    ∀ x,
+      (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
+        ∃ envSlot, (env.dropLifetime lifetime).slotAt x = some envSlot := by
+  intro hsafe hdrops hheap x
+  constructor
+  · exact dropLifetime_envDomain_of_storeSurvivor hsafe hdrops (by
+      intro slot hslot
+      exact dropsLifetime_slot_not_dropped hdrops hslot)
+  · exact dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap
+      hsafe hdrops hheap
 
 @[simp] theorem validPartialValue_unit (store : ProgramStore) :
     store ⊢ PartialValue.value Value.unit ∼ PartialTy.ty Ty.unit :=

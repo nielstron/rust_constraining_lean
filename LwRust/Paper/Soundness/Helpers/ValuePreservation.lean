@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Helpers.RuntimeFacts
+import LwRust.Paper.Soundness.Helpers.Frame
 
 /-!
 # Soundness helpers: ValuePreservation
@@ -56,6 +56,80 @@ theorem valuePreservation_move_step {store store' : ProgramStore} {env env₂ : 
           cases hslotEq
           cases hslotValue
           exact hvalidValue
+
+/--
+`R-Move` value preservation in the post-write store, factored through an
+explicit frame condition.
+
+The remaining obligation is no longer an opaque post-store validity premise:
+the location overwritten by `move` must not be one of the locations inspected by
+the moved value's validity derivation in the pre-write store.
+-/
+theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+    {lv : LVal} {value : Value} {ty : Ty} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) ty env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    (∀ updated slot,
+      store.loc lv = some updated →
+      store.slotAt updated = some slot →
+      ∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ updated) →
+    ValidValue store' value ty := by
+  intro hwellFormed hsafe htyping hstep hframe
+  have hvalidStore : ValidValue store value ty :=
+    valuePreservation_move_step hwellFormed hsafe htyping hstep
+  cases hstep with
+  | move hread hwrite =>
+      cases hloc : store.loc lv with
+      | none =>
+          simp [ProgramStore.read, hloc] at hread
+      | some updated =>
+          cases hslot : store.slotAt updated with
+          | none =>
+              simp [ProgramStore.read, hloc, hslot] at hread
+          | some oldSlot =>
+              have hstore' :
+                  store' =
+                    store.update updated { oldSlot with value := PartialValue.undef } := by
+                simp [ProgramStore.write, hloc, hslot] at hwrite
+                exact hwrite.symm
+              subst hstore'
+              exact RuntimeFrame.validValue_update_of_not_reaches hvalidStore
+                (hframe updated oldSlot hloc hslot)
+
+/-- `R-Move` post-write value preservation for unit values. -/
+theorem valuePreservation_move_step_unit_post {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+    {lv : LVal} {value : Value} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) .unit env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    ValidValue store' value .unit := by
+  intro hwellFormed hsafe htyping hstep
+  exact valuePreservation_move_step_of_not_reaches
+    hwellFormed hsafe htyping hstep
+    (by
+      intro _updated _slot _hloc _hslot ℓ hreach
+      cases hreach)
+
+/-- `R-Move` post-write value preservation for integer values. -/
+theorem valuePreservation_move_step_int_post {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+    {lv : LVal} {value : Value} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) .int env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    ValidValue store' value .int := by
+  intro hwellFormed hsafe htyping hstep
+  exact valuePreservation_move_step_of_not_reaches
+    hwellFormed hsafe htyping hstep
+    (by
+      intro _updated _slot _hloc _hslot ℓ hreach
+      cases hreach)
 
 /-- Lemma 9.9, `R-Borrow` one-step value preservation fragment. -/
 theorem valuePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
@@ -384,8 +458,19 @@ theorem validRuntimeState_copy_step {store : ProgramStore} {env env₂ : Env}
     Step store lifetime (.copy lv) store (.val value) →
     ValidRuntimeState store (.val value) := by
   intro hwellFormed hsafe hvalidRuntime htyping hstep
+  have htermHeap : TermOwnerTargetsHeap (.val value) := by
+    cases htyping with
+    | copy hLv hcopy hreadProhibited =>
+        exact termOwnerTargetsHeap_value_nonOwner
+          (copy_value_nonOwner hcopy
+            (valuePreservation_copy_step hwellFormed hsafe
+              (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep))
   exact ⟨validState_copy_step hwellFormed hsafe hvalidRuntime.1 htyping hstep,
-    storeOwnersAllocated_copy_step hvalidRuntime.2 hstep⟩
+    storeOwnersAllocated_copy_step
+      (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+    ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+    htermHeap⟩
 
 /-- Runtime-validity preservation for `R-Borrow`. -/
 theorem validRuntimeState_borrow_step {store : ProgramStore}
@@ -396,7 +481,11 @@ theorem validRuntimeState_borrow_step {store : ProgramStore}
     ValidRuntimeState store (.val (.ref { location := location, owner := false })) := by
   intro hvalidRuntime hstep
   exact ⟨validState_borrow_step hvalidRuntime.1 hstep,
-    storeOwnersAllocated_borrow_step hvalidRuntime.2 hstep⟩
+    storeOwnersAllocated_borrow_step
+      (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+    ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+    termOwnerTargetsHeap_borrowed_ref⟩
 
 /-- Runtime-validity preservation for `R-Move`. -/
 theorem validRuntimeState_move_step {store store' : ProgramStore}
@@ -405,8 +494,19 @@ theorem validRuntimeState_move_step {store store' : ProgramStore}
     Step store lifetime (.move lv) store' (.val value) →
     ValidRuntimeState store' (.val value) := by
   intro hvalidRuntime hstep
-  exact ⟨validState_move_step hvalidRuntime.1 hstep,
-    storeOwnersAllocated_move_step hvalidRuntime.2 hstep⟩
+  cases hstep with
+  | move hread hwrite =>
+      exact ⟨validState_move_step hvalidRuntime.1
+          (Step.move (lifetime := lifetime) hread hwrite),
+        storeOwnersAllocated_move_step
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          (Step.move (lifetime := lifetime) hread hwrite),
+        storeOwnerTargetsHeap_write_undef
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hwrite,
+        heapSlotsRootLifetime_write_undef
+          (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime) hwrite,
+        termOwnerTargetsHeap_value_of_store_read
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hread⟩
 
 /--
 Runtime-validity preservation for `R-Assign`, assuming the assignment's
@@ -419,10 +519,13 @@ theorem validRuntimeState_assign_step {store store' : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {value : Value} :
     ValidRuntimeState store (.assign lhs (.val value)) →
     StoreOwnersAllocated store' →
+    StoreOwnerTargetsHeap store' →
+    HeapSlotsRootLifetime store' →
     Step store lifetime (.assign lhs (.val value)) store' (.val .unit) →
     ValidRuntimeState store' (.val .unit) := by
-  intro hvalidRuntime hallocated hstep
-  exact ⟨validState_assign_step hvalidRuntime.1 hstep, hallocated⟩
+  intro hvalidRuntime hallocated hheap hroot hstep
+  exact ⟨validState_assign_step hvalidRuntime.1 hstep, hallocated, hheap,
+    hroot, termOwnerTargetsHeap_unit⟩
 
 /--
 Runtime-validity preservation for `R-Assign` from a post-drop allocation
@@ -444,8 +547,21 @@ theorem validRuntimeState_assign_step_of_postDrop_validValue
     storeAfterDrop.write lhs (.value value) = some store' →
     ValidRuntimeState store' (.val .unit) := by
   intro hvalidRuntime hallocatedAfterDrop hvalidValue hread hdrops hwrite
+  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+    ValueOwnerTargetsHeap.partial
+      (TermOwnerTargetsHeap.value
+        (termOwnerTargetsHeap_assign_inner
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+  have hheapAfterDrop : StoreOwnerTargetsHeap storeAfterDrop :=
+    drops_storeOwnerTargetsHeap hdrops
+      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+  have hrootAfterDrop : HeapSlotsRootLifetime storeAfterDrop :=
+    drops_heapSlotsRootLifetime hdrops
+      (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
   exact validRuntimeState_assign_step (lifetime := lifetime) hvalidRuntime
     (storeOwnersAllocated_write_value_of_validValue hallocatedAfterDrop hvalidValue hwrite)
+    (storeOwnerTargetsHeap_write hheapAfterDrop hvalueHeap hwrite)
+    (heapSlotsRootLifetime_write hrootAfterDrop hwrite)
     (Step.assign (lifetime := lifetime) hread hdrops hwrite)
 
 /--
@@ -469,7 +585,8 @@ theorem validRuntimeState_assign_step_old_nonOwner
     drops_partialValue_nonOwner_eq hnonOwner hdrops
   subst hdropEq
   exact validRuntimeState_assign_step_of_postDrop_validValue
-    (lifetime := lifetime) hvalidRuntime hvalidRuntime.2 hvalidValue hread hdrops hwrite
+    (lifetime := lifetime) hvalidRuntime
+    (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue hread hdrops hwrite
 
 /-- Runtime-validity preservation for `R-Declare`, from initializer validity. -/
 theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStore}
@@ -483,9 +600,24 @@ theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStor
   cases hstep with
   | declare hstore' =>
       subst hstore'
+      have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+        ValueOwnerTargetsHeap.partial
+          (TermOwnerTargetsHeap.value
+            (termOwnerTargetsHeap_declare_inner
+              (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
       exact ⟨validState_declare hvalidRuntime.1 hfresh,
-        storeOwnersAllocated_declare_step_of_validValue hvalidRuntime.2 hvalidValue
-          (Step.declare rfl)⟩
+        storeOwnersAllocated_declare_step_of_validValue
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue
+          (Step.declare rfl),
+        by
+          simpa [ProgramStore.declare] using
+            storeOwnerTargetsHeap_update
+              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap,
+        by
+          simpa [ProgramStore.declare] using
+            heapSlotsRootLifetime_update_var
+              (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
+        termOwnerTargetsHeap_unit⟩
 
 /-- Runtime-validity preservation for `R-Declare`. -/
 theorem validRuntimeState_declare_step {store store' : ProgramStore}
@@ -515,7 +647,14 @@ theorem validRuntimeState_seq_step {store store' : ProgramStore}
   | seq hdrops =>
       exact ⟨validState_seq_step hvalidRuntime.1 hdrops,
         storeOwnersAllocated_seq_step (lifetime := lifetime)
-          hvalidRuntime.1 hvalidRuntime.2 (Step.seq (lifetime := lifetime) hdrops)⟩
+          hvalidRuntime.1 (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          (Step.seq (lifetime := lifetime) hdrops),
+        drops_storeOwnerTargetsHeap hdrops
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime),
+        drops_heapSlotsRootLifetime hdrops
+          (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
+        termOwnerTargetsHeap_block_tail
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)⟩
 
 /-- Runtime-validity preservation for `R-BlockB`. -/
 theorem validRuntimeState_blockB_step {store store' : ProgramStore}
@@ -529,8 +668,34 @@ theorem validRuntimeState_blockB_step {store store' : ProgramStore}
   | blockB hdrops =>
       exact ⟨validState_blockB hvalidRuntime.1 hdrops,
         storeOwnersAllocated_blockB_step (lifetime := lifetime)
-          hvalidRuntime.1 hvalidRuntime.2 hdropDisjoint
-          (Step.blockB (lifetime := lifetime) hdrops)⟩
+          hvalidRuntime.1 (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          hdropDisjoint (Step.blockB (lifetime := lifetime) hdrops),
+        dropsLifetime_storeOwnerTargetsHeap hdrops
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime),
+        dropsLifetime_heapSlotsRootLifetime hdrops
+          (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
+        termOwnerTargetsHeap_block_value
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)⟩
+
+/--
+Runtime-validity preservation for `R-BlockB` under the typed block-lifetime
+shape.  Heap slots are always root-lifetime slots, and `T-Block` supplies a
+child lifetime, so no store owner target can be allocated in the dropped block
+lifetime.
+-/
+theorem validRuntimeState_blockB_step_of_child {store store' : ProgramStore}
+    {lifetime blockLifetime : Lifetime} {value : Value} :
+    ValidRuntimeState store (.block blockLifetime [.val value]) →
+    LifetimeChild lifetime blockLifetime →
+    Step store lifetime (.block blockLifetime [.val value]) store' (.val value) →
+    ValidRuntimeState store' (.val value) := by
+  intro hvalidRuntime hchild hstep
+  exact validRuntimeState_blockB_step hvalidRuntime
+    (lifetimeDropOwnersDisjoint_of_heapRootLifetime
+      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+      (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
+      hchild)
+    hstep
 
 /-- Runtime-validity preservation for `R-Box`, from operand validity. -/
 theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
@@ -540,9 +705,36 @@ theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
     Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
     ValidRuntimeState store' (.val (.ref ref)) := by
   intro hvalidRuntime hvalidValue hstep
-  exact ⟨validState_box_step_of_validValue hvalidRuntime.1 hvalidRuntime.2
-      hvalidValue hstep,
-    storeOwnersAllocated_box_step_of_validValue hvalidRuntime.2 hvalidValue hstep⟩
+  cases hstep with
+  | box hfresh hbox =>
+      have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+        ValueOwnerTargetsHeap.partial
+          (TermOwnerTargetsHeap.value
+            (termOwnerTargetsHeap_box_inner
+              (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+      exact ⟨validState_box_step_of_validValue hvalidRuntime.1
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          hvalidValue (Step.box (lifetime := lifetime) hfresh hbox),
+        storeOwnersAllocated_box_step_of_validValue
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue
+          (Step.box (lifetime := lifetime) hfresh hbox),
+        by
+          cases hbox
+          simpa [ProgramStore.boxAt] using
+            storeOwnerTargetsHeap_update
+              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap,
+        by
+          cases hbox
+          simpa [ProgramStore.boxAt] using
+            heapSlotsRootLifetime_update_heap_root
+              (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
+        by
+          cases hbox
+          intro owned hmem
+          simp [termOwningLocations, termValues, valueOwningLocations,
+            valueOwnedLocation?] at hmem
+          subst hmem
+          exact ⟨_, rfl⟩⟩
 
 /-- Runtime-validity preservation for `R-Box`. -/
 theorem validRuntimeState_box_step {store store' : ProgramStore}
@@ -675,6 +867,82 @@ theorem preservation_move_var_step_runtime {store store' : ProgramStore}
   exact ⟨validRuntimeState_move_step hvalidRuntime hstep,
     storePreservation_move_var_step hsafe henvSlot hmove hstep hpreserveOld,
     hvalidValue⟩
+
+/--
+Lemma 4.11, variable `R-Move` one-step preservation under concrete
+store-update frame conditions.
+
+This derives the post-write validity of the moved value and the surviving
+environment slots from `RuntimeFrame.Reaches` non-interference facts.  It is the
+direct-variable analogue of the framed assignment fragments.
+-/
+theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
+    {x : Name} {value : Value} {ty : Ty} :
+    WellFormedEnv env₁ current →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move (.var x)) →
+    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    EnvMove env₁ (.var x) env₂ →
+    TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
+    Step store lifetime (.move (.var x)) store' (.val value) →
+    (∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ →
+      ℓ ≠ VariableProjection x) →
+    (∀ y envSlot oldValue,
+      y ≠ x →
+      env₁.slotAt y = some envSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := envSlot.lifetime } →
+      ∀ ℓ, RuntimeFrame.Reaches store oldValue envSlot.ty ℓ →
+        ℓ ≠ VariableProjection x) →
+    ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
+      ValidValue store' value ty := by
+  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
+    hvalueFrame hotherFrames
+  have hvalidStore : ValidValue store value ty :=
+    valuePreservation_move_step hwellFormed hsafe htyping hstep
+  rcases hsafe.2 x { ty := .ty ty, lifetime := valueLifetime } henvSlot with
+    ⟨sourceValue, hsourceSlot, _hsourceValid⟩
+  have hsourceSlotVar :
+      store.slotAt (.var x) =
+        some { value := sourceValue, lifetime := valueLifetime } := by
+    simpa [VariableProjection] using hsourceSlot
+  have hstore' :
+      store' =
+        store.update (VariableProjection x)
+          { value := .undef, lifetime := valueLifetime } := by
+    cases hstep with
+    | move hread hwrite =>
+        have hreadEq := hread
+        rw [show store.read (.var x) =
+            some { value := sourceValue, lifetime := valueLifetime } by
+              simp [ProgramStore.read, ProgramStore.loc, hsourceSlotVar]] at hreadEq
+        injection hreadEq with hslotEq
+        cases hslotEq
+        simp [ProgramStore.write, ProgramStore.loc, hsourceSlotVar] at hwrite
+        exact hwrite.symm
+  have hvalidValue : ValidValue store' value ty := by
+    rw [hstore']
+    exact RuntimeFrame.validValue_update_of_not_reaches hvalidStore hvalueFrame
+  have hpreserveOld :
+      ∀ y envSlot oldValue,
+        y ≠ x →
+        env₁.slotAt y = some envSlot →
+        store.slotAt (VariableProjection y) =
+          some { value := oldValue, lifetime := envSlot.lifetime } →
+        ValidPartialValue store' oldValue envSlot.ty := by
+    intro y envSlot oldValue hyx henvY hstoreY
+    rw [hstore']
+    exact RuntimeFrame.validPartialValue_update_of_not_reaches
+      (by
+        rcases hsafe.2 y envSlot henvY with ⟨safeValue, hsafeSlot, hvalidOld⟩
+        rw [hstoreY] at hsafeSlot
+        injection hsafeSlot with hslotEq
+        cases hslotEq
+        exact hvalidOld)
+      (hotherFrames y envSlot oldValue hyx henvY hstoreY)
+  exact preservation_move_var_step_runtime hwellFormed hsafe hvalidRuntime
+    henvSlot hmove htyping hstep hvalidValue hpreserveOld
 
 /--
 Lemma 4.11, `R-Box` one-step preservation fragment, factored around the
@@ -833,10 +1101,12 @@ theorem preservation_assign_step_runtime_validity {store store' : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {value : Value} :
     ValidRuntimeState store (.assign lhs (.val value)) →
     StoreOwnersAllocated store' →
+    StoreOwnerTargetsHeap store' →
+    HeapSlotsRootLifetime store' →
     Step store lifetime (.assign lhs (.val value)) store' (.val .unit) →
     ValidRuntimeState store' (.val .unit) ∧ ValidValue store' .unit .unit := by
-  intro hvalidRuntime hallocated hstep
-  exact ⟨validRuntimeState_assign_step hvalidRuntime hallocated hstep,
+  intro hvalidRuntime hallocated hheap hroot hstep
+  exact ⟨validRuntimeState_assign_step hvalidRuntime hallocated hheap hroot hstep,
     ValidPartialValue.unit⟩
 
 /--
@@ -879,6 +1149,75 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     ValidPartialValue.unit⟩
 
 /--
+Lemma 4.11, direct-variable `R-Assign` preservation fragment under concrete
+store-update frame conditions.
+
+Compared with `preservation_assign_var_old_nonOwner_step_runtime_of_preserved`,
+this derives the post-write validity of the RHS value and the surviving
+environment slots from `RuntimeFrame.Reaches` non-interference facts.  The old
+lhs value is non-owning, so the drop is a no-op and the only store change is the
+write to `x`.
+-/
+theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
+    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.assign (.var x) (.val value)) →
+    env.slotAt x = some envSlot →
+    EnvWrite 0 env (.var x) ty env' →
+    PartialValueNonOwner oldSlot.value →
+    ValidValue store value ty →
+    store.read (.var x) = some oldSlot →
+    Drops store [oldSlot.value] storeAfterDrop →
+    storeAfterDrop.write (.var x) (.value value) = some store' →
+    (∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ →
+      ℓ ≠ VariableProjection x) →
+    (∀ y otherEnvSlot oldValue,
+      y ≠ x →
+      env.slotAt y = some otherEnvSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
+      ∀ ℓ, RuntimeFrame.Reaches store oldValue otherEnvSlot.ty ℓ →
+        ℓ ≠ VariableProjection x) →
+    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
+      ValidValue store' .unit .unit := by
+  intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hvalidValue
+    hread hdrops hwrite hvalueFrame hotherFrames
+  have hdropEq : storeAfterDrop = store :=
+    drops_partialValue_nonOwner_eq hnonOwner hdrops
+  have hstoreX : store.slotAt (VariableProjection x) = some oldSlot := by
+    simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
+  have hstoreXAfterDrop : storeAfterDrop.slotAt (VariableProjection x) = some oldSlot := by
+    simpa [hdropEq] using hstoreX
+  have hstore' :
+      store' = storeAfterDrop.update (VariableProjection x)
+        { oldSlot with value := .value value } :=
+    write_var_eq hstoreXAfterDrop hwrite
+  have hnewValid : ValidPartialValue store' (.value value) (.ty ty) := by
+    rw [hstore', hdropEq]
+    exact RuntimeFrame.validValue_update_of_not_reaches hvalidValue hvalueFrame
+  have hpreserveOther :
+      ∀ y otherEnvSlot,
+        y ≠ x →
+        env.slotAt y = some otherEnvSlot →
+        ∃ oldValue,
+          store'.slotAt (VariableProjection y) =
+            some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
+          ValidPartialValue store' oldValue otherEnvSlot.ty := by
+    intro y otherEnvSlot hyx henvY
+    rcases hsafe.2 y otherEnvSlot henvY with ⟨oldValue, hstoreY, hvalidOld⟩
+    refine ⟨oldValue, ?_, ?_⟩
+    · rw [hstore', hdropEq]
+      simpa [ProgramStore.update, VariableProjection, hyx] using hstoreY
+    · rw [hstore', hdropEq]
+      exact RuntimeFrame.validPartialValue_update_of_not_reaches hvalidOld
+        (hotherFrames y otherEnvSlot oldValue hyx henvY hstoreY)
+  exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
+    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
+    hvalidValue hread hdrops hwrite hnewValid hpreserveOther
+
+/--
 Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
 environment type is non-owning (`unit`, `int`, `undef`, or borrow).
 
@@ -917,6 +1256,45 @@ theorem preservation_assign_var_envShape_step_runtime_of_preserved
   exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
     hvalidValue hread hdrops hwrite hnewValid hpreserveOther
+
+/--
+Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
+environment type is non-owning-shaped, with post-write validity derived from
+reachability frame conditions.
+-/
+theorem preservation_assign_var_envShape_step_runtime_of_frames
+    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.assign (.var x) (.val value)) →
+    env.slotAt x = some envSlot →
+    EnvWrite 0 env (.var x) ty env' →
+    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
+      (∃ inner, envSlot.ty = .undef inner) ∨
+      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
+    ValidValue store value ty →
+    store.read (.var x) = some oldSlot →
+    Drops store [oldSlot.value] storeAfterDrop →
+    storeAfterDrop.write (.var x) (.value value) = some store' →
+    (∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ →
+      ℓ ≠ VariableProjection x) →
+    (∀ y otherEnvSlot oldValue,
+      y ≠ x →
+      env.slotAt y = some otherEnvSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
+      ∀ ℓ, RuntimeFrame.Reaches store oldValue otherEnvSlot.ty ℓ →
+        ℓ ≠ VariableProjection x) →
+    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
+      ValidValue store' .unit .unit := by
+  intro hsafe hvalidRuntime henvX hwriteEnv hshape hvalidValue
+    hread hdrops hwrite hvalueFrame hotherFrames
+  have hnonOwner : PartialValueNonOwner oldSlot.value :=
+    safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
+  exact preservation_assign_var_old_nonOwner_step_runtime_of_frames
+    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
+    hvalidValue hread hdrops hwrite hvalueFrame hotherFrames
 
 /--
 Lemma 4.11, `R-Seq` preservation fragment for non-owning values.
@@ -979,12 +1357,8 @@ theorem preservation_blockB_value_step_runtime_of_drop_preserved
     ValidRuntimeState store (.block blockLifetime [.val value]) →
     store ∼ₛ env →
     TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
-    LifetimeDropOwnersDisjoint store blockLifetime →
     Step store lifetime (.block blockLifetime [.val value]) store' (.val value) →
     ValidValue store' value ty →
-    (∀ x,
-      (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
-        ∃ envSlot, (env.dropLifetime blockLifetime).slotAt x = some envSlot) →
     (∀ x envSlot,
       env.slotAt x = some envSlot →
       envSlot.lifetime ≠ blockLifetime →
@@ -994,13 +1368,23 @@ theorem preservation_blockB_value_step_runtime_of_drop_preserved
         ValidPartialValue store' oldValue envSlot.ty) →
     ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env' ∧
       ValidValue store' value ty := by
-  intro hvalidRuntime hsafe htyping hdropDisjoint hstep hvalidValue hdomain hpreserve
+  intro hvalidRuntime hsafe htyping hstep hvalidValue hpreserve
   have henv' : env' = env.dropLifetime blockLifetime := by
     exact blockValueTyping_output_eq htyping
+  have hdropDisjoint : LifetimeDropOwnersDisjoint store blockLifetime := by
+    cases htyping with
+    | block hchild _hterms _hwellTy _hdrop =>
+        exact lifetimeDropOwnersDisjoint_of_heapRootLifetime
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+          (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
+          hchild
   have hsafeDrop : store' ∼ₛ env.dropLifetime blockLifetime := by
     cases hstep with
     | blockB hdrops =>
-        exact dropPreservation_lifetime hsafe hdrops hdomain hpreserve
+        exact dropPreservation_lifetime hsafe hdrops
+          (dropLifetime_domain_equiv_of_ownerTargetsHeap hsafe hdrops
+            (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime))
+          hpreserve
   have hsafe' : store' ∼ₛ env' := by
     rw [henv']
     exact hsafeDrop
@@ -1551,16 +1935,10 @@ theorem preservation_blockB_value_multistep_runtime_of_drop_preserved
     ValidRuntimeState store (.block blockLifetime [.val value]) →
     store ∼ₛ env →
     TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
-    LifetimeDropOwnersDisjoint store blockLifetime →
     ValidValue store value ty →
     (∀ store',
       DropsLifetime store blockLifetime store' →
       ValidValue store' value ty) →
-    (∀ store',
-      DropsLifetime store blockLifetime store' →
-      ∀ x,
-        (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
-          ∃ envSlot, (env.dropLifetime blockLifetime).slotAt x = some envSlot) →
     (∀ store',
       DropsLifetime store blockLifetime store' →
       ∀ x envSlot,
@@ -1573,7 +1951,7 @@ theorem preservation_blockB_value_multistep_runtime_of_drop_preserved
     MultiStep store lifetime (.block blockLifetime [.val value]) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
       ValidValue finalStore finalValue ty := by
-  intro hvalidRuntime hsafe htyping hdropDisjoint _hvalidValue hresultValue hdomain hpreserve
+  intro hvalidRuntime hsafe htyping _hvalidValue hresultValue hpreserve
     hmulti
   exact preservation_runtime_multistep_of_step_to_value
     (term := .block blockLifetime [.val value])
@@ -1591,10 +1969,9 @@ theorem preservation_blockB_value_multistep_runtime_of_drop_preserved
       cases hstep with
       | blockB hdrops =>
           exact preservation_blockB_value_step_runtime_of_drop_preserved
-            hvalidRuntime hsafe htyping hdropDisjoint
+            hvalidRuntime hsafe htyping
             (Step.blockB (lifetime := lifetime) hdrops)
             (hresultValue _store' hdrops)
-            (hdomain _store' hdrops)
             (hpreserve _store' hdrops))
     hmulti
 

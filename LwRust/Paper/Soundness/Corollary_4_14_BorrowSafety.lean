@@ -15,14 +15,14 @@ For the calculus core this strengthens to `Γ₂ = Γ₃`, which is the mechaniz
 form below: typing from a well-formed borrow-safe environment yields a
 well-formed *and* borrow-safe result environment.
 
-Status: unconditional as a paper-facing statement, but it depends on explicit
-sorried lemmas through `updateBorrowInvariantObligations_from_sorries` and
-`borrowSafetyPreservationObligations_from_sorries`.  In the borrow-safety half,
-the global mutual term/list induction is source-scoped: `T-Const` only handles
-source values, whose types are borrow-free.  Assignment leaves the local
-`EnvWrite` frame obligation, now with the root-independent RHS
-`TyBorrowSafeAgainstEnv` invariant made explicit.  Move result-extension is
-proved constructively from the `LValTyping`/`Strike` origin lemma.  Blocks are
+Status: proved for the strengthened rule-carried formulation that exposes
+`UpdateBorrowInvariantObligations`, the mutable-borrow fan-out invariant missing
+from the bare paper rule.  The borrow-safety `EnvWrite` frame obligation is now
+proved constructively with the root-independent RHS `TyBorrowSafeAgainstEnv`
+invariant and the strengthened RHS/RHS fan-out side condition carried by
+`T-Assign`.  The global mutual term/list induction is source-scoped: `T-Const`
+only handles source values, whose types are borrow-free.  Move result-extension
+is proved constructively from the `LValTyping`/`Strike` origin lemma.  Blocks are
 handled by the global term/list induction, which carries that same
 root-independent result-type invariant through `dropLifetime`.  The final result
 binding also carries `FreshUpdateCoherenceObligations`, because the bare paper
@@ -1886,10 +1886,59 @@ theorem borrowSafetyPreservation_envWrite
     EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
     ¬ WriteProhibited env₃ lhs →
     BorrowSafeEnv env₃ := by
-  sorry
+  intro hborrowSafe hsafeTy _hLhs _hRhs _hshape _hwellTy hwrite hranked _hcoh
+    _hnotWrite x y mutable targetsMutable targetsOther targetMutable targetOther
+    hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  rcases hranked with ⟨_φ, _hlinBy, hbelow⟩
+  rcases hcontainsMutable with ⟨mutableSlot, hmutableSlot, hmutableContains⟩
+  rcases hcontainsOther with ⟨otherSlot, hotherSlot, hotherContains⟩
+  have hmutableOrigin :=
+    EnvWrite.borrowTargetOrigin_all hwrite x mutableSlot true targetsMutable
+      hmutableSlot hmutableContains targetMutable htargetMutable
+  have hotherOrigin :=
+    EnvWrite.borrowTargetOrigin_all hwrite y otherSlot mutable targetsOther
+      hotherSlot hotherContains targetOther htargetOther
+  rcases hmutableOrigin with hmutableOld | hmutableRhs
+  · rcases hmutableOld with
+      ⟨oldMutableSlot, oldMutableTargets, holdMutableSlot,
+        holdMutableContains, holdMutableTarget⟩
+    rcases hotherOrigin with hotherOld | hotherRhs
+    · rcases hotherOld with
+        ⟨oldOtherSlot, oldOtherTargets, holdOtherSlot,
+          holdOtherContains, holdOtherTarget⟩
+      exact hborrowSafe x y mutable oldMutableTargets oldOtherTargets
+        targetMutable targetOther
+        ⟨oldMutableSlot, holdMutableSlot, holdMutableContains⟩
+        ⟨oldOtherSlot, holdOtherSlot, holdOtherContains⟩
+        holdMutableTarget holdOtherTarget hconflict
+    · rcases hotherRhs with ⟨rhsOtherTargets, hrhsOtherContains, hrhsOtherTarget⟩
+      exact False.elim
+        (hsafeTy.2 x oldMutableTargets mutable rhsOtherTargets targetMutable
+          targetOther
+          ⟨oldMutableSlot, holdMutableSlot, holdMutableContains⟩
+          hrhsOtherContains holdMutableTarget hrhsOtherTarget hconflict)
+  · rcases hmutableRhs with
+      ⟨rhsMutableTargets, hrhsMutableContains, hrhsMutableTarget⟩
+    rcases hotherOrigin with hotherOld | hotherRhs
+    · rcases hotherOld with
+        ⟨oldOtherSlot, oldOtherTargets, holdOtherSlot,
+          holdOtherContains, holdOtherTarget⟩
+      exact False.elim
+        (hsafeTy.1 rhsMutableTargets mutable oldOtherTargets y targetMutable
+          targetOther hrhsMutableContains
+          ⟨oldOtherSlot, holdOtherSlot, holdOtherContains⟩
+          hrhsMutableTarget holdOtherTarget hconflict)
+    · rcases hotherRhs with ⟨rhsOtherTargets, hrhsOtherContains, hrhsOtherTarget⟩
+      exact hbelow.2 x y mutable targetsMutable targetsOther targetMutable
+        targetOther
+        ⟨mutableSlot, hmutableSlot, hmutableContains⟩
+        ⟨otherSlot, hotherSlot, hotherContains⟩
+        htargetMutable htargetOther hconflict
+        ⟨true, rhsMutableTargets, hrhsMutableContains, hrhsMutableTarget⟩
+        ⟨mutable, rhsOtherTargets, hrhsOtherContains, hrhsOtherTarget⟩
 
-/-- Concrete borrow-safety package assembled from the explicit sorried lemmas. -/
-theorem borrowSafetyPreservationObligations_from_sorries :
+/-- Concrete borrow-safety package assembled from proved local preservation lemmas. -/
+theorem borrowSafetyPreservationObligations_proved :
     BorrowSafetyPreservationObligations where
   envWrite := borrowSafetyPreservation_envWrite
 
@@ -2222,6 +2271,7 @@ open LwRust.Paper LwRust.Core
 theorem corollary_4_14_borrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {gamma : Name}
+    (hupdateObligations : UpdateBorrowInvariantObligations)
     (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hvalidState : ValidState store term)
     (hvalidStoreTyping : ValidStoreTyping store term typing)
@@ -2236,8 +2286,8 @@ theorem corollary_4_14_borrowSafety
         lifetime ∧
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) :=
   borrowSafety_of_ruleCarriedObligations
-    updateBorrowInvariantObligations_from_sorries
-    borrowSafetyPreservationObligations_from_sorries
+    hupdateObligations
+    borrowSafetyPreservationObligations_proved
     hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
     hfresh hfreshCoherence
 

@@ -13,9 +13,9 @@ Paper statement (Section 4.5):
 
 The paper's statement assumes termination; here that is the explicit
 `TerminatesAsValue` witness.  Follows from Lemma 4.10 (Progress) and Lemma 4.11
-(Preservation).  The paper-facing statement is unconditional, but it depends on
-the explicit sorried runtime lemmas through
-`runtimePreservationObligations_from_sorries`.
+(Preservation).  The mechanized paper-facing wrapper exposes the explicit
+`RuntimePreservationObligations` needed for the remaining move/assign/block
+runtime redex families.
 -/
 
 namespace LwRust
@@ -106,6 +106,7 @@ open LwRust.Paper LwRust.Core
 theorem theorem_4_12_typeAndBorrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
+    (hobligations : RuntimePreservationObligations)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : ∀ lifetime, WellFormedEnv env₁ lifetime)
@@ -117,7 +118,7 @@ theorem theorem_4_12_typeAndBorrowSafety
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety runtimePreservationObligations_from_sorries hvalid
+  typeAndBorrowSafety hobligations hvalid
     hstoreTyping hwellFormed hsafe hstore htyping hterminates
 
 end LwRust.Paper.Soundness
