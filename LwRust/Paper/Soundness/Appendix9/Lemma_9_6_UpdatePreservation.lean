@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness
+import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 
 /-!
 # Lemma 9.6 (Update Preservation)

@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness
+import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 
 /-!
 # Theorem 4.12 (Type and Borrow Safety)
@@ -17,6 +17,86 @@ The paper's statement assumes termination; here that is the explicit
 the explicit sorried runtime lemmas through
 `runtimePreservationObligations_from_sorries`.
 -/
+
+namespace LwRust
+namespace Paper
+
+open Core
+
+
+
+/-! ## Section 4.5: Type and Borrow Safety -/
+
+/-- A term terminates when it multisteps to a runtime value. -/
+def TerminatesAsValue (store : ProgramStore) (lifetime : Lifetime) (term : Term) : Prop :=
+  ∃ finalStore finalValue,
+    MultiStep store lifetime term finalStore (.val finalValue)
+
+/--
+Theorem 4.12 bridge, Type and Borrow Safety.
+
+The paper's core calculus is terminating, while this mechanisation keeps the
+operational semantics relational.  Therefore the theorem is stated with an
+explicit termination witness and the Lemma 4.11 preservation conclusion as a
+premise.  Progress rules out an initially stuck well-typed state; preservation
+turns the terminal multistep into the safe terminal state promised by the paper.
+-/
+theorem typeAndBorrowSafety_of_preservation
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    (∀ finalStore finalValue,
+      MultiStep store lifetime term finalStore (.val finalValue) →
+      TerminalStateSafe finalStore finalValue env₂ ty) →
+    TerminatesAsValue store lifetime term →
+    ProgressResult store lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep store lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
+    hpreservation hterminates
+  rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
+  exact ⟨progress_runtime hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+      hstoreProgress htyping,
+    ⟨finalStore, finalValue, hmulti, hpreservation finalStore finalValue hmulti⟩⟩
+
+/--
+Theorem 4.12, Type and Borrow Safety.
+
+The paper assumes termination; here that assumption is represented by an
+explicit multistep witness to a final runtime value.
+-/
+theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    RuntimePreservationObligations →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    TerminatesAsValue store lifetime term →
+    ProgressResult store lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep store lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro hobligations hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress
+    htyping hterminates
+  exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
+    hwellFormed hsafe hstoreProgress htyping
+    (by
+      intro finalStore finalValue hmulti
+      exact preservation hobligations hvalidRuntime hvalidStoreTyping
+        (hwellFormed lifetime) hsafe htyping hmulti)
+    hterminates
+
+end Paper
+end LwRust
 
 namespace LwRust.Paper.Soundness
 
