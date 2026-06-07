@@ -20665,20 +20665,20 @@ Result-extension for `T-Const` is only proved for source values; arbitrary
 runtime references need an evaluation/reachability invariant, not a local typing
 fact.  The copy, move, mut/imm borrow, box, and declaration shells are proved
 directly from the conflict definitions and induction hypotheses.  The assignment
-field consumes the full RHS induction result: `BorrowSafeEnv env₂` plus the fact
-that the RHS type can be safely exposed as a fresh root.  Block bodies are
-handled by the mutual term/list induction below: the induction carries the
-root-independent `TyBorrowSafeAgainstEnv` invariant through `dropLifetime`, so
-there is no separate block-list obligation here.
+field consumes the full RHS induction result: `BorrowSafeEnv env₂` plus the
+root-independent fact that the RHS type has no borrow-target conflicts with
+`env₂`.  This avoids baking fresh-name reasoning into assignment; fresh result
+installation is a caller-level corollary of the same invariant.  Block bodies
+are handled by the mutual term/list induction below: the induction carries
+`TyBorrowSafeAgainstEnv` through `dropLifetime`, so there is no separate
+block-list obligation here.
 -/
 structure BorrowSafetyPreservationObligations : Prop where
   envWrite {env₁ env₂ env₃ : Env}
       {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
       {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
       BorrowSafeEnv env₂ →
-      (∀ gamma,
-        env₂.fresh gamma →
-        BorrowSafeEnv (env₂.update gamma { ty := .ty rhsTy, lifetime := lifetime })) →
+      TyBorrowSafeAgainstEnv env₂ rhsTy →
       LValTyping env₁ lhs oldTy targetLifetime →
       TermTyping env₁ typing lifetime rhs rhsTy env₂ →
       ShapeCompatible env₂ oldTy (.ty rhsTy) →
@@ -20723,18 +20723,16 @@ theorem borrowSafetyPreservation_move
 /-- Remaining explicit `EnvWrite` borrow-safety frame obligation.
 
 The global term-typing induction supplies both `BorrowSafeEnv env₂` and the RHS
-result-extension invariant.  The latter is part of the real assignment argument:
-`BorrowSafeEnv env₂` alone does not say that borrow targets contained in `rhsTy`
-are safe to expose as a root.
+root-independent type/environment invariant.  The latter is part of the real
+assignment argument: `BorrowSafeEnv env₂` alone does not say that borrow targets
+contained in `rhsTy` are safe against existing environment roots.
 -/
 theorem borrowSafetyPreservation_envWrite
     {env₁ env₂ env₃ : Env}
     {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
     {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
     BorrowSafeEnv env₂ →
-    (∀ gamma,
-      env₂.fresh gamma →
-      BorrowSafeEnv (env₂.update gamma { ty := .ty rhsTy, lifetime := lifetime })) →
+    TyBorrowSafeAgainstEnv env₂ rhsTy →
     LValTyping env₁ lhs oldTy targetLifetime →
     TermTyping env₁ typing lifetime rhs rhsTy env₂ →
     ShapeCompatible env₂ oldTy (.ty rhsTy) →
@@ -21410,7 +21408,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
         have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe
         have hwriteSafe :
             BorrowSafeEnv _env₃ :=
-          hobligations.envWrite hRhsSafe.1 hRhsSafe.2.2 hLhs hRhs hshape hwellTy
+          hobligations.envWrite hRhsSafe.1 hRhsSafe.2.1 hLhs hRhs hshape hwellTy
             hwrite hranked hcoh hnotWrite
         exact ⟨hwriteSafe,
           tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit,
@@ -21437,7 +21435,7 @@ theorem typingPreservesBorrowSafeResult {env₁ env₂ : Env}
     BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hobligations hsource hborrowSafe htyping hfresh
   exact (typingPreservesBorrowSafeResult_global hobligations hsource
-    hborrowSafe htyping).2 gamma hfresh
+    hborrowSafe htyping).2.2 gamma hfresh
 
 /--
 Corollary 4.14, Borrow Safety.

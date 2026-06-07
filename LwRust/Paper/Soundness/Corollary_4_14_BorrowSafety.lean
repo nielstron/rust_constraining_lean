@@ -20,12 +20,13 @@ sorried lemmas through `updateBorrowInvariantObligations_from_sorries` and
 `borrowSafetyPreservationObligations_from_sorries`.  In the borrow-safety half,
 the global mutual term/list induction is source-scoped: `T-Const` only handles
 source values, whose types are borrow-free.  Assignment leaves the local
-`EnvWrite` frame obligation, now with the RHS result-extension invariant made
-explicit.  Move result-extension is proved constructively from the
-`LValTyping`/`Strike` origin lemma; blocks still leave an explicit
-non-borrow-free result-extension obligation.  The final result binding also
-carries `FreshUpdateCoherenceObligations`, because the bare paper phrase
-`γ ∈ fresh` is too weak for the strengthened `Coherent` invariant.
+`EnvWrite` frame obligation, now with the root-independent RHS
+`TyBorrowSafeAgainstEnv` invariant made explicit.  Move result-extension is
+proved constructively from the `LValTyping`/`Strike` origin lemma.  Blocks are
+handled by the global term/list induction, which carries that same
+root-independent result-type invariant through `dropLifetime`.  The final result
+binding also carries `FreshUpdateCoherenceObligations`, because the bare paper
+phrase `γ ∈ fresh` is too weak for the strengthened `Coherent` invariant.
 -/
 
 namespace LwRust.Paper.Soundness
