@@ -5756,6 +5756,81 @@ theorem lvalTyping_vars_base_le {e : Env} (hcont : ContainedBorrowsWellFormed e)
       · obtain ⟨s, hs, sbs, hsbs, hvsbs⟩ := ihRest v hr hvbs
         exact ⟨s, List.mem_cons_of_mem _ hs, sbs, hsbs, hvsbs⟩
 
+/-- **Rank-bounded** form of `lvalTyping_vars_base_le`: only the contained-borrow
+invariant at slots of rank `< N` is needed to bound the variables of an lval of
+base-rank `< N`.  (The spine vars share the base rank; the target vars are
+strictly smaller by `lvalTyping_vars_rank_lt` — so every `hcontN` query stays
+below `N`.)  This is what lets the join's `ContainedBorrows` be *bootstrapped* by
+strong rank induction: at rank `n` the targets (rank `< n`) are bounded using only
+the rank-`<n` invariant supplied by the induction hypothesis. -/
+theorem lvalTyping_vars_base_le_bounded {e : Env} {φ : Name → Nat} (N : Nat)
+    (hφ : ∀ x slot, e.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hcontN : ∀ x slot mutable T, φ x < N → e.slotAt x = some slot →
+        e ⊢ x ↝ Ty.borrow mutable T → BorrowTargetsWellFormedInSlot e slot.lifetime T) :
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping e lv pt lf → φ (LVal.base lv) < N →
+      ∀ {bs : EnvSlot}, e.slotAt (LVal.base lv) = some bs →
+      ∀ v, v ∈ PartialTy.vars pt →
+        ∀ {vbs : EnvSlot}, e.slotAt v = some vbs → vbs.lifetime ≤ bs.lifetime := by
+  intro lv pt lf htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lf _ =>
+      φ (LVal.base lv) < N →
+      ∀ {bs : EnvSlot}, e.slotAt (LVal.base lv) = some bs →
+      ∀ v, v ∈ PartialTy.vars pt →
+        ∀ {vbs : EnvSlot}, e.slotAt v = some vbs → vbs.lifetime ≤ bs.lifetime)
+    (motive_2 := fun tgts pt _lf _ =>
+      (∀ s, s ∈ tgts → φ (LVal.base s) < N) →
+      ∀ v, v ∈ PartialTy.vars pt → ∀ {vbs : EnvSlot}, e.slotAt v = some vbs →
+        ∃ s, s ∈ tgts ∧ ∃ sbs, e.slotAt (LVal.base s) = some sbs ∧
+          vbs.lifetime ≤ sbs.lifetime)
+    ?var ?box ?borrow ?singleton ?cons htyping
+  case var =>
+      intro x slot hslot hxN bs hbs v hv vbs hvbs
+      simp only [LVal.base] at hbs hxN
+      have hsb : slot = bs := Option.some.inj (hslot.symm.trans hbs)
+      subst hsb
+      obtain ⟨m, tgts, hcontains, tgt, htgt, hbasetgt⟩ :=
+        partialTy_vars_mem_contains v hv
+      have hbtw := hcontN x slot m tgts hxN hslot ⟨slot, hslot, hcontains⟩
+      obtain ⟨tt, tlf, _htyp, _hle, tgtbs, htgtbs, htgtbsle⟩ := hbtw tgt htgt
+      rw [hbasetgt] at htgtbs
+      have hvbseq : vbs = tgtbs := Option.some.inj (hvbs.symm.trans htgtbs)
+      subst hvbseq
+      exact htgtbsle
+  case box =>
+      intro lv0 inner lifetime _hlv0 ih hxN bs hbs v hv vbs hvbs
+      simp only [LVal.base] at hbs hxN
+      exact ih hxN hbs v (by simpa [PartialTy.vars] using hv) hvbs
+  case borrow =>
+      intro lv0 mutable targets borrowLife targetLife targetTy hbor _htgts
+        ihBorrow ihTargets hxN bs hbs v hv vbs hvbs
+      simp only [LVal.base] at hbs hxN
+      have htgtsN : ∀ s, s ∈ targets → φ (LVal.base s) < N := by
+        intro s hs
+        have hsbase : LVal.base s ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+          mem_partialTy_vars_iff.mpr ⟨mutable, targets, s, PartialTyContains.here, hs, rfl⟩
+        exact lt_trans ((lvalTyping_vars_rank_lt hφ).1 hbor _ hsbase) hxN
+      obtain ⟨s, hs, sbs, hsbs, hvsbs⟩ := ihTargets htgtsN v hv hvbs
+      have hsbase : LVal.base s ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+        mem_partialTy_vars_iff.mpr ⟨mutable, targets, s, PartialTyContains.here, hs, rfl⟩
+      exact LifetimeOutlives.trans hvsbs (ihBorrow hxN hbs (LVal.base s) hsbase hsbs)
+  case singleton =>
+      intro target ty lifetime htarget _ih hsN v hv vbs hvbs
+      obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists htarget
+      exact ⟨target, by simp, tbs, htbs, _ih (hsN target (by simp)) htbs v hv hvbs⟩
+  case cons =>
+      intro target rest headTy headLife restLife life restTy unionTy
+        hhead _hrest hunion _hintersection ihHead ihRest hsN v hv vbs hvbs
+      rcases partialTyUnion_vars_subset hunion hv with hh | hr
+      · obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists hhead
+        exact ⟨target, by simp, tbs, htbs,
+          ihHead (hsN target (by simp)) htbs v hh hvbs⟩
+      · obtain ⟨s, hs, sbs, hsbs, hvsbs⟩ :=
+          ihRest (fun s' hs' => hsN s' (List.mem_cons_of_mem _ hs')) v hr hvbs
+        exact ⟨s, List.mem_cons_of_mem _ hs, sbs, hsbs, hvsbs⟩
+
 /-- **Foundation stone of the lifetime bound.**  In a linearizable
 (`hφ`), contained-borrow-well-formed (`hcont`) environment, every typed lval's
 lifetime is bounded by its base slot's lifetime.  Proved by strong induction on
@@ -5812,6 +5887,61 @@ theorem lvalTyping_lifetime_le_base {e : Env} {φ : Name → Nat}
             exact LifetimeOutlives.trans
               (ihRank _ hrankt t rfl htyp htbs)
               (lvalTyping_vars_base_le hcont hbor hbs' (LVal.base t) hvar htbs)
+
+/-- **Rank-bounded** form of `lvalTyping_lifetime_le_base`: only the rank-`<N`
+contained-borrow invariant is needed to bound the lifetime of an lval of base
+rank `<N`.  This is the tool the join `ContainedBorrows` bootstrap applies to each
+fan-out target (rank `<n`) using the strong-induction hypothesis (rank-`<n`
+invariant), breaking the circularity of the unbounded foundation stone (which
+needs `ContainedBorrows` of the env being established). -/
+theorem lvalTyping_lifetime_le_base_bounded {e : Env} {φ : Name → Nat} (N : Nat)
+    (hφ : ∀ x slot, e.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hcontN : ∀ x slot mutable T, φ x < N → e.slotAt x = some slot →
+        e ⊢ x ↝ Ty.borrow mutable T → BorrowTargetsWellFormedInSlot e slot.lifetime T) :
+    ∀ (lv : LVal), φ (LVal.base lv) < N → ∀ {pt : PartialTy} {lf : Lifetime},
+      LValTyping e lv pt lf →
+      ∀ {bs : EnvSlot}, e.slotAt (LVal.base lv) = some bs → lf ≤ bs.lifetime := by
+  suffices h : ∀ (n : Nat) (lv : LVal),
+      φ (LVal.base lv) = n → φ (LVal.base lv) < N →
+      ∀ {pt lf}, LValTyping e lv pt lf →
+        ∀ {bs}, e.slotAt (LVal.base lv) = some bs → lf ≤ bs.lifetime by
+    intro lv hlvN pt lf htyping bs hbs
+    exact h (φ (LVal.base lv)) lv rfl hlvN htyping hbs
+  intro n
+  induction n using Nat.strong_induction_on with
+  | _ n ihRank =>
+    intro lv
+    induction lv with
+    | var x =>
+        intro _hbase _hlvN pt lf hp bs hbs
+        cases hp with
+        | var hslot =>
+            rename_i slot
+            simp only [LVal.base] at hbs
+            have heq : slot = bs := Option.some.inj (hslot.symm.trans hbs)
+            rw [heq]; exact LifetimeOutlives.refl _
+    | deref lv' ihStruct =>
+        intro hbase hlvN pt lf hp bs hbs
+        have hbase' : φ (LVal.base lv') = n := by simpa [LVal.base] using hbase
+        have hlvN' : φ (LVal.base lv') < N := by simpa [LVal.base] using hlvN
+        have hbs' : e.slotAt (LVal.base lv') = some bs := by simpa [LVal.base] using hbs
+        cases hp with
+        | box hbox => exact ihStruct hbase' hlvN' hbox hbs'
+        | borrow hbor htgts =>
+            rename_i mutb T blf
+            refine lvalTargetsTyping_le_of_members htgts (fun t ht tt tlf htyp => ?_)
+            have hvar : LVal.base t ∈ PartialTy.vars (.ty (.borrow mutb T)) :=
+              mem_partialTy_vars_iff.mpr ⟨mutb, T, t, PartialTyContains.here, ht, rfl⟩
+            have hrankt : φ (LVal.base t) < n := by
+              have hlt := (lvalTyping_vars_rank_lt hφ).1 hbor _ hvar
+              simpa [LVal.base] using lt_of_lt_of_eq hlt hbase'
+            have hrankt' : φ (LVal.base t) < N := lt_trans hrankt (hbase' ▸ hlvN')
+            obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists htyp
+            exact LifetimeOutlives.trans
+              (ihRank _ hrankt t rfl hrankt' htyp htbs)
+              (lvalTyping_vars_base_le_bounded N hφ hcontN hbor hlvN'
+                hbs' (LVal.base t) hvar htbs)
 
 @[refl] theorem Ty.sameShape_refl (t : Ty) : Ty.sameShape t t := by
   refine Ty.rec (motive_1 := fun t => Ty.sameShape t t)
