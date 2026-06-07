@@ -25,6 +25,135 @@ namespace Paper
 
 open Core
 
+/-! ### Store-update frame primitives (Appendix 9.10 support)
+
+A move/assign updates exactly one store location.  These lemmas isolate when
+such an update leaves an unrelated slot lookup and `loc` resolution unchanged.
+-/
+
+/-- Updating a location leaves the lookup at any *other* location unchanged. -/
+theorem ProgramStore.slotAt_update_ne {store : ProgramStore}
+    {updated location : Location} {slot : StoreSlot} :
+    location ≠ updated →
+    (store.update updated slot).slotAt location = store.slotAt location := by
+  intro hne
+  simp [ProgramStore.update, hne]
+
+/-- `loc` for a variable lval reads no slot, so it is store-independent. -/
+@[simp] theorem ProgramStore.loc_var (store : ProgramStore) (x : Name) :
+    store.loc (.var x) = some (.var x) := by
+  simp [ProgramStore.loc]
+
+/--
+The locations whose slots are inspected while resolving `loc store lv`.  A
+variable reads nothing; a deref reads the slot at the location its source
+resolves to, plus whatever the source reads.
+-/
+inductive LocReads (store : ProgramStore) : LVal → Location → Prop where
+  | here {lv : LVal} {location : Location} :
+      store.loc lv = some location →
+      LocReads store (.deref lv) location
+  | there {lv : LVal} {location : Location} :
+      LocReads store lv location →
+      LocReads store (.deref lv) location
+
+/-- If an update misses every location `loc` reads while resolving `lv`, the
+resolution is unchanged. -/
+theorem loc_update_of_not_locReads {store : ProgramStore}
+    {updated : Location} {slot : StoreSlot} :
+    ∀ {lv : LVal} {location : Location},
+      store.loc lv = some location →
+      (∀ mid, LocReads store lv mid → mid ≠ updated) →
+      (store.update updated slot).loc lv = some location := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro location hloc _hreads
+      simpa [ProgramStore.loc] using hloc
+  | deref lv ih =>
+      intro location hloc hreads
+      -- resolve the source location
+      cases hsource : store.loc lv with
+      | none => simp [ProgramStore.loc, hsource] at hloc
+      | some source =>
+          have hsourceNe : source ≠ updated :=
+            hreads source (LocReads.here hsource)
+          have hsource' : (store.update updated slot).loc lv = some source := by
+            refine ih hsource ?_
+            intro mid hmid
+            exact hreads mid (LocReads.there hmid)
+          -- the deref reads the slot at `source`; it is unchanged since source ≠ updated
+          have hslotEq :
+              (store.update updated slot).slotAt source = store.slotAt source :=
+            ProgramStore.slotAt_update_ne hsourceNe
+          have hlocEq :
+              (store.update updated slot).loc (.deref lv) = store.loc (.deref lv) := by
+            simp [ProgramStore.loc, hsource, hsource', hslotEq]
+          rw [hlocEq]; exact hloc
+
+/--
+The store locations whose slots are inspected while checking
+`ValidPartialValue store v ty`.  Owned (box) references read their pointee slot
+and recurse; a borrow reads the slots `loc` traverses to resolve its target.
+Ground values read nothing.
+-/
+inductive Reaches (store : ProgramStore) : PartialValue → PartialTy → Location → Prop where
+  | boxHere {location : Location} {slot : StoreSlot} {inner : PartialTy} :
+      store.slotAt location = some slot →
+      Reaches store (.value (.ref { location := location, owner := true })) (.box inner)
+        location
+  | boxInner {location : Location} {slot : StoreSlot} {inner : PartialTy} {ℓ : Location} :
+      store.slotAt location = some slot →
+      Reaches store slot.value inner ℓ →
+      Reaches store (.value (.ref { location := location, owner := true })) (.box inner) ℓ
+  | boxFullHere {location : Location} {slot : StoreSlot} {ty : Ty} :
+      store.slotAt location = some slot →
+      Reaches store (.value (.ref { location := location, owner := true })) (.ty (.box ty))
+        location
+  | boxFullInner {location : Location} {slot : StoreSlot} {ty : Ty} {ℓ : Location} :
+      store.slotAt location = some slot →
+      Reaches store slot.value (.ty ty) ℓ →
+      Reaches store (.value (.ref { location := location, owner := true })) (.ty (.box ty)) ℓ
+  | borrow {location ℓ : Location} {mutable : Bool} {targets : List LVal} {target : LVal} :
+      target ∈ targets →
+      store.loc target = some location →
+      LocReads store target ℓ →
+      Reaches store (.value (.ref { location := location, owner := false }))
+        (.ty (.borrow mutable targets)) ℓ
+
+/-- Frame lemma for `ValidPartialValue`: updating a location the value's
+validity derivation never inspects preserves the abstraction. -/
+theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
+    {updated : Location} {newSlot : StoreSlot} :
+    ∀ {v : PartialValue} {ty : PartialTy},
+      ValidPartialValue store v ty →
+      (∀ ℓ, Reaches store v ty ℓ → ℓ ≠ updated) →
+      ValidPartialValue (store.update updated newSlot) v ty := by
+  intro v ty hvalid
+  induction hvalid with
+  | unit => intro _; exact ValidPartialValue.unit
+  | int => intro _; exact ValidPartialValue.int
+  | undef => intro _; exact ValidPartialValue.undef
+  | borrow hmem hloc =>
+      intro hreach
+      refine ValidPartialValue.borrow hmem ?_
+      refine loc_update_of_not_locReads hloc ?_
+      intro mid hmidReads
+      exact hreach mid (Reaches.borrow hmem hloc hmidReads)
+  | @box location slot inner hslot _hinner ih =>
+      intro hreach
+      have hlocNe : location ≠ updated := hreach location (Reaches.boxHere hslot)
+      refine ValidPartialValue.box
+        (location := location) (slot := slot) ?_ ?_
+      · rw [ProgramStore.slotAt_update_ne hlocNe]; exact hslot
+      · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxInner hslot hℓ))
+  | @boxFull location slot ty hslot _hinner ih =>
+      intro hreach
+      have hlocNe : location ≠ updated := hreach location (Reaches.boxFullHere hslot)
+      refine ValidPartialValue.boxFull
+        (location := location) (slot := slot) ?_ ?_
+      · rw [ProgramStore.slotAt_update_ne hlocNe]; exact hslot
+      · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
 theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
     {env : Env} :
