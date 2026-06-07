@@ -8116,6 +8116,39 @@ theorem WriteBorrowTargets.shapePreserved_init {rank : Nat} {env result : Env}
     rcases ih hrank hsc' with ⟨hpres, hshape⟩
     exact EnvShapePreserved.update_from_source_slot hpres hslot hshape
 
+/-- Each target of a `WriteBorrowTargets` fan-out has its own single `EnvWrite`
+at the dereferenced location `prependPath path t`.  (Extracted from the fan-out's
+`singleton`/`cons` structure.)  This is what lets the per-target location/leaf
+reasoning (`writeLeafTy_cont`, shape preservation) invert one target's write in
+isolation. -/
+theorem WriteBorrowTargets.member_write {rank : Nat} {env result : Env}
+    {path : List Unit} {targets : List LVal} {rhsTy : Ty}
+    (hwrites : WriteBorrowTargets rank env path targets rhsTy result) :
+    ∀ t, t ∈ targets →
+      ∃ result', EnvWrite rank env (prependPath path t) rhsTy result' := by
+  refine WriteBorrowTargets.rec
+    (motive_1 := fun _ _ _ _ _ _ _ _ => True)
+    (motive_2 := fun rank env path targets rhsTy _result _ =>
+      ∀ t, t ∈ targets →
+        ∃ result', EnvWrite rank env (prependPath path t) rhsTy result')
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites
+  case strong => intros; trivial
+  case weak => intros; trivial
+  case box => intros; trivial
+  case mutBorrow => intros; trivial
+  case nil => intro rank env path ty t ht; simp at ht
+  case singleton =>
+      intro rank env updated path target ty hwrite _ih t ht
+      rw [List.mem_singleton] at ht; subst ht; exact ⟨updated, hwrite⟩
+  case cons =>
+      intro rank env updated restEnv result path target rest ty
+        hwrite _hrest _hjoin _ihWrite ihRest t ht
+      rcases List.mem_cons.mp ht with rfl | ht
+      · exact ⟨updated, hwrite⟩
+      · exact ihRest t ht
+  case intro => intros; trivial
+
 /-- `WriteLeafTy` is antitone under same-shape strengthening of its type
 argument: if the write descends `a` to initialised leaves and `b ⊑ a` keeps the
 same shape (so `b`'s borrow target lists are subsets of `a`'s), then it descends
