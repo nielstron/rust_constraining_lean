@@ -176,6 +176,35 @@ theorem validValue_update_of_not_reaches {store : ProgramStore}
     ValidValue (store.update updated newSlot) value ty :=
   validPartialValue_update_of_not_reaches
 
+/-- Reverse-abstraction bridge (variable case): a store borrow reference sitting
+in a variable's slot reflects an env borrow type at that variable whose target
+list contains a target resolving to the referenced location. -/
+theorem env_borrow_of_store_var_borrow {store : ProgramStore} {env : Env}
+    {z : Name} {ℓ : Location} {lifetime : Lifetime} :
+    store ∼ₛ env →
+    store.slotAt (VariableProjection z) =
+      some { value := .value (.ref { location := ℓ, owner := false }),
+             lifetime := lifetime } →
+    ∃ envSlot mutable targets target,
+      env.slotAt z = some envSlot ∧
+      envSlot.ty = .ty (.borrow mutable targets) ∧
+      target ∈ targets ∧
+      store.loc target = some ℓ := by
+  intro hsafe hstoreSlot
+  have hdomain : ∃ envSlot, env.slotAt z = some envSlot :=
+    (hsafe.1 z).mp ⟨_, hstoreSlot⟩
+  rcases hdomain with ⟨⟨envTy, envLf⟩, henvSlot⟩
+  rcases hsafe.2 z _ henvSlot with ⟨value, hstoreSlot', hvalid⟩
+  -- the store slot is unique, so `value` is the borrow reference
+  rw [hstoreSlot] at hstoreSlot'
+  simp only [Option.some.injEq, StoreSlot.mk.injEq] at hstoreSlot'
+  obtain ⟨hvalueEq, _⟩ := hstoreSlot'
+  subst hvalueEq
+  -- a borrow reference (owner := false) is only valid at a borrow type
+  cases hvalid with
+  | borrow hmem hloc =>
+      exact ⟨_, _, _, _, henvSlot, rfl, hmem, hloc⟩
+
 theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
     {env : Env} :
     ValidRuntimeState store (.val .unit) →
