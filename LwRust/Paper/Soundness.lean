@@ -8881,44 +8881,37 @@ theorem LValBaseOutlives.join_right {left right join : Env}
     ⟨joinSlot, hjoinSlot, hlifetime⟩
   exact ⟨joinSlot, hjoinSlot, by rw [← hlifetime]; exact houtlives⟩
 
-/-- The single-lval join transport packaged to match
-`FullLValTypingJoinTransport.full`'s conclusion, derived **one-directionally**
-from the keystone (`lvalTyping_strengthen_transport`) for the typing/shape, plus
-`LValTyping.lifetime_outlives_of_base_outlives_one` for the lifetime bound
-(`joinLifetime ≤ current` from the borrow invariant `ContainedBorrowsWellFormed
-join` + the transported base-outlives).
-
-NOTE on the lifetime bound (`joinLifetime ≤ current`): this is TRUE (the join
-target's lifetime is bounded by the borrow's slot lifetime via the borrow
-invariant) but is NOT monotone from the left bound — `LifetimeIntersection` is the
-LUB, so merging a deref-borrow target's list only *grows* its lifetime; the bound
-comes from the invariant on `join`, which here is the env whose `ContainedBorrows`
-the driver is establishing.  It is therefore left as an explicit HONEST `sorry`
-(a true statement) — the genuine remaining lifetime content of the deref-borrow
-join landmark, to be discharged by the rank-stratified `ContainedBorrows join`
-proof (typeability via the keystone above + lifetime via the recursively-bounded
-targets).  This replaces the earlier *false-direction* `lvalTyping_join_lifetime_le`
-stub. -/
-theorem fullJoinTransport_viaInvariants {left join : Env} {target : LVal}
-    {leftTy : Ty} {leftLifetime current : Lifetime}
-    (hstr : ∀ x sE, left.slotAt x = some sE →
+/-- Single-lval join transport with the lifetime bound now DISCHARGED via the
+rank-stratified foundation stone.  The transported typing's lifetime is bounded
+by its base slot (`lvalTyping_lifetime_le_base_bounded`, using the rank-`<N`
+contained-borrow invariant `hcontN` of `join` — supplied by the strong-induction
+hypothesis of the `ContainedBorrows join` bootstrap), and the base slot is bounded
+by `current` (`LValBaseOutlives.join_left`).  No more sorry. -/
+theorem fullJoinTransport_viaInvariants {source join : Env} {target : LVal}
+    {sourceTy : Ty} {sourceLifetime current : Lifetime} {φ : Name → Nat} {N : Nat}
+    (hstr : ∀ x sE, source.slotAt x = some sE →
       ∃ sE', join.slotAt x = some sE' ∧
         PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty)
-    (hlinJoin : Linearizable join) (hcohJoin : Coherent join)
-    (hleftTyping : LValTyping left target (.ty leftTy) leftLifetime)
-    (hleftOutlives : leftLifetime ≤ current) :
+    (hφJoin : ∀ x slot, join.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hcohJoin : Coherent join)
+    (hcontN : ∀ x slot mutable T, φ x < N → join.slotAt x = some slot →
+        join ⊢ x ↝ Ty.borrow mutable T → BorrowTargetsWellFormedInSlot join slot.lifetime T)
+    (hrankN : φ (LVal.base target) < N)
+    (hsourceTyping : LValTyping source target (.ty sourceTy) sourceLifetime)
+    (hjoinBase : LValBaseOutlives join target current) :
     ∃ joinTy joinLifetime,
       LValTyping join target (.ty joinTy) joinLifetime ∧ joinLifetime ≤ current := by
-  obtain ⟨φ, hφJoin⟩ := hlinJoin
-  have hφLeft := linearizable_rankFn_of_le_shape hstr hφJoin
-  rcases lvalTyping_strengthen_transport hstr hφLeft hφJoin hcohJoin target
-      hleftTyping with ⟨p', lf', hjoinTyping, hshape, _hstrong⟩
+  have hφSource := linearizable_rankFn_of_le_shape hstr hφJoin
+  rcases lvalTyping_strengthen_transport hstr hφSource hφJoin hcohJoin target
+      hsourceTyping with ⟨p', lf', hjoinTyping, hshape, _hstrong⟩
   cases p' with
   | ty joinTy =>
       refine ⟨joinTy, lf', hjoinTyping, ?_⟩
-      -- HONEST sorry: joinLifetime ≤ current (true; the rank-stratified
-      -- deref-borrow join lifetime bound — see the docstring).
-      sorry
+      obtain ⟨tbs, htbs, htbsle⟩ := hjoinBase
+      exact LifetimeOutlives.trans
+        (lvalTyping_lifetime_le_base_bounded N hφJoin hcontN target hrankN hjoinTyping htbs)
+        htbsle
   | box _ => simp [PartialTy.sameShape] at hshape
   | undef _ => simp [PartialTy.sameShape] at hshape
 
@@ -8928,57 +8921,52 @@ This replaces the symmetric `FullLValTypingJoinTransport`-based
 `BorrowTargetsWellFormedInSlot.join_of_lvalTargetsTypingJoinTransport`. -/
 theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_left
     {left right join : Env} {targets : List LVal} {slotLifetime : Lifetime}
+    {φ : Name → Nat} {N : Nat}
     (hjoin : EnvJoin left right join)
     (hstr : ∀ x sE, left.slotAt x = some sE →
       ∃ sE', join.slotAt x = some sE' ∧
         PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty)
-    (hlinJoin : Linearizable join) (hcohJoin : Coherent join)
+    (hφJoin : ∀ x slot, join.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hcohJoin : Coherent join)
+    (hcontN : ∀ x slot mutable T, φ x < N → join.slotAt x = some slot →
+        join ⊢ x ↝ Ty.borrow mutable T → BorrowTargetsWellFormedInSlot join slot.lifetime T)
+    (hrankTargets : ∀ t, t ∈ targets → φ (LVal.base t) < N)
     (hleft : BorrowTargetsWellFormedInSlot left slotLifetime targets) :
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro target htarget
   rcases hleft target htarget with
-    ⟨leftTy, leftLifetime, hleftTyping, hleftOutlives, hleftBase⟩
-  rcases fullJoinTransport_viaInvariants hstr hlinJoin hcohJoin hleftTyping
-      hleftOutlives with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives,
-    LValBaseOutlives.join_left hjoin hleftBase⟩
+    ⟨leftTy, leftLifetime, hleftTyping, _hleftOutlives, hleftBase⟩
+  have hjoinBase := LValBaseOutlives.join_left hjoin hleftBase
+  rcases fullJoinTransport_viaInvariants hstr hφJoin hcohJoin hcontN
+      (hrankTargets target htarget) hleftTyping hjoinBase
+    with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase⟩
 
 /-- Right-branch mirror of `BorrowTargetsWellFormedInSlot.join_viaInvariants_left`. -/
 theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_right
     {left right join : Env} {targets : List LVal} {slotLifetime : Lifetime}
+    {φ : Name → Nat} {N : Nat}
     (hjoin : EnvJoin left right join)
     (hstr : ∀ x sE, right.slotAt x = some sE →
       ∃ sE', join.slotAt x = some sE' ∧
         PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty)
-    (hlinJoin : Linearizable join) (hcohJoin : Coherent join)
+    (hφJoin : ∀ x slot, join.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hcohJoin : Coherent join)
+    (hcontN : ∀ x slot mutable T, φ x < N → join.slotAt x = some slot →
+        join ⊢ x ↝ Ty.borrow mutable T → BorrowTargetsWellFormedInSlot join slot.lifetime T)
+    (hrankTargets : ∀ t, t ∈ targets → φ (LVal.base t) < N)
     (hright : BorrowTargetsWellFormedInSlot right slotLifetime targets) :
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro target htarget
   rcases hright target htarget with
-    ⟨rightTy, rightLifetime, hrightTyping, hrightOutlives, hrightBase⟩
-  rcases fullJoinTransport_viaInvariants (left := right) hstr hlinJoin hcohJoin
-      hrightTyping hrightOutlives with
-    ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives,
-    LValBaseOutlives.join_right hjoin hrightBase⟩
-
-/-- Generic per-target borrow-invariant transport along a shape-preserving slot
-strengthening `e → e'` (keystone), with an explicit base-outlives transport.
-Both the `EnvJoin` and `EnvWrite` per-target preservations are instances. -/
-theorem BorrowTargetsWellFormedInSlot.transport_viaInvariants {e e' : Env}
-    {targets : List LVal} {slotLifetime : Lifetime}
-    (hstr : ∀ x sE, e.slotAt x = some sE →
-      ∃ sE', e'.slotAt x = some sE' ∧
-        PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty)
-    (hlin' : Linearizable e') (hcoh' : Coherent e')
-    (hbase : ∀ t, LValBaseOutlives e t slotLifetime → LValBaseOutlives e' t slotLifetime)
-    (h : BorrowTargetsWellFormedInSlot e slotLifetime targets) :
-    BorrowTargetsWellFormedInSlot e' slotLifetime targets := by
-  intro target htarget
-  rcases h target htarget with ⟨ty, lt, htyping, houtlives, hbaseO⟩
-  rcases fullJoinTransport_viaInvariants hstr hlin' hcoh' htyping houtlives with
-    ⟨ty', lt', htyping', houtlives'⟩
-  exact ⟨ty', lt', htyping', houtlives', hbase target hbaseO⟩
+    ⟨rightTy, rightLifetime, hrightTyping, _hrightOutlives, hrightBase⟩
+  have hjoinBase := LValBaseOutlives.join_right hjoin hrightBase
+  rcases fullJoinTransport_viaInvariants hstr hφJoin hcohJoin hcontN
+      (hrankTargets target htarget) hrightTyping hjoinBase
+    with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase⟩
 
 /-- The slot shape-map `env → result` for a single `EnvWrite`, assembled from
 `EnvWrite.envStrengthens` (existence + strengthening) and `EnvWrite.shapePreserved`
@@ -9163,9 +9151,12 @@ theorem ContainedBorrowsWellFormed.join_of_inSlot {left right join : Env} :
       simpa [hrightLife] using htargets)
     hcontainsJoin
 
-/-- Contained-borrow join preservation via the runtime invariants (one-directional
-keystone deployment).  Replaces `ContainedBorrowsWellFormed.join_of_crossBranchTargets`
-(which needed the symmetric `FullLValTypingJoinTransport`). -/
+/-- Contained-borrow join preservation, now via the **rank-stratified bootstrap**.
+`ContainedBorrows join` is established by strong induction on the slot rank `φ x`:
+the borrow at `x` (rank `n`) has targets all of rank `< n` (Linearizable), so the
+per-target join transport (`join_viaInvariants_left/right`) bounds their lifetimes
+using the rank-`<n` invariant supplied by the induction hypothesis (`hcontN`).
+This breaks the circularity the old `fullJoinTransport` lifetime sorry hit. -/
 theorem ContainedBorrowsWellFormed.join_viaInvariants {left right join : Env}
     (hjoin : EnvJoin left right join)
     (hstrL : ∀ x sE, left.slotAt x = some sE →
@@ -9178,13 +9169,63 @@ theorem ContainedBorrowsWellFormed.join_viaInvariants {left right join : Env}
     (hleftContained : ContainedBorrowsWellFormed left)
     (hrightContained : ContainedBorrowsWellFormed right) :
     ContainedBorrowsWellFormed join := by
-  refine ContainedBorrowsWellFormed.join_of_inSlot hjoin ?_ ?_
-  · intro x slot mutable targets hslot hcontains
-    exact BorrowTargetsWellFormedInSlot.join_viaInvariants_left hjoin hstrL hlinJoin
-      hcohJoin (hleftContained x slot mutable targets hslot hcontains)
-  · intro x slot mutable targets hslot hcontains
-    exact BorrowTargetsWellFormedInSlot.join_viaInvariants_right hjoin hstrR hlinJoin
-      hcohJoin (hrightContained x slot mutable targets hslot hcontains)
+  obtain ⟨φ, hφJoin⟩ := hlinJoin
+  have hφLeft := linearizable_rankFn_of_le_shape hstrL hφJoin
+  have hφRight := linearizable_rankFn_of_le_shape hstrR hφJoin
+  suffices h : ∀ n, ∀ x joinSlot mutable targets, φ x = n →
+      join.slotAt x = some joinSlot → join ⊢ x ↝ Ty.borrow mutable targets →
+      BorrowTargetsWellFormedInSlot join joinSlot.lifetime targets by
+    intro x joinSlot mutable targets hjoinSlot hcontains
+    exact h (φ x) x joinSlot mutable targets rfl hjoinSlot hcontains
+  intro n
+  induction n using Nat.strong_induction_on with
+  | _ n ihRank =>
+    intro x joinSlot mutable targets hxn hjoinSlot hcontains
+    have hcontN : ∀ x' slot' m' T', φ x' < n → join.slotAt x' = some slot' →
+        join ⊢ x' ↝ Ty.borrow m' T' → BorrowTargetsWellFormedInSlot join slot'.lifetime T' :=
+      fun x' slot' m' T' hx'n hslot' hcont' =>
+        ihRank (φ x') hx'n x' slot' m' T' rfl hslot' hcont'
+    rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+    have hcontainedSlotEq : containedSlot = joinSlot :=
+      Option.some.inj (by rw [← hcontainedSlot, hjoinSlot])
+    have hcontainsJoin : PartialTyContains joinSlot.ty (.borrow mutable targets) := by
+      simpa [hcontainedSlotEq] using hcontainsTy
+    rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+      ⟨leftSlot, hleftSlot, _hleftLifetime⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+      ⟨rightSlot, hrightSlot, _hrightLifetime⟩
+    rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+      ⟨hleftLife, hrightLife, hunion⟩
+    refine BorrowTargetsWellFormedInSlot.of_partialTyUnion
+      (env := join) (lifetime := joinSlot.lifetime) hunion ?_ ?_ hcontainsJoin
+    · intro leftMutable leftTargets hcontainsLeft
+      have hrankTargets : ∀ t, t ∈ leftTargets → φ (LVal.base t) < n := by
+        intro t ht
+        have hmem : LVal.base t ∈ PartialTy.vars leftSlot.ty :=
+          mem_partialTy_vars_iff.mpr ⟨leftMutable, leftTargets, t, hcontainsLeft, ht, rfl⟩
+        have hlt := hφLeft x leftSlot hleftSlot (LVal.base t) hmem
+        omega
+      have htargets :
+          BorrowTargetsWellFormedInSlot join leftSlot.lifetime leftTargets :=
+        BorrowTargetsWellFormedInSlot.join_viaInvariants_left hjoin hstrL hφJoin
+          hcohJoin hcontN hrankTargets
+          (hleftContained x leftSlot leftMutable leftTargets hleftSlot
+            ⟨leftSlot, hleftSlot, hcontainsLeft⟩)
+      simpa [hleftLife] using htargets
+    · intro rightMutable rightTargets hcontainsRight
+      have hrankTargets : ∀ t, t ∈ rightTargets → φ (LVal.base t) < n := by
+        intro t ht
+        have hmem : LVal.base t ∈ PartialTy.vars rightSlot.ty :=
+          mem_partialTy_vars_iff.mpr ⟨rightMutable, rightTargets, t, hcontainsRight, ht, rfl⟩
+        have hlt := hφRight x rightSlot hrightSlot (LVal.base t) hmem
+        omega
+      have htargets :
+          BorrowTargetsWellFormedInSlot join rightSlot.lifetime rightTargets :=
+        BorrowTargetsWellFormedInSlot.join_viaInvariants_right hjoin hstrR hφJoin
+          hcohJoin hcontN hrankTargets
+          (hrightContained x rightSlot rightMutable rightTargets hrightSlot
+            ⟨rightSlot, hrightSlot, hcontainsRight⟩)
+      simpa [hrightLife] using htargets
 
 /--
 Faithful target-list typing construction.
@@ -15548,7 +15589,11 @@ theorem BorrowTargetsTransport.trans {first second third : Env} :
   exact hsecondThird (hfirstSecond htargets)
 
 /-- Observer-target transport across a join via the runtime invariants
-(one-directional: `source → left → join`). -/
+(one-directional: `source → left → join`).  Here `ContainedBorrows join` is
+already established (the bootstrap runs first), so each transported target's
+lifetime is bounded by the *unbounded*-strength invariant — packaged through the
+rank-bounded `fullJoinTransport` with the per-target bound `N := φ(base t)+1` and
+`hcontN` derived from the full `hcontJoin`. -/
 theorem BorrowTargetsTransport.join_viaInvariants_left
     {source left right join : Env}
     (hjoin : EnvJoin left right join)
@@ -15556,11 +15601,21 @@ theorem BorrowTargetsTransport.join_viaInvariants_left
       ∃ sE', join.slotAt x = some sE' ∧
         PartialTy.sameShape sE.ty sE'.ty ∧ PartialTyStrengthens sE.ty sE'.ty)
     (hlinJoin : Linearizable join) (hcohJoin : Coherent join)
+    (hcontJoin : ContainedBorrowsWellFormed join)
     (hsourceLeft : BorrowTargetsTransport source left) :
     BorrowTargetsTransport source join := by
+  obtain ⟨φ, hφJoin⟩ := hlinJoin
   intro slotLifetime targets htargets
-  exact BorrowTargetsWellFormedInSlot.join_viaInvariants_left hjoin hstrL hlinJoin
-    hcohJoin (hsourceLeft htargets)
+  have hleft := hsourceLeft htargets
+  intro target htarget
+  rcases hleft target htarget with ⟨leftTy, leftLf, hleftTyping, _hleftOutlives, hleftBase⟩
+  have hjoinBase := LValBaseOutlives.join_left hjoin hleftBase
+  rcases fullJoinTransport_viaInvariants (N := φ (LVal.base target) + 1)
+      hstrL hφJoin hcohJoin
+      (fun x' slot' m' T' _ hslot' hcont' => hcontJoin x' slot' m' T' hslot' hcont')
+      (Nat.lt_succ_self _) hleftTyping hjoinBase
+    with ⟨joinTy, joinLf, hjoinTyping, hjoinOutlives⟩
+  exact ⟨joinTy, joinLf, hjoinTyping, hjoinOutlives, hjoinBase⟩
 
 theorem ContainedBorrowsWellFormedIn.of_transport {source observer : Env} :
     ContainedBorrowsWellFormed source →
@@ -16004,11 +16059,12 @@ theorem WriteBorrowTargets.preserves_core_of_crossLandmarks
           PartialTy.sameShape sL.ty sR.ty := by sorry
       have hstrL := EnvJoin.fanOutShapeMap_left hjoin hbranch
       have hstrR := EnvJoin.fanOutShapeMap_right hjoin hbranch
-      refine ⟨⟨
+      have hcontJoin :=
         ContainedBorrowsWellFormed.join_viaInvariants hjoin hstrL hstrR hlinR hcohR
-          hupdatedContained hrestContained,
+          hupdatedContained hrestContained
+      refine ⟨⟨hcontJoin,
         BorrowTargetsTransport.join_viaInvariants_left hjoin hstrL hlinR hcohR
-          hupdatedTransport,
+          hcontJoin hupdatedTransport,
         ContainedBorrowsWellFormedIn.join_source hjoin hupdatedInEnv hrestInEnv⟩,
         hcohR, hlinR⟩)
     (by intro rank env₁ env₂ lv slot ty updatedTy hslot hupdate ih; trivial)
