@@ -155,6 +155,27 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
       · rw [ProgramStore.slotAt_update_ne hlocNe]; exact hslot
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
+/-- Ground (non-reference) values inspect no store location. -/
+theorem reaches_unit_false {store : ProgramStore} {ℓ : Location} :
+    ¬ Reaches store (.value .unit) (.ty .unit) ℓ := by
+  intro h; cases h
+
+theorem reaches_int_false {store : ProgramStore} {n : Int} {ℓ : Location} :
+    ¬ Reaches store (.value (.int n)) (.ty .int) ℓ := by
+  intro h; cases h
+
+theorem reaches_undef_false {store : ProgramStore} {ty : Ty} {ℓ : Location} :
+    ¬ Reaches store .undef (.undef ty) ℓ := by
+  intro h; cases h
+
+/-- `ValidValue` specialization of the store-update frame. -/
+theorem validValue_update_of_not_reaches {store : ProgramStore}
+    {updated : Location} {newSlot : StoreSlot} {value : Value} {ty : Ty} :
+    ValidValue store value ty →
+    (∀ ℓ, Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ updated) →
+    ValidValue (store.update updated newSlot) value ty :=
+  validPartialValue_update_of_not_reaches
+
 theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
     {env : Env} :
     ValidRuntimeState store (.val .unit) →
