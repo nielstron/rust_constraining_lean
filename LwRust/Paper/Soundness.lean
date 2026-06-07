@@ -5692,6 +5692,70 @@ theorem lvalTyping_vars_rank_lt {env : Env} {φ : Name → Nat}
           exact ⟨t, List.mem_cons_of_mem _ ht, hvt⟩)
       htyping
 
+/-- Every variable occurring in a typed lval's type has a base slot that outlives
+the lval's own base slot.  (`vars pt` are exactly the bases of the borrow targets
+syntactically inside `pt`; each such target outlives its containing borrow's slot,
+and that chains up the spine.)  Proved by *plain* mutual structural recursion —
+the type's variables are structurally smaller, so no rank induction is needed:
+`var` uses the contained-borrow invariant's base-outlives directly; `box` lifts
+through the inner type; `deref`-borrow chains the targets-motive (each `v` is
+below some target `s`) with the borrow-motive (`s` is below `bs`); the
+target-list cases recurse through the union's variable split. -/
+theorem lvalTyping_vars_base_le {e : Env} (hcont : ContainedBorrowsWellFormed e) :
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping e lv pt lf →
+      ∀ {bs : EnvSlot}, e.slotAt (LVal.base lv) = some bs →
+      ∀ v, v ∈ PartialTy.vars pt →
+        ∀ {vbs : EnvSlot}, e.slotAt v = some vbs → vbs.lifetime ≤ bs.lifetime := by
+  intro lv pt lf htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lf _ =>
+      ∀ {bs : EnvSlot}, e.slotAt (LVal.base lv) = some bs →
+      ∀ v, v ∈ PartialTy.vars pt →
+        ∀ {vbs : EnvSlot}, e.slotAt v = some vbs → vbs.lifetime ≤ bs.lifetime)
+    (motive_2 := fun tgts pt _lf _ =>
+      ∀ v, v ∈ PartialTy.vars pt → ∀ {vbs : EnvSlot}, e.slotAt v = some vbs →
+        ∃ s, s ∈ tgts ∧ ∃ sbs, e.slotAt (LVal.base s) = some sbs ∧
+          vbs.lifetime ≤ sbs.lifetime)
+    ?var ?box ?borrow ?singleton ?cons htyping
+  case var =>
+      intro x slot hslot bs hbs v hv vbs hvbs
+      simp only [LVal.base] at hbs
+      have hsb : slot = bs := Option.some.inj (hslot.symm.trans hbs)
+      subst hsb
+      obtain ⟨m, tgts, hcontains, tgt, htgt, hbasetgt⟩ :=
+        partialTy_vars_mem_contains v hv
+      have hbtw := hcont x slot m tgts hslot ⟨slot, hslot, hcontains⟩
+      obtain ⟨tt, tlf, _htyp, _hle, tgtbs, htgtbs, htgtbsle⟩ := hbtw tgt htgt
+      rw [hbasetgt] at htgtbs
+      have hvbseq : vbs = tgtbs := Option.some.inj (hvbs.symm.trans htgtbs)
+      subst hvbseq
+      exact htgtbsle
+  case box =>
+      intro lv0 inner lifetime _hlv0 ih bs hbs v hv vbs hvbs
+      simp only [LVal.base] at hbs
+      exact ih hbs v (by simpa [PartialTy.vars] using hv) hvbs
+  case borrow =>
+      intro lv0 mutable targets borrowLife targetLife targetTy _hbor _htgts
+        ihBorrow ihTargets bs hbs v hv vbs hvbs
+      simp only [LVal.base] at hbs
+      obtain ⟨s, hs, sbs, hsbs, hvsbs⟩ := ihTargets v hv hvbs
+      have hsbase : LVal.base s ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+        mem_partialTy_vars_iff.mpr ⟨mutable, targets, s, PartialTyContains.here, hs, rfl⟩
+      exact LifetimeOutlives.trans hvsbs (ihBorrow hbs (LVal.base s) hsbase hsbs)
+  case singleton =>
+      intro target ty lifetime htarget _ih v hv vbs hvbs
+      obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists htarget
+      exact ⟨target, by simp, tbs, htbs, _ih htbs v hv hvbs⟩
+  case cons =>
+      intro target rest headTy headLife restLife life restTy unionTy
+        hhead _hrest hunion _hintersection ihHead ihRest v hv vbs hvbs
+      rcases partialTyUnion_vars_subset hunion hv with hh | hr
+      · obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists hhead
+        exact ⟨target, by simp, tbs, htbs, ihHead htbs v hh hvbs⟩
+      · obtain ⟨s, hs, sbs, hsbs, hvsbs⟩ := ihRest v hr hvbs
+        exact ⟨s, List.mem_cons_of_mem _ hs, sbs, hsbs, hvsbs⟩
+
 /-- **Foundation stone of the lifetime bound.**  In a linearizable
 (`hφ`), contained-borrow-well-formed (`hcont`) environment, every typed lval's
 lifetime is bounded by its base slot's lifetime.  Proved by strong induction on
@@ -5737,28 +5801,17 @@ theorem lvalTyping_lifetime_le_base {e : Env} {φ : Name → Nat}
         | borrow hbor htgts =>
             rename_i mutb T blf
             refine lvalTargetsTyping_le_of_members htgts (fun t ht tt tlf htyp => ?_)
+            have hvar : LVal.base t ∈ PartialTy.vars (.ty (.borrow mutb T)) :=
+              mem_partialTy_vars_iff.mpr ⟨mutb, T, t, PartialTyContains.here, ht, rfl⟩
             have hrankt : φ (LVal.base t) < n := by
-              have hvar : LVal.base t ∈ PartialTy.vars (.ty (.borrow mutb T)) :=
-                mem_partialTy_vars_iff.mpr ⟨mutb, T, t, PartialTyContains.here, ht, rfl⟩
               have hlt := (lvalTyping_vars_rank_lt hφ).1 hbor _ hvar
               simpa [LVal.base] using lt_of_lt_of_eq hlt hbase'
             obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists htyp
-            have htlf_le_tbs : tlf ≤ tbs.lifetime := ihRank _ hrankt t rfl htyp htbs
-            rcases lvalTyping_contained_or_reborrow lv' hbor PartialTyContains.here with
-              hc | hr
-            · rcases hc with ⟨bs2, hbs2, hcontain⟩
-              have hbs2eq : bs2 = bs :=
-                Option.some.inj (hbs2.symm.trans hbs')
-              subst hbs2eq
-              have hbtw : BorrowTargetsWellFormedInSlot e bs2.lifetime T :=
-                hcont (LVal.base lv') bs2 mutb T hbs' ⟨bs2, hbs', hcontain⟩
-              obtain ⟨tt2, tlf2, htyp2, hle2, hbaseout⟩ := hbtw t ht
-              rcases hbaseout with ⟨tbs2, htbs2, htbs2le⟩
-              have htbseq : tbs = tbs2 := Option.some.inj (htbs.symm.trans htbs2)
-              subst htbseq
-              exact LifetimeOutlives.trans htlf_le_tbs htbs2le
-            · -- reborrow sub-case: the deeper φ-recursion (isolated)
-              sorry
+            -- tlf ≤ tbs.lifetime by the rank IH; tbs.lifetime ≤ bs.lifetime since
+            -- `base t` occurs in `lv'`'s borrow type (uniform — no contained/reborrow split)
+            exact LifetimeOutlives.trans
+              (ihRank _ hrankt t rfl htyp htbs)
+              (lvalTyping_vars_base_le hcont hbor hbs' (LVal.base t) hvar htbs)
 
 @[refl] theorem Ty.sameShape_refl (t : Ty) : Ty.sameShape t t := by
   refine Ty.rec (motive_1 := fun t => Ty.sameShape t t)
