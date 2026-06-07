@@ -4428,6 +4428,38 @@ theorem lvalTargetsTyping_le_of_members {e : Env} {bound : Lifetime}
         (hmem target (by simp) _ _ hhead)
         (ihRest (fun t ht => hmem t (List.mem_cons_of_mem _ ht)))
 
+/-- Structural classification of a typed lval: either a needle borrow occurring
+in its partial type is `PartialTyContains`-reachable from the *base slot* (the
+lval's spine is var/box only, so the borrow is slot-contained), or the spine
+passes through a borrow dereference (a reborrow `*u`, with `u` a borrow lval of
+the same base, hence same rank).  This is the case split the contained-borrow
+bootstrap needs to know whether `ContainedBorrowsWellFormed` applies directly or
+the φ-recursion must descend through `u`. -/
+theorem lvalTyping_contained_or_reborrow {e : Env} :
+    ∀ (lv : LVal) {pt : PartialTy} {lf : Lifetime} {needle : Ty},
+      LValTyping e lv pt lf → PartialTyContains pt needle →
+      (∃ bs, e.slotAt (LVal.base lv) = some bs ∧ PartialTyContains bs.ty needle) ∨
+      (∃ u m0 T0 blf0, LVal.base u = LVal.base lv ∧
+        LValTyping e u (.ty (.borrow m0 T0)) blf0) := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro pt lf needle h hcontains
+      cases h with
+      | var hslot => exact Or.inl ⟨_, hslot, hcontains⟩
+  | deref lv0 ih =>
+      intro pt lf needle h hcontains
+      cases h with
+      | box hbox =>
+          rcases ih hbox (PartialTyContains.box hcontains) with hc | hr
+          · left; simpa [LVal.base] using hc
+          · right
+            rcases hr with ⟨u, m0, T0, blf0, hbase, htyp⟩
+            exact ⟨u, m0, T0, blf0, by simpa [LVal.base] using hbase, htyp⟩
+      | borrow hbor _htgts =>
+          right
+          exact ⟨lv0, _, _, _, by simp [LVal.base], hbor⟩
+
 theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
