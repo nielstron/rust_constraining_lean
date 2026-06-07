@@ -4372,6 +4372,33 @@ theorem LValTyping.lifetime_outlives_one {env : Env} {current : Lifetime}
   intro hwellEnv htyping
   exact (LValTyping.lifetime_outlives hwellEnv).1 htyping
 
+/-- The lifetime bound `lifetime ≤ current` for a typed lval needs only
+`EnvSlotsOutlive env current` (every slot lives at least as long as `current`):
+the lval's lifetime is the LUB of the base slots its borrow chain bottoms out at,
+each bounded by `current`.  This is the `EnvSlotsOutlive`-only core of
+`lifetime_outlives_one`, used to discharge the deref-borrow join lifetime bound
+without circular appeal to `ContainedBorrows join`. -/
+theorem LValTyping.lifetime_le_of_slotsOutlive {env : Env} {current : Lifetime}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime}
+    (houtlive : EnvSlotsOutlive env current)
+    (htyping : LValTyping env lv ty lifetime) :
+    lifetime ≤ current := by
+  exact LValTyping.rec
+    (motive_1 := fun _lv _ty lifetime _ => lifetime ≤ current)
+    (motive_2 := fun _targets _ty lifetime _ => lifetime ≤ current)
+    (by intro x slot hslot; exact houtlive x slot hslot)
+    (by intro _lv _inner _lifetime _htyping ih; exact ih)
+    (by
+      intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+        _hborrow _htargets _ihBorrow ihTargets
+      exact ihTargets)
+    (by intro _target _ty _lifetime _htarget ihTarget; exact ihTarget)
+    (by
+      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy _unionTy
+        _hhead _hrest _hunion hintersection ihHead ihRest
+      exact LifetimeIntersection.le_of_le hintersection ihHead ihRest)
+    htyping
+
 theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
