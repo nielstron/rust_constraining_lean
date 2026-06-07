@@ -5692,6 +5692,74 @@ theorem lvalTyping_vars_rank_lt {env : Env} {φ : Name → Nat}
           exact ⟨t, List.mem_cons_of_mem _ ht, hvt⟩)
       htyping
 
+/-- **Foundation stone of the lifetime bound.**  In a linearizable
+(`hφ`), contained-borrow-well-formed (`hcont`) environment, every typed lval's
+lifetime is bounded by its base slot's lifetime.  Proved by strong induction on
+the base rank `φ`, structural on the lval: `var` is reflexive; `box` recurses
+structurally; the `deref`-of-borrow case folds the per-target bound
+(`lvalTargetsTyping_le_of_members`) where each target `t` (strictly smaller rank
+via `lvalTyping_vars_rank_lt`) is bounded by `t`'s base slot (rank IH) and that
+slot outlives `bs` (the contained-borrow invariant's base-outlives).  The
+remaining *reborrow* sub-case (the borrow lies behind a deref, not slot-contained)
+is the deeper φ-recursion — isolated here. -/
+theorem lvalTyping_lifetime_le_base {e : Env} {φ : Name → Nat}
+    (hφ : ∀ x slot, e.slotAt x = some slot →
+      ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x)
+    (hcont : ContainedBorrowsWellFormed e) :
+    ∀ (lv : LVal) {pt : PartialTy} {lf : Lifetime},
+      LValTyping e lv pt lf →
+      ∀ {bs : EnvSlot}, e.slotAt (LVal.base lv) = some bs → lf ≤ bs.lifetime := by
+  suffices h : ∀ (n : Nat) (lv : LVal), φ (LVal.base lv) = n →
+      ∀ {pt lf}, LValTyping e lv pt lf →
+        ∀ {bs}, e.slotAt (LVal.base lv) = some bs → lf ≤ bs.lifetime by
+    intro lv pt lf htyping bs hbs
+    exact h (φ (LVal.base lv)) lv rfl htyping hbs
+  intro n
+  induction n using Nat.strong_induction_on with
+  | _ n ihRank =>
+    intro lv
+    induction lv with
+    | var x =>
+        intro _hbase pt lf hp bs hbs
+        cases hp with
+        | var hslot =>
+            rename_i slot
+            simp only [LVal.base] at hbs
+            have heq : slot = bs := Option.some.inj (hslot.symm.trans hbs)
+            rw [heq]
+            exact LifetimeOutlives.refl _
+    | deref lv' ihStruct =>
+        intro hbase pt lf hp bs hbs
+        have hbase' : φ (LVal.base lv') = n := by simpa [LVal.base] using hbase
+        have hbs' : e.slotAt (LVal.base lv') = some bs := by simpa [LVal.base] using hbs
+        cases hp with
+        | box hbox => exact ihStruct hbase' hbox hbs'
+        | borrow hbor htgts =>
+            rename_i mutb T blf
+            refine lvalTargetsTyping_le_of_members htgts (fun t ht tt tlf htyp => ?_)
+            have hrankt : φ (LVal.base t) < n := by
+              have hvar : LVal.base t ∈ PartialTy.vars (.ty (.borrow mutb T)) :=
+                mem_partialTy_vars_iff.mpr ⟨mutb, T, t, PartialTyContains.here, ht, rfl⟩
+              have hlt := (lvalTyping_vars_rank_lt hφ).1 hbor _ hvar
+              simpa [LVal.base] using lt_of_lt_of_eq hlt hbase'
+            obtain ⟨tbs, htbs⟩ := LValTyping.base_slot_exists htyp
+            have htlf_le_tbs : tlf ≤ tbs.lifetime := ihRank _ hrankt t rfl htyp htbs
+            rcases lvalTyping_contained_or_reborrow lv' hbor PartialTyContains.here with
+              hc | hr
+            · rcases hc with ⟨bs2, hbs2, hcontain⟩
+              have hbs2eq : bs2 = bs :=
+                Option.some.inj (hbs2.symm.trans hbs')
+              subst hbs2eq
+              have hbtw : BorrowTargetsWellFormedInSlot e bs2.lifetime T :=
+                hcont (LVal.base lv') bs2 mutb T hbs' ⟨bs2, hbs', hcontain⟩
+              obtain ⟨tt2, tlf2, htyp2, hle2, hbaseout⟩ := hbtw t ht
+              rcases hbaseout with ⟨tbs2, htbs2, htbs2le⟩
+              have htbseq : tbs = tbs2 := Option.some.inj (htbs.symm.trans htbs2)
+              subst htbseq
+              exact LifetimeOutlives.trans htlf_le_tbs htbs2le
+            · -- reborrow sub-case: the deeper φ-recursion (isolated)
+              sorry
+
 @[refl] theorem Ty.sameShape_refl (t : Ty) : Ty.sameShape t t := by
   refine Ty.rec (motive_1 := fun t => Ty.sameShape t t)
     (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
