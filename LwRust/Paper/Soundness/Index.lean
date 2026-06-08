@@ -24,7 +24,7 @@ file states the paper result, wires it to the mechanization in
 documented strengthened typing system: variable-only source redexes for
 move/borrow, variable-only stored borrow targets, dereference-capable assignment
 via `EnvWrite`, rule-carried assignment/declaration coherence facts, and
-singleton/drop-safe block sequencing.  Theorem 4.12 is currently the conditional
+non-owner sequence temporaries plus drop-safe block locals.  Theorem 4.12 is currently the conditional
 terminal-safety form; Lemma 4.10 provides the local progress theorem used for
 nontermination-friendly safety statements.
 
@@ -33,7 +33,7 @@ nontermination-friendly safety statements.
 * `Definitions`                          — Def 4.1–4.8, 4.13
 * `Lemma_4_9_BorrowInvariance`           — Lemma 4.9    (core wrapper proven)
 * `Lemma_4_10_Progress`                  — Lemma 4.10   (proven)
-* `Lemma_4_11_Preservation`              — Lemma 4.11   (owner-overwrite assignment proof debt remains)
+* `Lemma_4_11_Preservation`              — Lemma 4.11   (source-continuation scoped)
 * `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (conditional on termination)
 * `Corollary_4_14_BorrowSafety`          — Cor 4.14     (core wrapper proven)
 
@@ -48,5 +48,5 @@ nontermination-friendly safety statements.
 * `Appendix9.Lemma_9_7_ValueTyping`             — proven
 * `Appendix9.Lemma_9_8_AliasPreservation`       — mechanized for structural fragments
 * `Appendix9.Lemma_9_9_ValuePreservation`       — proven as Preservation value projection
-* `Appendix9.Lemma_9_10_StorePreservation`      — Preservation store projection; inherits assignment proof debt
+* `Appendix9.Lemma_9_10_StorePreservation`      — Preservation store projection
 -/

@@ -5126,7 +5126,7 @@ theorem typingPreservesWellFormed_of_landmarks
       let result := ih htypingEq hwellFormed
       ⟨result.1, WellFormedTy.box result.2⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms _hsingleton hwellTy _hdropSafe hdrop ih htypingEq hwellFormed =>
+        hblockChild hterms hwellTy _hdropSafe hdrop ih htypingEq hwellFormed =>
       let bodyResult :=
         ih htypingEq
           (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
@@ -5215,7 +5215,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       let result := ih htypingEq hwellFormed
       ⟨result.1, WellFormedTy.box result.2⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms _hsingleton hwellTy _hdropSafe hdrop ih htypingEq hwellFormed =>
+        hblockChild hterms hwellTy _hdropSafe hdrop ih htypingEq hwellFormed =>
       let bodyResult :=
         ih htypingEq
           (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
@@ -6745,6 +6745,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {finalValue : Value} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
@@ -6752,10 +6753,11 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hrefs hvalidRuntime hvalidStoreTyping hwellFormed hsafe htyping hmulti
+  intro hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe htyping hmulti
   exact (TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
       currentTyping = typing →
+      SourceTerm term →
       ∀ (store finalStore : ProgramStore) (finalValue : Value),
         ValidRuntimeState store term →
         ValidStoreTyping store term currentTyping →
@@ -6766,6 +6768,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
           TerminalStateSafe finalStore finalValue env₂ ty)
     (motive_2 := fun env currentTyping blockLifetime terms ty env₂ _ =>
       currentTyping = typing →
+      SourceTerm (.block blockLifetime terms) →
       ∀ (outerLifetime : Lifetime) (store finalStore : ProgramStore)
         (finalValue : Value),
         LifetimeChild outerLifetime blockLifetime →
@@ -6775,14 +6778,14 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         store ∼ₛ env →
         EnvLifetimeDropSafe env₂ blockLifetime →
         WellFormedTy env₂ ty outerLifetime →
-        BlockBodySingleton terms →
         MultiStep store outerLifetime (.block blockLifetime terms)
           finalStore (.val finalValue) →
         TerminalStateSafe finalStore finalValue
           (env₂.dropLifetime blockLifetime) ty)
     (fun {_env _typing _lifetime _value _ty}
         (hvalueTyping : ValueTyping _typing _value _ty)
-        (htypingEq : _typing = typing) (store finalStore : ProgramStore)
+        (htypingEq : _typing = typing) (_hsource : SourceTerm (.val _value))
+        (store finalStore : ProgramStore)
         (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.val _value))
         (hvalidStoreTyping : ValidStoreTyping store (.val _value) _typing)
@@ -6801,7 +6804,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     (fun {_env _typing _lifetime _valueLifetime _lv _ty}
         (hLv : LValTyping _env _lv (.ty _ty) _valueLifetime)
         (hcopy : CopyTy _ty) (hnotRead : ¬ ReadProhibited _env _lv)
-        (htypingEq : _typing = typing) (store finalStore : ProgramStore)
+        (htypingEq : _typing = typing) (_hsource : SourceTerm (.copy _lv))
+        (store finalStore : ProgramStore)
         (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.copy _lv))
         (hvalidStoreTyping : ValidStoreTyping store (.copy _lv) _typing)
@@ -6821,7 +6825,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         (hLv : LValTyping _env₁ _lv (.ty _ty) _valueLifetime)
         (hvar : LValIsVar _lv) (hnotWrite : ¬ WriteProhibited _env₁ _lv)
         (hmove : EnvMove _env₁ _lv _env₂)
-        (htypingEq : _typing = typing) (store finalStore : ProgramStore)
+        (htypingEq : _typing = typing) (_hsource : SourceTerm (.move _lv))
+        (store finalStore : ProgramStore)
         (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.move _lv))
         (hvalidStoreTyping : ValidStoreTyping store (.move _lv) _typing)
@@ -6853,7 +6858,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         (hLv : LValTyping _env _lv (.ty _ty) _valueLifetime)
         (hvar : LValIsVar _lv) (hmutable : Mutable _env _lv)
         (hnotWrite : ¬ WriteProhibited _env _lv)
-        (htypingEq : _typing = typing) (store finalStore : ProgramStore)
+        (htypingEq : _typing = typing) (_hsource : SourceTerm (.borrow true _lv))
+        (store finalStore : ProgramStore)
         (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.borrow true _lv))
         (_hvalidStoreTyping : ValidStoreTyping store (.borrow true _lv) _typing)
@@ -6872,7 +6878,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     (fun {_env _typing _lifetime _valueLifetime _lv _ty}
         (hLv : LValTyping _env _lv (.ty _ty) _valueLifetime)
         (hvar : LValIsVar _lv) (hnotRead : ¬ ReadProhibited _env _lv)
-        (htypingEq : _typing = typing) (store finalStore : ProgramStore)
+        (htypingEq : _typing = typing) (_hsource : SourceTerm (.borrow false _lv))
+        (store finalStore : ProgramStore)
         (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.borrow false _lv))
         (_hvalidStoreTyping : ValidStoreTyping store (.borrow false _lv) _typing)
@@ -6891,6 +6898,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     (fun {_env₁ _env₂ _typing _lifetime _term _ty}
         (hterm : TermTyping _env₁ _typing _lifetime _term _ty _env₂)
         (ih : _typing = typing →
+          SourceTerm _term →
           ∀ (store finalStore : ProgramStore) (finalValue : Value),
             ValidRuntimeState store _term →
             ValidStoreTyping store _term _typing →
@@ -6899,7 +6907,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             MultiStep store _lifetime _term finalStore (.val finalValue) →
             WellFormedEnv _env₂ _lifetime ∧
               TerminalStateSafe finalStore finalValue _env₂ _ty)
-        (htypingEq : _typing = typing) (store finalStore : ProgramStore)
+        (htypingEq : _typing = typing) (hsource : SourceTerm (.box _term))
+        (store finalStore : ProgramStore)
         (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.box _term))
         (hvalidStoreTyping : ValidStoreTyping store (.box _term) _typing)
@@ -6916,7 +6925,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         (by
           intro midStore value hvalidInner hvalidStoreTypingInner hsafeInner
             _hinnerTyping hmultiInner
-          exact (ih rfl store midStore value hvalidInner hvalidStoreTypingInner
+          exact (ih rfl (SourceTerm.box_inner hsource)
+            store midStore value hvalidInner hvalidStoreTypingInner
             hwellFormed hsafeInner hmultiInner).2)
         hvalidRuntime hvalidStoreTyping hsafe htermTyping hmulti
       have hwellOut : WellFormedEnv _env₂ _lifetime :=
@@ -6927,11 +6937,11 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
         (hblockChild : LifetimeChild _lifetime _blockLifetime)
         (hterms : TermListTyping _env₁ _typing _blockLifetime _terms _ty _env₂)
-        (hsingleton : BlockBodySingleton _terms)
         (hwellTy : WellFormedTy _env₂ _ty _lifetime)
         (hdropSafe : EnvLifetimeDropSafe _env₂ _blockLifetime)
         (hdrop : _env₃ = _env₂.dropLifetime _blockLifetime)
         (ih : _typing = typing →
+          SourceTerm (.block _blockLifetime _terms) →
           ∀ (outerLifetime : Lifetime) (store finalStore : ProgramStore)
             (finalValue : Value),
             LifetimeChild outerLifetime _blockLifetime →
@@ -6941,12 +6951,12 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             store ∼ₛ _env₁ →
             EnvLifetimeDropSafe _env₂ _blockLifetime →
             WellFormedTy _env₂ _ty outerLifetime →
-            BlockBodySingleton _terms →
             MultiStep store outerLifetime (.block _blockLifetime _terms)
               finalStore (.val finalValue) →
             TerminalStateSafe finalStore finalValue
               (_env₂.dropLifetime _blockLifetime) _ty)
         (htypingEq : _typing = typing)
+        (hsource : SourceTerm (.block _blockLifetime _terms))
         (store finalStore : ProgramStore) (finalValue : Value)
         (hvalidRuntime : ValidRuntimeState store (.block _blockLifetime _terms))
         (hvalidStoreTyping : ValidStoreTyping store (.block _blockLifetime _terms) _typing)
@@ -6959,7 +6969,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
       cases htypingEq
       have htermTyping :
           TermTyping _env₁ typing _lifetime (.block _blockLifetime _terms) _ty _env₃ :=
-        TermTyping.block hblockChild hterms hsingleton hwellTy hdropSafe hdrop
+        TermTyping.block hblockChild hterms hwellTy hdropSafe hdrop
       have hwellOut : WellFormedEnv _env₃ _lifetime :=
         (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
           (ValidRuntimeState.validState hvalidRuntime)
@@ -6967,21 +6977,22 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
       have hterminal : TerminalStateSafe finalStore finalValue _env₃ _ty :=
         by
           subst hdrop
-          exact ih rfl _lifetime store finalStore finalValue hblockChild
+          exact ih rfl hsource _lifetime store finalStore finalValue hblockChild
             hvalidRuntime hvalidStoreTyping
             (WellFormedEnv.weaken hwellFormed
               (LifetimeChild.outlives hblockChild))
-            hsafe hdropSafe hwellTy hsingleton hmulti
+            hsafe hdropSafe hwellTy hmulti
       exact And.intro hwellOut hterminal)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
         hfresh hterm hfreshOut _hcoh henv₃ ih
-        (htypingEq : _typing = typing) store finalStore finalValue hvalidRuntime
+        (htypingEq : _typing = typing) (hsource : SourceTerm (.letMut _x _term))
+        store finalStore finalValue hvalidRuntime
         hvalidStoreTyping hwellFormed hsafe hmulti =>
       by
         cases htypingEq
         rcases multistep_declare_to_value_inv hmulti with
           ⟨midStore, value, hinnerMulti, hdeclareStep⟩
-        rcases ih rfl store midStore value
+        rcases ih rfl (SourceTerm.declare_inner hsource) store midStore value
             (validRuntimeState_declare_inner hvalidRuntime)
             (validStoreTyping_declare_inner hvalidStoreTyping)
             hwellFormed hsafe hinnerMulti with
@@ -7008,13 +7019,14 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
         hLhs hRhs hLhsPost hshape hwellTy hwrite hranked hcoh hcontained
         hnotWrite _ih
-        (htypingEq : _typing = typing) store finalStore finalValue hvalidRuntime
+        (htypingEq : _typing = typing) (hsource : SourceTerm (.assign _lhs _rhs))
+        store finalStore finalValue hvalidRuntime
         hvalidStoreTyping hwellFormed hsafe hmulti =>
       by
         cases htypingEq
         rcases multistep_assign_to_value_inv hmulti with
           ⟨midStore, value, hinnerMulti, hassignStep⟩
-        rcases _ih rfl store midStore value
+        rcases _ih rfl (SourceTerm.assign_inner hsource) store midStore value
             (validRuntimeState_assign_inner hvalidRuntime)
             (validStoreTyping_assign_inner hvalidStoreTyping)
             hwellFormed hsafe hinnerMulti with
@@ -8835,13 +8847,13 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                                   cases htargetVar
         exact ⟨hwellOut, hterminal⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih
-        htypingEq outerLifetime store finalStore finalValue hchild hvalidRuntime
-        hvalidStoreTyping hwellFormed hsafe hdropSafe hwellTy _hsingleton hmulti =>
+        htypingEq hsource outerLifetime store finalStore finalValue hchild hvalidRuntime
+        hvalidStoreTyping hwellFormed hsafe hdropSafe hwellTy hmulti =>
       by
         cases htypingEq
         rcases multistep_block_head_to_value_inv hmulti with
           ⟨midStore, value, hinnerMulti, hblockValueMulti⟩
-        rcases _ih rfl store midStore value
+        rcases _ih rfl (SourceTerm.block_head hsource) store midStore value
             (validRuntimeState_block_singleton_inner hvalidRuntime)
             (validStoreTyping_block_singleton_inner hvalidStoreTyping)
             hwellFormed hsafe hinnerMulti with
@@ -8851,18 +8863,68 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
           hterminalInner.2.1 hchild hdropSafe hwellInner hwellTy
           hterminalInner.2.2 hblockValueMulti)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-        _hterm _hnonOwner hrest _ihHead _ihRest
-        _htypingEq _outerLifetime _store _finalStore _finalValue _hchild
-        _hvalidRuntime _hvalidStoreTyping _hwellFormed _hsafe _hdropSafe
-        _hwellTy hsingleton _hmulti =>
+        _hterm hnonOwner hrest _ihHead _ihRest
+        htypingEq hsource outerLifetime store finalStore finalValue hchild
+        hvalidRuntime hvalidStoreTyping hwellFormed hsafe hdropSafe hwellTy hmulti =>
       by
-        rcases hsingleton with ⟨body, htermsEq⟩
+        cases htypingEq
         cases _rest with
         | nil =>
             cases hrest
-        | cons restHead restTail =>
-            cases htermsEq)
-    htyping rfl store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
+        | cons next restTail =>
+            have hsourceHead : SourceTerm _term :=
+              SourceTerm.block_head hsource
+            have hsourceTail : SourceTerm (.block _lifetime (next :: restTail)) :=
+              SourceTerm.block_tail hsource
+            rcases multistep_block_head_to_value_inv hmulti with
+              ⟨midStore, value, hinnerMulti, hblockValueMulti⟩
+            rcases _ihHead rfl hsourceHead store midStore value
+                (validRuntimeState_block_head hvalidRuntime)
+                (validStoreTyping_block_head hvalidStoreTyping)
+                hwellFormed hsafe hinnerMulti with
+              ⟨hwellInner, hterminalInner⟩
+            have hvalueNonOwner : valueOwnedLocation? value = none :=
+              validValue_nonOwner_of_nonOwnerTy hnonOwner hterminalInner.2.2
+            have hvalueBlockValid :
+                ValidRuntimeState midStore
+                  (.block _lifetime (.val value :: next :: restTail)) :=
+              validRuntimeState_block_value_cons_of_value_source_tail
+                hsourceTail hterminalInner.1
+            have htailStoreTypingAtMid :
+                ValidStoreTyping midStore (.block _lifetime (next :: restTail)) typing :=
+              validStoreTyping_sourceTerm_of_validStoreTyping hsourceTail
+                (validStoreTyping_block_tail_of_cons hvalidStoreTyping)
+            exact preservation_block_terminal_multistep_runtime_of_first_step
+              (env' := _env₃.dropLifetime _lifetime) (ty := _finalTy)
+              (by
+                intro seqValue seqNext seqRest storeAfter hterms hdrops htailMulti
+                cases hterms
+                have hseqStep :
+                    Step midStore outerLifetime
+                      (.block _lifetime (.val value :: next :: restTail))
+                      storeAfter (.block _lifetime (next :: restTail)) :=
+                  Step.seq hdrops
+                rcases preservation_seq_nonOwner_step_runtime hvalueNonOwner
+                    hterminalInner.2.1 hvalueBlockValid hseqStep with
+                  ⟨hvalidTailAfter, hsafeTailAfter⟩
+                have hstoreAfter : storeAfter = midStore :=
+                  drops_value_nonOwner_eq hvalueNonOwner hdrops
+                have htailStoreTyping :
+                    ValidStoreTyping storeAfter (.block _lifetime (next :: restTail)) typing := by
+                  rw [hstoreAfter]
+                  exact htailStoreTypingAtMid
+                exact _ihRest rfl hsourceTail outerLifetime storeAfter finalStore
+                  finalValue hchild hvalidTailAfter htailStoreTyping hwellInner
+                  hsafeTailAfter hdropSafe hwellTy htailMulti)
+              (by
+                intro blockTerm blockRest storeAfter termAfter hterms hstep _htailMulti
+                cases hterms
+                exact False.elim (value_no_step hstep))
+              (by
+                intro blockValue storeAfter hterms _hdrops _htailMulti
+                cases hterms)
+              hblockValueMulti)
+    htyping rfl hsource store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
     hsafe hmulti).2
 
 end Paper

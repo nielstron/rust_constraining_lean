@@ -8,15 +8,15 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 
 Status: **partial appendix support** — the full paper statement for arbitrary
 recursive drops is not used by the closed Section 4 proof.  Preservation uses
-the strengthened singleton/drop-safe block rule, whose required `R-BlockB`
-safe-abstraction half is mechanized here:
+the strengthened drop-safe block-local rule, whose required `R-BlockB`
+safe-abstraction half for terminal value blocks is mechanized here:
 
 * `dropsLifetime_validStore`, `drops_validStore` — dropping preserves store
   validity;
 * `dropsLifetime_storeOwnersAllocated`, `drops_storeOwnersAllocated_of_disjoint`
   — owner-allocation is preserved under the lifetime-disjointness side condition;
 * `preservation_blockB_value_multistep_runtime_of_envDropSafe` — the
-  safe-abstraction half used by Preservation for singleton/drop-safe blocks;
+  safe-abstraction half used by Preservation for terminal value blocks;
 * `lemma_9_5_value_drops_frame` — recursive value drops preserve a value
   abstraction when the drop avoids every reached location.
 

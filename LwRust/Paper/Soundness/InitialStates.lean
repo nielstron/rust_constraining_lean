@@ -14,55 +14,6 @@ namespace Paper
 open Core
 
 
-theorem sourceValue_no_owningLocations {value : Value} :
-    SourceValue value →
-    valueOwningLocations value = [] := by
-  intro hsource
-  cases value with
-  | unit =>
-      rfl
-  | int _ =>
-      rfl
-  | ref ref =>
-      cases hsource
-
-theorem sourceValues_no_owningLocations {values : List Value} :
-    (∀ value, value ∈ values → SourceValue value) →
-    List.flatMap valueOwningLocations values = [] := by
-  intro hsource
-  induction values with
-  | nil =>
-      rfl
-  | cons head tail ih =>
-      have hhead : SourceValue head := hsource head (by simp)
-      have htail : ∀ value, value ∈ tail → SourceValue value := by
-        intro value hmem
-        exact hsource value (by simp [hmem])
-      calc
-        List.flatMap valueOwningLocations (head :: tail)
-            = valueOwningLocations head ++ List.flatMap valueOwningLocations tail := rfl
-        _ = [] ++ [] := by
-          rw [sourceValue_no_owningLocations hhead, ih htail]
-        _ = [] := rfl
-
-theorem sourceTerm_no_owningLocations {term : Term} :
-    SourceTerm term →
-    termOwningLocations term = [] := by
-  intro hsource
-  exact sourceValues_no_owningLocations hsource
-
-theorem sourceTerm_validTerm {term : Term} :
-    SourceTerm term →
-    ValidTerm term := by
-  intro hsource
-  simp [ValidTerm, sourceTerm_no_owningLocations hsource]
-
-theorem sourceTerm_ownerTargetsHeap {term : Term} :
-    SourceTerm term →
-    TermOwnerTargetsHeap term := by
-  intro hsource owned hmem
-  simp [sourceTerm_no_owningLocations hsource] at hmem
-
 theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
     SourceValue value →
     ∃ ty, ValueTyping StoreTyping.empty value ty ∧ ValidValue store value ty := by
@@ -231,7 +182,7 @@ theorem sourceInitial_blockB_value_borrowSafety_result_extension
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hsource htyping hfresh hfreshCoherence
   cases htyping with
-  | block _hblockChild hterms _hsingleton hwellTy _hdropSafe hdrop =>
+  | block _hblockChild hterms hwellTy _hdropSafe hdrop =>
       have hvalueTyping := termListTyping_singleton_value_valueTyping hterms
       have henvList : Env.empty = _ :=
         termListTyping_singleton_value_environment_eq hterms
@@ -306,7 +257,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       exact ih htypingEq candidate (by simpa [termValues] using hmem))
     (by
       intro _env₁ _env₂ _env₃ _typing _lifetime blockLifetime _terms _ty
-        _hchild _hterms _hsingleton _hwellTy _hdropSafe _hdrop ih htypingEq
+        _hchild _hterms _hwellTy _hdropSafe _hdrop ih htypingEq
       exact ih htypingEq)
     (by
       intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty
@@ -485,7 +436,8 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hstoreProgress,
       hrefs⟩
-  exact preservation hrefs hvalidRuntime hvalidStoreTyping
+  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+  exact preservation hrefs hsource hvalidRuntime hvalidStoreTyping
     (wellFormedEnv_empty lifetime) hsafe htyping hmulti
 
 /--
@@ -504,7 +456,8 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
       hrefs⟩
-  exact typeAndBorrowSafety hrefs hvalidRuntime hvalidStoreTyping hwellFormed
+  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+  exact typeAndBorrowSafety hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed
     hsafe hstoreProgress htyping hterminates
 
 /-- **Lemma 4.10.** Empty-store/source-term non-terminal step corollary. -/

@@ -21,8 +21,7 @@ matter when comparing theorem statements.
   temporaries and relies on full recursive drop preservation.  The mechanised
   typing rules allow only the no-recursive-owner cases: non-final sequence
   terms must have `NonOwnerTy`, block-local slots must satisfy
-  `EnvLifetimeDropSafe`, and typed blocks are restricted by
-  `BlockBodySingleton`.
+  `EnvLifetimeDropSafe`, and `T-Block` types general nonempty term lists.
 
 - **Fresh declaration coherence is explicit.**  `T-Declare` carries
   `FreshUpdateCoherenceObligations`.  A syntactically well-formed type such as
@@ -69,10 +68,10 @@ matter when comparing theorem statements.
   additional typing-rule premise; it is the structural invariant already
   enforced by lvalue and borrow-target typing.
 
-- **Borrow safety for source programs is source-scoped.**  The final
-  borrow-safety corollary assumes `SourceTerm`.  Arbitrary runtime constants can
-  already contain references, while the source calculus starts from values
-  without embedded borrows/owners except those produced by reduction.
+- **Terminal preservation/safety is source-continuation scoped.**  Lemma 4.11
+  and the terminal-safety half of Theorem 4.12 assume `SourceTerm`.  Arbitrary
+  runtime constants can already contain references in unevaluated continuations;
+  source-initial empty-store theorems derive `SourceTerm` from typability.
 
 ### Runtime and Semantics
 
@@ -106,8 +105,8 @@ matter when comparing theorem statements.
 
 - **The operational semantics still has general block-list rules.**  `R-Seq`,
   `R-BlockA`, and `R-BlockB` operate on arbitrary term lists, as in the paper.
-  The restriction is on the typed fragment used by the soundness proof:
-  singleton typed blocks and non-owner sequence temporaries.
+  The typed fragment now also permits general block term lists; the remaining
+  sequence restriction is that non-final temporaries must have `NonOwnerTy`.
 
 ### Theorem Interface Notes
 

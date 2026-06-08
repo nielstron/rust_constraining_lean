@@ -6,8 +6,7 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then `S₂ ∼ Γ₂`
 > (the final store is safely abstracted by the result environment).
 
-Status: mechanized through Preservation (Lemma 4.11), with the current owner
-overwrite assignment proof debt inherited from that lemma.  This is the
+Status: mechanized through Preservation (Lemma 4.11).  This is the
 `finalStore ∼ₛ env₂` conjunct of `TerminalStateSafe`.  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
@@ -19,8 +18,8 @@ overwrite assignment proof debt inherited from that lemma.  This is the
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
 * block `R-BlockB` — via Lemma 9.5
-  (`preservation_blockB_value_multistep_runtime_of_envDropSafe`) for
-  singleton/drop-safe blocks.
+  (`preservation_blockB_value_multistep_runtime_of_envDropSafe`) for terminal
+  value blocks.
 
 The move, assignment, and strengthened block cases are discharged in
 `preservation`; the theorem below records the full store-preservation projection.
@@ -38,6 +37,7 @@ theorem lemma_9_10_storePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
@@ -45,8 +45,8 @@ theorem lemma_9_10_storePreservation
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     finalStore ∼ₛ env₂ := by
-  intro hrefs hvalid hstoreTyping hwellFormed hsafe htyping hmulti
-  exact (preservation hrefs hvalid hstoreTyping
+  intro hrefs hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+  exact (preservation hrefs hsource hvalid hstoreTyping
     hwellFormed hsafe htyping hmulti).2.1
 
 /--

@@ -18,6 +18,10 @@ explicit `TerminatesAsValue` witness and then combines Lemma 4.10 (Progress)
 with Lemma 4.11 (Preservation).  For nontermination-friendly safety, use the
 progress component `typeAndBorrowProgress`, or its non-terminal corollary
 `progress_runtime_step`.
+
+The preservation-backed terminal safety component is scoped to `SourceTerm`
+continuations.  Empty-initial source theorems derive that premise from
+typability under `StoreTyping.empty`.
 -/
 
 namespace LwRust
@@ -107,7 +111,7 @@ theorem typeAndBorrowSafety_of_preservation
     ⟨finalStore, finalValue, hmulti, hpreservation finalStore finalValue hmulti⟩⟩
 
 /--
-Theorem 4.12, conditional Type and Borrow Safety.
+Theorem 4.12, conditional Type and Borrow Safety for source continuations.
 
 The paper's theorem states terminal existence; this mechanized form is the
 conditional safety theorem for an explicitly supplied terminal multistep.
@@ -115,6 +119,7 @@ conditional safety theorem for an explicitly supplied terminal multistep.
 theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     (∀ lifetime, WellFormedEnv env₁ lifetime) →
@@ -126,13 +131,13 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hrefs hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+  intro hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe
     hstoreProgress htyping hterminates
   exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
     hwellFormed hsafe hstoreProgress htyping
     (by
       intro finalStore finalValue hmulti
-      exact preservation hrefs hvalidRuntime hvalidStoreTyping
+      exact preservation hrefs hsource hvalidRuntime hvalidStoreTyping
         (hwellFormed lifetime) hsafe htyping hmulti)
     hterminates
 
@@ -156,13 +161,14 @@ theorem theorem_4_12_typeAndBorrowProgress
     ProgressResult store lifetime term :=
   typeAndBorrowProgress_of_typable hvalid hstoreTyping hwellFormed hsafe hstore htyping
 
-/-- Theorem 4.12, conditional Type and Borrow Safety.
+/-- Theorem 4.12, conditional Type and Borrow Safety for source continuations.
 This currently assumes termination, which is too strong, but we will anyways introduce non-termination later.
 -/
 theorem theorem_4_12_typeAndBorrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
+    (hsource : SourceTerm term)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : ∀ lifetime, WellFormedEnv env₁ lifetime)
@@ -174,7 +180,7 @@ theorem theorem_4_12_typeAndBorrowSafety
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety hrefs hvalid
+  typeAndBorrowSafety hrefs hsource hvalid
     hstoreTyping hwellFormed hsafe hstore htyping hterminates
 
 end LwRust.Paper.Soundness

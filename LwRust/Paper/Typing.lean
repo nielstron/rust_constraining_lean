@@ -113,10 +113,6 @@ def EnvLifetimeDropSafe (env : Env) (lifetime : Lifetime) : Prop :=
   ∀ x slot, env.slotAt x = some slot → slot.lifetime = lifetime →
     DropSafePartialTy slot.ty
 
-/-- Mechanized block-body restriction: blocks contain a single body term. -/
-def BlockBodySingleton (terms : List Term) : Prop :=
-  ∃ term, terms = [term]
-
 /-- Definition 3.7, type strengthening `T̃₁ ⊑ T̃₂`. -/
 inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
   /-- W-Reflex. -/
@@ -888,7 +884,6 @@ mutual
         {lifetime blockLifetime : Lifetime} {terms : List Term} {ty : Ty} :
         LifetimeChild lifetime blockLifetime →
         TermListTyping env₁ typing blockLifetime terms ty env₂ →
-        BlockBodySingleton terms →
         WellFormedTy env₂ ty lifetime →
         EnvLifetimeDropSafe env₂ blockLifetime →
         env₃ = env₂.dropLifetime blockLifetime →
@@ -939,6 +934,27 @@ mutual
         TermListTyping env₂ typing lifetime rest finalTy env₃ →
         TermListTyping env₁ typing lifetime (term :: rest) finalTy env₃
 end
+
+/-- Convenience constructor for a two-term block body.
+
+This is not a new typing rule: it is just `T-Block` plus `T-Seq/cons`, and
+records that typed blocks are no longer restricted to singleton bodies.
+-/
+theorem TermTyping.block_two {env₁ env₂ env₃ env₄ : Env}
+    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
+    {first second : Term} {firstTy resultTy : Ty} :
+    LifetimeChild lifetime blockLifetime →
+    TermTyping env₁ typing blockLifetime first firstTy env₂ →
+    NonOwnerTy firstTy →
+    TermTyping env₂ typing blockLifetime second resultTy env₃ →
+    WellFormedTy env₃ resultTy lifetime →
+    EnvLifetimeDropSafe env₃ blockLifetime →
+    env₄ = env₃.dropLifetime blockLifetime →
+    TermTyping env₁ typing lifetime (.block blockLifetime [first, second]) resultTy env₄ := by
+  intro hchild hfirst hnonOwner hsecond hwellTy hdropSafe hdrop
+  exact TermTyping.block hchild
+    (TermListTyping.cons hfirst hnonOwner (TermListTyping.singleton hsecond))
+    hwellTy hdropSafe hdrop
 
 end Paper
 end LwRust

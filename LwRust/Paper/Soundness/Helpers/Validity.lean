@@ -158,6 +158,90 @@ def termValues : Term → List Value
 def termOwningLocations (term : Term) : List Location :=
   List.flatMap valueOwningLocations (termValues term)
 
+/-! ## Source terms -/
+
+def SourceValue : Value → Prop
+  | .unit => True
+  | .int _ => True
+  | .ref _ => False
+
+def SourceTerm (term : Term) : Prop :=
+  ∀ value, value ∈ termValues term → SourceValue value
+
+theorem sourceValue_no_owningLocations {value : Value} :
+    SourceValue value →
+    valueOwningLocations value = [] := by
+  intro hsource
+  cases value with
+  | unit =>
+      rfl
+  | int _ =>
+      rfl
+  | ref ref =>
+      cases hsource
+
+theorem sourceValues_no_owningLocations {values : List Value} :
+    (∀ value, value ∈ values → SourceValue value) →
+    List.flatMap valueOwningLocations values = [] := by
+  intro hsource
+  induction values with
+  | nil =>
+      rfl
+  | cons head tail ih =>
+      have hhead : SourceValue head := hsource head (by simp)
+      have htail : ∀ value, value ∈ tail → SourceValue value := by
+        intro value hmem
+        exact hsource value (by simp [hmem])
+      calc
+        List.flatMap valueOwningLocations (head :: tail)
+            = valueOwningLocations head ++ List.flatMap valueOwningLocations tail := rfl
+        _ = [] ++ [] := by
+          rw [sourceValue_no_owningLocations hhead, ih htail]
+        _ = [] := rfl
+
+theorem sourceTerm_no_owningLocations {term : Term} :
+    SourceTerm term →
+    termOwningLocations term = [] := by
+  intro hsource
+  exact sourceValues_no_owningLocations hsource
+
+theorem SourceTerm.block_head {lifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    SourceTerm (.block lifetime (term :: rest)) →
+    SourceTerm term := by
+  intro hsource value hmem
+  exact hsource value
+    (by
+      simp [termValues, hmem])
+
+theorem SourceTerm.block_tail {lifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    SourceTerm (.block lifetime (term :: rest)) →
+    SourceTerm (.block lifetime rest) := by
+  intro hsource value hmem
+  exact hsource value
+    (by
+      simp [termValues] at hmem ⊢
+      exact Or.inr hmem)
+
+theorem SourceTerm.box_inner {term : Term} :
+    SourceTerm (.box term) →
+    SourceTerm term := by
+  intro hsource value hmem
+  exact hsource value (by simpa [termValues] using hmem)
+
+theorem SourceTerm.declare_inner {x : Name} {term : Term} :
+    SourceTerm (.letMut x term) →
+    SourceTerm term := by
+  intro hsource value hmem
+  exact hsource value (by simpa [termValues] using hmem)
+
+theorem SourceTerm.assign_inner {lhs : LVal} {rhs : Term} :
+    SourceTerm (.assign lhs rhs) →
+    SourceTerm rhs := by
+  intro hsource value hmem
+  exact hsource value (by simpa [termValues] using hmem)
+
 namespace ProgramStore
 
 /--
@@ -288,6 +372,18 @@ def ValueOwnerTargetsHeap (value : Value) : Prop :=
 def TermOwnerTargetsHeap (term : Term) : Prop :=
   ∀ owned, owned ∈ termOwningLocations term →
     ∃ address, owned = .heap address
+
+theorem sourceTerm_validTerm {term : Term} :
+    SourceTerm term →
+    ValidTerm term := by
+  intro hsource
+  simp [ValidTerm, sourceTerm_no_owningLocations hsource]
+
+theorem sourceTerm_ownerTargetsHeap {term : Term} :
+    SourceTerm term →
+    TermOwnerTargetsHeap term := by
+  intro hsource owned hmem
+  simp [sourceTerm_no_owningLocations hsource] at hmem
 
 /--
 No store owner points at a location allocated in `lifetime`.  This is the
@@ -473,6 +569,15 @@ theorem termOwnerTargetsHeap_assign_inner {lhs : LVal} {rhs : Term} :
   intro hterm owned hmem
   exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
 
+theorem termOwnerTargetsHeap_block_head {blockLifetime : Lifetime}
+    {term : Term} {rest : List Term} :
+    TermOwnerTargetsHeap (.block blockLifetime (term :: rest)) →
+    TermOwnerTargetsHeap term := by
+  intro hterm owned hmem
+  exact hterm owned (by
+    simp [termOwningLocations, termValues] at hmem ⊢
+    exact Or.inl hmem)
+
 theorem termOwnerTargetsHeap_block_tail {blockLifetime : Lifetime}
     {value : Value} {next : Term} {rest : List Term} :
     TermOwnerTargetsHeap (.block blockLifetime (.val value :: next :: rest)) →
@@ -519,6 +624,37 @@ theorem validRuntimeState_block_singleton_inner {store : ProgramStore}
     termOwnerTargetsHeap_block_singleton
       (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
 
+theorem validState_block_head {store : ProgramStore}
+    {blockLifetime : Lifetime} {term : Term} {rest : List Term} :
+    ValidState store (.block blockLifetime (term :: rest)) →
+    ValidState store term := by
+  intro hvalid
+  exact ⟨hvalid.1,
+    by
+      have hvalidAppend :
+          (termOwningLocations term ++
+            termOwningLocations (.block blockLifetime rest)).Nodup := by
+        simpa [ValidTerm, termOwningLocations, termValues] using hvalid.2.1
+      exact List.Nodup.of_append_left hvalidAppend,
+    by
+      intro owned hmem
+      exact hvalid.2.2 owned
+        (by
+          simp [termOwningLocations, termValues] at hmem ⊢
+          exact Or.inl hmem)⟩
+
+theorem validRuntimeState_block_head {store : ProgramStore}
+    {blockLifetime : Lifetime} {term : Term} {rest : List Term} :
+    ValidRuntimeState store (.block blockLifetime (term :: rest)) →
+    ValidRuntimeState store term := by
+  intro hvalid
+  exact ⟨validState_block_head hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_block_head
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+
 theorem validState_block_singleton_value_of_value {store : ProgramStore}
     {blockLifetime : Lifetime} {value : Value} :
     ValidState store (.val value) →
@@ -539,6 +675,60 @@ theorem validRuntimeState_block_singleton_value_of_value {store : ProgramStore}
       intro owned hmem
       exact (ValidRuntimeState.termOwnerTargetsHeap hvalid) owned
         (by simpa [termOwningLocations, termValues] using hmem)⟩
+
+theorem validRuntimeState_sourceTerm_of_store {store : ProgramStore}
+    {term : Term} :
+    ValidStore store →
+    StoreOwnersAllocated store →
+    StoreOwnerTargetsHeap store →
+    HeapSlotsRootLifetime store →
+    SourceTerm term →
+    ValidRuntimeState store term := by
+  intro hstore hallocated hheap hroot hsource
+  exact ⟨⟨hstore, sourceTerm_validTerm hsource,
+      by
+        intro owned hmem
+        simp [sourceTerm_no_owningLocations hsource] at hmem⟩,
+    hallocated,
+    hheap,
+    hroot,
+    sourceTerm_ownerTargetsHeap hsource⟩
+
+theorem validRuntimeState_block_value_cons_of_value_source_tail
+    {store : ProgramStore} {blockLifetime : Lifetime}
+    {value : Value} {next : Term} {rest : List Term} :
+    SourceTerm (.block blockLifetime (next :: rest)) →
+    ValidRuntimeState store (.val value) →
+    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) := by
+  intro hsourceTail hvalidValue
+  have htailOwners :
+      termOwningLocations (.block blockLifetime (next :: rest)) = [] :=
+    sourceTerm_no_owningLocations hsourceTail
+  have htailOwnersExpanded :
+      (List.flatMap valueOwningLocations (termValues next) ++
+        List.flatMap valueOwningLocations (List.flatMap termValues rest)) = [] := by
+    simpa [termOwningLocations, termValues] using htailOwners
+  exact ⟨⟨hvalidValue.1.1,
+      by
+        have hvalueValidTerm : (valueOwningLocations value).Nodup := by
+          simpa [ValidTerm, termOwningLocations, termValues] using hvalidValue.1.2.1
+        simpa [ValidTerm, termOwningLocations, termValues, htailOwnersExpanded] using
+          hvalueValidTerm,
+      by
+        intro owned hmem howns
+        have hvalueMem : owned ∈ valueOwningLocations value := by
+          simpa [termOwningLocations, termValues, htailOwnersExpanded] using hmem
+        exact hvalidValue.1.2.2 owned
+          (by simpa [termOwningLocations, termValues] using hvalueMem) howns⟩,
+    ValidRuntimeState.storeOwnersAllocated hvalidValue,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalidValue,
+    ValidRuntimeState.heapSlotsRootLifetime hvalidValue,
+    by
+      intro owned hmem
+      have hvalueMem : owned ∈ valueOwningLocations value := by
+        simpa [termOwningLocations, termValues, htailOwnersExpanded] using hmem
+      exact (ValidRuntimeState.termOwnerTargetsHeap hvalidValue) owned
+        (by simpa [termOwningLocations, termValues] using hvalueMem)⟩
 
 theorem validState_box_inner {store : ProgramStore} {term : Term} :
     ValidState store (.box term) →

@@ -6,10 +6,10 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then the final
 > value is abstracted by the result type: `S₂ ▷ v ∼ T`.
 
-Status: **proven** for the strengthened Section 4 typing system.  This is the
-`ValidValue finalStore finalValue ty` conjunct of `TerminalStateSafe`,
-established by Preservation (Lemma 4.11).  The file also exposes representative
-redex-level frame lemmas for move/value cases.
+Status: **proven** for the strengthened Section 4 typing system over source
+continuations.  This is the `ValidValue finalStore finalValue ty` conjunct of
+`TerminalStateSafe`, established by Preservation (Lemma 4.11).  The file also
+exposes representative redex-level frame lemmas for move/value cases.
 -/
 
 namespace LwRust.Paper.Soundness
@@ -24,6 +24,7 @@ theorem lemma_9_9_valuePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
@@ -31,8 +32,8 @@ theorem lemma_9_9_valuePreservation
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ValidValue finalStore finalValue ty := by
-  intro hrefs hvalid hstoreTyping hwellFormed hsafe htyping hmulti
-  exact (preservation hrefs hvalid hstoreTyping
+  intro hrefs hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+  exact (preservation hrefs hsource hvalid hstoreTyping
     hwellFormed hsafe htyping hmulti).2.2
 
 /--

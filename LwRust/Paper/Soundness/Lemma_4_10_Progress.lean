@@ -623,7 +623,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       progress_box_typing hstore (TermTyping.box hterm)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty}
-        _hblockChild _hterms _hsingleton _hwellTy _hdropSafe _hdrop ih hwellFormed hsafe hstore =>
+        _hblockChild _hterms _hwellTy _hdropSafe _hdrop ih hwellFormed hsafe hstore =>
       ih lifetime hwellFormed hsafe hstore)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
         hfresh hterm hfreshOut hcoh henv ih

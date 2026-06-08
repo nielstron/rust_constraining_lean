@@ -348,6 +348,44 @@ theorem validStoreTyping_assign_inner {store : ProgramStore} {lhs : LVal}
   intro hvalid value hmem
   exact hvalid value (by simpa [termValues] using hmem)
 
+theorem validStoreTyping_block_head {store : ProgramStore} {typing : StoreTyping}
+    {blockLifetime : Lifetime} {term : Term} {rest : List Term} :
+    ValidStoreTyping store (.block blockLifetime (term :: rest)) typing →
+    ValidStoreTyping store term typing := by
+  intro htyping value hmem
+  exact htyping value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inl hmem)
+
+theorem validStoreTyping_block_tail_of_cons {store : ProgramStore}
+    {typing : StoreTyping} {blockLifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    ValidStoreTyping store (.block blockLifetime (term :: rest)) typing →
+    ValidStoreTyping store (.block blockLifetime rest) typing := by
+  intro htyping value hmem
+  exact htyping value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr hmem)
+
+theorem validStoreTyping_sourceTerm_of_validStoreTyping
+    {store store' : ProgramStore} {term : Term} {typing : StoreTyping} :
+    SourceTerm term →
+    ValidStoreTyping store term typing →
+    ValidStoreTyping store' term typing := by
+  intro hsource htyping value hmem
+  rcases htyping value hmem with ⟨ty, hvalueTyping, _hvalidValue⟩
+  refine ⟨ty, hvalueTyping, ?_⟩
+  have hsourceValue : SourceValue value := hsource value hmem
+  cases value with
+  | unit =>
+      cases hvalueTyping
+      exact ValidPartialValue.unit
+  | int _ =>
+      cases hvalueTyping
+      exact ValidPartialValue.int
+  | ref _ =>
+      cases hsourceValue
+
 /--
 After `R-Seq` drops a completed head value, the remaining block mentions only
 runtime values that were already present in the original block.

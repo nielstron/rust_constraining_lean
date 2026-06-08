@@ -2726,7 +2726,7 @@ theorem blockValueTyping_output_eq {env env' : Env} {typing : StoreTyping}
     env' = env.dropLifetime blockLifetime := by
   intro htyping
   cases htyping with
-  | block _hblockChild hterms _hsingleton _hwellFormed _hdropSafe hdrop =>
+  | block _hblockChild hterms _hwellFormed _hdropSafe hdrop =>
       have henv₂ := termListTyping_singleton_value_environment_eq hterms
       rw [henv₂]
       exact hdrop
@@ -2738,7 +2738,7 @@ theorem blockValueTyping_valueTyping {env env' : Env} {typing : StoreTyping}
     ValueTyping typing value ty := by
   intro htyping
   cases htyping with
-  | block _hblockChild hterms _hsingleton _hwellFormed _hdropSafe _hdrop =>
+  | block _hblockChild hterms _hwellFormed _hdropSafe _hdrop =>
       exact termListTyping_singleton_value_valueTyping hterms
 
 /--

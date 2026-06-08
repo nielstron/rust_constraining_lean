@@ -1115,51 +1115,6 @@ theorem borrowSafe_value_result_extension_borrowFree {env env₂ : Env}
 
 /-! ## Source-Level Initial States -/
 
-def SourceValue : Value → Prop
-  | .unit => True
-  | .int _ => True
-  | .ref _ => False
-
-def SourceTerm (term : Term) : Prop :=
-  ∀ value, value ∈ termValues term → SourceValue value
-
-theorem SourceTerm.block_head {lifetime : Lifetime} {term : Term}
-    {rest : List Term} :
-    SourceTerm (.block lifetime (term :: rest)) →
-    SourceTerm term := by
-  intro hsource value hmem
-  exact hsource value
-    (by
-      simp [termValues, hmem])
-
-theorem SourceTerm.block_tail {lifetime : Lifetime} {term : Term}
-    {rest : List Term} :
-    SourceTerm (.block lifetime (term :: rest)) →
-    SourceTerm (.block lifetime rest) := by
-  intro hsource value hmem
-  exact hsource value
-    (by
-      simp [termValues] at hmem ⊢
-      exact Or.inr hmem)
-
-theorem SourceTerm.box_inner {term : Term} :
-    SourceTerm (.box term) →
-    SourceTerm term := by
-  intro hsource value hmem
-  exact hsource value (by simpa [termValues] using hmem)
-
-theorem SourceTerm.declare_inner {x : Name} {term : Term} :
-    SourceTerm (.letMut x term) →
-    SourceTerm term := by
-  intro hsource value hmem
-  exact hsource value (by simpa [termValues] using hmem)
-
-theorem SourceTerm.assign_inner {lhs : LVal} {rhs : Term} :
-    SourceTerm (.assign lhs rhs) →
-    SourceTerm rhs := by
-  intro hsource value hmem
-  exact hsource value (by simpa [termValues] using hmem)
-
 theorem sourceValue_valueTyping_borrowFree {typing : StoreTyping} {value : Value}
     {ty : Ty} :
     SourceValue value →
@@ -2100,7 +2055,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           intro gamma hfresh
           exact borrowSafeEnv_update_box_of_update_inner (hinner.2.2 gamma hfresh)⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms _hsingleton hwellTy _hdropSafe hdrop _ih hsource hborrowSafe =>
+        hblockChild hterms hwellTy _hdropSafe hdrop _ih hsource hborrowSafe =>
       by
         have hbody := _ih hsource hborrowSafe
         have hbodySafe : BorrowSafeEnv _env₂ :=
