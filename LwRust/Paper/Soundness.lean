@@ -23,13 +23,15 @@ per-result lemma files (each carries the material needed to prove its result and
 ends with the paper-facing statement) and in the Appendix 9 files.  Generic,
 reusable typing/runtime facts live under `Soundness.Helpers`.
 
-Section 4 is closed for the mechanized calculus with the following documented
-deviations from the paper rules:
+Section 4 is mechanized for the strengthened calculus with the following
+documented deviations from the paper rules:
 
 * the abstract `ProgramStore` exposes progress totality as
   `OperationalStoreProgress`; concrete finite stores instantiate it;
-* Theorem 4.12 uses an explicit `TerminatesAsValue` witness, matching the
-  paper's termination assumption rather than deriving termination here;
+* the current Theorem 4.12 wrapper is conditional terminal safety: it exposes
+  `TerminatesAsValue` instead of proving the paper's terminal-existence
+  conclusion.  The nontermination-friendly local safety statement is
+  `progress_runtime_step`, which says a well-typed non-terminal state can step;
 * move/borrow/assignment source redexes are restricted to variable lvalues;
 * declaration and assignment typing carry the local coherence/rank facts needed
   by the `lw_rust_followup` linearizability argument;

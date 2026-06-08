@@ -11,11 +11,13 @@ Paper statement (Section 4.5):
 > `Γ₁ ⊢ ⟨t : T⟩^l_σ ⊣ Γ₂`, then `⟨S₁ ▷ t ⟶* S₂ ▷ v⟩^l` for some terminal
 > state `S₂ ▷ v`.
 
-The paper's statement assumes termination; here that is the explicit
-`TerminatesAsValue` witness.  Follows from Lemma 4.10 (Progress) and Lemma 4.11
-(Preservation).  The mechanized paper-facing wrapper uses the strengthened
-singleton/drop-safe block typing rule, so the final statement carries no
-external runtime-preservation premise.
+The paper states terminal existence directly and then notes in Section 4.5.2
+that this relies on termination of the presented calculus.  This mechanized
+wrapper does not prove normalization; it exposes the terminal run as the
+explicit `TerminatesAsValue` witness and then combines Lemma 4.10 (Progress)
+with Lemma 4.11 (Preservation).  For nontermination-friendly safety, use the
+progress component `typeAndBorrowProgress`, or its non-terminal corollary
+`progress_runtime_step`.
 -/
 
 namespace LwRust
@@ -33,13 +35,52 @@ def TerminatesAsValue (store : ProgramStore) (lifetime : Lifetime) (term : Term)
     MultiStep store lifetime term finalStore (.val finalValue)
 
 /--
-Theorem 4.12 bridge, Type and Borrow Safety.
+The nontermination-friendly progress component of Theorem 4.12.
 
-The paper's core calculus is terminating, while this mechanisation keeps the
-operational semantics relational.  Therefore the theorem is stated with an
-explicit termination witness and the Lemma 4.11 preservation conclusion as a
-premise.  Progress rules out an initially stuck well-typed state; preservation
-turns the terminal multistep into the safe terminal state promised by the paper.
+This is the part that remains valid when loops or recursion are added: a
+well-typed current state is either already terminal or has a valid next step.
+-/
+theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
+  exact progress_runtime hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+    hstoreProgress htyping
+
+/--
+Progress from mere typability of the current term.
+
+The output environment and result type are intentionally existential: local
+progress does not inspect them.
+-/
+theorem typeAndBorrowProgress_of_typable {store : ProgramStore} {env₁ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    (∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) →
+    ProgressResult store lifetime term := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htypable
+  rcases htypable with ⟨env₂, ty, htyping⟩
+  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+    hstoreProgress htyping
+
+/--
+Theorem 4.12 bridge, conditional terminal safety.
+
+The paper's core calculus is intended to terminate.  This mechanisation keeps
+that fact separate: the theorem is stated with an explicit terminal-run witness
+and the Lemma 4.11 preservation conclusion as a premise.  Progress rules out an
+initially stuck well-typed state; preservation turns the terminal multistep into
+a safe terminal state.
 -/
 theorem typeAndBorrowSafety_of_preservation
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
@@ -61,15 +102,15 @@ theorem typeAndBorrowSafety_of_preservation
   intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
     hpreservation hterminates
   rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
-  exact ⟨progress_runtime hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+  exact ⟨typeAndBorrowProgress hvalidRuntime hvalidStoreTyping hwellFormed hsafe
       hstoreProgress htyping,
     ⟨finalStore, finalValue, hmulti, hpreservation finalStore finalValue hmulti⟩⟩
 
 /--
-Theorem 4.12, Type and Borrow Safety.
+Theorem 4.12, conditional Type and Borrow Safety.
 
-The paper assumes termination; here that assumption is represented by an
-explicit multistep witness to a final runtime value.
+The paper's theorem states terminal existence; this mechanized form is the
+conditional safety theorem for an explicitly supplied terminal multistep.
 -/
 theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
@@ -102,7 +143,22 @@ namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Theorem 4.12, Type and Borrow Safety. -/
+/-- Theorem 4.12 progress component, without a termination assumption. -/
+theorem theorem_4_12_typeAndBorrowProgress
+    {store : ProgramStore} {env₁ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : ∀ lifetime, WellFormedEnv env₁ lifetime)
+    (hsafe : store ∼ₛ env₁)
+    (hstore : OperationalStoreProgress store)
+    (htyping : ∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) :
+    ProgressResult store lifetime term :=
+  typeAndBorrowProgress_of_typable hvalid hstoreTyping hwellFormed hsafe hstore htyping
+
+/-- Theorem 4.12, conditional Type and Borrow Safety.
+This currently assumes termination, which is too strong, but we will anyways introduce non-termination later.
+-/
 theorem theorem_4_12_typeAndBorrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
