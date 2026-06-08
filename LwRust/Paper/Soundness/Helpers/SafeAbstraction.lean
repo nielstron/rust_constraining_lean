@@ -104,6 +104,55 @@ theorem validPartialValue_after_drops_all_nonOwner {store store' : ProgramStore}
   subst hstore
   exact hvalid
 
+/-- Safe strengthening for partial values when strengthening preserves the
+initialized/undefined shape.  Same-shape excludes the `ty → undef` and
+`box → undef` strengthening cases, which are not valid for initialized runtime
+values. -/
+theorem validPartialValue_strengthen_sameShape {store : ProgramStore}
+    {value : PartialValue} {oldTy newTy : PartialTy} :
+    ValidPartialValue store value oldTy →
+    PartialTyStrengthens oldTy newTy →
+    PartialTy.sameShape oldTy newTy →
+    ValidPartialValue store value newTy := by
+  intro hvalid
+  induction hvalid generalizing newTy with
+  | unit =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.unit
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | int =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.int
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | undef =>
+      intro hstrength _hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.undef
+      | undefLeft _ => exact ValidPartialValue.undef
+  | borrow hmem hloc =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.borrow hmem hloc
+      | borrow hsubset => exact ValidPartialValue.borrow (hsubset hmem) hloc
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | box hslot _hinner ih =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex =>
+          exact ValidPartialValue.box hslot _hinner
+      | box hinnerStrength =>
+          exact ValidPartialValue.box hslot
+            (ih hinnerStrength (by simpa [PartialTy.sameShape] using hshape))
+      | boxIntoUndef _ =>
+          simp [PartialTy.sameShape] at hshape
+  | boxFull hslot hinner =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.boxFull hslot hinner
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+
 /--
 Definition 4.5, valid store typing `S ▷ t ⊢ σ`.
 
@@ -381,6 +430,65 @@ def SafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
       ValidPartialValue store value envSlot.ty
 
 infix:50 " ∼ₛ " => SafeAbstraction
+
+theorem safeAbstraction_of_domain_and_slots {store : ProgramStore} {env : Env} :
+    (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+          ∃ envSlot, env.slotAt x = some envSlot) →
+    (∀ x envSlot,
+      env.slotAt x = some envSlot →
+      ∃ value,
+        store.slotAt (VariableProjection x) =
+          some { value := value, lifetime := envSlot.lifetime } ∧
+        ValidPartialValue store value envSlot.ty) →
+    store ∼ₛ env := by
+  intro hdomain hslots
+  exact ⟨hdomain, hslots⟩
+
+/--
+Transport safe abstraction across an environment shape/strengthening map when
+the runtime store itself is unchanged.
+
+This is the store-side counterpart to positive-rank write/fan-out shape maps:
+same-shape strengthening is safe for already-initialized runtime values, while
+the two slot maps provide exact domain agreement.
+-/
+theorem safeAbstraction_transport_sameShape {store : ProgramStore}
+    {env result : Env} :
+    store ∼ₛ env →
+    (∀ x resultSlot,
+      result.slotAt x = some resultSlot →
+      ∃ sourceSlot,
+        env.slotAt x = some sourceSlot ∧
+          sourceSlot.lifetime = resultSlot.lifetime ∧
+          PartialTyStrengthens sourceSlot.ty resultSlot.ty ∧
+          PartialTy.sameShape sourceSlot.ty resultSlot.ty) →
+    (∀ x sourceSlot,
+      env.slotAt x = some sourceSlot →
+      ∃ resultSlot,
+        result.slotAt x = some resultSlot ∧
+          sourceSlot.lifetime = resultSlot.lifetime) →
+    store ∼ₛ result := by
+  intro hsafe hback hfwd
+  refine safeAbstraction_of_domain_and_slots ?domain ?slots
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases (hsafe.1 x).mp hstoreDomain with ⟨sourceSlot, hsource⟩
+      rcases hfwd x sourceSlot hsource with ⟨resultSlot, hresult, _⟩
+      exact ⟨resultSlot, hresult⟩
+    · intro hresultDomain
+      rcases hresultDomain with ⟨resultSlot, hresult⟩
+      rcases hback x resultSlot hresult with
+        ⟨sourceSlot, hsource, _hlife, _hstrength, _hshape⟩
+      exact (hsafe.1 x).mpr ⟨sourceSlot, hsource⟩
+  · intro x resultSlot hresult
+    rcases hback x resultSlot hresult with
+      ⟨sourceSlot, hsource, hlife, hstrength, hshape⟩
+    rcases hsafe.2 x sourceSlot hsource with
+      ⟨value, hstore, hvalid⟩
+    refine ⟨value, ?_, ?_⟩
+    · simpa [hlife] using hstore
+    · exact validPartialValue_strengthen_sameShape hvalid hstrength hshape
 
 /--
 Drop Preservation, non-owning drop-set fragment: if every value in `ψ` is
@@ -1020,6 +1128,66 @@ theorem safeAbstraction_update_var_of_preserved {store' : ProgramStore}
         simpa [Env.update] using henvUpdated.symm
       subst hupdatedSlot
       exact ⟨.value value, hstoreX, hnewValid⟩
+    · have henv : env.slotAt y = some updatedSlot := by
+        simpa [Env.update, hyx] using henvUpdated
+      exact hpreserveOther y updatedSlot hyx henv
+
+/--
+Safe-abstraction preservation for updating one variable's abstract slot to an
+arbitrary partial type.
+
+Direct assignment to a variable uses the full-type specialization above; writes
+through owned boxes update the base variable's boxed partial type, so they need
+this more general form.
+-/
+theorem safeAbstraction_update_var_partial_of_preserved {store' : ProgramStore}
+    {env env' : Env} {x : Name} {envSlot : EnvSlot}
+    {value : PartialValue} {newTy : PartialTy} :
+    env.slotAt x = some envSlot →
+    store'.slotAt (VariableProjection x) =
+      some { value := value, lifetime := envSlot.lifetime } →
+    ValidPartialValue store' value newTy →
+    env' = env.update x { envSlot with ty := newTy } →
+    (∀ y,
+      y ≠ x →
+      ((∃ slot, store'.slotAt (VariableProjection y) = some slot) ↔
+        ∃ otherEnvSlot, env.slotAt y = some otherEnvSlot)) →
+    (∀ y otherEnvSlot,
+      y ≠ x →
+      env.slotAt y = some otherEnvSlot →
+      ∃ oldValue,
+        store'.slotAt (VariableProjection y) =
+          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
+        ValidPartialValue store' oldValue otherEnvSlot.ty) →
+    store' ∼ₛ env' := by
+  intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
+  subst henv'
+  constructor
+  · intro y
+    by_cases hyx : y = x
+    · subst hyx
+      constructor
+      · intro _hstoreDomain
+        exact ⟨{ envSlot with ty := newTy }, by simp [Env.update]⟩
+      · intro _henvDomain
+        exact ⟨{ value := value, lifetime := envSlot.lifetime }, hstoreX⟩
+    · constructor
+      · intro hstoreDomain
+        rcases (hdomainOther y hyx).mp hstoreDomain with ⟨otherEnvSlot, henv⟩
+        exact ⟨otherEnvSlot, by simpa [Env.update, hyx] using henv⟩
+      · intro henvDomain
+        rcases henvDomain with ⟨otherEnvSlot, henvUpdated⟩
+        have henv : env.slotAt y = some otherEnvSlot := by
+          simpa [Env.update, hyx] using henvUpdated
+        exact (hdomainOther y hyx).mpr ⟨otherEnvSlot, henv⟩
+  · intro y updatedSlot henvUpdated
+    by_cases hyx : y = x
+    · subst hyx
+      have hupdatedSlot :
+          updatedSlot = { envSlot with ty := newTy } := by
+        simpa [Env.update] using henvUpdated.symm
+      subst hupdatedSlot
+      exact ⟨value, hstoreX, hnewValid⟩
     · have henv : env.slotAt y = some updatedSlot := by
         simpa [Env.update, hyx] using henvUpdated
       exact hpreserveOther y updatedSlot hyx henv

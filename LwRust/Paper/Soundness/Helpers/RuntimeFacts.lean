@@ -3237,6 +3237,38 @@ theorem write_defined_of_location {store : ProgramStore} {lv : LVal}
   exact ⟨store.update location { slot with value := value }, by
     simp [ProgramStore.write, hloc, hslot]⟩
 
+/-- A successful runtime write updates exactly the location selected by `loc`. -/
+theorem write_eq_update_of_read {store store' : ProgramStore}
+    {lv : LVal} {oldSlot : StoreSlot} {value : PartialValue} :
+    store.read lv = some oldSlot →
+    store.write lv value = some store' →
+    ∃ location,
+      store.loc lv = some location ∧
+        store.slotAt location = some oldSlot ∧
+        store' = store.update location { oldSlot with value := value } := by
+  intro hread hwrite
+  unfold ProgramStore.read at hread
+  unfold ProgramStore.write at hwrite
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hread
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none =>
+          simp [hloc, hslot] at hread
+      | some runtimeSlot =>
+          have holdSlot : oldSlot = runtimeSlot := by
+            simpa [hloc, hslot] using hread.symm
+          have hstore' :
+              store' =
+                store.update location { runtimeSlot with value := value } := by
+            simpa [hloc, hslot] using hwrite.symm
+          subst holdSlot
+          subst hstore'
+          refine ⟨location, ?_, ?_, rfl⟩
+          · rfl
+          · exact hslot
+
 theorem read_defined_of_allocated {store : ProgramStore} {lv : LVal} :
     LValAllocatedLocation store lv →
     ∃ slot, store.read lv = some slot := by
