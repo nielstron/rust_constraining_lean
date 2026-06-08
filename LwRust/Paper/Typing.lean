@@ -575,11 +575,10 @@ def WriteProhibited (env : Env) (lv : LVal) : Prop :=
     target ⋈ lv
 
 /--
-Mechanized strengthening: source-level move, borrow, and assignment redexes are
-restricted to variable lvalues.  The paper permits general lvalues here, but the
-concrete store preservation proof only has fully explicit update preservation
-for variable-base writes; dereference writes require stronger dynamic frame
-information than Definition 3.17 exposes.
+Mechanized strengthening: source-level move and borrow redexes, and stored
+borrow targets, are restricted to variable lvalues.  Assignment lhs lvalues are
+not restricted here: safe assignment through mutable references is one of the
+core Rust behaviours captured by `EnvWrite`.
 -/
 def LValIsVar : LVal → Prop
   | .var _ => True
@@ -656,6 +655,58 @@ inductive BorrowTargetsWellFormed : Env → List LVal → Lifetime → Prop wher
           LValIsVar target) →
       BorrowTargetsWellFormed env targets lifetime
 
+/--
+Definition 4.8(i), the borrow invariant, stated per target for borrows contained
+in one slot.
+-/
+def BorrowTargetsWellFormedInSlot
+    (env : Env) (slotLifetime : Lifetime) (targets : List LVal) : Prop :=
+  ∀ target, target ∈ targets →
+    ∃ targetTy targetLifetime,
+      LValTyping env target (.ty targetTy) targetLifetime ∧
+        targetLifetime ≤ slotLifetime ∧
+        LValBaseOutlives env target slotLifetime ∧
+        LValIsVar target
+
+/-- Slot-local borrow invariant for a partial type. -/
+def PartialTyBorrowsWellFormedInSlot
+    (env : Env) (slotLifetime : Lifetime) (partialTy : PartialTy) : Prop :=
+  ∀ {mutable targets},
+    PartialTyContains partialTy (.borrow mutable targets) →
+    BorrowTargetsWellFormedInSlot env slotLifetime targets
+
+/-- Every borrow contained in every environment slot has well-formed targets. -/
+def ContainedBorrowsWellFormed (env : Env) : Prop :=
+  ∀ x slot mutable targets,
+    env.slotAt x = some slot →
+    env ⊢ x ↝ (Ty.borrow mutable targets) →
+    BorrowTargetsWellFormedInSlot env slot.lifetime targets
+
+/-- Definition 4.8(ii). Every environment slot lives at least as long as `lifetime`. -/
+def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=
+  ∀ x slot,
+    env.slotAt x = some slot →
+    slot.lifetime ≤ lifetime
+
+/--
+Coherence of contained borrows: every borrow-typed lvalue has jointly typeable
+targets, which is what `T-LvBor` needs for reborrows.
+-/
+def Coherent (env : Env) : Prop :=
+  ∀ lv mutable targets borrowLifetime,
+    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+
+theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
+    LinearizedBy φ env → Linearizable env := by
+  intro hφ
+  exact ⟨φ, hφ⟩
+
+/-- Definition 4.8, well-formed environment, with the maintained invariants. -/
+def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
+  ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
+    Coherent env ∧ Linearizable env
+
 /-- Definition 3.21, well-formed type `Γ ⊢ T ≽ l`. -/
 inductive WellFormedTy : Env → Ty → Lifetime → Prop where
   /-- L-Unit, the unit case implicit in the paper's use of `ϵ`. -/
@@ -682,6 +733,9 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
   /-- S-Int. -/
   | int {env : Env} :
       ShapeCompatible env (.ty .int) (.ty .int)
+  /-- S-Box for fully initialized owner types. -/
+  | tyBox {env : Env} {inner : Ty} :
+      ShapeCompatible env (.ty (.box inner)) (.ty (.box inner))
   /-- S-Box. -/
   | box {env : Env} {left right : PartialTy} :
       ShapeCompatible env left right →
@@ -857,10 +911,10 @@ mutual
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
-        LValIsVar lhs →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
         EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+        ContainedBorrowsWellFormed env₃ →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
 

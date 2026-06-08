@@ -708,6 +708,8 @@ theorem ShapeCompatible.full_partialTyUnion_exists {env : Env}
       exact ⟨.unit, PartialTyUnion.self (.ty .unit)⟩
   | int =>
       exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
+  | tyBox =>
+      exact ⟨.box _, PartialTyUnion.self (.ty (.box _))⟩
   | borrow _hleft _hright _hcompatible =>
       exact ⟨.borrow _ (_ ++ _), PartialTyUnion.borrow_append⟩
 
@@ -719,6 +721,7 @@ theorem ShapeCompatible.symm {env : Env} {left right : PartialTy} :
   induction h with
   | unit => exact ShapeCompatible.unit
   | int => exact ShapeCompatible.int
+  | tyBox => exact ShapeCompatible.tyBox
   | box _hinner ih => exact ShapeCompatible.box ih
   | borrow hleft hright _hcompat ih => exact ShapeCompatible.borrow hright hleft ih
   | undefLeft _hinner ih => exact ShapeCompatible.undefRight ih
@@ -813,6 +816,8 @@ theorem ShapeCompatible.right_full_partialTyUnion_exists {env : Env}
       exact ⟨.ty .unit, PartialTyUnion.self (.ty .unit)⟩
   | int =>
       exact ⟨.ty .int, PartialTyUnion.self (.ty .int)⟩
+  | tyBox =>
+      exact ⟨.ty (.box _), PartialTyUnion.self (.ty (.box _))⟩
   | borrow _hcompatible =>
       exact ⟨.ty (.borrow _ (_ ++ _)), PartialTyUnion.borrow_append⟩
   | undefLeft hinner =>
@@ -1740,6 +1745,7 @@ theorem PartialTy.sameShape_of_shapeCompatible {env : Env} {a b : Ty} :
   cases h with
   | unit => simp [PartialTy.sameShape, Ty.sameShape]
   | int => simp [PartialTy.sameShape, Ty.sameShape]
+  | tyBox => exact PartialTy.sameShape_refl _
   | borrow _ _ _ => simp [PartialTy.sameShape, Ty.sameShape]
 
 /-- The union target list of two same-`mutable` borrows is subset-equivalent to
@@ -1873,6 +1879,15 @@ theorem partialTyJoin_sameShape {env : Env} {old joined : PartialTy} {ty : Ty}
           Set.mem_singleton_iff] at hp; rcases hp with rfl | rfl <;> rfl)
       cases joined with
       | ty u => have := PartialTyStrengthens.to_int_inv hbound; subst this; trivial
+      | box _ => cases hbound
+      | undef _ => cases hbound
+  | tyBox =>
+      rename_i inner
+      have hbound : joined ≤ (PartialTy.ty (.box inner)) :=
+        hjoin.2 (by intro p hp; simp only [Set.mem_insert_iff,
+          Set.mem_singleton_iff] at hp; rcases hp with rfl | rfl <;> rfl)
+      cases joined with
+      | ty u => have := PartialTyStrengthens.to_box_ty_inv hbound; subst this; trivial
       | box _ => cases hbound
       | undef _ => cases hbound
   | borrow hL hR hpointee =>

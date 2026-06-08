@@ -3161,11 +3161,12 @@ theorem lvalTyping_read_nonOwner_of_shapeCompatible {store : ProgramStore} {env 
     WellFormedEnv env current →
     store ∼ₛ env →
     LValTyping env lv oldTy valueLifetime →
+    NonOwnerTy rhsTy →
     ShapeCompatible env oldTy (.ty rhsTy) →
     store.read lv = some oldSlot →
     PartialValueNonOwner oldSlot.value := by
-  intro hwellFormed hsafe htyping hshape hread
-  have hshapeOld := partialTy_nonOwnerShape_of_shapeCompatible_right_ty hshape
+  intro hwellFormed hsafe htyping hnonOwner hshape hread
+  have hshapeOld := partialTy_nonOwnerShape_of_shapeCompatible_right_ty hnonOwner hshape
   cases htyping with
   | var henvSlot =>
       exact safeAbstraction_var_read_nonOwner_of_envShape hsafe henvSlot hread hshapeOld
@@ -3206,7 +3207,7 @@ theorem lvalTyping_read_nonOwner_of_shapeCompatible {store : ProgramStore} {env 
       have hselectedShape :
           selectedTy = .unit ∨ selectedTy = .int ∨
             ∃ mutable targets, selectedTy = .borrow mutable targets :=
-        ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty hstrength hshape
+        ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty hnonOwner hstrength hshape
       rcases hselectedShape with hunit | hint | hborrowShape
       · subst hunit
         exact validPartialValue_nonOwner_of_envShape hvalid (Or.inl rfl)

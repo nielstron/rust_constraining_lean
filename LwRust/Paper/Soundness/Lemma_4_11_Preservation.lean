@@ -12,10 +12,11 @@ Paper statement (Section 4.4):
 > `⟨S₁ ▷ t ⟶* S₂ ▷ v⟩^l`, then `S₂ ▷ v` remains valid where `S₂ ∼ Γ₂` and
 > `S₂ ▷ v ∼ T`.
 
-Status: proved for the strengthened rule-carried formulation.  The
-value/copy/move/borrow/box/declare/assign cases are proven inside
-`preservation`; the block case is discharged for the singleton/drop-safe block
-typing rule used by the mechanization.
+Status: proved for the strengthened rule-carried formulation except for the
+owner-overwrite assignment drop-preservation debt currently isolated in
+`preservation`.  The value/copy/move/borrow/box/declare cases are proven; the
+block case is discharged for the singleton/drop-safe block typing rule used by
+the mechanization.
 -/
 
 namespace LwRust

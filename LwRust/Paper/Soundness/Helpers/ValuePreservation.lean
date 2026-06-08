@@ -237,14 +237,16 @@ theorem validState_assign_step {store store' : ProgramStore}
   intro hvalidState hstep
   rcases hvalidState with ⟨hvalidStore, _hvalidTerm, hdisjoint⟩
   cases hstep with
-  | assign hread hdrops hwrite =>
-      exact ⟨validStore_write_disjoint (drops_validStore hdrops hvalidStore) (by
-          intro owned hmem hownsAfterDrop
+  | assign hread hwrite hdrops =>
+      have hvalidWritten :
+          ValidStore _ :=
+        validStore_write_disjoint hvalidStore (by
+          intro owned hmem howns
           exact hdisjoint owned
             (by simpa [termOwningLocations, termValues, partialValueOwningLocations]
               using hmem)
-            (drops_owns_of_owns hdrops hownsAfterDrop))
-          hwrite,
+            howns) hwrite
+      exact ⟨drops_validStore hdrops hvalidWritten,
         validTerm_unit,
         by
           intro owned hmem
@@ -529,41 +531,25 @@ theorem validRuntimeState_assign_step {store store' : ProgramStore}
     hroot, termOwnerTargetsHeap_unit⟩
 
 /--
-Runtime-validity preservation for `R-Assign` from a post-drop allocation
-invariant and a value abstraction in that post-drop store.
-
-Unlike `R-Seq`, assignment may temporarily invalidate owner allocation after the
-old value is dropped, because the old owner still occupies the lhs until the
-write happens.  This lemma states the correct final-store bridge.
+Runtime-validity preservation for `R-Assign` from final post-write/post-drop
+store invariants.
 -/
-theorem validRuntimeState_assign_step_of_postDrop_validValue
-    {store storeAfterDrop store' : ProgramStore}
+theorem validRuntimeState_assign_step_of_postWriteDrop_invariants
+    {store storeAfterWrite store' : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {oldSlot : StoreSlot}
-    {value : Value} {ty : Ty} :
+    {value : Value} :
     ValidRuntimeState store (.assign lhs (.val value)) →
-    StoreOwnersAllocated storeAfterDrop →
-    ValidValue storeAfterDrop value ty →
+    StoreOwnersAllocated store' →
+    StoreOwnerTargetsHeap store' →
+    HeapSlotsRootLifetime store' →
     store.read lhs = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write lhs (.value value) = some store' →
+    store.write lhs (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     ValidRuntimeState store' (.val .unit) := by
-  intro hvalidRuntime hallocatedAfterDrop hvalidValue hread hdrops hwrite
-  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
-    ValueOwnerTargetsHeap.partial
-      (TermOwnerTargetsHeap.value
-        (termOwnerTargetsHeap_assign_inner
-          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
-  have hheapAfterDrop : StoreOwnerTargetsHeap storeAfterDrop :=
-    drops_storeOwnerTargetsHeap hdrops
-      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-  have hrootAfterDrop : HeapSlotsRootLifetime storeAfterDrop :=
-    drops_heapSlotsRootLifetime hdrops
-      (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
+  intro hvalidRuntime hallocated hheap hroot hread hwrite hdrops
   exact validRuntimeState_assign_step (lifetime := lifetime) hvalidRuntime
-    (storeOwnersAllocated_write_value_of_validValue hallocatedAfterDrop hvalidValue hwrite)
-    (storeOwnerTargetsHeap_write hheapAfterDrop hvalueHeap hwrite)
-    (heapSlotsRootLifetime_write hrootAfterDrop hwrite)
-    (Step.assign (lifetime := lifetime) hread hdrops hwrite)
+    hallocated hheap hroot
+    (Step.assign (lifetime := lifetime) hread hwrite hdrops)
 
 /--
 Runtime-validity preservation for `R-Assign` when the old lhs value is
@@ -571,23 +557,34 @@ non-owning.  In this common case the drop step is a no-op, so the original
 allocation invariant and RHS value abstraction are enough.
 -/
 theorem validRuntimeState_assign_step_old_nonOwner
-    {store storeAfterDrop store' : ProgramStore}
+    {store storeAfterWrite store' : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {oldSlot : StoreSlot}
     {value : Value} {ty : Ty} :
     PartialValueNonOwner oldSlot.value →
     ValidRuntimeState store (.assign lhs (.val value)) →
     ValidValue store value ty →
     store.read lhs = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write lhs (.value value) = some store' →
+    store.write lhs (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     ValidRuntimeState store' (.val .unit) := by
-  intro hnonOwner hvalidRuntime hvalidValue hread hdrops hwrite
-  have hdropEq : storeAfterDrop = store :=
+  intro hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops
+  have hdropEq : store' = storeAfterWrite :=
     drops_partialValue_nonOwner_eq hnonOwner hdrops
-  subst hdropEq
-  exact validRuntimeState_assign_step_of_postDrop_validValue
+  subst store'
+  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+    ValueOwnerTargetsHeap.partial
+      (TermOwnerTargetsHeap.value
+        (termOwnerTargetsHeap_assign_inner
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+  exact validRuntimeState_assign_step_of_postWriteDrop_invariants
     (lifetime := lifetime) hvalidRuntime
-    (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue hread hdrops hwrite
+    (storeOwnersAllocated_write_value_of_validValue
+      (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue hwrite)
+    (storeOwnerTargetsHeap_write
+      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap hwrite)
+    (heapSlotsRootLifetime_write
+      (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime) hwrite)
+    hread hwrite hdrops
 
 /-- Runtime-validity preservation for `R-Declare`, from initializer validity. -/
 theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStore}
@@ -1119,7 +1116,7 @@ preservation fragment.  The only remaining premise is the genuine
 path-stability/update-preservation obligation for variables other than `x`.
 -/
 theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -1129,8 +1126,8 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     PartialValueNonOwner oldSlot.value →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     ValidPartialValue store' (.value value) (.ty ty) →
     (∀ y otherEnvSlot,
       y ≠ x →
@@ -1142,11 +1139,11 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
       ValidValue store' .unit .unit := by
   intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hvalidValue
-    hread hdrops hwrite hnewValid hpreserveOther
+    hread hwrite hdrops hnewValid hpreserveOther
   exact ⟨validRuntimeState_assign_step_old_nonOwner (lifetime := lifetime)
-      hnonOwner hvalidRuntime hvalidValue hread hdrops hwrite,
+      hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops,
     storePreservation_assign_var_old_nonOwner_of_preserved hsafe henvX hwriteEnv
-      hnonOwner hread hdrops hwrite hnewValid hpreserveOther,
+      hnonOwner hread hwrite hdrops hnewValid hpreserveOther,
     ValidPartialValue.unit⟩
 
 /--
@@ -1160,7 +1157,7 @@ lhs value is non-owning, so the drop is a no-op and the only store change is the
 write to `x`.
 -/
 theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -1170,8 +1167,8 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
     PartialValueNonOwner oldSlot.value →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     (∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ →
       ℓ ≠ VariableProjection x) →
     (∀ y otherEnvSlot oldValue,
@@ -1184,39 +1181,38 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
     ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
       ValidValue store' .unit .unit := by
   intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hvalidValue
-    hread hdrops hwrite hvalueFrame hotherFrames
-  have hdropEq : storeAfterDrop = store :=
+    hread hwrite hdrops hvalueFrame hotherFrames
+  have hdropEq : store' = storeAfterWrite :=
     drops_partialValue_nonOwner_eq hnonOwner hdrops
+  subst store'
   have hstoreX : store.slotAt (VariableProjection x) = some oldSlot := by
     simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
-  have hstoreXAfterDrop : storeAfterDrop.slotAt (VariableProjection x) = some oldSlot := by
-    simpa [hdropEq] using hstoreX
-  have hstore' :
-      store' = storeAfterDrop.update (VariableProjection x)
+  have hstoreAfterWrite :
+      storeAfterWrite = store.update (VariableProjection x)
         { oldSlot with value := .value value } :=
-    write_var_eq hstoreXAfterDrop hwrite
-  have hnewValid : ValidPartialValue store' (.value value) (.ty ty) := by
-    rw [hstore', hdropEq]
+    write_var_eq hstoreX hwrite
+  have hnewValid : ValidPartialValue storeAfterWrite (.value value) (.ty ty) := by
+    rw [hstoreAfterWrite]
     exact RuntimeFrame.validValue_update_of_not_reaches hvalidValue hvalueFrame
   have hpreserveOther :
       ∀ y otherEnvSlot,
         y ≠ x →
         env.slotAt y = some otherEnvSlot →
         ∃ oldValue,
-          store'.slotAt (VariableProjection y) =
+          storeAfterWrite.slotAt (VariableProjection y) =
             some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-          ValidPartialValue store' oldValue otherEnvSlot.ty := by
+          ValidPartialValue storeAfterWrite oldValue otherEnvSlot.ty := by
     intro y otherEnvSlot hyx henvY
     rcases hsafe.2 y otherEnvSlot henvY with ⟨oldValue, hstoreY, hvalidOld⟩
     refine ⟨oldValue, ?_, ?_⟩
-    · rw [hstore', hdropEq]
+    · rw [hstoreAfterWrite]
       simpa [ProgramStore.update, VariableProjection, hyx] using hstoreY
-    · rw [hstore', hdropEq]
+    · rw [hstoreAfterWrite]
       exact RuntimeFrame.validPartialValue_update_of_not_reaches hvalidOld
         (hotherFrames y otherEnvSlot oldValue hyx henvY hstoreY)
   exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
-    hvalidValue hread hdrops hwrite hnewValid hpreserveOther
+    hvalidValue hread hwrite hdrops hnewValid hpreserveOther
 
 /--
 Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
@@ -1226,7 +1222,7 @@ This derives the runtime non-owner drop side condition from `S ∼ Γ`, the
 variable read, and the environment slot shape.
 -/
 theorem preservation_assign_var_envShape_step_runtime_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -1238,8 +1234,8 @@ theorem preservation_assign_var_envShape_step_runtime_of_preserved
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     ValidPartialValue store' (.value value) (.ty ty) →
     (∀ y otherEnvSlot,
       y ≠ x →
@@ -1251,12 +1247,12 @@ theorem preservation_assign_var_envShape_step_runtime_of_preserved
     ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
       ValidValue store' .unit .unit := by
   intro hsafe hvalidRuntime henvX hwriteEnv hshape hvalidValue
-    hread hdrops hwrite hnewValid hpreserveOther
+    hread hwrite hdrops hnewValid hpreserveOther
   have hnonOwner : PartialValueNonOwner oldSlot.value :=
     safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
   exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
-    hvalidValue hread hdrops hwrite hnewValid hpreserveOther
+    hvalidValue hread hwrite hdrops hnewValid hpreserveOther
 
 /--
 Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
@@ -1264,7 +1260,7 @@ environment type is non-owning-shaped, with post-write validity derived from
 reachability frame conditions.
 -/
 theorem preservation_assign_var_envShape_step_runtime_of_frames
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -1276,8 +1272,8 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     (∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ →
       ℓ ≠ VariableProjection x) →
     (∀ y otherEnvSlot oldValue,
@@ -1290,12 +1286,12 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
       ValidValue store' .unit .unit := by
   intro hsafe hvalidRuntime henvX hwriteEnv hshape hvalidValue
-    hread hdrops hwrite hvalueFrame hotherFrames
+    hread hwrite hdrops hvalueFrame hotherFrames
   have hnonOwner : PartialValueNonOwner oldSlot.value :=
     safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
   exact preservation_assign_var_old_nonOwner_step_runtime_of_frames
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
-    hvalidValue hread hdrops hwrite hvalueFrame hotherFrames
+    hvalidValue hread hwrite hdrops hvalueFrame hotherFrames
 
 /--
 Lemma 4.11, `R-Seq` preservation fragment for non-owning values.
@@ -1965,7 +1961,8 @@ theorem preservation_assign_context_multistep_runtime
   intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping
     hinnerMulti hassignStep
   cases htyping with
-  | assign hLv hinnerTyping hLvPost hshape hwellTy _hvar hwrite _hranked _hcoh hnotWrite =>
+  | assign hLv hinnerTyping hLvPost hshape hwellTy hwrite _hranked _hcoh _hcontained
+      hnotWrite =>
       rcases hinnerPreservation
           (validRuntimeState_assign_inner hvalidRuntime)
           (validStoreTyping_assign_inner hvalidStoreTyping)

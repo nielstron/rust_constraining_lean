@@ -32,7 +32,8 @@ documented deviations from the paper rules:
   `TerminatesAsValue` instead of proving the paper's terminal-existence
   conclusion.  The nontermination-friendly local safety statement is
   `progress_runtime_step`, which says a well-typed non-terminal state can step;
-* move/borrow/assignment source redexes are restricted to variable lvalues;
+* move/borrow source redexes and stored borrow targets are restricted to
+  variable lvalues; assignment lvalues use `EnvWrite` and may be dereferences;
 * declaration and assignment typing carry the local coherence/rank facts needed
   by the `lw_rust_followup` linearizability argument;
 * block/sequence typing is strengthened to singleton/drop-safe blocks and

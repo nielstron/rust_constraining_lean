@@ -220,16 +220,19 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
 
 theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
     {oldTy : PartialTy} {rhsTy : Ty} :
+    NonOwnerTy rhsTy →
     ShapeCompatible env oldTy (.ty rhsTy) →
     oldTy = .ty .unit ∨ oldTy = .ty .int ∨
       (∃ inner, oldTy = .undef inner) ∨
       ∃ mutable targets, oldTy = .ty (.borrow mutable targets) := by
-  intro hshape
+  intro hnonOwner hshape
   cases hshape with
   | unit =>
       exact Or.inl rfl
   | int =>
       exact Or.inr (Or.inl rfl)
+  | tyBox =>
+      cases hnonOwner
   | borrow =>
       exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
   | undefLeft _hinner =>
@@ -237,11 +240,12 @@ theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
 
 theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
     {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
+    NonOwnerTy rhsTy →
     PartialTyStrengthens (.ty selectedTy) oldTy →
     ShapeCompatible env oldTy (.ty rhsTy) →
     selectedTy = .unit ∨ selectedTy = .int ∨
       ∃ mutable targets, selectedTy = .borrow mutable targets := by
-  intro hstrength hshape
+  intro hnonOwner hstrength hshape
   cases hshape with
   | unit =>
       cases hstrength
@@ -249,6 +253,8 @@ theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
   | int =>
       cases hstrength
       exact Or.inr (Or.inl rfl)
+  | tyBox =>
+      cases hnonOwner
   | borrow =>
       cases hstrength with
       | reflex =>
@@ -265,6 +271,8 @@ theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
           | int =>
               cases hinnerStrength
               exact Or.inr (Or.inl rfl)
+          | tyBox =>
+              cases hnonOwner
           | borrow =>
               cases hinnerStrength with
               | reflex =>
@@ -1071,7 +1079,7 @@ preservation obligation: values abstracting variables other than `x` must remain
 valid after overwriting `x`.
 -/
 theorem storePreservation_assign_var_old_nonOwner_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -1079,8 +1087,8 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
     EnvWrite 0 env (.var x) ty env' →
     PartialValueNonOwner oldSlot.value →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     ValidPartialValue store' (.value value) (.ty ty) →
     (∀ y otherEnvSlot,
       y ≠ x →
@@ -1090,42 +1098,36 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
-  intro hsafe henvX hwriteEnv hnonOwner hread hdrops hwrite hnewValid hpreserveOther
-  have hdropEq : storeAfterDrop = store :=
+  intro hsafe henvX hwriteEnv hnonOwner hread hwrite hdrops hnewValid hpreserveOther
+  have hdropEq : store' = storeAfterWrite :=
     drops_partialValue_nonOwner_eq hnonOwner hdrops
+  subst store'
   have hstoreX : store.slotAt (VariableProjection x) = some oldSlot := by
     simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
-  have hstoreXAfterDrop : storeAfterDrop.slotAt (VariableProjection x) = some oldSlot := by
-    simpa [hdropEq] using hstoreX
   have hlifetime : oldSlot.lifetime = envSlot.lifetime := by
     rcases hsafe.2 x envSlot henvX with ⟨safeValue, hsafeSlot, _hvalid⟩
     rw [hstoreX] at hsafeSlot
     injection hsafeSlot with hslotEq
     exact congrArg StoreSlot.lifetime hslotEq
-  have hstore' :
-      store' = storeAfterDrop.update (VariableProjection x)
+  have hstoreAfterWrite :
+      storeAfterWrite = store.update (VariableProjection x)
         { oldSlot with value := .value value } :=
-    write_var_eq hstoreXAfterDrop hwrite
-  refine storePreservation_assign_var_of_preserved henvX hwriteEnv hstoreXAfterDrop
+    write_var_eq hstoreX hwrite
+  refine storePreservation_assign_var_of_preserved henvX hwriteEnv hstoreX
     hlifetime hwrite hnewValid ?domain hpreserveOther
   intro y hyx
   constructor
   · intro hstoreDomain
     rcases hstoreDomain with ⟨slot, hslot⟩
     have hslotStore : store.slotAt (VariableProjection y) = some slot := by
-      rw [hstore'] at hslot
-      have hslotAfterDrop :
-          storeAfterDrop.slotAt (VariableProjection y) = some slot := by
-        simpa [ProgramStore.update, VariableProjection, hyx] using hslot
-      simpa [hdropEq] using hslotAfterDrop
+      rw [hstoreAfterWrite] at hslot
+      simpa [ProgramStore.update, VariableProjection, hyx] using hslot
     exact (hsafe.1 y).mp ⟨slot, hslotStore⟩
   · intro henvDomain
     rcases (hsafe.1 y).mpr henvDomain with ⟨slot, hslot⟩
     exact ⟨slot, by
-      rw [hstore']
-      have hslotAfterDrop : storeAfterDrop.slotAt (VariableProjection y) = some slot := by
-        simpa [hdropEq] using hslot
-      simpa [ProgramStore.update, VariableProjection, hyx] using hslotAfterDrop⟩
+      rw [hstoreAfterWrite]
+      simpa [ProgramStore.update, VariableProjection, hyx] using hslot⟩
 
 /--
 Variable-base assignment store preservation when the old lhs environment type is
@@ -1136,7 +1138,7 @@ the environment slot shape, and the lhs read, the old runtime partial value is
 known to be non-owning, so its drop leaves the store unchanged.
 -/
 theorem storePreservation_assign_var_envShape_of_preserved
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -1146,8 +1148,8 @@ theorem storePreservation_assign_var_envShape_of_preserved
       (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     ValidPartialValue store' (.value value) (.ty ty) →
     (∀ y otherEnvSlot,
       y ≠ x →
@@ -1157,11 +1159,11 @@ theorem storePreservation_assign_var_envShape_of_preserved
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
-  intro hsafe henvX hwriteEnv hshape hread hdrops hwrite hnewValid hpreserveOther
+  intro hsafe henvX hwriteEnv hshape hread hwrite hdrops hnewValid hpreserveOther
   have hnonOwner : PartialValueNonOwner oldSlot.value :=
     safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
   exact storePreservation_assign_var_old_nonOwner_of_preserved
-    hsafe henvX hwriteEnv hnonOwner hread hdrops hwrite hnewValid hpreserveOther
+    hsafe henvX hwriteEnv hnonOwner hread hwrite hdrops hnewValid hpreserveOther
 
 /-- Updating a fresh location does not change an already-defined lval location. -/
 theorem loc_update_of_loc {store : ProgramStore} {updatedLocation : Location}

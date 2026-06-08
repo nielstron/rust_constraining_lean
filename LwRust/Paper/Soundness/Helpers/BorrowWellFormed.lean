@@ -13,104 +13,6 @@ open Core
 
 /-! ## Section 4.3: Borrow Invariance -/
 
-/--
-Definition 4.8(i), the borrow invariant, stated faithfully **per target**.
-
-The paper's Definition 4.8(i) reads: for all `x` and `w` with `Γ ⊢ x ↝ &[mut] w`
-and `Γ(x) = ·ⁿ`, we have `Γ ⊢ w : T^m ∧ m ≼ n`.  The quantifier ranges over the
-*individual* target lval `w`, and `Γ ⊢ w : T^m` types that single lval.  This is
-strictly weaker than the joint target-list typing `Γ ⊢ ū : ⟨T⟩^m` used by the
-well-formed-*type* judgement (Definition 3.21, `WellFormedTy`): the invariant
-does **not** require all targets to share one joined pointee type.
-
-This distinction matters at environment joins.  Joining `&[mut] L` with
-`&[mut] R` produces `&[mut] (L ⊔ R)` whose target list merges `L` and `R`
-(rule W-Bor merges only the target lists, never the pointee types).  The merged
-list need not have a joint pointee typing — but each individual target keeps the
-typing it had on whichever side it came from, so the per-target invariant is
-preserved.  An earlier mechanisation used the joint typing here, which is exactly
-why the join case could not be discharged. -/
-def BorrowTargetsWellFormedInSlot
-    (env : Env) (slotLifetime : Lifetime) (targets : List LVal) : Prop :=
-  ∀ target, target ∈ targets →
-    ∃ targetTy targetLifetime,
-      LValTyping env target (.ty targetTy) targetLifetime ∧
-        targetLifetime ≤ slotLifetime ∧
-        LValBaseOutlives env target slotLifetime ∧
-        LValIsVar target
-
-/--
-Slot-local borrow invariant for a partial type.  This is the proof obligation
-that each Definition 3.23 update constructor has to re-establish for the slot
-type it returns.
--/
-def PartialTyBorrowsWellFormedInSlot
-    (env : Env) (slotLifetime : Lifetime) (partialTy : PartialTy) : Prop :=
-  ∀ {mutable targets},
-    PartialTyContains partialTy (.borrow mutable targets) →
-    BorrowTargetsWellFormedInSlot env slotLifetime targets
-
-def ContainedBorrowsWellFormed (env : Env) : Prop :=
-  ∀ x slot mutable targets,
-    env.slotAt x = some slot →
-    env ⊢ x ↝ (Ty.borrow mutable targets) →
-    BorrowTargetsWellFormedInSlot env slot.lifetime targets
-
-/--
-Definition 4.8(ii).  Every environment slot lives at least as long as the
-current lifetime.
--/
-def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=
-  ∀ x slot,
-    env.slotAt x = some slot →
-    slot.lifetime ≤ lifetime
-
-/--
-Coherence of contained borrows: every borrow contained in a slot has a *joint*
-target-list typing `Γ ⊢ ū : ⟨T⟩^m`, not merely per-target typings.
-
-DELIBERATE DEVIATION FROM THE PAPER (documented):  Definition 4.8(i) of
-`lw_rust.pdf`, taken literally, is the *per-target* statement (each target `w`
-satisfies `Γ ⊢ w : T^m`), which `BorrowTargetsWellFormedInSlot` captures.  But
-typing a *dereference* of a borrow — rule T-LvBor — requires the *joint* typing
-of the whole target list (`LValTargetsTyping`, the Definition 3.21 well-formed
-type premise).  So to type a reborrow target `*source` after a write/join, the
-inner borrow's targets must be jointly typeable, i.e. coherent.  The paper's
-borrow discipline maintains this (it is exactly Definition 3.21 carried as a
-runtime invariant); the literal per-target Definition 4.8 omits it.  We therefore
-carry `Coherent` as an explicit invariant.  It is non-vacuous (it is true of
-every environment produced by the typing rules, since `T-LvBor` only forms a
-borrow over a jointly-typeable target list) and is precisely what makes the
-Appendix 9.6 borrow-invariance argument go through.
-
-Stated over *lvals* (not merely slots): whenever an lval `lv` types to a borrow
-`&ū`, the target list `ū` is jointly typeable.  This is strictly what typing a
-reborrow `*lv` needs (rule T-LvBor), and it covers reborrow chains at depth — a
-deref-of-borrow whose borrow type is *not* slot-contained (`PartialTyContains`
-only descends through `box`, never through borrow target lists). -/
-def Coherent (env : Env) : Prop :=
-  ∀ lv mutable targets borrowLifetime,
-    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
-    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
-
-theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
-    LinearizedBy φ env → Linearizable env := by
-  intro hφ
-  exact ⟨φ, hφ⟩
-
-/-- Definition 4.8, well-formed environment.
-
-DELIBERATE DEVIATION (documented, non-vacuous): augmented with the two runtime
-invariants the borrow discipline maintains and that Appendix 9.6 needs —
-`Coherent env` (every contained borrow's targets are jointly typeable, Def 3.21
-carried at runtime, needed to type a reborrow) and `Linearizable env`
-(`lw_rust_followup` Def 11, the well-foundedness rank making the borrow-target
-recursion terminate).  These are exactly what `lvalTyping_strengthen_transport`
-consumes; they hold of every environment the typing rules produce. -/
-def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
-  ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
-    Coherent env ∧ Linearizable env
-
 @[simp] theorem containedBorrowsWellFormed_empty :
     ContainedBorrowsWellFormed Env.empty := by
   intro x slot mutable targets hslot _hcontains
@@ -1453,7 +1355,7 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hLhsPost _hshape _hwellRhs _hvar hwrite _hranked _hcoh
+          _hLhs _hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _hcoh _hcontained
           _hnotWrite ih x sourceSlot houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
@@ -1543,7 +1445,7 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hLhsPost _hshape _hwellRhs _hvar hwrite _hranked _hcoh
+          _hLhs _hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _hcoh _hcontained
           _hnotWrite ih x sourceSlot houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with

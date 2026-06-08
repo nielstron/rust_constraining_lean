@@ -35,6 +35,17 @@ inductive LocReads (store : ProgramStore) : LVal → Location → Prop where
       LocReads store lv location →
       LocReads store (.deref lv) location
 
+theorem LocReads.false_of_lvalIsVar {store : ProgramStore} {lv : LVal}
+    {location : Location} :
+    LValIsVar lv →
+    ¬ LocReads store lv location := by
+  intro hvar hreads
+  cases lv with
+  | var _ =>
+      cases hreads
+  | deref _ =>
+      cases hvar
+
 /-- If an update misses every location read while resolving `lv`, resolution is unchanged. -/
 theorem loc_update_of_not_locReads {store : ProgramStore}
     {updated : Location} {slot : StoreSlot} :
@@ -384,6 +395,85 @@ theorem validValue_drops_of_avoids_reaches {store store' : ProgramStore}
       DropsAvoids store values location) →
     ValidValue store' value ty :=
   validPartialValue_drops_of_avoids_reaches
+
+theorem reaches_owning_or_store_owns_of_validPartialValue {env : Env}
+    {store : ProgramStore} {slotLifetime : Lifetime}
+    {value : PartialValue} {ty : PartialTy} {location : Location} :
+    PartialTyBorrowsWellFormedInSlot env slotLifetime ty →
+    ValidPartialValue store value ty →
+    Reaches store value ty location →
+    location ∈ partialValueOwningLocations value ∨ ProgramStore.Owns store location := by
+  intro hborrows hvalid
+  induction hvalid generalizing env slotLifetime location with
+  | unit =>
+      intro hreach
+      cases hreach
+  | int =>
+      intro hreach
+      cases hreach
+  | undef =>
+      intro hreach
+      cases hreach
+  | borrow _hmem _hloc =>
+      intro hreach
+      cases hreach with
+      | @borrow _location _readLocation _mutable _targets target htargetMem _hloc hreads =>
+          rcases hborrows PartialTyContains.here target htargetMem with
+            ⟨_targetTy, _targetLifetime, _htargetTyping, _hlifetime,
+              _hbaseOutlives, hvar⟩
+          exact False.elim (LocReads.false_of_lvalIsVar hvar hreads)
+  | @box ownerLocation slot inner hslot _hinner ih =>
+      intro hreach
+      cases hreach with
+      | boxHere _hslot =>
+          exact Or.inl (by
+            simp [partialValueOwningLocations, valueOwningLocations,
+              valueOwnedLocation?])
+      | @boxInner _ slot' _ _ hslot' hinnerReach =>
+          have hslotEq : slot' = slot := by
+            rw [hslot] at hslot'
+            injection hslot' with hslotEq
+            exact hslotEq.symm
+          subst hslotEq
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.box hcontains)
+          rcases ih hinnerBorrows hinnerReach with howned | howns
+          · exact Or.inr ⟨ownerLocation, slot'.lifetime, by
+              have hslotValue : slot'.value = .value (owningRef location) :=
+                eq_owningRef_of_mem_partialValueOwningLocations howned
+              cases slot' with
+              | mk slotValue slotLifetime =>
+                  cases hslotValue
+                  simpa using hslot⟩
+          · exact Or.inr howns
+  | @boxFull ownerLocation slot innerTy hslot _hinner ih =>
+      intro hreach
+      cases hreach with
+      | boxFullHere _hslot =>
+          exact Or.inl (by
+            simp [partialValueOwningLocations, valueOwningLocations,
+              valueOwnedLocation?])
+      | @boxFullInner _ slot' _ _ hslot' hinnerReach =>
+          have hslotEq : slot' = slot := by
+            rw [hslot] at hslot'
+            injection hslot' with hslotEq
+            exact hslotEq.symm
+          subst hslotEq
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.tyBox hcontains)
+          rcases ih hinnerBorrows hinnerReach with howned | howns
+          · exact Or.inr ⟨ownerLocation, slot'.lifetime, by
+              have hslotValue : slot'.value = .value (owningRef location) :=
+                eq_owningRef_of_mem_partialValueOwningLocations howned
+              cases slot' with
+              | mk slotValue slotLifetime =>
+                  cases hslotValue
+                  simpa using hslot⟩
+          · exact Or.inr howns
 
 end RuntimeFrame
 

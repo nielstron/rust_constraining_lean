@@ -6,9 +6,9 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then `S₂ ∼ Γ₂`
 > (the final store is safely abstracted by the result environment).
 
-Status: **proven** for the strengthened Section 4 typing system.  This is the
-`finalStore ∼ₛ env₂` conjunct of `TerminalStateSafe`, established by
-Preservation (Lemma 4.11).  Mechanized support:
+Status: mechanized through Preservation (Lemma 4.11), with the current owner
+overwrite assignment proof debt inherited from that lemma.  This is the
+`finalStore ∼ₛ env₂` conjunct of `TerminalStateSafe`.  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
   `preservation_declare_redex_runtime_of_validValue` (uses Lemma 9.7);
@@ -52,10 +52,10 @@ theorem lemma_9_10_storePreservation
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete
 frame conditions used to keep the RHS and unaffected variables valid after the
-runtime write to `x`.
+runtime write to `x` and the subsequent cleanup drop of the overwritten value.
 -/
 theorem lemma_9_10_assign_var_envShape_frame
-    {store storeAfterDrop store' : ProgramStore} {env env' : Env}
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
     store ∼ₛ env →
@@ -67,8 +67,8 @@ theorem lemma_9_10_assign_var_envShape_frame
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write (.var x) (.value value) = some store' →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
     (∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ →
       ℓ ≠ VariableProjection x) →
     (∀ y otherEnvSlot oldValue,

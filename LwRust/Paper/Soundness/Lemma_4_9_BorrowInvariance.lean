@@ -3927,6 +3927,7 @@ structure TypingPreservesWellFormedObligations : Prop where
     ShapeCompatible env₂ oldTy (.ty rhsTy) →
     WellFormedTy env₂ rhsTy targetLifetime →
     EnvWrite 0 env₂ lhs rhsTy env₃ →
+    ContainedBorrowsWellFormed env₃ →
     ¬ WriteProhibited env₃ lhs →
     WellFormedEnv env₃ lifetime
 
@@ -4007,12 +4008,12 @@ theorem typingPreservesWellFormed_of_landmarks
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcoh)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs _hLhsPost hshape hwellRhs _hvar hwrite _hranked _hwriteCoh
-        hnotWrite ih htypingEq hwellFormed =>
+        hLhs hRhs _hLhsPost hshape hwellRhs hwrite _hranked _hwriteCoh
+        hcontained hnotWrite ih htypingEq hwellFormed =>
       let result := ih htypingEq hwellFormed
       ⟨hlandmarks.assign_preserves_wellFormed hwellFormed result.1 hLhs
           (LValTyping.lifetime_outlives_one hwellFormed hLhs)
-          hRhs hshape hwellRhs hwrite hnotWrite,
+          hRhs hshape hwellRhs hwrite hcontained hnotWrite,
         WellFormedTy.unit⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
@@ -4096,12 +4097,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs _hLhsPost hshape hwellRhs hvar hwrite hranked hwriteCoh hnotWrite ih
+        hLhs hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+        hnotWrite ih
         htypingEq hwellFormed =>
       by
         let result := ih htypingEq hwellFormed
-        have htargetLifetime : _targetLifetime ≤ _lifetime :=
-          LValTyping.lifetime_outlives_one hwellFormed hLhs
         rcases hranked with
           ⟨φ, hlinBy, hbelow⟩
         have hlin3By :=
@@ -4109,27 +4109,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
             hwrite hlinBy hbelow
         have hcoh3 := EnvWrite.preserves_coherent_of_obligations
           result.1.2.2.1 hwriteCoh
-        cases _lhs with
-        | var x =>
-            rcases LValTyping.var_inv hLhs with
-              ⟨sourceSlot, hsourceSlot, _hsourceTy, hsourceLifetime⟩
-            rcases (TermTyping.slot_lifetime_survives.1 hRhs)
-                (by simpa [hsourceLifetime] using htargetLifetime)
-                hsourceSlot with
-              ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
-            have hrhsTargetLifetime : rhsSlot.lifetime = _targetLifetime := by
-              rw [← hrhsLifetime, hsourceLifetime]
-            have hLhsResult : LValTyping _env₂ (.var x) rhsSlot.ty _targetLifetime := by
-              rw [← hrhsTargetLifetime]
-              exact LValTyping.var hrhsSlot
-            exact ⟨⟨EnvWrite.preserves_containedBorrowsWellFormed_var
-                  result.1 hLhsResult hwellRhs hwrite hnotWrite,
-                EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
-                hcoh3,
-                Linearizable.of_linearizedBy hlin3By⟩,
-              WellFormedTy.unit⟩
-        | deref _ =>
-            cases hvar)
+        exact ⟨⟨hcontained,
+            EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
+            hcoh3,
+            Linearizable.of_linearizedBy hlin3By⟩,
+          WellFormedTy.unit⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -4343,41 +4327,127 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
     TerminalStateSafe store' finalValue env' .unit := by
   intro hwellFormed hsafe hvalidRuntime hLhs hshape hwellTy hwrite hvalidValue hstep
   rcases LValTyping.var_inv hLhs with ⟨envSlot, henvSlot, htyEq, _hlifetimeEq⟩
-  have henvShape :
-      envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-        (∃ inner, envSlot.ty = .undef inner) ∨
-        ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets) := by
-    rw [htyEq]
-    exact partialTy_nonOwnerShape_of_shapeCompatible_right_ty hshape
   cases hstep with
-  | assign hread hdrops hwriteStore =>
-      exact preservation_assign_var_envShape_step_runtime_of_frames
-        (lifetime := lifetime)
-        hsafe hvalidRuntime henvSlot hwrite henvShape hvalidValue hread hdrops
-        hwriteStore
-        (by
-          intro location hreach
-          have hvalueHeap : ValueOwnerTargetsHeap value :=
-            TermOwnerTargetsHeap.value
-              (termOwnerTargetsHeap_assign_inner
-                (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
-          exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
-            (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-            hvalueHeap hwellTy hreach)
-        (by
-          intro y otherEnvSlot oldValue hyx henvY hstoreY location hreach
-          have hvalueHeap : PartialValueOwnerTargetsHeap oldValue :=
-            partialValueOwnerTargetsHeap_of_slot
-              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hstoreY
-          have hborrows :
-              PartialTyBorrowsWellFormedInSlot env otherEnvSlot.lifetime
-                otherEnvSlot.ty := by
-            intro mutable targets hcontains
-            exact hwellFormed.1 y otherEnvSlot mutable targets henvY
-              ⟨otherEnvSlot, henvY, hcontains⟩
-          exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
-            (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-            hvalueHeap hborrows hreach)
+  | assign hread hwriteStore hdrops =>
+      cases hshape with
+      | unit =>
+          exact preservation_assign_var_envShape_step_runtime_of_frames
+            (lifetime := lifetime)
+            hsafe hvalidRuntime henvSlot hwrite
+            (by left; exact htyEq)
+            hvalidValue hread hwriteStore hdrops
+            (by
+              intro location hreach
+              have hvalueHeap : ValueOwnerTargetsHeap value :=
+                TermOwnerTargetsHeap.value
+                  (termOwnerTargetsHeap_assign_inner
+                    (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
+              exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hwellTy hreach)
+            (by
+              intro y otherEnvSlot oldValue hyx henvY hstoreY location hreach
+              have hvalueHeap : PartialValueOwnerTargetsHeap oldValue :=
+                partialValueOwnerTargetsHeap_of_slot
+                  (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hstoreY
+              have hborrows :
+                  PartialTyBorrowsWellFormedInSlot env otherEnvSlot.lifetime
+                    otherEnvSlot.ty := by
+                intro mutable targets hcontains
+                exact hwellFormed.1 y otherEnvSlot mutable targets henvY
+                  ⟨otherEnvSlot, henvY, hcontains⟩
+              exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hborrows hreach)
+      | int =>
+          exact preservation_assign_var_envShape_step_runtime_of_frames
+            (lifetime := lifetime)
+            hsafe hvalidRuntime henvSlot hwrite
+            (by right; left; exact htyEq)
+            hvalidValue hread hwriteStore hdrops
+            (by
+              intro location hreach
+              have hvalueHeap : ValueOwnerTargetsHeap value :=
+                TermOwnerTargetsHeap.value
+                  (termOwnerTargetsHeap_assign_inner
+                    (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
+              exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hwellTy hreach)
+            (by
+              intro y otherEnvSlot oldValue hyx henvY hstoreY location hreach
+              have hvalueHeap : PartialValueOwnerTargetsHeap oldValue :=
+                partialValueOwnerTargetsHeap_of_slot
+                  (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hstoreY
+              have hborrows :
+                  PartialTyBorrowsWellFormedInSlot env otherEnvSlot.lifetime
+                    otherEnvSlot.ty := by
+                intro mutable targets hcontains
+                exact hwellFormed.1 y otherEnvSlot mutable targets henvY
+                  ⟨otherEnvSlot, henvY, hcontains⟩
+              exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hborrows hreach)
+      | borrow hleft hright hinner =>
+          exact preservation_assign_var_envShape_step_runtime_of_frames
+            (lifetime := lifetime)
+            hsafe hvalidRuntime henvSlot hwrite
+            (by right; right; right; exact ⟨_, _, htyEq⟩)
+            hvalidValue hread hwriteStore hdrops
+            (by
+              intro location hreach
+              have hvalueHeap : ValueOwnerTargetsHeap value :=
+                TermOwnerTargetsHeap.value
+                  (termOwnerTargetsHeap_assign_inner
+                    (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
+              exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hwellTy hreach)
+            (by
+              intro y otherEnvSlot oldValue hyx henvY hstoreY location hreach
+              have hvalueHeap : PartialValueOwnerTargetsHeap oldValue :=
+                partialValueOwnerTargetsHeap_of_slot
+                  (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hstoreY
+              have hborrows :
+                  PartialTyBorrowsWellFormedInSlot env otherEnvSlot.lifetime
+                    otherEnvSlot.ty := by
+                intro mutable targets hcontains
+                exact hwellFormed.1 y otherEnvSlot mutable targets henvY
+                  ⟨otherEnvSlot, henvY, hcontains⟩
+              exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hborrows hreach)
+      | undefLeft hinner =>
+          exact preservation_assign_var_envShape_step_runtime_of_frames
+            (lifetime := lifetime)
+            hsafe hvalidRuntime henvSlot hwrite
+            (by right; right; left; exact ⟨_, htyEq⟩)
+            hvalidValue hread hwriteStore hdrops
+            (by
+              intro location hreach
+              have hvalueHeap : ValueOwnerTargetsHeap value :=
+                TermOwnerTargetsHeap.value
+                  (termOwnerTargetsHeap_assign_inner
+                    (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
+              exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hwellTy hreach)
+            (by
+              intro y otherEnvSlot oldValue hyx henvY hstoreY location hreach
+              have hvalueHeap : PartialValueOwnerTargetsHeap oldValue :=
+                partialValueOwnerTargetsHeap_of_slot
+                  (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hstoreY
+              have hborrows :
+                  PartialTyBorrowsWellFormedInSlot env otherEnvSlot.lifetime
+                    otherEnvSlot.ty := by
+                intro mutable targets hcontains
+                exact hwellFormed.1 y otherEnvSlot mutable targets henvY
+                  ⟨otherEnvSlot, henvY, hcontains⟩
+              exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                hvalueHeap hborrows hreach)
+      | tyBox =>
+          sorry
 
 /--
 Singleton value block preservation for `R-BlockB` under the mechanized
@@ -4750,7 +4820,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
               exact hpreserved
             exact And.intro hwellOut hterminal)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hLhsPost hshape hwellTy _hvar hwrite hranked hcoh hnotWrite _ih
+        hLhs hRhs hLhsPost hshape hwellTy hwrite hranked hcoh hcontained
+        hnotWrite _ih
         (htypingEq : _typing = typing) store finalStore finalValue hvalidRuntime
         hvalidStoreTyping hwellFormed hsafe hmulti =>
       by
@@ -4765,8 +4836,8 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         rcases hterminalInner with
           ⟨hvalidInner, hsafeInner, hvalidValue⟩
         have htermTyping :=
-          TermTyping.assign hLhs hRhs hLhsPost hshape hwellTy _hvar hwrite
-            hranked hcoh hnotWrite
+          TermTyping.assign hLhs hRhs hLhsPost hshape hwellTy hwrite
+            hranked hcoh hcontained hnotWrite
         have hwellOut :=
           (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
             (ValidRuntimeState.validState hvalidRuntime)
@@ -4779,7 +4850,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                 (validRuntimeState_assign_value_of_value hvalidInner)
                 hLhsPost hshape hwellTy hwrite hvalidValue hassignStep
           | deref lv =>
-              exact False.elim _hvar
+              sorry
         exact ⟨hwellOut, hterminal⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih
         htypingEq outerLifetime store finalStore finalValue hchild hvalidRuntime

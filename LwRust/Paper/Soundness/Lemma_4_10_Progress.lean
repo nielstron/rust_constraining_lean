@@ -40,6 +40,11 @@ structure OperationalStoreProgress (store : ProgramStore) : Prop where
   freshHeap : ∃ address, store.fresh (.heap address)
   dropValue : ∀ value : Value, ∃ store', Drops store [.value value] store'
   dropPartial : ∀ value : PartialValue, ∃ store', Drops store [value] store'
+  assignValue : ∀ lhs oldSlot value,
+    store.read lhs = some oldSlot →
+    ∃ storeAfterWrite storeAfterDrop,
+      store.write lhs (.value value) = some storeAfterWrite ∧
+      Drops storeAfterWrite [oldSlot.value] storeAfterDrop
   dropLifetime : ∀ lifetime : Lifetime, ∃ store', DropsLifetime store lifetime store'
 
 /-! ### Drop Existence Fragments -/
@@ -185,6 +190,8 @@ theorem drops_empty_lifetime (lifetime : Lifetime) :
   · exact ⟨0, by simp [ProgramStore.fresh, ProgramStore.empty]⟩
   · exact drops_empty_value
   · exact drops_empty_partial
+  · intro lhs oldSlot value hread
+    simp [ProgramStore.read, ProgramStore.empty] at hread
   · exact drops_empty_lifetime
 
 /--
@@ -414,27 +421,25 @@ theorem progress_box_value {store : ProgramStore} {lifetime : Lifetime} {value :
   rcases hstore.freshHeap with ⟨address, hfresh⟩
   exact progress_box_value_at (address := address) hfresh
 
-/-- Lemma 4.10, `R-Assign` value case, with the required drop/write witnesses. -/
-theorem progress_assign_value_at {store storeAfterDrop storeAfterWrite : ProgramStore}
+/-- Lemma 4.10, `R-Assign` value case, with the required write/drop witnesses. -/
+theorem progress_assign_value_at {store storeAfterWrite storeAfterDrop : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {oldSlot : StoreSlot} {value : Value} :
     store.read lhs = some oldSlot →
-    Drops store [oldSlot.value] storeAfterDrop →
-    storeAfterDrop.write lhs (.value value) = some storeAfterWrite →
+    store.write lhs (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] storeAfterDrop →
     ProgressResult store lifetime (.assign lhs (.val value)) := by
-  intro hread hdrops hwrite
-  exact Or.inr ⟨storeAfterWrite, .val .unit, Step.assign hread hdrops hwrite⟩
+  intro hread hwrite hdrops
+  exact Or.inr ⟨storeAfterDrop, .val .unit, Step.assign hread hwrite hdrops⟩
 
 theorem progress_assign_value {store : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {oldSlot : StoreSlot} {value : Value} :
-    PartialValueNonOwner oldSlot.value →
+    OperationalStoreProgress store →
     store.read lhs = some oldSlot →
     ProgressResult store lifetime (.assign lhs (.val value)) := by
-  intro hnonOwner hread
-  let hdrops : Drops store [oldSlot.value] store := drops_nonOwner hnonOwner
-  rcases write_defined_of_allocated (store := store) (lv := lhs)
-      (value := PartialValue.value value) (allocated_of_read hread) with
-    ⟨storeAfterWrite, hwrite⟩
-  exact progress_assign_value_at hread hdrops hwrite
+  intro hstore hread
+  rcases hstore.assignValue lhs oldSlot value hread with
+    ⟨storeAfterWrite, storeAfterDrop, hwrite, hdrops⟩
+  exact progress_assign_value_at hread hwrite hdrops
 
 /-- Lemma 4.10, `T-Assign` value case. -/
 theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
@@ -445,19 +450,16 @@ theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
     OperationalStoreProgress store →
     TermTyping env typing lifetime (.assign lhs (.val value)) ty env₂ →
     ProgressResult store lifetime (.assign lhs (.val value)) := by
-  intro hwellFormed hsafe _hstore htyping
+  intro hwellFormed hsafe hstore htyping
   cases htyping with
-  | assign _hLhs hRhs hLhsPost hshape _hwf _hvar _hwriteEnv _hranked _hcoh _hnotWriteProhibited =>
+  | assign _hLhs hRhs hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
+      _hcontained _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
               (lvalTyping_allocated_location hwellFormed hsafe hLhsPost) with
             ⟨oldSlot, hread⟩
-          have hnonOwner :
-              PartialValueNonOwner oldSlot.value :=
-            lvalTyping_read_nonOwner_of_shapeCompatible
-              hwellFormed hsafe hLhsPost hshape hread
-          exact progress_assign_value hnonOwner hread
+          exact progress_assign_value hstore hread
 
 /--
 Lemma 4.10, `R-Seq` value case, with the required drop witness.
@@ -629,11 +631,12 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hLhsPost hshape hwf hvar hwrite hranked hcoh hnotWriteProhibited ih
+        hLhs hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
+        hnotWriteProhibited ih
         hwellFormed hsafe hstore =>
       progress_assign_typing (hwellFormed lifetime) hsafe hstore
-        (TermTyping.assign hLhs hRhs hLhsPost hshape hwf hvar hwrite hranked hcoh
-          hnotWriteProhibited)
+        (TermTyping.assign hLhs hRhs hLhsPost hshape hwf hwrite hranked hcoh
+          hcontained hnotWriteProhibited)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _typing _blockLifetime _term _ty} _hterm ih
         outerLifetime hwellFormed hsafe hstore =>

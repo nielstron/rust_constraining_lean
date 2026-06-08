@@ -2131,7 +2131,8 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           fun gamma _hfreshGamma =>
             borrowSafeEnv_update_fresh_borrowFree hdeclaredSafe tyBorrowFree_unit⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs _hLhsPost hshape hwellTy _hvar hwrite hranked hcoh hnotWrite _ih
+        hLhs hRhs _hLhsPost hshape hwellTy hwrite hranked hcoh _hcontained
+        hnotWrite _ih
         hsource hborrowSafe =>
       by
         have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe

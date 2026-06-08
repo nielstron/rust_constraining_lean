@@ -12,11 +12,10 @@ matter when comparing theorem statements.
 ### Type and Borrow System
 
 - **Variable-only source lvalues.**  The paper permits general lvalues in move,
-  borrow, assignment, and borrow target positions.  The mechanisation adds
-  `LValIsVar` to `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, `T-Assign`, and the
-  borrow-target invariant.  This keeps preservation on variable-rooted writes;
-  dereference writes would need stronger dynamic frame/path stability facts.
-  See `LwRust/Paper/Typing.lean`.
+  borrow, and borrow target positions.  The mechanisation adds `LValIsVar` to
+  `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, and the borrow-target invariant.
+  Assignment lhs lvalues are not variable-restricted: `T-Assign` uses `EnvWrite`
+  and can write through mutable references.  See `LwRust/Paper/Typing.lean`.
 
 - **Restricted block and sequence drops.**  The paper allows general owning
   temporaries and relies on full recursive drop preservation.  The mechanised
@@ -32,10 +31,17 @@ matter when comparing theorem statements.
 
 - **Assignment is strengthened.**  `T-Assign` rechecks that the lhs is typeable
   after typing the rhs, requires shape compatibility and rhs well-formedness at
-  the target lifetime, restricts the lhs to a variable lvalue, and carries
-  explicit rank/coherence obligations:
-  `EnvWriteRhsBorrowTargetsBelow` and `EnvWriteCoherenceObligations`.  These
-  avoid borrow cycles and supply the facts needed by preservation.
+  the target lifetime, and carries explicit rank/coherence obligations:
+  `EnvWriteRhsBorrowTargetsBelow`, `EnvWriteCoherenceObligations`, and
+  `ContainedBorrowsWellFormed` for the result.  These avoid borrow cycles and
+  supply the facts needed by preservation.  The result-side obligations are
+  rule-carried invariants, not extra premises on the final safety statements.
+
+- **Full box replacement is shape-compatible only at exact type.**  The paper's
+  shape relation permits owner replacement along matching box shapes.  The
+  mechanisation now includes exact `Box<T>` compatibility
+  (`ShapeCompatible.tyBox`) so assignment such as `Box<Int> := Box<Int>` is
+  accepted, without adding a broad recursive full-box compatibility rule.
 
 - **Borrow well-formedness is preserved per target.**  Runtime borrow
   well-formedness uses `BorrowTargetsWellFormed`, which requires each target to
@@ -80,12 +86,29 @@ matter when comparing theorem statements.
   lifetime.  This mirrors the paper's fresh heap location rule, but exposes the
   address witness explicitly.
 
+- **Assignment follows the reference implementation, not the printed rule.**
+  The assignment step reads the overwritten slot, writes the new value, and then
+  drops the overwritten old value from the post-write store.  The printed
+  appendix proof appears to use the wrong order in Lemma 9.6 and omits the drop
+  in the assignment case of Lemma 9.8.  Conceptually, the repaired proof first
+  establishes abstraction for the post-write store, then proves that dropping
+  the old owner graph preserves every value still represented by the result
+  environment.
+
 - **The operational semantics still has general block-list rules.**  `R-Seq`,
   `R-BlockA`, and `R-BlockB` operate on arbitrary term lists, as in the paper.
   The restriction is on the typed fragment used by the soundness proof:
   singleton typed blocks and non-owner sequence temporaries.
 
 ### Theorem Interface Notes
+
+- **Open proof debt: owner-overwrite assignment preservation.**  The assignment
+  semantics and typing rule now admit owner replacement and dereference
+  assignment, but Lemma 4.11 still has two `sorry`s for the recursive
+  drop-preservation argument after overwriting an owner: the direct
+  `Box<T> := Box<T>` case and the general dereference-assignment case.  The
+  missing lemma is the ownership-graph disjointness argument described in the
+  runtime assignment note above.
 
 - **Termination is not hidden in progress.**  The local progress theorem returns
   `ProgressResult store lifetime term` without a termination premise.  The
