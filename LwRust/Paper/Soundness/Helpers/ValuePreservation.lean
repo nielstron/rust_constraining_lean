@@ -61,7 +61,7 @@ theorem valuePreservation_move_step {store store' : ProgramStore} {env env₂ : 
 `R-Move` value preservation in the post-write store, factored through an
 explicit frame condition.
 
-The remaining obligation is no longer an opaque post-store validity premise:
+ The frame condition is no longer an opaque post-store validity premise:
 the location overwritten by `move` must not be one of the locations inspected by
 the moved value's validity derivation in the pre-write store.
 -/
@@ -513,7 +513,8 @@ Runtime-validity preservation for `R-Assign`, assuming the assignment's
 drop/write sequence preserves the explicit owner-allocation invariant.
 
 The paper's store model leaves this allocation invariant implicit; the premise
-is the remaining update-preservation obligation for our abstract store package.
+is the explicit update-preservation frame condition for our abstract store
+package.
 -/
 theorem validRuntimeState_assign_step {store store' : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {value : Value} :
@@ -781,14 +782,14 @@ theorem storePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
         (.borrow mutable [lv]) := by
   intro hsafe htyping hstep
   cases htyping with
-  | mutBorrow hLv hmutable hnotWrite =>
+  | mutBorrow hLv hvar hmutable hnotWrite =>
       exact ⟨hsafe,
         valuePreservation_borrow_step (typing := typing)
-          (TermTyping.mutBorrow (typing := typing) hLv hmutable hnotWrite) hstep⟩
-  | immBorrow hLv hnotRead =>
+          (TermTyping.mutBorrow (typing := typing) hLv hvar hmutable hnotWrite) hstep⟩
+  | immBorrow hLv hvar hnotRead =>
       exact ⟨hsafe,
         valuePreservation_borrow_step (typing := typing)
-          (TermTyping.immBorrow (typing := typing) hLv hnotRead) hstep⟩
+          (TermTyping.immBorrow (typing := typing) hLv hvar hnotRead) hstep⟩
 
 /--
 Lemma 4.11, `R-Copy` one-step preservation fragment.
@@ -1348,6 +1349,162 @@ theorem preservation_seq_nonOwner_step_runtime_with_storeTyping
       exact ⟨hvalidRuntime', hsafe', validStoreTyping_block_tail hstoreTyping⟩
 
 /--
+A drop list is safe at `location` when every owning reference in the list avoids
+`location`, and any slot it recursively opens contains a non-owning value.
+-/
+def DropListSafeAt (store : ProgramStore) (values : List PartialValue)
+    (location : Location) : Prop :=
+  ∀ ref,
+    .value (.ref ref) ∈ values →
+    ref.owner = true →
+      ref.location ≠ location ∧
+        ∀ slot, store.slotAt ref.location = some slot →
+          PartialValueNonOwner slot.value
+
+/-- A safe drop list avoids the protected location throughout the recursive drop. -/
+theorem dropsAvoids_of_dropListSafeAt {store store' : ProgramStore}
+    {values : List PartialValue} {location : Location} :
+    Drops store values store' →
+    DropListSafeAt store values location →
+    DropsAvoids store values location := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro _hsafe
+      exact DropsAvoids.nil
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hsafe
+      exact DropsAvoids.nonOwner hnonOwner
+        (ih (by
+          intro ref hmem howner
+          exact hsafe ref (by simp [hmem]) howner))
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hsafe
+      exact DropsAvoids.ownerMissing howner hmissing
+        (ih (by
+          intro ref hmem hownerRef
+          exact hsafe ref (by simp [hmem]) hownerRef))
+  | ownerPresent howner hpresent _hdrops ih =>
+      intro hsafe
+      rename_i storeBefore _storeAfter ref slot rest
+      rcases hsafe ref (by simp) howner with ⟨hne, hslotNonOwner⟩
+      exact DropsAvoids.ownerPresent howner hpresent hne
+        (ih (by
+          intro ref' hmem howner'
+          simp at hmem
+          rcases hmem with hhead | htail
+          · have hnonOwnerHead : PartialValueNonOwner (.value (.ref ref')) := by
+              simpa [← hhead] using hslotNonOwner slot hpresent
+            exact False.elim
+              (not_partialValueNonOwner_owning_ref howner' hnonOwnerHead)
+          · rcases hsafe ref' (by simp [htail]) howner' with
+              ⟨hne', hslotNonOwner'⟩
+            exact ⟨hne', by
+              intro slot' hslot'
+              exact hslotNonOwner' slot'
+                (RuntimeFrame.slotAt_of_erase_slotAt hslot')⟩))
+
+/--
+The drop set produced by a block-lifetime drop is safe for every non-variable
+location when block-local slots are statically drop-safe.
+-/
+theorem dropListSafeAt_of_lifetimeDropSet_envDropSafe
+    {store : ProgramStore} {env : Env} {values : List PartialValue}
+    {parent lifetime : Lifetime} {location : Location} :
+    (∀ value, value ∈ values ↔
+      ∃ dropLocation slot,
+        store.slotAt dropLocation = some slot ∧
+        slot.lifetime = lifetime ∧
+        value = .value (.ref { location := dropLocation, owner := true })) →
+    store ∼ₛ env →
+    EnvLifetimeDropSafe env lifetime →
+    HeapSlotsRootLifetime store →
+    LifetimeChild parent lifetime →
+    (∀ x, location ≠ VariableProjection x) →
+    DropListSafeAt store values location := by
+  intro hdropSet hsafe hdropSafe hheapRoot hchild hnotVar ref hmem howner
+  rcases (hdropSet (.value (.ref ref))).mp hmem with
+    ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
+  have hrefEq : ref = { location := dropLocation, owner := true } := by
+    injection hdropValue with hvalueEq
+    injection hvalueEq
+  subst hrefEq
+  constructor
+  · intro hlocation
+    cases location with
+    | var x =>
+        exact hnotVar x rfl
+    | heap address =>
+        subst hlocation
+        have hroot : dropSlot.lifetime = Lifetime.root :=
+          hheapRoot address dropSlot hdropSlot
+        exact LifetimeChild.child_ne_root hchild (hdropLifetime ▸ hroot)
+  · intro slot hslot
+    cases dropLocation with
+    | heap address =>
+        have hroot : slot.lifetime = Lifetime.root :=
+          hheapRoot address slot hslot
+        have hslotEq : slot = dropSlot := by
+          rw [hslot] at hdropSlot
+          injection hdropSlot with hslotEq
+        subst hslotEq
+        exact False.elim (LifetimeChild.child_ne_root hchild (hdropLifetime ▸ hroot))
+    | var x =>
+        rcases (hsafe.1 x).mp ⟨slot, by simpa [VariableProjection] using hslot⟩ with
+          ⟨envSlot, henvSlot⟩
+        rcases hsafe.2 x envSlot henvSlot with ⟨safeValue, hsafeSlot, hvalid⟩
+        have hstoreSlot :
+            store.slotAt (VariableProjection x) =
+              some { value := slot.value, lifetime := slot.lifetime } := by
+          cases slot
+          simpa [VariableProjection] using hslot
+        rw [hstoreSlot] at hsafeSlot
+        injection hsafeSlot with hslotEq
+        have hvalueEq : safeValue = slot.value :=
+          (congrArg StoreSlot.value hslotEq).symm
+        have hlifetimeEq : envSlot.lifetime = slot.lifetime :=
+          (congrArg StoreSlot.lifetime hslotEq).symm
+        subst hvalueEq
+        have hslotDropLifetime : slot.lifetime = lifetime := by
+          rw [hslot] at hdropSlot
+          injection hdropSlot with hslotEq'
+          have hslotLifetimeEq : slot.lifetime = dropSlot.lifetime :=
+            congrArg StoreSlot.lifetime hslotEq'
+          exact hslotLifetimeEq.trans hdropLifetime
+        exact validPartialValue_nonOwner_of_dropSafePartialTy
+          (hdropSafe x envSlot henvSlot (by
+            rw [hlifetimeEq]
+            exact hslotDropLifetime))
+          hvalid
+
+/--
+Lifetime drops preserve a value abstraction whose reachability footprint avoids
+variables, provided block-local slots are statically drop-safe.
+-/
+theorem validPartialValue_dropsLifetime_of_envDropSafe
+    {store store' : ProgramStore} {env : Env}
+    {parent lifetime : Lifetime} {value : PartialValue} {partialTy : PartialTy} :
+    store ∼ₛ env →
+    EnvLifetimeDropSafe env lifetime →
+    HeapSlotsRootLifetime store →
+    LifetimeChild parent lifetime →
+    ValidPartialValue store value partialTy →
+    (∀ location, RuntimeFrame.Reaches store value partialTy location →
+      ∀ x, location ≠ VariableProjection x) →
+    DropsLifetime store lifetime store' →
+    ValidPartialValue store' value partialTy := by
+  intro hsafe hdropSafe hheapRoot hchild hvalid hnotVar hdrops
+  cases hdrops with
+  | intro hdropSet hdrops =>
+      exact RuntimeFrame.validPartialValue_drops_of_avoids_reaches hdrops hvalid
+        (by
+          intro location hreach
+          exact dropsAvoids_of_dropListSafeAt hdrops
+            (dropListSafeAt_of_lifetimeDropSet_envDropSafe
+              hdropSet hsafe hdropSafe hheapRoot hchild
+              (hnotVar location hreach)))
+
+/--
 Lemma 4.11, `R-BlockB` one-step preservation fragment, factored through the
 store-side premises needed by Lemma 9.5 (`drop(S, m) ∼ drop(Γ, m)`).
 -/
@@ -1786,6 +1943,7 @@ theorem preservation_assign_context_multistep_runtime
     (∀ {targetLifetime oldTy rhsTy env₂},
       LValTyping env₁ lhs oldTy targetLifetime →
       TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      LValTyping env₂ lhs oldTy targetLifetime →
       ShapeCompatible env₂ oldTy (.ty rhsTy) →
       WellFormedTy env₂ rhsTy targetLifetime →
       EnvWrite 0 env₂ lhs rhsTy env₃ →
@@ -1807,13 +1965,13 @@ theorem preservation_assign_context_multistep_runtime
   intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping
     hinnerMulti hassignStep
   cases htyping with
-  | assign hLv hinnerTyping hshape hwellTy _hvar hwrite _hranked _hcoh hnotWrite =>
+  | assign hLv hinnerTyping hLvPost hshape hwellTy _hvar hwrite _hranked _hcoh hnotWrite =>
       rcases hinnerPreservation
           (validRuntimeState_assign_inner hvalidRuntime)
           (validStoreTyping_assign_inner hvalidStoreTyping)
           hsafe hinnerTyping hinnerMulti with
         ⟨hvalidInner, hsafeInner, hvalidValue⟩
-      exact hassignRedex hLv hinnerTyping hshape hwellTy hwrite hnotWrite
+      exact hassignRedex hLv hinnerTyping hLvPost hshape hwellTy hwrite hnotWrite
         (validRuntimeState_assign_value_of_value hvalidInner)
         hsafeInner hvalidValue hassignStep
 
@@ -1838,6 +1996,7 @@ theorem preservation_assign_context_terminal_multistep_runtime
     (∀ {midStore value targetLifetime oldTy rhsTy env₂},
       LValTyping env₁ lhs oldTy targetLifetime →
       TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+      LValTyping env₂ lhs oldTy targetLifetime →
       ShapeCompatible env₂ oldTy (.ty rhsTy) →
       WellFormedTy env₂ rhsTy targetLifetime →
       EnvWrite 0 env₂ lhs rhsTy env₃ →
@@ -1868,12 +2027,12 @@ theorem preservation_assign_context_terminal_multistep_runtime
         (rhsTy := rhsTy) (env₂ := env₂)
         hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping hmultiInner)
     (by
-      intro targetLifetime oldTy rhsTy env₂ hLv hinnerTyping hshape hwellTy hwrite
-        hnotWrite hvalidAssign hsafeAssign hvalidValue hstep
+      intro targetLifetime oldTy rhsTy env₂ hLv hinnerTyping hLvPost hshape hwellTy
+        hwrite hnotWrite hvalidAssign hsafeAssign hvalidValue hstep
       exact hassignRedex (midStore := midStore) (value := value)
         (targetLifetime := targetLifetime) (oldTy := oldTy)
         (rhsTy := rhsTy) (env₂ := env₂)
-        hLv hinnerTyping hshape hwellTy hwrite hnotWrite
+        hLv hinnerTyping hLvPost hshape hwellTy hwrite hnotWrite
         hvalidAssign hsafeAssign hvalidValue hstep)
     hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hassignStep
 

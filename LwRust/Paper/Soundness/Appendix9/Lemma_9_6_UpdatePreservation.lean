@@ -16,8 +16,6 @@ Status: split into a **static** half and a **runtime** half.
   write-coherence premises.  This is the `T-Assign` case of Lemma 4.9.
 * Runtime (safe abstraction preserved by the store `write`): mechanized as
   `storePreservation_assign_var_*_of_preserved` and the redex lemmas
-  `preservation_assign_var_envShape_step_runtime_of_preserved`, currently taking
-  the per-variable update-preservation facts (`∀ y ≠ x, validity survives the
-  write`) as hypotheses; this is the `RuntimePreservationObligations.assign`
-  case.
+  `preservation_assign_var_envShape_step_runtime_of_frames`, with the concrete
+  reachability frame facts now derived from well-formedness in Lemma 4.11.
 -/

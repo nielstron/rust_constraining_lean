@@ -1231,7 +1231,8 @@ theorem lvalTyping_vars_base_le {e : Env} (hcont : ContainedBorrowsWellFormed e)
       obtain ⟨m, tgts, hcontains, tgt, htgt, hbasetgt⟩ :=
         partialTy_vars_mem_contains v hv
       have hbtw := hcont x slot m tgts hslot ⟨slot, hslot, hcontains⟩
-      obtain ⟨tt, tlf, _htyp, _hle, tgtbs, htgtbs, htgtbsle⟩ := hbtw tgt htgt
+      obtain ⟨tt, tlf, _htyp, _hle, ⟨tgtbs, htgtbs, htgtbsle⟩, _hvar⟩ :=
+        hbtw tgt htgt
       rw [hbasetgt] at htgtbs
       have hvbseq : vbs = tgtbs := Option.some.inj (hvbs.symm.trans htgtbs)
       subst hvbseq
@@ -1299,7 +1300,8 @@ theorem lvalTyping_vars_base_le_bounded {e : Env} {φ : Name → Nat} (N : Nat)
       obtain ⟨m, tgts, hcontains, tgt, htgt, hbasetgt⟩ :=
         partialTy_vars_mem_contains v hv
       have hbtw := hcontN x slot m tgts hxN hslot ⟨slot, hslot, hcontains⟩
-      obtain ⟨tt, tlf, _htyp, _hle, tgtbs, htgtbs, htgtbsle⟩ := hbtw tgt htgt
+      obtain ⟨tt, tlf, _htyp, _hle, ⟨tgtbs, htgtbs, htgtbsle⟩, _hvar⟩ :=
+        hbtw tgt htgt
       rw [hbasetgt] at htgtbs
       have hvbseq : vbs = tgtbs := Option.some.inj (hvbs.symm.trans htgtbs)
       subst hvbseq

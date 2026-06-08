@@ -23,6 +23,20 @@ per-result lemma files (each carries the material needed to prove its result and
 ends with the paper-facing statement) and in the Appendix 9 files.  Generic,
 reusable typing/runtime facts live under `Soundness.Helpers`.
 
+Section 4 is closed for the mechanized calculus with the following documented
+deviations from the paper rules:
+
+* the abstract `ProgramStore` exposes progress totality as
+  `OperationalStoreProgress`; concrete finite stores instantiate it;
+* Theorem 4.12 uses an explicit `TerminatesAsValue` witness, matching the
+  paper's termination assumption rather than deriving termination here;
+* move/borrow/assignment source redexes are restricted to variable lvalues;
+* declaration and assignment typing carry the local coherence/rank facts needed
+  by the `lw_rust_followup` linearizability argument;
+* block/sequence typing is strengthened to singleton/drop-safe blocks and
+  non-owning non-final sequence temporaries, avoiding an unproved general
+  recursive drop-preservation theorem.
+
 The lemma files form a linear chain following the paper order
 (4.10 → 4.9 → 4.11 → 4.12 → 4.14), with the source-initial corollaries and the
 Appendix 9 results layered on top.

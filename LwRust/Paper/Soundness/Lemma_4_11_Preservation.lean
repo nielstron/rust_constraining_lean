@@ -12,11 +12,10 @@ Paper statement (Section 4.4):
 > `⟨S₁ ▷ t ⟶* S₂ ▷ v⟩^l`, then `S₂ ▷ v` remains valid where `S₂ ∼ Γ₂` and
 > `S₂ ▷ v ∼ T`.
 
-Status: proved for the strengthened rule-carried formulation that exposes
-`RuntimePreservationObligations`.  The structural cases
-(value/copy/borrow/box/declare) are proven inside `preservation`; the remaining
-move/assign/block redex families are explicit runtime obligations rather than
-hidden behind an unproved package.
+Status: proved for the strengthened rule-carried formulation.  The
+value/copy/move/borrow/box/declare/assign cases are proven inside
+`preservation`; the block case is discharged for the singleton/drop-safe block
+typing rule used by the mechanization.
 -/
 
 namespace LwRust
@@ -496,7 +495,7 @@ open LwRust.Paper LwRust.Core
 theorem lemma_4_11_preservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
-    (hobligations : RuntimePreservationObligations)
+    (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
@@ -504,7 +503,6 @@ theorem lemma_4_11_preservation
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     TerminalStateSafe finalStore finalValue env₂ ty :=
-  preservation hobligations hvalid hstoreTyping
-    hwellFormed hsafe htyping hmulti
+  preservation hrefs hvalid hstoreTyping hwellFormed hsafe htyping hmulti
 
 end LwRust.Paper.Soundness

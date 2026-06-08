@@ -13,9 +13,9 @@ Paper statement (Section 4.5):
 
 The paper's statement assumes termination; here that is the explicit
 `TerminatesAsValue` witness.  Follows from Lemma 4.10 (Progress) and Lemma 4.11
-(Preservation).  The mechanized paper-facing wrapper exposes the explicit
-`RuntimePreservationObligations` needed for the remaining move/assign/block
-runtime redex families.
+(Preservation).  The mechanized paper-facing wrapper uses the strengthened
+singleton/drop-safe block typing rule, so the final statement carries no
+external runtime-preservation premise.
 -/
 
 namespace LwRust
@@ -73,7 +73,7 @@ explicit multistep witness to a final runtime value.
 -/
 theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-    RuntimePreservationObligations →
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     (∀ lifetime, WellFormedEnv env₁ lifetime) →
@@ -85,13 +85,13 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hobligations hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress
-    htyping hterminates
+  intro hrefs hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+    hstoreProgress htyping hterminates
   exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
     hwellFormed hsafe hstoreProgress htyping
     (by
       intro finalStore finalValue hmulti
-      exact preservation hobligations hvalidRuntime hvalidStoreTyping
+      exact preservation hrefs hvalidRuntime hvalidStoreTyping
         (hwellFormed lifetime) hsafe htyping hmulti)
     hterminates
 
@@ -106,7 +106,7 @@ open LwRust.Paper LwRust.Core
 theorem theorem_4_12_typeAndBorrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
-    (hobligations : RuntimePreservationObligations)
+    (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : ∀ lifetime, WellFormedEnv env₁ lifetime)
@@ -118,7 +118,7 @@ theorem theorem_4_12_typeAndBorrowSafety
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety hobligations hvalid
+  typeAndBorrowSafety hrefs hvalid
     hstoreTyping hwellFormed hsafe hstore htyping hterminates
 
 end LwRust.Paper.Soundness

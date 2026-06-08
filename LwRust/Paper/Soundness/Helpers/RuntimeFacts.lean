@@ -18,14 +18,14 @@ These package the two runtime invariants (`Linearizable`, `Coherent`) that
 operations that the Appendix 9.6 borrow-invariance argument performs: a single
 `EnvWrite` and an `EnvJoin` (the write fan-out's branch merge).
 
-`Linearizable` preservation is the `lw_rust_followup` contribution (Definition 11
-+ its preservation proposition: a common rank function survives a write and a
-branch join); it is stated here as an explicit, documented obligation
-to be discharged from the followup development.
+`Linearizable` preservation is the `lw_rust_followup` contribution (Definition
+11 plus its preservation proposition): a common rank function survives a write
+under the rule-carried RHS-rank side condition, and survives branch joins when
+both branches use the same rank function.
 
-  `Coherent` preservation is Section-4 content provable from the transport keystone
-  by a rank-stratified induction; it is likewise staged as an explicit obligation
-  here so the borrow-invariance landmarks can be derived from it first. -/
+`Coherent` preservation is Section-4 content proved from explicit
+root-transport/coherence side conditions carried by the strengthened write and
+declaration rules. -/
 
 /-- A tiny environment witnessing why bare rank-0 write linearization is false. -/
 def writeLinearizationCycleEnv : Env :=
@@ -1649,7 +1649,7 @@ condition.
 `EnvWrite.borrowTargetOrigin` says every variable in a positive-rank write result
 comes either from the old slot at the same base, or from the RHS type.  The old
 case is handled by the previous rank witness.  The RHS case is exactly the side
-condition that the bare `EnvWrite.preserves_linearizedBy` axiom is missing. -/
+condition missing from the bare `EnvWrite.preserves_linearizedBy` statement. -/
 theorem EnvWrite.preserves_linearizedBy_of_rhsVarsBelow {rank : Nat}
     {env result : Env} {lv : LVal} {rhsTy : Ty} {φ : Name → Nat} :
     0 < rank →
@@ -2245,12 +2245,12 @@ theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_left
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro target htarget
   rcases hleft target htarget with
-    ⟨leftTy, leftLifetime, hleftTyping, _hleftOutlives, hleftBase⟩
+    ⟨leftTy, leftLifetime, hleftTyping, _hleftOutlives, hleftBase, hleftVar⟩
   have hjoinBase := LValBaseOutlives.join_left hjoin hleftBase
   rcases fullJoinTransport_viaInvariants hstr hφJoin hcohJoin hcontN
       (hrankTargets target htarget) hleftTyping hjoinBase
     with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase, hleftVar⟩
 
 /-- Right-branch mirror of `BorrowTargetsWellFormedInSlot.join_viaInvariants_left`. -/
 theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_right
@@ -2270,12 +2270,12 @@ theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_right
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro target htarget
   rcases hright target htarget with
-    ⟨rightTy, rightLifetime, hrightTyping, _hrightOutlives, hrightBase⟩
+    ⟨rightTy, rightLifetime, hrightTyping, _hrightOutlives, hrightBase, hrightVar⟩
   have hjoinBase := LValBaseOutlives.join_right hjoin hrightBase
   rcases fullJoinTransport_viaInvariants hstr hφJoin hcohJoin hcontN
       (hrankTargets target htarget) hrightTyping hjoinBase
     with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase, hrightVar⟩
 
 /-- The slot shape-map `env → result` for a single `EnvWrite`, assembled from
 `EnvWrite.envStrengthens` (existence + strengthening) and `EnvWrite.shapePreserved`
@@ -2699,7 +2699,7 @@ theorem termListTyping_singleton_value_environment_eq {env₁ env₂ : Env}
   cases htyping with
   | singleton hterm =>
       exact valueTyping_environment_eq hterm
-  | cons _hterm hrest =>
+  | cons _hterm _hnonOwner hrest =>
       cases hrest
 
 /-- `T-Const` inversion for singleton value term lists. -/
@@ -2713,7 +2713,7 @@ theorem termListTyping_singleton_value_valueTyping {env₁ env₂ : Env}
       cases hterm with
       | const hvalueTyping =>
           exact hvalueTyping
-  | cons _hterm hrest =>
+  | cons _hterm _hnonOwner hrest =>
       cases hrest
 
 /--
@@ -2726,7 +2726,7 @@ theorem blockValueTyping_output_eq {env env' : Env} {typing : StoreTyping}
     env' = env.dropLifetime blockLifetime := by
   intro htyping
   cases htyping with
-  | block _hblockChild hterms _hwellFormed hdrop =>
+  | block _hblockChild hterms _hsingleton _hwellFormed _hdropSafe hdrop =>
       have henv₂ := termListTyping_singleton_value_environment_eq hterms
       rw [henv₂]
       exact hdrop
@@ -2738,7 +2738,7 @@ theorem blockValueTyping_valueTyping {env env' : Env} {typing : StoreTyping}
     ValueTyping typing value ty := by
   intro htyping
   cases htyping with
-  | block _hblockChild hterms _hwellFormed _hdrop =>
+  | block _hblockChild hterms _hsingleton _hwellFormed _hdropSafe _hdrop =>
       exact termListTyping_singleton_value_valueTyping hterms
 
 /--

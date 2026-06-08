@@ -36,7 +36,8 @@ def BorrowTargetsWellFormedInSlot
     ∃ targetTy targetLifetime,
       LValTyping env target (.ty targetTy) targetLifetime ∧
         targetLifetime ≤ slotLifetime ∧
-        LValBaseOutlives env target slotLifetime
+        LValBaseOutlives env target slotLifetime ∧
+        LValIsVar target
 
 /--
 Slot-local borrow invariant for a partial type.  This is the proof obligation
@@ -245,9 +246,9 @@ theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
     BorrowTargetsWellFormedInSlot (env.update x slot) slotLifetime targets := by
   intro hfresh htargets target hmem
   rcases htargets target hmem with
-    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase, hvar⟩
   refine ⟨targetTy, targetLifetime,
-    LValTyping.update_fresh_one (slot := slot) hfresh htyping, houtlives, ?_⟩
+    LValTyping.update_fresh_one (slot := slot) hfresh htyping, houtlives, ?_, hvar⟩
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
   have hbaseSlot' :
       (env.update x slot).slotAt (LVal.base target) = some baseSlot := by
@@ -273,13 +274,14 @@ theorem BorrowTargetsWellFormed.singleton {env : Env} {target : LVal}
     LValTyping env target (.ty targetTy) targetLifetime →
     targetLifetime ≤ lifetime →
     LValBaseOutlives env target lifetime →
+    LValIsVar target →
     BorrowTargetsWellFormed env [target] lifetime := by
-  intro htarget houtlives hbase
+  intro htarget houtlives hbase hvar
   refine BorrowTargetsWellFormed.intro (by
     intro selected hselected
     simp at hselected
     subst hselected
-    exact ⟨targetTy, targetLifetime, htarget, houtlives, hbase⟩)
+    exact ⟨targetTy, targetLifetime, htarget, houtlives, hbase, hvar⟩)
 
 theorem LifetimeOutlives.trans {first second third : Lifetime} :
     first ≤ second →
@@ -419,11 +421,11 @@ theorem BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed {env : Env}
   refine BorrowTargetsWellFormed.intro ?_
   intro target hmem
   rcases htargets target hmem with
-    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlivesSlot, hbase⟩
+    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlivesSlot, hbase, hvar⟩
   refine ⟨targetTy, targetLifetime, htargetTyping,
     LifetimeOutlives.trans htargetOutlivesSlot houtlives, ?_⟩
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-  exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
+  exact ⟨⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩, hvar⟩
 
 theorem EnvContains.borrowTargetsWellFormed {env : Env} {x : Name}
     {mutable : Bool} {targets : List LVal} {lifetime : Lifetime} :
@@ -444,7 +446,8 @@ theorem BorrowTargetsWellFormed.member {env : Env} {targets : List LVal}
       ∃ targetTy targetLifetime,
         LValTyping env target (.ty targetTy) targetLifetime ∧
         targetLifetime ≤ lifetime ∧
-        LValBaseOutlives env target lifetime := by
+        LValBaseOutlives env target lifetime ∧
+        LValIsVar target := by
   intro htargets target hmem
   cases htargets with
   | intro hmembers => exact hmembers target hmem
@@ -460,12 +463,12 @@ theorem BorrowTargetsWellFormed.weaken {env : Env} {targets : List LVal}
         refine BorrowTargetsWellFormed.intro ?_
         intro target htarget
         rcases hmembers target htarget with
-          ⟨targetTy, targetLifetime, htyping, htOutlives, hbase⟩
+          ⟨targetTy, targetLifetime, htyping, htOutlives, hbase, hvar⟩
         refine ⟨targetTy, targetLifetime, htyping,
           LifetimeOutlives.trans htOutlives houterInner, ?_⟩
         rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-        exact ⟨baseSlot, hbaseSlot,
-          LifetimeOutlives.trans hbaseOutlives houterInner⟩
+        exact ⟨⟨baseSlot, hbaseSlot,
+          LifetimeOutlives.trans hbaseOutlives houterInner⟩, hvar⟩
 
 theorem BorrowTargetsWellFormedInSlot.weaken {env : Env} {targets : List LVal}
     {outer inner : Lifetime} :
@@ -474,11 +477,11 @@ theorem BorrowTargetsWellFormedInSlot.weaken {env : Env} {targets : List LVal}
     BorrowTargetsWellFormedInSlot env inner targets := by
   intro htargets houtlives target htarget
   rcases htargets target htarget with
-    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives, hbase⟩
+    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives, hbase, hvar⟩
   refine ⟨targetTy, targetLifetime, htargetTyping,
     LifetimeOutlives.trans htargetOutlives houtlives, ?_⟩
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-  exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
+  exact ⟨⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩, hvar⟩
 
 theorem PartialTyBorrowsWellFormedInSlot.weaken {env : Env}
     {partialTy : PartialTy} {outer inner : Lifetime} :
@@ -1411,11 +1414,11 @@ theorem TermTyping.slot_lifetime_survives :
           _hLv _hvar _hnotWrite hmove x sourceSlot _houtlives hslot
         exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hmutable _hnotWrite
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hnotRead
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hnotRead
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
@@ -1424,7 +1427,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing lifetime blockLifetime _terms _ty
-          hchild _hterms _hwellTy hdrop ih x sourceSlot houtlives hslot
+          hchild _hterms _hsingleton _hwellTy _hdropSafe hdrop ih x sourceSlot houtlives hslot
         rcases ih (LifetimeOutlives.trans houtlives (LifetimeChild.outlives hchild))
             hslot with
           ⟨bodySlot, hbodySlot, hbodyLifetime⟩
@@ -1450,8 +1453,8 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hshape _hwellRhs _hvar hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
-          houtlives hslot
+          _hLhs _hRhs _hLhsPost _hshape _hwellRhs _hvar hwrite _hranked _hcoh
+          _hnotWrite ih x sourceSlot houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
@@ -1462,7 +1465,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-          _hterm _hrest ihHead ihRest x sourceSlot houtlives hslot
+          _hterm _hnonOwner _hrest ihHead ihRest x sourceSlot houtlives hslot
         rcases ihHead houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
         have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
           rw [← hmidLifetime]
@@ -1501,11 +1504,11 @@ theorem TermTyping.slot_lifetime_survives :
           _hLv _hvar _hnotWrite hmove x sourceSlot _houtlives hslot
         exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hmutable _hnotWrite
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hnotRead
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hnotRead
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
@@ -1514,7 +1517,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing lifetime blockLifetime _terms _ty
-          hchild _hterms _hwellTy hdrop ih x sourceSlot houtlives hslot
+          hchild _hterms _hsingleton _hwellTy _hdropSafe hdrop ih x sourceSlot houtlives hslot
         rcases ih (LifetimeOutlives.trans houtlives (LifetimeChild.outlives hchild))
             hslot with
           ⟨bodySlot, hbodySlot, hbodyLifetime⟩
@@ -1540,8 +1543,8 @@ theorem TermTyping.slot_lifetime_survives :
           exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hshape _hwellRhs _hvar hwrite _hranked _hcoh _hnotWrite ih x sourceSlot
-          houtlives hslot
+          _hLhs _hRhs _hLhsPost _hshape _hwellRhs _hvar hwrite _hranked _hcoh
+          _hnotWrite ih x sourceSlot houtlives hslot
         rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
         rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
@@ -1552,7 +1555,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-          _hterm _hrest ihHead ihRest x sourceSlot houtlives hslot
+          _hterm _hnonOwner _hrest ihHead ihRest x sourceSlot houtlives hslot
         rcases ihHead houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
         have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
           rw [← hmidLifetime]
@@ -1622,7 +1625,7 @@ theorem borrowInvariance_result_extension {env₂ : Env} {gamma : Name}
 /--
 Final environment-extension step with fresh-slot coherence made explicit.
 
-This avoids the legacy `Coherent.update_fresh_ty` axiom by requiring the local
+This avoids the legacy `Coherent.update_fresh_ty` shortcut by requiring the local
 fresh-update coherence obligations for the result binding.
 -/
 theorem borrowInvariance_result_extension_of_coherenceObligations

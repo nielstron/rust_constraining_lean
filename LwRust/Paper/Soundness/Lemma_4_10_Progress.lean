@@ -447,16 +447,16 @@ theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hwellFormed hsafe _hstore htyping
   cases htyping with
-  | assign hLhs hRhs hshape _hwf _hwriteEnv _hranked _hcoh _hnotWriteProhibited =>
-      rcases read_defined_of_allocated
-          (lvalTyping_allocated_location hwellFormed hsafe hLhs) with
-        ⟨oldSlot, hread⟩
+  | assign _hLhs hRhs hLhsPost hshape _hwf _hvar _hwriteEnv _hranked _hcoh _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
+          rcases read_defined_of_allocated
+              (lvalTyping_allocated_location hwellFormed hsafe hLhsPost) with
+            ⟨oldSlot, hread⟩
           have hnonOwner :
               PartialValueNonOwner oldSlot.value :=
             lvalTyping_read_nonOwner_of_shapeCompatible
-              hwellFormed hsafe hLhs hshape hread
+              hwellFormed hsafe hLhsPost hshape hread
           exact progress_assign_value hnonOwner hread
 
 /--
@@ -608,20 +608,20 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         hwellFormed hsafe _hstore =>
       progress_move_typing (typing := _typing) (hwellFormed lifetime) hsafe
         (TermTyping.move (typing := _typing) hLv hvar hwriteProhibited hmove))
-    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hmutable hwriteProhibited
+    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hvar hmutable hwriteProhibited
         hwellFormed hsafe _hstore =>
       progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
-        (TermTyping.mutBorrow (typing := _typing) hLv hmutable hwriteProhibited))
-    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hreadProhibited
+        (TermTyping.mutBorrow (typing := _typing) hLv hvar hmutable hwriteProhibited))
+    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hvar hreadProhibited
         hwellFormed hsafe _hstore =>
       progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
-        (TermTyping.immBorrow (typing := _typing) hLv hreadProhibited))
+        (TermTyping.immBorrow (typing := _typing) hLv hvar hreadProhibited))
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} hterm ih
         hwellFormed hsafe hstore =>
       progress_box_typing hstore (TermTyping.box hterm)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty}
-        _hblockChild _hterms _hwellTy _hdrop ih hwellFormed hsafe hstore =>
+        _hblockChild _hterms _hsingleton _hwellTy _hdropSafe _hdrop ih hwellFormed hsafe hstore =>
       ih lifetime hwellFormed hsafe hstore)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
         hfresh hterm hfreshOut hcoh henv ih
@@ -629,17 +629,18 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs hshape hwf hvar hwrite hranked hcoh hnotWriteProhibited ih hwellFormed
-        hsafe hstore =>
+        hLhs hRhs hLhsPost hshape hwf hvar hwrite hranked hcoh hnotWriteProhibited ih
+        hwellFormed hsafe hstore =>
       progress_assign_typing (hwellFormed lifetime) hsafe hstore
-        (TermTyping.assign hLhs hRhs hshape hwf hvar hwrite hranked hcoh hnotWriteProhibited)
+        (TermTyping.assign hLhs hRhs hLhsPost hshape hwf hvar hwrite hranked hcoh
+          hnotWriteProhibited)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _typing _blockLifetime _term _ty} _hterm ih
         outerLifetime hwellFormed hsafe hstore =>
       progress_block_of_head_progress hstore
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing _blockLifetime _term _rest _termTy _finalTy}
-        _hterm _hrest ihHead _ihRest outerLifetime hwellFormed hsafe hstore =>
+        _hterm _hnonOwner _hrest ihHead _ihRest outerLifetime hwellFormed hsafe hstore =>
       progress_block_of_head_progress hstore
         (ihHead hwellFormed hsafe hstore))
     htyping hwellFormed hsafe hstore

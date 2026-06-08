@@ -57,6 +57,38 @@ def ValidValue (store : ProgramStore) (value : Value) (ty : Ty) : Prop :=
 notation:50 store:51 " ⊢ " value:51 " ∼ " ty:51 =>
   ValidPartialValue store value ty
 
+/-- Values valid at statically non-owning types contain no owning reference. -/
+theorem validValue_nonOwner_of_nonOwnerTy {store : ProgramStore}
+    {value : Value} {ty : Ty} :
+    NonOwnerTy ty →
+    ValidValue store value ty →
+    valueOwnedLocation? value = none := by
+  intro hnonOwner hvalid
+  cases hnonOwner <;> cases hvalid <;> simp [valueOwnedLocation?]
+
+/--
+Partial values valid at a drop-safe partial type are runtime non-owners.
+
+This is the bridge from the static block-local drop condition to the
+`Drops.nonOwner` case used by the concrete lifetime-drop preservation proof.
+-/
+theorem validPartialValue_nonOwner_of_dropSafePartialTy {store : ProgramStore}
+    {value : PartialValue} {partialTy : PartialTy} :
+    DropSafePartialTy partialTy →
+    ValidPartialValue store value partialTy →
+    PartialValueNonOwner value := by
+  cases partialTy with
+  | ty ty =>
+      intro hsafe hvalid
+      cases hsafe <;> cases hvalid <;> simp
+  | undef ty =>
+      intro _hsafe hvalid
+      cases hvalid
+      simp
+  | box inner =>
+      intro hsafe _hvalid
+      cases hsafe
+
 /--
 Dropping a list of non-owning partial values preserves existing partial-value
 abstractions, since the store is unchanged.
@@ -116,6 +148,14 @@ theorem validStoreTyping_block_tail {store : ProgramStore} {typing : StoreTyping
   exact htyping candidate (by
     simp [termValues] at hmem ⊢
     exact Or.inr hmem)
+
+/-- A singleton block has the same runtime values as its body term. -/
+theorem validStoreTyping_block_singleton_inner {store : ProgramStore}
+    {typing : StoreTyping} {blockLifetime : Lifetime} {term : Term} :
+    ValidStoreTyping store (.block blockLifetime [term]) typing →
+    ValidStoreTyping store term typing := by
+  intro htyping value hmem
+  exact htyping value (by simpa [termValues] using hmem)
 
 theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
     {partialValue : PartialValue} {partialTy : PartialTy} {owned : Location} :

@@ -443,6 +443,58 @@ theorem termOwnerTargetsHeap_block_value {blockLifetime : Lifetime} {value : Val
   intro hterm owned hmem
   exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
 
+theorem termOwnerTargetsHeap_block_singleton {blockLifetime : Lifetime} {term : Term} :
+    TermOwnerTargetsHeap (.block blockLifetime [term]) →
+    TermOwnerTargetsHeap term := by
+  intro hterm owned hmem
+  exact hterm owned (by simpa [termOwningLocations, termValues] using hmem)
+
+theorem validState_block_singleton_inner {store : ProgramStore}
+    {blockLifetime : Lifetime} {term : Term} :
+    ValidState store (.block blockLifetime [term]) →
+    ValidState store term := by
+  intro hvalid
+  exact ⟨hvalid.1,
+    by
+      simpa [ValidTerm, termOwningLocations, termValues] using hvalid.2.1,
+    by
+      intro owned hmem
+      exact hvalid.2.2 owned
+        (by simpa [termOwningLocations, termValues] using hmem)⟩
+
+theorem validRuntimeState_block_singleton_inner {store : ProgramStore}
+    {blockLifetime : Lifetime} {term : Term} :
+    ValidRuntimeState store (.block blockLifetime [term]) →
+    ValidRuntimeState store term := by
+  intro hvalid
+  exact ⟨validState_block_singleton_inner hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    termOwnerTargetsHeap_block_singleton
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+
+theorem validState_block_singleton_value_of_value {store : ProgramStore}
+    {blockLifetime : Lifetime} {value : Value} :
+    ValidState store (.val value) →
+    ValidState store (.block blockLifetime [.val value]) := by
+  intro hvalid
+  simpa [ValidState, ValidTerm, termOwningLocations, termValues] using hvalid
+
+theorem validRuntimeState_block_singleton_value_of_value {store : ProgramStore}
+    {blockLifetime : Lifetime} {value : Value} :
+    ValidRuntimeState store (.val value) →
+    ValidRuntimeState store (.block blockLifetime [.val value]) := by
+  intro hvalid
+  exact ⟨validState_block_singleton_value_of_value hvalid.1,
+    ValidRuntimeState.storeOwnersAllocated hvalid,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalid,
+    ValidRuntimeState.heapSlotsRootLifetime hvalid,
+    by
+      intro owned hmem
+      exact (ValidRuntimeState.termOwnerTargetsHeap hvalid) owned
+        (by simpa [termOwningLocations, termValues] using hmem)⟩
+
 theorem validState_box_inner {store : ProgramStore} {term : Term} :
     ValidState store (.box term) →
     ValidState store term := by

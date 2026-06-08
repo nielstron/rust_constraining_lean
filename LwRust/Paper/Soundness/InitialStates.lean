@@ -227,7 +227,7 @@ theorem sourceInitial_blockB_value_borrowSafety_result_extension
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hsource htyping hfresh hfreshCoherence
   cases htyping with
-  | block _hblockChild hterms hwellTy hdrop =>
+  | block _hblockChild hterms _hsingleton hwellTy _hdropSafe hdrop =>
       have hvalueTyping := termListTyping_singleton_value_valueTyping hterms
       have henvList : Env.empty = _ :=
         termListTyping_singleton_value_environment_eq hterms
@@ -481,22 +481,17 @@ theorem valueTyping_empty_result_wellFormed {env : Env}
 
 /-- Source-initial borrow invariance through the rule-carried route. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
-    {lifetime : Lifetime} {ty : Ty} {gamma : Name} :
+    {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-      lifetime := by
-  intro hsource htyping hfresh hfreshCoherence
+    WellFormedEnv env₂ lifetime := by
+  intro hsource htyping
   exact borrowInvariance_emptyStoreTyping
     (sourceInitialRuntimeState_valid hsource).1
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty lifetime)
     safeAbstraction_empty
     htyping
-    hfresh
-    hfreshCoherence
 
 theorem sourceInitial_typeAndBorrowSafety_of_preservation
     {term : Term} {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
@@ -629,18 +624,14 @@ This is the source-program version of
 -/
 theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
-    {gamma : Name} :
+    :
     AssignmentRhsEdgesRanked →
     AssignmentWriteCoherenceObligations →
     DeclarationFreshUpdateCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-      lifetime := by
-  intro hranked hwriteCoherent hdeclFresh hsource htyping hfresh
-    hfreshCoherence
+    WellFormedEnv env₂ lifetime := by
+  intro hranked hwriteCoherent hdeclFresh hsource htyping
   exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
     hranked
     hwriteCoherent
@@ -653,20 +644,14 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     (wellFormedEnv_empty lifetime)
     safeAbstraction_empty
     htyping
-    hfresh
-    hfreshCoherence
 
 /-- Source-initial borrow invariance through the rule-carried obligation route. -/
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
-    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
-    {gamma : Name} :
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-      lifetime := by
-  intro hsource htyping hfresh hfreshCoherence
+    WellFormedEnv env₂ lifetime := by
+  intro hsource htyping
   exact borrowInvariance_of_ruleCarriedObligations
     (by
       intro env lifetime
@@ -676,11 +661,9 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     (wellFormedEnv_empty lifetime)
     safeAbstraction_empty
     htyping
-    hfresh
-    hfreshCoherence
 
 /--
-Source-initial Borrow Safety through the explicit, non-axiomatic
+Source-initial Borrow Safety through the explicit, proof-carrying
 borrow-invariance route.
 
 This is the source-program counterpart of
@@ -689,20 +672,14 @@ environment, and store typing discharge the standard source-state premises, whil
 the rule-carried side conditions are supplied by the typing derivation.
 -/
 theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
-    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
-    {gamma : Name} :
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
     AssignmentRhsEdgesRanked →
     AssignmentWriteCoherenceObligations →
     DeclarationFreshUpdateCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-      WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-      lifetime ∧
-      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hrankedAssign hwriteCoherent
-    hdeclFresh hsource htyping hfresh hfreshCoherence
+    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
+  intro hrankedAssign hwriteCoherent hdeclFresh hsource htyping
   exact borrowSafety_of_rankedAssign_and_declFreshCoherence
     hrankedAssign
     hwriteCoherent
@@ -717,21 +694,14 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     borrowSafeEnv_empty
     safeAbstraction_empty
     htyping
-    hfresh
-    hfreshCoherence
 
 /-- Source-initial borrow safety through the rule-carried obligation route. -/
 theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
-    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
-    {gamma : Name} :
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-      WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-      lifetime ∧
-      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsource htyping hfresh hfreshCoherence
+    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
+  intro hsource htyping
   exact borrowSafety_of_ruleCarriedObligations
     hsource
     (by
@@ -743,8 +713,6 @@ theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
     borrowSafeEnv_empty
     safeAbstraction_empty
     htyping
-    hfresh
-    hfreshCoherence
 
 end Paper
 end LwRust

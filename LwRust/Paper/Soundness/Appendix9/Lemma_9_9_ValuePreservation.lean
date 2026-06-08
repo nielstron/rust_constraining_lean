@@ -6,19 +6,34 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then the final
 > value is abstracted by the result type: `S₂ ▷ v ∼ T`.
 
-Status: **in progress** — this is the `ValidValue finalStore finalValue ty`
-conjunct of `TerminalStateSafe`, established by Preservation (Lemma 4.11).  The
-base cases (`R-Copy`, pre-write `R-Move` via Corollary 9.4, post-write `R-Move`
-for ground `unit`/`int` results and under the explicit reachability frame
-condition, `&[mut] w` via Lemma 9.3, `box`/`declare` via the multistep fragments
-`preservation_box_context_terminal_multistep_runtime`,
-`preservation_declare_multistep_runtime`) are mechanized; the move/assign/block
-cases are the corresponding `RuntimePreservationObligations` fields.
+Status: **proven** for the strengthened Section 4 typing system.  This is the
+`ValidValue finalStore finalValue ty` conjunct of `TerminalStateSafe`,
+established by Preservation (Lemma 4.11).  The file also exposes representative
+redex-level frame lemmas for move/value cases.
 -/
 
 namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
+
+/--
+Appendix 9.9, Value Preservation, as the value-abstraction projection of
+Lemma 4.11.
+-/
+theorem lemma_9_9_valuePreservation
+    {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    ValidValue finalStore finalValue ty := by
+  intro hrefs hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+  exact (preservation hrefs hvalid hstoreTyping
+    hwellFormed hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

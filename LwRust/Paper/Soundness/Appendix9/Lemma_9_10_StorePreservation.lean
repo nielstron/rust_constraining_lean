@@ -6,9 +6,9 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then `S₂ ∼ Γ₂`
 > (the final store is safely abstracted by the result environment).
 
-Status: **in progress** — the `finalStore ∼ₛ env₂` conjunct of
-`TerminalStateSafe`, established by Preservation (Lemma 4.11).  Mechanized
-support:
+Status: **proven** for the strengthened Section 4 typing system.  This is the
+`finalStore ∼ₛ env₂` conjunct of `TerminalStateSafe`, established by
+Preservation (Lemma 4.11).  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
   `preservation_declare_redex_runtime_of_validValue` (uses Lemma 9.7);
@@ -18,15 +18,36 @@ support:
 * direct-variable move — `preservation_move_var_step_runtime_of_frames`, which
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
-* block `R-BlockB` — via Lemma 9.5 (`preservation_blockB_value_*`).
+* block `R-BlockB` — via Lemma 9.5
+  (`preservation_blockB_value_multistep_runtime_of_envDropSafe`) for
+  singleton/drop-safe blocks.
 
-The move/assign/block cases are the `RuntimePreservationObligations` fields; the
-copy/borrow cases are already discharged in `preservation`.
+The move, assignment, and strengthened block cases are discharged in
+`preservation`; the theorem below records the full store-preservation projection.
 -/
 
 namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
+
+/--
+Appendix 9.10, Store Preservation, as the safe-abstraction projection of
+Lemma 4.11.
+-/
+theorem lemma_9_10_storePreservation
+    {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    finalStore ∼ₛ env₂ := by
+  intro hrefs hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+  exact (preservation hrefs hvalid hstoreTyping
+    hwellFormed hsafe htyping hmulti).2.1
 
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete

@@ -359,6 +359,42 @@ theorem multistep_block_to_value_first_step_inv {store finalStore : ProgramStore
   | blockB hdrops =>
       exact Or.inr (Or.inr ⟨_, store', rfl, hdrops, hrest⟩)
 
+/--
+Operational decomposition for a nonempty block body: before the block can
+finish, its head term reaches a value, and the block then continues from the
+value-headed body.
+-/
+theorem multistep_block_head_to_value_inv {store finalStore : ProgramStore}
+    {lifetime blockLifetime : Lifetime} {term : Term} {rest : List Term}
+    {finalValue : Value} :
+    MultiStep store lifetime (.block blockLifetime (term :: rest))
+      finalStore (.val finalValue) →
+    ∃ midStore value,
+      MultiStep store blockLifetime term midStore (.val value) ∧
+      MultiStep midStore lifetime (.block blockLifetime (.val value :: rest))
+        finalStore (.val finalValue) := by
+  intro hmulti
+  generalize hcurrentEq :
+      (Term.block blockLifetime (term :: rest)) = current at hmulti
+  generalize htargetEq : (Term.val finalValue) = target at hmulti
+  induction hmulti generalizing term rest finalValue with
+  | refl =>
+      cases hcurrentEq
+      cases htargetEq
+  | trans hstep htail ih =>
+      cases hcurrentEq
+      cases htargetEq
+      cases hstep with
+      | seq hdrops =>
+          exact ⟨_, _, MultiStep.refl,
+            MultiStep.trans (Step.seq hdrops) htail⟩
+      | blockA hhead =>
+          rcases ih rfl rfl with ⟨midStore, value, hheadTail, hblockTail⟩
+          exact ⟨midStore, value, MultiStep.trans hhead hheadTail, hblockTail⟩
+      | blockB hdrops =>
+          exact ⟨_, _, MultiStep.refl,
+            MultiStep.trans (Step.blockB hdrops) htail⟩
+
 namespace WorkedExample
 
 def l : Lifetime := [0]
