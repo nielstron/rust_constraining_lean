@@ -1408,6 +1408,108 @@ theorem dropsAvoids_var_of_not_owning_var
             exact hslotNotVar
           · exact hvalues value (by simp [hrest])))
 
+/--
+If `storage` continues to protect an ownership edge to `owned`, then a drop
+list that avoids `storage` also avoids `owned`, provided the explicit drop-list
+heads do not themselves contain an owning reference to `owned`.
+
+The recursive owner-present case is the interesting one: if the opened slot
+owned `owned`, the store would have two owners for `owned` (`storage` and the
+opened location), contradicting `ValidStore`.
+-/
+theorem dropsAvoids_of_protected_owner {store store' : ProgramStore}
+    {values : List PartialValue} {owned storage : Location} :
+    Drops store values store' →
+    ValidStore store →
+    ProgramStore.OwnsAt store owned storage →
+    DropsAvoids store values storage →
+    (∀ value, value ∈ values → owned ∉ partialValueOwningLocations value) →
+    DropsAvoids store values owned := by
+  intro hdrops
+  induction hdrops generalizing storage with
+  | nil =>
+      intro _hvalid _howns _havoidStorage _hdisjoint
+      exact DropsAvoids.nil
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hvalid howns havoidStorage hdisjoint
+      cases havoidStorage with
+      | nonOwner _ havoidRest =>
+          exact DropsAvoids.nonOwner hnonOwner
+            (ih hvalid howns havoidRest (by
+              intro value hmem
+              exact hdisjoint value (by simp [hmem])))
+      | ownerMissing howner _ _ =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+      | ownerPresent howner _ _ _ =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hvalid howns havoidStorage hdisjoint
+      cases havoidStorage with
+      | nonOwner hnonOwner _ =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+      | ownerMissing _ _ havoidRest =>
+          exact DropsAvoids.ownerMissing howner hmissing
+            (ih hvalid howns havoidRest (by
+              intro value hmem
+              exact hdisjoint value (by simp [hmem])))
+      | ownerPresent _ hpresent _ _ =>
+          rw [hmissing] at hpresent
+          cases hpresent
+  | ownerPresent howner hpresent _hdrops ih =>
+      intro hvalid howns havoidStorage hdisjoint
+      rename_i storeBefore storeAfter ref slot rest
+      cases havoidStorage with
+      | nonOwner hnonOwner _ =>
+          exact False.elim
+            (not_partialValueNonOwner_owning_ref howner hnonOwner)
+      | ownerMissing _ hmissing _ =>
+          rw [hpresent] at hmissing
+          cases hmissing
+      | ownerPresent _ hpresentStorage hstorageNe havoidRest =>
+          rw [hpresent] at hpresentStorage
+          cases hpresentStorage
+          have hrefNeOwned : ref.location ≠ owned := by
+            intro hrefOwned
+            exact hdisjoint (.value (.ref ref)) (by simp)
+              (by
+                rw [← hrefOwned]
+                exact mem_partialValueOwningLocations_ref_true howner)
+          refine DropsAvoids.ownerPresent howner hpresent hrefNeOwned ?_
+          have hvalidErased : ValidStore (storeBefore.erase ref.location) :=
+            validStore_erase hvalid
+          have hownsErased :
+              ProgramStore.OwnsAt (storeBefore.erase ref.location) owned storage := by
+            rcases howns with ⟨ownerLifetime, hownerSlot⟩
+            exact ⟨ownerLifetime, by
+              simpa [ProgramStore.erase, hstorageNe.symm] using hownerSlot⟩
+          exact ih hvalidErased hownsErased havoidRest (by
+            intro value hmem
+            simp at hmem
+            rcases hmem with hvalue | hrest
+            · subst hvalue
+              intro hownedInSlot
+              have hslotValue :
+                  slot.value = .value (owningRef owned) :=
+                eq_owningRef_of_mem_partialValueOwningLocations hownedInSlot
+              have hopenedOwns :
+                  ProgramStore.OwnsAt storeBefore owned ref.location := by
+                have hslotStruct :
+                    slot =
+                      { value := .value (owningRef owned),
+                        lifetime := slot.lifetime } := by
+                  cases slot with
+                  | mk slotValue slotLifetime =>
+                      cases hslotValue
+                      rfl
+                exact ⟨slot.lifetime,
+                  hpresent.trans (congrArg some hslotStruct)⟩
+              exact hstorageNe
+                (hvalid owned ref.location storage hopenedOwns howns)
+            · exact hdisjoint value (by simp [hrest]))
+
 /-- Dropping a non-owning partial value leaves the store unchanged. -/
 theorem drops_partialValue_nonOwner_eq {store store' : ProgramStore}
     {value : PartialValue} :
