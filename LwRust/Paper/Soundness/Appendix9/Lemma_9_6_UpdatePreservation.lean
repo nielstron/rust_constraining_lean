@@ -14,8 +14,16 @@ Status: split into a **static** half and a **runtime** half.
   the explicit-obligation assignment lemmas in `LwRust.Paper.Soundness`, gated on
   `UpdateBorrowInvariantObligations` plus the rule-carried RHS-rank and
   write-coherence premises.  This is the `T-Assign` case of Lemma 4.9.
-* Runtime (safe abstraction preserved by the store `write`): mechanized as
-  `storePreservation_assign_var_*_of_preserved` and the redex lemmas
-  `preservation_assign_var_envShape_step_runtime_of_frames`, with the concrete
-  reachability frame facts now derived from well-formedness in Lemma 4.11.
+* Runtime (safe abstraction preserved by the store `write`): mechanized for
+  direct variable assignment, the one-step owned-dereference case used by owner
+  replacement, and the direct mutable-reference fan-out case `*p := v`.  The
+  remaining Lemma 4.11 holes are the recursive Appendix 9.6 cases: owner-chain
+  writes below more than one box, and nested mutable-borrow fan-out where the
+  runtime reference selects one target while recursive `write_k` calls join all
+  possible target environments.
+
+The runtime statement must use the corrected assignment order implemented by
+`Step.assign`: read the overwritten slot, write the new value, then drop the
+overwritten old value from the post-write store.  The printed appendix proof's
+drop/write order is not the theorem being mechanized here.
 -/

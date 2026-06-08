@@ -329,6 +329,52 @@ theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
               | borrow _hsubset =>
                   exact Or.inr (Or.inr ⟨_, _, rfl⟩)
 
+theorem ShapeCompatible.ty_ty_left_of_strengthens {env : Env}
+    {selectedTy oldTy rhsTy : Ty} :
+    PartialTyStrengthens (.ty selectedTy) (.ty oldTy) →
+    ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
+    ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
+  intro hstrength hshape
+  cases hshape with
+  | unit =>
+      cases hstrength
+      exact ShapeCompatible.unit
+  | int =>
+      cases hstrength
+      exact ShapeCompatible.int
+  | tyBox =>
+      cases hstrength
+      exact ShapeCompatible.tyBox
+  | borrow hleft hright hinner =>
+      cases hstrength with
+      | reflex =>
+          exact ShapeCompatible.borrow hleft hright hinner
+      | borrow hsubset =>
+          exact ShapeCompatible.borrow
+            (fun target hmem => hleft target (hsubset hmem))
+            hright hinner
+
+theorem ShapeCompatible.ty_left_of_strengthens {env : Env}
+    {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
+    PartialTyStrengthens (.ty selectedTy) oldTy →
+    ShapeCompatible env oldTy (.ty rhsTy) →
+    ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
+  intro hstrength hshape
+  cases hstrength with
+  | reflex =>
+      exact hshape
+  | borrow hsubset =>
+      cases hshape with
+      | borrow hleft hright hinner =>
+          exact ShapeCompatible.borrow
+            (fun target hmem => hleft target (hsubset hmem))
+            hright hinner
+  | intoUndef hinnerStrength =>
+      cases hshape with
+      | undefLeft hinnerShape =>
+          exact ShapeCompatible.ty_ty_left_of_strengthens
+            hinnerStrength hinnerShape
+
 theorem validValue_owningLocation_allocated {store : ProgramStore}
     {value : Value} {ty : Ty} {owned : Location} :
     ValidValue store value ty →

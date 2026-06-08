@@ -52,6 +52,459 @@ def TerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : T
     Prop :=
   ValidRuntimeState store (.val value) ∧ store ∼ₛ env ∧ ValidValue store value ty
 
+theorem TerminalStateSafe.transport_sameShape {store : ProgramStore}
+    {value : Value} {source result : Env} {ty : Ty} :
+    TerminalStateSafe store value source ty →
+    (∀ x resultSlot,
+      result.slotAt x = some resultSlot →
+      ∃ sourceSlot,
+        source.slotAt x = some sourceSlot ∧
+          sourceSlot.lifetime = resultSlot.lifetime ∧
+          PartialTyStrengthens sourceSlot.ty resultSlot.ty ∧
+          PartialTy.sameShape sourceSlot.ty resultSlot.ty) →
+    (∀ x sourceSlot,
+      source.slotAt x = some sourceSlot →
+      ∃ resultSlot,
+        result.slotAt x = some resultSlot ∧
+          sourceSlot.lifetime = resultSlot.lifetime) →
+    TerminalStateSafe store value result ty := by
+  intro hterminal hback hfwd
+  exact ⟨hterminal.1,
+    safeAbstraction_transport_sameShape hterminal.2.1 hback hfwd,
+    hterminal.2.2⟩
+
+def EnvSameShapeStrengthening (source result : Env) : Prop :=
+  (∀ x resultSlot,
+    result.slotAt x = some resultSlot →
+    ∃ sourceSlot,
+      source.slotAt x = some sourceSlot ∧
+        sourceSlot.lifetime = resultSlot.lifetime ∧
+        PartialTyStrengthens sourceSlot.ty resultSlot.ty ∧
+        PartialTy.sameShape sourceSlot.ty resultSlot.ty) ∧
+  (∀ x sourceSlot,
+    source.slotAt x = some sourceSlot →
+    ∃ resultSlot,
+      result.slotAt x = some resultSlot ∧
+        sourceSlot.lifetime = resultSlot.lifetime)
+
+theorem EnvSameShapeStrengthening.refl (env : Env) :
+    EnvSameShapeStrengthening env env := by
+  constructor
+  · intro x resultSlot hslot
+    exact ⟨resultSlot, hslot, rfl, PartialTyStrengthens.reflex,
+      PartialTy.sameShape_refl _⟩
+  · intro x sourceSlot hslot
+    exact ⟨sourceSlot, hslot, rfl⟩
+
+theorem EnvSameShapeStrengthening.trans {first second third : Env} :
+    EnvSameShapeStrengthening first second →
+    EnvSameShapeStrengthening second third →
+    EnvSameShapeStrengthening first third := by
+  intro hfirst hsecond
+  constructor
+  · intro x thirdSlot hthird
+    rcases hsecond.1 x thirdSlot hthird with
+      ⟨secondSlot, hsecondSlot, hlife₂, hstrength₂, hshape₂⟩
+    rcases hfirst.1 x secondSlot hsecondSlot with
+      ⟨firstSlot, hfirstSlot, hlife₁, hstrength₁, hshape₁⟩
+    exact ⟨firstSlot, hfirstSlot, by rw [hlife₁, hlife₂],
+      partialTyStrengthens_trans hstrength₁ hstrength₂,
+      PartialTy.sameShape_trans hshape₁ hshape₂⟩
+  · intro x firstSlot hfirstSlot
+    rcases hfirst.2 x firstSlot hfirstSlot with
+      ⟨secondSlot, hsecondSlot, hlife₁⟩
+    rcases hsecond.2 x secondSlot hsecondSlot with
+      ⟨thirdSlot, hthirdSlot, hlife₂⟩
+    exact ⟨thirdSlot, hthirdSlot, by rw [hlife₁, hlife₂]⟩
+
+theorem EnvSameShapeStrengthening.safe
+    {store : ProgramStore} {source result : Env} :
+    EnvSameShapeStrengthening source result →
+    store ∼ₛ source →
+    store ∼ₛ result := by
+  intro hmap hsafe
+  exact safeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
+
+theorem EnvSameShapeStrengthening.update_result_existing_slot
+    {source result : Env} {x : Name} {slot : EnvSlot} :
+    EnvSameShapeStrengthening source result →
+    source.slotAt x = some slot →
+    EnvSameShapeStrengthening source (result.update x slot) := by
+  intro hmap hsourceSlot
+  constructor
+  · intro y resultSlot hresultSlot
+    by_cases hy : y = x
+    · subst hy
+      have hresultSlotEq : resultSlot = slot := by
+        simpa [Env.update] using hresultSlot.symm
+      exact ⟨slot, hsourceSlot,
+        by rw [hresultSlotEq],
+        by
+          rw [hresultSlotEq],
+        by
+          rw [hresultSlotEq]⟩
+    · have hresultOld : result.slotAt y = some resultSlot := by
+        simpa [Env.update, hy] using hresultSlot
+      exact hmap.1 y resultSlot hresultOld
+  · intro y sourceSlot hslot
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq : sourceSlot = slot :=
+        Option.some.inj (hslot.symm.trans hsourceSlot)
+      exact ⟨slot, by simp [Env.update], by rw [hslotEq]⟩
+    · rcases hmap.2 y sourceSlot hslot with
+        ⟨resultSlot, hresultSlot, hlifetime⟩
+      exact ⟨resultSlot, by simpa [Env.update, hy] using hresultSlot,
+        hlifetime⟩
+
+theorem EnvWrite.positive_var_strong_to_result_map
+    {rank : Nat} {env result : Env} {x : Name}
+    {slot : EnvSlot} {oldTy rhsTy : Ty} :
+    0 < rank →
+    env.slotAt x = some slot →
+    slot.ty = .ty oldTy →
+    EnvWrite rank env (.var x) rhsTy result →
+    EnvSameShapeStrengthening
+      (env.update x { slot with ty := .ty rhsTy }) result := by
+  intro hrank hslot hslotTy hwrite
+  cases hwrite with
+  | @intro _rank _env₁ env₂ lv writeSlot _ty updatedTy hwriteSlot hupdate =>
+      simp [LVal.base] at hwriteSlot
+      have hslotEq : writeSlot = slot := by
+        have hsome : some writeSlot = some slot := by
+          rw [← hwriteSlot, hslot]
+        exact Option.some.inj hsome
+      subst writeSlot
+      simp [LVal.path] at hupdate
+      rw [hslotTy] at hupdate
+      cases hupdate with
+      | strong =>
+          exact False.elim (Nat.lt_irrefl 0 hrank)
+      | weak hshape hjoin =>
+          constructor
+          · intro y resultSlot hresultSlot
+            by_cases hy : y = x
+            · subst hy
+              have hresultSlotEq :
+                  resultSlot = { slot with ty := updatedTy } := by
+                simpa [Env.update, LVal.base] using hresultSlot.symm
+              subst hresultSlotEq
+              refine ⟨{ slot with ty := .ty rhsTy }, ?_, ?_, ?_, ?_⟩
+              · simp [Env.update]
+              · rfl
+              · exact PartialTyUnion.right_strengthens hjoin
+              · exact partialTyJoin_ty_left_sameShape
+                  (PartialTyUnion.symm hjoin)
+            · have hresultOld :
+                  env.slotAt y = some resultSlot := by
+                simpa [Env.update, LVal.base, hy] using hresultSlot
+              refine ⟨resultSlot, ?_, rfl, PartialTyStrengthens.reflex,
+                PartialTy.sameShape_refl _⟩
+              simpa [Env.update, hy] using hresultOld
+          · intro y sourceSlot hsourceSlot
+            by_cases hy : y = x
+            · subst hy
+              have hsourceSlotEq :
+                  sourceSlot = { slot with ty := .ty rhsTy } := by
+                simpa [Env.update, LVal.base] using hsourceSlot.symm
+              subst hsourceSlotEq
+              refine ⟨{ slot with ty := updatedTy }, ?_, rfl⟩
+              simp [Env.update, LVal.base]
+            · have hsourceOld :
+                  env.slotAt y = some sourceSlot := by
+                simpa [Env.update, hy] using hsourceSlot
+              refine ⟨sourceSlot, ?_, rfl⟩
+              simpa [Env.update, LVal.base, hy] using hsourceOld
+
+theorem EnvJoin.left_sameShapeStrengthening {left right join : Env} :
+    EnvJoin left right join →
+    (∀ x leftSlot rightSlot,
+      left.slotAt x = some leftSlot →
+      right.slotAt x = some rightSlot →
+      PartialTy.sameShape leftSlot.ty rightSlot.ty) →
+    EnvSameShapeStrengthening left join := by
+  intro hjoin hbranch
+  constructor
+  · intro x joinSlot hjoinSlot
+    rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+      ⟨leftSlot, hleftSlot, hlifetime⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+      ⟨rightSlot, hrightSlot, _hrightLifetime⟩
+    rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+      ⟨_, _, hunion⟩
+    exact ⟨leftSlot, hleftSlot, hlifetime,
+      PartialTyUnion.left_strengthens hunion,
+      partialTyUnion_sameShape_of_sameShape hunion
+        (hbranch x leftSlot rightSlot hleftSlot hrightSlot)⟩
+  · intro x leftSlot hleftSlot
+    have hle := EnvJoin.le_left hjoin x
+    rw [hleftSlot] at hle
+    cases hjoinSlot : join.slotAt x with
+    | none =>
+        rw [hjoinSlot] at hle
+        exact False.elim hle
+    | some joinSlot =>
+        rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+          ⟨leftSlot', hleftSlot', hlifetime⟩
+        have hslotEq : leftSlot' = leftSlot :=
+          Option.some.inj (hleftSlot'.symm.trans hleftSlot)
+        subst hslotEq
+        exact ⟨joinSlot, rfl, hlifetime⟩
+
+theorem EnvJoin.right_sameShapeStrengthening {left right join : Env} :
+    EnvJoin left right join →
+    (∀ x leftSlot rightSlot,
+      left.slotAt x = some leftSlot →
+      right.slotAt x = some rightSlot →
+      PartialTy.sameShape leftSlot.ty rightSlot.ty) →
+    EnvSameShapeStrengthening right join := by
+  intro hjoin hbranch
+  constructor
+  · intro x joinSlot hjoinSlot
+    rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+      ⟨leftSlot, hleftSlot, _hleftLifetime⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+      ⟨rightSlot, hrightSlot, hlifetime⟩
+    rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+      ⟨_, _, hunion⟩
+    have hshapeLR :
+        PartialTy.sameShape leftSlot.ty rightSlot.ty :=
+      hbranch x leftSlot rightSlot hleftSlot hrightSlot
+    have hshapeLJoin :
+        PartialTy.sameShape leftSlot.ty joinSlot.ty :=
+      partialTyUnion_sameShape_of_sameShape hunion hshapeLR
+    exact ⟨rightSlot, hrightSlot, hlifetime,
+      PartialTyUnion.right_strengthens hunion,
+      PartialTy.sameShape_trans (PartialTy.sameShape_symm hshapeLR)
+        hshapeLJoin⟩
+  · intro x rightSlot hrightSlot
+    have hle := EnvJoin.le_right hjoin x
+    rw [hrightSlot] at hle
+    cases hjoinSlot : join.slotAt x with
+    | none =>
+        rw [hjoinSlot] at hle
+        exact False.elim hle
+    | some joinSlot =>
+        rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+          ⟨rightSlot', hrightSlot', hlifetime⟩
+        have hslotEq : rightSlot' = rightSlot :=
+          Option.some.inj (hrightSlot'.symm.trans hrightSlot)
+        subst hslotEq
+        exact ⟨joinSlot, rfl, hlifetime⟩
+
+theorem WriteBorrowTargets.initialized_leaves_of_typed
+    {rank : Nat} {env result : Env} {path : Path}
+    {targets : List LVal} {rhsTy : Ty} :
+    WriteBorrowTargets rank env path targets rhsTy result →
+    ∀ target, target ∈ targets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy := by
+  intro hwrites
+  refine WriteBorrowTargets.rec
+    (motive_1 := fun _ _ _ _ _ _ _ _ => True)
+    (motive_2 := fun _rank env path targets rhsTy _result _ =>
+      ∀ target, target ∈ targets → ∀ targetSlot,
+        env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+        WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy)
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites
+  case strong => intros; trivial
+  case weak => intros; trivial
+  case box => intros; trivial
+  case mutBorrow => intros; trivial
+  case nil =>
+    intro rank env path ty target htarget
+    simp at htarget
+  case singleton =>
+    intro rank env updated path target ty _hwrite htyped _ih selected hselected slot hslot
+    rw [List.mem_singleton] at hselected
+    subst hselected
+    rcases htyped with ⟨leafTy, leafLifetime, htyping⟩
+    have hleaf :=
+      writeLeafTy_of_lvalTyping htyping hslot [] ty WriteLeafTy.leaf
+    simpa using hleaf
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      _hwrite htyped _hwrites _hjoin _ihWrite ihRest selected hselected slot hslot
+    rcases List.mem_cons.mp hselected with hhead | htail
+    · subst hhead
+      rcases htyped with ⟨leafTy, leafLifetime, htyping⟩
+      have hleaf :=
+        writeLeafTy_of_lvalTyping htyping hslot [] ty WriteLeafTy.leaf
+      simpa using hleaf
+    · exact ihRest selected htail slot hslot
+  case intro => intros; trivial
+
+theorem WriteBorrowTargets.selected_var_strong_to_result_map
+    {rank : Nat} {env result : Env}
+    {targets : List LVal} {rhsTy : Ty}
+    {selectedName : Name} {selectedSlot : EnvSlot} {selectedTy : Ty} :
+    0 < rank →
+    WriteBorrowTargets rank env [] targets rhsTy result →
+    (.var selectedName) ∈ targets →
+    env.slotAt selectedName = some selectedSlot →
+    selectedSlot.ty = .ty selectedTy →
+    EnvSameShapeStrengthening
+      (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+      result := by
+  intro hrank hwrites
+  refine WriteBorrowTargets.rec
+    (motive_1 := fun _ _ _ _ _ _ _ _ => True)
+    (motive_2 := fun rank env path targets rhsTy result hwrites =>
+      path = [] →
+      0 < rank →
+      ∀ {selectedName : Name} {selectedSlot : EnvSlot} {selectedTy : Ty},
+        (.var selectedName) ∈ targets →
+        env.slotAt selectedName = some selectedSlot →
+        selectedSlot.ty = .ty selectedTy →
+        EnvSameShapeStrengthening
+          (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+          result)
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites rfl hrank
+  case strong => intros; trivial
+  case weak => intros; trivial
+  case box => intros; trivial
+  case mutBorrow => intros; trivial
+  case nil =>
+    intro rank env path ty hpath _hrank selectedName selectedSlot selectedTy hmem
+    simp at hmem
+  case singleton =>
+    intro rank env updated path target ty hwrite _htyped _ih hpath
+      hrank selectedName selectedSlot selectedTy hmem hslot hslotTy
+    subst hpath
+    rw [List.mem_singleton] at hmem
+    subst hmem
+    exact EnvWrite.positive_var_strong_to_result_map
+      hrank hslot hslotTy (by simpa [prependPath] using hwrite)
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      hwrite htyped hwrites hjoin _ihWrite ihWrites hpath
+      hrank selectedName selectedSlot selectedTy hmem hslot hslotTy
+    subst hpath
+    have hallLeaves :
+        ∀ t, t ∈ target :: rest → ∀ tslot,
+          env.slotAt (LVal.base (prependPath [] t)) = some tslot →
+          WriteLeafTy env (LVal.path (prependPath [] t)) tslot.ty ty :=
+      WriteBorrowTargets.initialized_leaves_of_typed
+        (WriteBorrowTargets.cons hwrite htyped hwrites hjoin)
+    have hupdShape : EnvShapePreserved env updated :=
+      EnvWrite.shapePreserved_init hrank hwrite
+        (fun slot hslot =>
+          by
+            have hleaf := hallLeaves target (by simp) slot hslot
+            simpa [prependPath] using hleaf)
+    have hrestShape : EnvShapePreserved env restEnv :=
+      WriteBorrowTargets.shapePreserved_init hrank hwrites
+        (fun t ht slot hslot =>
+          by
+            have hleaf := hallLeaves t (List.mem_cons_of_mem target ht) slot hslot
+            simpa [prependPath] using hleaf)
+    have hbranch :
+        ∀ x leftSlot rightSlot,
+          updated.slotAt x = some leftSlot →
+          restEnv.slotAt x = some rightSlot →
+          PartialTy.sameShape leftSlot.ty rightSlot.ty :=
+      EnvShapePreserved.branch_sameShape hupdShape hrestShape
+    rcases List.mem_cons.mp hmem with hhead | htail
+    · subst hhead
+      have hheadMap :
+          EnvSameShapeStrengthening
+            (env.update selectedName { selectedSlot with ty := .ty ty })
+            updated :=
+        EnvWrite.positive_var_strong_to_result_map
+          hrank hslot hslotTy (by simpa [prependPath] using hwrite)
+      exact EnvSameShapeStrengthening.trans hheadMap
+        (EnvJoin.left_sameShapeStrengthening hjoin hbranch)
+    · have hrestMap :
+          EnvSameShapeStrengthening
+            (env.update selectedName { selectedSlot with ty := .ty ty })
+            restEnv :=
+        ihWrites rfl hrank htail hslot hslotTy
+      exact EnvSameShapeStrengthening.trans hrestMap
+        (EnvJoin.right_sameShapeStrengthening hjoin hbranch)
+  case intro => intros; trivial
+
+theorem EnvWrite.deref_var_borrow_selected_var_map
+    {rank : Nat} {env result : Env} {sourceName selectedName : Name}
+    {sourceSlot selectedSlot : EnvSlot} {mutable : Bool} {targets : List LVal}
+    {rhsTy selectedTy : Ty} :
+    env.slotAt sourceName = some sourceSlot →
+    sourceSlot.ty = .ty (.borrow mutable targets) →
+    EnvWrite rank env (.deref (.var sourceName)) rhsTy result →
+    ¬ WriteProhibited result (.deref (.var sourceName)) →
+    (.var selectedName) ∈ targets →
+    env.slotAt selectedName = some selectedSlot →
+    selectedSlot.ty = .ty selectedTy →
+    EnvSameShapeStrengthening
+      (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+      result := by
+  intro hsourceSlot hsourceTy hwrite hnotWrite hmem hselectedSlot hselectedTy
+  cases hwrite with
+  | @intro _rank _env₁ writeEnv lv writeSlot _ty updatedTy hwriteSlot hupdate =>
+      simp [LVal.base] at hwriteSlot
+      have hslotEq : writeSlot = sourceSlot := by
+        have hsome : some writeSlot = some sourceSlot := by
+          rw [← hwriteSlot, hsourceSlot]
+        exact Option.some.inj hsome
+      subst writeSlot
+      have hupdateCons :
+          UpdateAtPath rank env [()] sourceSlot.ty rhsTy writeEnv updatedTy := by
+        simpa [LVal.path, LVal.base] using hupdate
+      rw [hsourceTy] at hupdateCons
+      rcases UpdateAtPath.cons_inv hupdateCons with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+        cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        have hselectedNeSource : selectedName ≠ sourceName := by
+          intro hEq
+          have hcontains :
+              (writeEnv.update (LVal.base (LVal.var sourceName).deref)
+                { sourceSlot with ty := updatedTy }) ⊢
+                sourceName ↝ Ty.borrow true targets :=
+            ⟨{ sourceSlot with ty := updatedTy },
+              by simp [Env.update, LVal.base],
+              by
+                rw [hupdatedEq]
+                exact PartialTyContains.here⟩
+          have hmemSource : (.var sourceName) ∈ targets := by
+            simpa [hEq] using hmem
+          have hconflict :
+              (.var sourceName) ⋈ (.deref (.var sourceName)) := by
+            simp [PathConflicts, LVal.base]
+          exact hnotWrite
+            (Or.inl ⟨sourceName, targets, .var sourceName,
+              hcontains, hmemSource, hconflict⟩)
+        have hsourceNeSelected : sourceName ≠ selectedName := by
+          intro hEq
+          exact hselectedNeSource hEq.symm
+        have hfanMap :
+            EnvSameShapeStrengthening
+              (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+              writeEnv :=
+          WriteBorrowTargets.selected_var_strong_to_result_map
+            (Nat.succ_pos rank) hwrites hmem hselectedSlot hselectedTy
+        have hsourceRebuild :
+            (env.update selectedName
+              { selectedSlot with ty := .ty rhsTy }).slotAt sourceName =
+              some { sourceSlot with ty := .ty (.borrow true targets) } := by
+          have hsourceStrong :
+              (env.update selectedName
+                { selectedSlot with ty := .ty rhsTy }).slotAt sourceName =
+                some sourceSlot := by
+            simpa [Env.update, hsourceNeSelected] using hsourceSlot
+          have hslotRebuild :
+              { sourceSlot with ty := .ty (.borrow true targets) } = sourceSlot := by
+            cases sourceSlot
+            simp at hsourceTy ⊢
+            exact hsourceTy.symm
+          simpa [hslotRebuild] using hsourceStrong
+        have hmapFinal :=
+          EnvSameShapeStrengthening.update_result_existing_slot
+            hfanMap hsourceRebuild
+        simpa [LVal.base, hupdatedEq] using hmapFinal
+
 theorem EnvContains.update_same {env : Env} {x : Name} {slot : EnvSlot}
     {ty : Ty} :
     PartialTyContains slot.ty ty →
@@ -4313,14 +4766,14 @@ theorem preservation_move_var_multistep_runtime_of_wellFormed
 well-formedness rather than supplied as an obligation. -/
 theorem preservation_assign_var_step_runtime_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
-    {lifetime targetLifetime : Lifetime} {x : Name}
+    {lifetime targetLifetime rhsWellLifetime : Lifetime} {x : Name}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     LValTyping env (.var x) oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
-    WellFormedTy env rhsTy targetLifetime →
+    WellFormedTy env rhsTy rhsWellLifetime →
     EnvWrite 0 env (.var x) rhsTy env' →
     ValidValue store value rhsTy →
     Step store lifetime (.assign (.var x) (.val value)) store' (.val finalValue) →
@@ -4502,7 +4955,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                           (.ref { location := location, owner := true }) } := by
                 rw [hwrittenStore]
                 simp [ProgramStore.update]
-              have hwellInner : WellFormedTy env inner targetLifetime := by
+              have hwellInner : WellFormedTy env inner rhsWellLifetime := by
                 cases hwellTy with
                 | box hinner => exact hinner
               have hnewInnerValidWrite :
@@ -4565,7 +5018,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                   DropsAvoids writtenStore [oldSlot.value] (VariableProjection x) :=
                 dropsAvoids_var_of_ownerTargetsHeap hdrops hwriteOwnerHeap hdropValuesHeap
               have hnewBorrows :
-                  PartialTyBorrowsWellFormedInSlot env targetLifetime
+                  PartialTyBorrowsWellFormedInSlot env rhsWellLifetime
                     (.ty (.box inner)) :=
                 PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellTy
               have hnewGraphDisjoint :
@@ -6153,7 +6606,116 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                           | deref source =>
                               sorry
                   | borrow hsourceBorrow htargets =>
-                      sorry
+                      rename_i mutable targets borrowLifetime
+                      have hsourceLocation :
+                          LValLocationAbstraction midStore lv
+                            (.ty (.borrow mutable targets)) :=
+                        lvalTyping_defined_location hwellInner hsafeInner hsourceBorrow
+                      rcases hsourceLocation with
+                        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+                          hvalidBorrowSlot⟩
+                      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+                      cases hvalidBorrowSlot with
+                      | @borrow selectedLocation _mutable _targets selectedTarget
+                          htargetMem htargetLocFromBorrow =>
+                          have hlhsLocFromBorrow :
+                              midStore.loc lv.deref = some selectedLocation := by
+                            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+                          have hselectedLocationEq : selectedLocation = lhsLocation := by
+                            rw [hlhsLoc] at hlhsLocFromBorrow
+                            exact (Option.some.inj hlhsLocFromBorrow).symm
+                          subst hselectedLocationEq
+                          have hsourceWellTy :
+                              WellFormedTy _env₂ (.borrow mutable targets) _lifetime :=
+                            LValTyping.fullTyWellFormed hwellInner hsourceBorrow
+                          cases hsourceWellTy with
+                          | borrow hborrowTargets =>
+                              cases hborrowTargets with
+                              | intro hborrowTargets =>
+                              rcases hborrowTargets selectedTarget htargetMem with
+                                ⟨selectedTy, selectedLifetime, htargetTyping,
+                                  _htargetOutlives, _htargetBase, htargetVar⟩
+                              cases selectedTarget with
+                              | var selectedName =>
+                                  have hselectedRead :
+                                      midStore.read (.var selectedName) =
+                                        some overwrittenSlot := by
+                                    have hselectedLoc :
+                                        midStore.loc (.var selectedName) =
+                                          some selectedLocation := by
+                                      simpa using htargetLocFromBorrow
+                                    simp [ProgramStore.read, hselectedLoc, hlhsSlot]
+                                  have hselectedWrite :
+                                      midStore.write (.var selectedName)
+                                          (.value value) =
+                                        some
+                                          (midStore.update selectedLocation
+                                            { overwrittenSlot with value := .value value }) := by
+                                    have hselectedLoc :
+                                        midStore.loc (.var selectedName) =
+                                          some selectedLocation := by
+                                      simpa using htargetLocFromBorrow
+                                    simp [ProgramStore.write, hselectedLoc, hlhsSlot]
+                                  rcases lvalTargetsTyping_member_strengthens
+                                      htargets (.var selectedName) htargetMem with
+                                    ⟨memberTy, memberLifetime, hmemberTyping,
+                                      hmemberStrength⟩
+                                  rcases LValTyping.var_inv hmemberTyping with
+                                    ⟨selectedEnvSlot, hselectedEnvSlot,
+                                      _hselectedTyEq, _hselectedLifetimeEq⟩
+                                  let selectedStrongEnv :=
+                                    _env₂.update selectedName
+                                      { selectedEnvSlot with ty := .ty _rhsTy }
+                                  have hselectedStrongWrite :
+                                      EnvWrite 0 _env₂ (.var selectedName)
+                                        _rhsTy selectedStrongEnv := by
+                                    dsimp [selectedStrongEnv]
+                                    exact EnvWrite.intro hselectedEnvSlot
+                                      UpdateAtPath.strong
+                                  have hselectedShape :
+                                      ShapeCompatible _env₂
+                                        (.ty memberTy) (.ty _rhsTy) :=
+                                    ShapeCompatible.ty_left_of_strengthens
+                                      hmemberStrength hshape
+                                  have hdropsSelected :
+                                      Drops
+                                        (midStore.update selectedLocation
+                                          { overwrittenSlot with value := .value value })
+                                        [overwrittenSlot.value] finalStore := by
+                                    rwa [hwriteStoreEq] at hdrops
+                                  have hselectedStep :
+                                      Step midStore _lifetime
+                                        (Term.assign (.var selectedName) (.val value))
+                                        finalStore (.val .unit) :=
+                                    Step.assign hselectedRead hselectedWrite hdropsSelected
+                                  have hselectedTerminal :
+                                      TerminalStateSafe finalStore .unit
+                                        selectedStrongEnv .unit :=
+                                    preservation_assign_var_step_runtime_of_wellFormed
+                                      hwellInner hsafeInner
+                                      (validRuntimeState_assign_value_of_value
+                                        (lhs := .var selectedName) hvalidInner)
+                                      hmemberTyping hselectedShape hwellTy
+                                      hselectedStrongWrite hvalidValue
+                                      hselectedStep
+                                  cases lv with
+                                  | var sourceName =>
+                                      rcases LValTyping.var_inv hsourceBorrow with
+                                        ⟨sourceEnvSlot, hsourceEnvSlot,
+                                          hsourceTy, _hsourceLifetime⟩
+                                      have hmap :
+                                          EnvSameShapeStrengthening
+                                            selectedStrongEnv _env₃ :=
+                                        EnvWrite.deref_var_borrow_selected_var_map
+                                          hsourceEnvSlot hsourceTy hwrite
+                                          hnotWrite htargetMem hselectedEnvSlot
+                                          _hselectedTyEq
+                                      exact TerminalStateSafe.transport_sameShape
+                                        hselectedTerminal hmap.1 hmap.2
+                                  | deref source =>
+                                      sorry
+                              | deref selectedSource =>
+                                  cases htargetVar
         exact ⟨hwellOut, hterminal⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih
         htypingEq outerLifetime store finalStore finalValue hchild hvalidRuntime

@@ -102,13 +102,18 @@ matter when comparing theorem statements.
 
 ### Theorem Interface Notes
 
-- **Open proof debt: owner-overwrite assignment preservation.**  The assignment
+- **Open proof debt: Appendix 9.6 runtime update preservation.**  The assignment
   semantics and typing rule now admit owner replacement and dereference
-  assignment, but Lemma 4.11 still has two `sorry`s for the recursive
-  drop-preservation argument after overwriting an owner: the direct
-  `Box<T> := Box<T>` case and the general dereference-assignment case.  The
-  missing lemma is the ownership-graph disjointness argument described in the
-  runtime assignment note above.
+  assignment.  The direct variable and one-step owned-dereference cases are
+  mechanized, including `Box<T> := Box<T>`.  The direct mutable-reference
+  fan-out case `*p := v` is also mechanized: the runtime-selected strong target
+  update is transported to the weak/joined `write_k` result.  Lemma 4.11 still
+  has two `sorry`s for the genuinely recursive parts of the repaired Appendix
+  9.6 argument: nested owner-chain writes such as `**x := v`, and nested
+  mutable-borrow fan-out where recursive `write_k` calls join all possible
+  targets.  The missing runtime lemma must prove post-write abstraction first
+  and then show that dropping the overwritten old owner graph preserves every
+  value still represented by the result environment.
 
 - **Termination is not hidden in progress.**  The local progress theorem returns
   `ProgressResult store lifetime term` without a termination premise.  The
