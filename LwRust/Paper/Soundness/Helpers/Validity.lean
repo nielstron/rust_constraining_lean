@@ -172,6 +172,51 @@ def OwnsAt (store : ProgramStore) (owned storage : Location) : Prop :=
 def Owns (store : ProgramStore) (owned : Location) : Prop :=
   ∃ storage, ProgramStore.OwnsAt store owned storage
 
+/-- Transitive closure of store ownership edges. -/
+inductive OwnsTransitively (store : ProgramStore) : Location → Location → Prop where
+  | direct {storage owned : Location} :
+      ProgramStore.OwnsAt store owned storage →
+      OwnsTransitively store storage owned
+  | trans {storage middle owned : Location} :
+      ProgramStore.OwnsAt store middle storage →
+      OwnsTransitively store middle owned →
+      OwnsTransitively store storage owned
+
+theorem OwnsTransitively.trans_right {store : ProgramStore}
+    {storage middle owned : Location} :
+    ProgramStore.OwnsTransitively store storage middle →
+    ProgramStore.OwnsAt store owned middle →
+    ProgramStore.OwnsTransitively store storage owned := by
+  intro hpath howns
+  induction hpath generalizing owned with
+  | direct hfirst =>
+      exact ProgramStore.OwnsTransitively.trans hfirst
+        (ProgramStore.OwnsTransitively.direct howns)
+  | trans hfirst _htail ih =>
+      exact ProgramStore.OwnsTransitively.trans hfirst (ih howns)
+
+theorem OwnsTransitively.to_owns {store : ProgramStore}
+    {storage owned : Location} :
+    ProgramStore.OwnsTransitively store storage owned →
+    ProgramStore.Owns store owned := by
+  intro hpath
+  induction hpath with
+  | @direct storage owned howns =>
+      exact ⟨storage, howns⟩
+  | trans _hfirst _htail ih =>
+      exact ih
+
+theorem OwnsTransitively.head_owns {store : ProgramStore}
+    {storage owned : Location} :
+    ProgramStore.OwnsTransitively store storage owned →
+    ∃ first, ProgramStore.OwnsAt store first storage := by
+  intro hpath
+  cases hpath with
+  | direct howns =>
+      exact ⟨owned, howns⟩
+  | trans howns _htail =>
+      exact ⟨_, howns⟩
+
 end ProgramStore
 
 /--

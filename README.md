@@ -19,7 +19,7 @@ matter when comparing theorem statements.
 
 - **Restricted block and sequence drops.**  The paper allows general owning
   temporaries and relies on full recursive drop preservation.  The mechanised
-  typing rules admit only the no-recursive-owner cases: non-final sequence
+  typing rules allow only the no-recursive-owner cases: non-final sequence
   terms must have `NonOwnerTy`, block-local slots must satisfy
   `EnvLifetimeDropSafe`, and typed blocks are restricted by
   `BlockBodySingleton`.
@@ -62,6 +62,13 @@ matter when comparing theorem statements.
   branch.  The paper's schematic fan-out rule does not spell this out; without
   it, fan-out can reinitialize `undef` leaves and break shape preservation.
 
+- **Recursive selected-target transport is proof-side structure.**  The
+  preservation proof derives `PathSelected`/`TargetsPathSelected` from
+  `LValTyping` and `LValTargetsTyping` to identify the runtime-selected borrow
+  target through arbitrary recursive dereference paths.  This is not an
+  additional typing-rule premise; it is the structural invariant already
+  enforced by lvalue and borrow-target typing.
+
 - **Borrow safety for source programs is source-scoped.**  The final
   borrow-safety corollary assumes `SourceTerm`.  Arbitrary runtime constants can
   already contain references, while the source calculus starts from values
@@ -80,6 +87,8 @@ matter when comparing theorem statements.
   store model: store owners are allocated, store owner targets are heap
   locations, heap slots have root lifetime, and term owner targets are heap
   locations.  These are implicit in the paper's intended heap-allocation model.
+  The owner-cycle fact needed by assignment is derived locally from
+  `ValidPartialValue.no_owned_path_to_storage`, not assumed globally.
 
 - **Heap allocation is represented by chosen natural addresses.**  `R-Box`
   chooses a fresh `.heap address` and `boxAt` stores the boxed value at root
@@ -101,19 +110,6 @@ matter when comparing theorem statements.
   singleton typed blocks and non-owner sequence temporaries.
 
 ### Theorem Interface Notes
-
-- **Open proof debt: Appendix 9.6 runtime update preservation.**  The assignment
-  semantics and typing rule now admit owner replacement and dereference
-  assignment.  The direct variable and one-step owned-dereference cases are
-  mechanized, including `Box<T> := Box<T>`.  The direct mutable-reference
-  fan-out case `*p := v` is also mechanized: the runtime-selected strong target
-  update is transported to the weak/joined `write_k` result.  Lemma 4.11 still
-  has two `sorry`s for the genuinely recursive parts of the repaired Appendix
-  9.6 argument: nested owner-chain writes such as `**x := v`, and nested
-  mutable-borrow fan-out where recursive `write_k` calls join all possible
-  targets.  The missing runtime lemma must prove post-write abstraction first
-  and then show that dropping the overwritten old owner graph preserves every
-  value still represented by the result environment.
 
 - **Termination is not hidden in progress.**  The local progress theorem returns
   `ProgressResult store lifetime term` without a termination premise.  The

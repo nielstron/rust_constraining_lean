@@ -57,6 +57,169 @@ def ValidValue (store : ProgramStore) (value : Value) (ty : Ty) : Prop :=
 notation:50 store:51 " ⊢ " value:51 " ∼ " ty:51 =>
   ValidPartialValue store value ty
 
+/--
+Local ownership acyclicity for a valid stored value.
+
+If a slot contains a valid value and that value owns `owned`, then following
+ownership edges from `owned` can never lead back to the slot's storage location.
+This is the finite-derivation version of the paper's assignment-progress cycle
+argument.
+-/
+theorem ValidPartialValue.no_owned_path_to_storage {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValue store value ty →
+    ∀ {storage : Location} {slot : StoreSlot} {owned : Location},
+      store.slotAt storage = some slot →
+      slot.value = value →
+      owned ∈ partialValueOwningLocations value →
+      ¬ ProgramStore.OwnsTransitively store owned storage := by
+  intro hvalid
+  induction hvalid with
+  | unit =>
+      intro storage slot owned _hslot _hvalue hmem hpath
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | int =>
+      intro storage slot owned _hslot _hvalue hmem hpath
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | undef =>
+      intro storage slot owned _hslot _hvalue hmem hpath
+      simp [partialValueOwningLocations] at hmem
+  | borrow =>
+      intro storage slot owned _hslot _hvalue hmem hpath
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | @box ownerLocation ownerSlot inner hownedSlot _hinner ih =>
+      intro storage slot owned hslot hvalue hmem hpath
+      have hownedEq : owned = ownerLocation := by
+        simpa [partialValueOwningLocations, valueOwningLocations,
+          valueOwnedLocation?] using hmem
+      subst owned
+      have hparentOwns :
+          ProgramStore.OwnsAt store ownerLocation storage := by
+        refine ⟨slot.lifetime, ?_⟩
+        cases slot with
+        | mk slotValue slotLifetime =>
+            cases hvalue
+            simpa [owningRef] using hslot
+      cases hpath with
+      | direct hback =>
+          rcases hback with ⟨backLifetime, hbackSlot⟩
+          have hownerSlotValue :
+              ownerSlot.value = .value (owningRef storage) := by
+            have hslotEq :
+                ownerSlot =
+                  { value := .value (owningRef storage),
+                    lifetime := backLifetime } :=
+              Option.some.inj (hownedSlot.symm.trans hbackSlot)
+            exact congrArg StoreSlot.value hslotEq
+          have hstorageMem :
+              storage ∈ partialValueOwningLocations ownerSlot.value :=
+            mem_partialValueOwningLocations_of_eq_owningRef hownerSlotValue
+          exact ih hownedSlot rfl hstorageMem
+            (ProgramStore.OwnsTransitively.direct hparentOwns)
+      | trans hfirst htail =>
+          rename_i middle
+          rcases hfirst with ⟨firstLifetime, hfirstSlot⟩
+          have hownerSlotValue :
+              ownerSlot.value = .value (owningRef middle) := by
+            have hslotEq :
+                ownerSlot =
+                  { value := .value (owningRef middle),
+                    lifetime := firstLifetime } :=
+              Option.some.inj (hownedSlot.symm.trans hfirstSlot)
+            exact congrArg StoreSlot.value hslotEq
+          have hmiddleMem :
+              middle ∈ partialValueOwningLocations ownerSlot.value :=
+            mem_partialValueOwningLocations_of_eq_owningRef hownerSlotValue
+          exact ih hownedSlot rfl hmiddleMem
+            (ProgramStore.OwnsTransitively.trans_right htail hparentOwns)
+  | @boxFull ownerLocation ownerSlot innerTy hownedSlot _hinner ih =>
+      intro storage slot owned hslot hvalue hmem hpath
+      have hownedEq : owned = ownerLocation := by
+        simpa [partialValueOwningLocations, valueOwningLocations,
+          valueOwnedLocation?] using hmem
+      subst owned
+      have hparentOwns :
+          ProgramStore.OwnsAt store ownerLocation storage := by
+        refine ⟨slot.lifetime, ?_⟩
+        cases slot with
+        | mk slotValue slotLifetime =>
+            cases hvalue
+            simpa [owningRef] using hslot
+      cases hpath with
+      | direct hback =>
+          rcases hback with ⟨backLifetime, hbackSlot⟩
+          have hownerSlotValue :
+              ownerSlot.value = .value (owningRef storage) := by
+            have hslotEq :
+                ownerSlot =
+                  { value := .value (owningRef storage),
+                    lifetime := backLifetime } :=
+              Option.some.inj (hownedSlot.symm.trans hbackSlot)
+            exact congrArg StoreSlot.value hslotEq
+          have hstorageMem :
+              storage ∈ partialValueOwningLocations ownerSlot.value :=
+            mem_partialValueOwningLocations_of_eq_owningRef hownerSlotValue
+          exact ih hownedSlot rfl hstorageMem
+            (ProgramStore.OwnsTransitively.direct hparentOwns)
+      | trans hfirst htail =>
+          rename_i middle
+          rcases hfirst with ⟨firstLifetime, hfirstSlot⟩
+          have hownerSlotValue :
+              ownerSlot.value = .value (owningRef middle) := by
+            have hslotEq :
+                ownerSlot =
+                  { value := .value (owningRef middle),
+                    lifetime := firstLifetime } :=
+              Option.some.inj (hownedSlot.symm.trans hfirstSlot)
+            exact congrArg StoreSlot.value hslotEq
+          have hmiddleMem :
+              middle ∈ partialValueOwningLocations ownerSlot.value :=
+            mem_partialValueOwningLocations_of_eq_owningRef hownerSlotValue
+          exact ih hownedSlot rfl hmiddleMem
+            (ProgramStore.OwnsTransitively.trans_right htail hparentOwns)
+
+/-- A valid stored value cannot make its own storage part of an ownership cycle. -/
+theorem ValidPartialValue.no_storage_ownership_cycle {store : ProgramStore}
+    {storage : Location} {slot : StoreSlot} {ty : PartialTy} :
+    store.slotAt storage = some slot →
+    ValidPartialValue store slot.value ty →
+    ¬ ProgramStore.OwnsTransitively store storage storage := by
+  intro hslot hvalid hpath
+  cases hpath with
+  | direct howns =>
+      rcases howns with ⟨ownerLifetime, hownerSlot⟩
+      have hslotValue :
+          slot.value = .value (owningRef storage) := by
+        have hslotEq :
+            slot =
+              { value := .value (owningRef storage),
+                lifetime := ownerLifetime } :=
+          Option.some.inj (hslot.symm.trans hownerSlot)
+        exact congrArg StoreSlot.value hslotEq
+      have hmem :
+          storage ∈ partialValueOwningLocations slot.value :=
+        mem_partialValueOwningLocations_of_eq_owningRef hslotValue
+      exact ValidPartialValue.no_owned_path_to_storage hvalid hslot rfl hmem
+        (ProgramStore.OwnsTransitively.direct ⟨ownerLifetime, hownerSlot⟩)
+  | trans howns htail =>
+      rename_i middle
+      rcases howns with ⟨ownerLifetime, hownerSlot⟩
+      have hslotValue :
+          slot.value = .value (owningRef middle) := by
+        have hslotEq :
+            slot =
+              { value := .value (owningRef middle),
+                lifetime := ownerLifetime } :=
+          Option.some.inj (hslot.symm.trans hownerSlot)
+        exact congrArg StoreSlot.value hslotEq
+      have hmem :
+          middle ∈ partialValueOwningLocations slot.value :=
+        mem_partialValueOwningLocations_of_eq_owningRef hslotValue
+      exact ValidPartialValue.no_owned_path_to_storage hvalid hslot rfl hmem htail
+
 /-- Values valid at statically non-owning types contain no owning reference. -/
 theorem validValue_nonOwner_of_nonOwnerTy {store : ProgramStore}
     {value : Value} {ty : Ty} :

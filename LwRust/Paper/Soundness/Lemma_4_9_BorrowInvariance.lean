@@ -157,6 +157,59 @@ theorem EnvSameShapeStrengthening.update_result_existing_slot
       exact ⟨resultSlot, by simpa [Env.update, hy] using hresultSlot,
         hlifetime⟩
 
+theorem EnvSameShapeStrengthening.update_result_strengthening
+    {source result : Env} {x : Name} {sourceSlot resultSlot : EnvSlot} :
+    EnvSameShapeStrengthening source result →
+    source.slotAt x = some sourceSlot →
+    sourceSlot.lifetime = resultSlot.lifetime →
+    PartialTyStrengthens sourceSlot.ty resultSlot.ty →
+    PartialTy.sameShape sourceSlot.ty resultSlot.ty →
+    EnvSameShapeStrengthening source (result.update x resultSlot) := by
+  intro hmap hsourceSlot hlifetime hstrength hshape
+  constructor
+  · intro y slot hslot
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq : slot = resultSlot := by
+        simpa [Env.update] using hslot.symm
+      subst hslotEq
+      exact ⟨sourceSlot, hsourceSlot, hlifetime, hstrength, hshape⟩
+    · have hresultOld : result.slotAt y = some slot := by
+        simpa [Env.update, hy] using hslot
+      exact hmap.1 y slot hresultOld
+  · intro y slot hslot
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq : slot = sourceSlot :=
+        Option.some.inj (hslot.symm.trans hsourceSlot)
+      subst hslotEq
+      exact ⟨resultSlot, by simp [Env.update], hlifetime⟩
+    · rcases hmap.2 y slot hslot with ⟨middleSlot, hmiddleSlot, hlife⟩
+      exact ⟨middleSlot, by simpa [Env.update, hy] using hmiddleSlot, hlife⟩
+
+theorem EnvSameShapeStrengthening.of_shapeMap {source result : Env} :
+    (∀ x sourceSlot,
+      source.slotAt x = some sourceSlot →
+      ∃ resultSlot,
+        result.slotAt x = some resultSlot ∧
+          PartialTy.sameShape sourceSlot.ty resultSlot.ty ∧
+          PartialTyStrengthens sourceSlot.ty resultSlot.ty) →
+    EnvLifetimesPreserved source result →
+    EnvLifetimesSurvive source result →
+    EnvSameShapeStrengthening source result := by
+  intro hshapeMap hpreserved hsurvive
+  constructor
+  · intro x resultSlot hresultSlot
+    rcases hpreserved x resultSlot hresultSlot with
+      ⟨sourceSlot, hsourceSlot, hlifetime⟩
+    rcases hshapeMap x sourceSlot hsourceSlot with
+      ⟨mappedSlot, hmappedSlot, hshape, hstrength⟩
+    have hmappedEq : mappedSlot = resultSlot :=
+      Option.some.inj (hmappedSlot.symm.trans hresultSlot)
+    subst hmappedEq
+    exact ⟨sourceSlot, hsourceSlot, hlifetime, hstrength, hshape⟩
+  · exact hsurvive
+
 theorem EnvWrite.positive_var_strong_to_result_map
     {rank : Nat} {env result : Env} {x : Name}
     {slot : EnvSlot} {oldTy rhsTy : Ty} :
@@ -425,6 +478,571 @@ theorem WriteBorrowTargets.selected_var_strong_to_result_map
         (EnvJoin.right_sameShapeStrengthening hjoin hbranch)
   case intro => intros; trivial
 
+theorem WriteBorrowTargets.selected_branch_to_result_map
+    {rank : Nat} {env result selectedSource : Env}
+    {path : List Unit} {targets : List LVal} {rhsTy : Ty}
+    {selectedTarget : LVal} :
+    0 < rank →
+    WriteBorrowTargets rank env path targets rhsTy result →
+    (∀ target, target ∈ targets → ∀ targetSlot,
+      env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+      WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
+    selectedTarget ∈ targets →
+    (∀ branchResult,
+      EnvWrite rank env (prependPath path selectedTarget) rhsTy branchResult →
+      EnvSameShapeStrengthening selectedSource branchResult) →
+    EnvSameShapeStrengthening selectedSource result := by
+  intro hrank hwrites hleaves hmem hselectedBranch
+  refine WriteBorrowTargets.rec
+    (motive_1 := fun _ _ _ _ _ _ _ _ => True)
+    (motive_2 := fun rank env path targets rhsTy result hwrites =>
+      0 < rank →
+      (∀ target, target ∈ targets → ∀ targetSlot,
+        env.slotAt (LVal.base (prependPath path target)) = some targetSlot →
+        WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy) →
+      ∀ {selectedSource : Env} {selectedTarget : LVal},
+        selectedTarget ∈ targets →
+        (∀ branchResult,
+          EnvWrite rank env (prependPath path selectedTarget) rhsTy branchResult →
+          EnvSameShapeStrengthening selectedSource branchResult) →
+        EnvSameShapeStrengthening selectedSource result)
+    (motive_3 := fun _ _ _ _ _ _ => True)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro
+    hwrites hrank hleaves hmem hselectedBranch
+  case strong => intros; trivial
+  case weak => intros; trivial
+  case box => intros; trivial
+  case mutBorrow => intros; trivial
+  case nil =>
+    intro rank env path ty _hrank _hleaves selectedSource selectedTarget hmem
+    simp at hmem
+  case singleton =>
+    intro rank env updated path target ty hwrite _htyped _ih _hrank _hleaves
+      selectedSource selectedTarget hmem hbranch
+    rw [List.mem_singleton] at hmem
+    subst hmem
+    exact hbranch updated hwrite
+  case cons =>
+    intro rank env updated restEnv result path target rest ty
+      hwrite _htyped hwrites hjoin _ihWrite ihWrites hrank hleaves
+      selectedSource selectedTarget hmem hbranch
+    have hallLeaves :
+        ∀ t, t ∈ target :: rest → ∀ tslot,
+          env.slotAt (LVal.base (prependPath path t)) = some tslot →
+          WriteLeafTy env (LVal.path (prependPath path t)) tslot.ty ty :=
+      hleaves
+    have hupdShape : EnvShapePreserved env updated :=
+      EnvWrite.shapePreserved_init hrank hwrite
+        (fun slot hslot => hallLeaves target (by simp) slot hslot)
+    have hrestShape : EnvShapePreserved env restEnv :=
+      WriteBorrowTargets.shapePreserved_init hrank hwrites
+        (fun t ht slot hslot =>
+          hallLeaves t (List.mem_cons_of_mem target ht) slot hslot)
+    have hbranchShape :
+        ∀ x leftSlot rightSlot,
+          updated.slotAt x = some leftSlot →
+          restEnv.slotAt x = some rightSlot →
+          PartialTy.sameShape leftSlot.ty rightSlot.ty :=
+      EnvShapePreserved.branch_sameShape hupdShape hrestShape
+    rcases List.mem_cons.mp hmem with hhead | htail
+    · subst hhead
+      exact EnvSameShapeStrengthening.trans
+        (hbranch updated hwrite)
+        (EnvJoin.left_sameShapeStrengthening hjoin hbranchShape)
+    · have hrestMap :
+          EnvSameShapeStrengthening selectedSource restEnv :=
+        ihWrites hrank
+          (fun t ht slot hslot =>
+            hallLeaves t (List.mem_cons_of_mem target ht) slot hslot)
+          htail hbranch
+      exact EnvSameShapeStrengthening.trans hrestMap
+        (EnvJoin.right_sameShapeStrengthening hjoin hbranchShape)
+  case intro => intros; trivial
+
+@[simp] theorem prependPath_deref (path : List Unit) (lv : LVal) :
+    prependPath path (.deref lv) = prependPath (() :: path) lv := by
+  induction path with
+  | nil => rfl
+  | cons head tail ih =>
+      cases head
+      simp [prependPath, ih]
+
+mutual
+  /--
+  Proof-side selector invariant for writes through a typed lvalue path.
+
+  `PathSelected env pt path selectedName selectedSlot selectedTy` says that
+  following `path` from partial type `pt` eventually dereferences a mutable
+  borrow branch whose selected target is the variable `selectedName`.  The
+  invariant is derived from `LValTyping`/`LValTargetsTyping`; it is not an
+  additional typing-rule premise.
+  -/
+  inductive PathSelected (env : Env) :
+      PartialTy → List Unit → Name → EnvSlot → Ty → Prop where
+    | borrowHere {mutable : Bool} {targets : List LVal}
+        {selectedName : Name} {selectedSlot : EnvSlot} {selectedTy : Ty} :
+        (.var selectedName) ∈ targets →
+        env.slotAt selectedName = some selectedSlot →
+        selectedSlot.ty = .ty selectedTy →
+        PathSelected env (.ty (.borrow mutable targets)) [()] selectedName
+          selectedSlot selectedTy
+    | box {inner : PartialTy} {path : List Unit} {selectedName : Name}
+        {selectedSlot : EnvSlot} {selectedTy : Ty} :
+        PathSelected env inner path selectedName selectedSlot selectedTy →
+        PathSelected env (.box inner) (() :: path) selectedName selectedSlot
+          selectedTy
+    | borrowStep {mutable : Bool} {targets : List LVal} {path : List Unit}
+        {selectedName : Name} {selectedSlot : EnvSlot} {selectedTy : Ty} :
+        TargetsPathSelected env targets path selectedName selectedSlot selectedTy →
+        PathSelected env (.ty (.borrow mutable targets)) (() :: path) selectedName
+          selectedSlot selectedTy
+
+  inductive TargetsPathSelected (env : Env) :
+      List LVal → List Unit → Name → EnvSlot → Ty → Prop where
+    | target {targets : List LVal} {target : LVal} {pt : PartialTy}
+        {lifetime : Lifetime} {path : List Unit} {selectedName : Name}
+        {selectedSlot : EnvSlot} {selectedTy : Ty} :
+        target ∈ targets →
+        LValTyping env target pt lifetime →
+        PathSelected env pt path selectedName selectedSlot selectedTy →
+        TargetsPathSelected env targets path selectedName selectedSlot selectedTy
+end
+
+mutual
+  theorem PathSelected.rank_lt_of_lvalTyping {env : Env} {φ : Name → Nat}
+      (hφ : LinearizedBy φ env) :
+      ∀ {pt : PartialTy} {path : List Unit} {selectedName : Name}
+        {selectedSlot : EnvSlot} {selectedTy : Ty},
+        PathSelected env pt path selectedName selectedSlot selectedTy →
+        ∀ {lv : LVal} {lifetime : Lifetime},
+          LValTyping env lv pt lifetime →
+          φ selectedName < φ (LVal.base lv)
+    | .ty (.borrow mutable targets), [()], selectedName, selectedSlot, selectedTy,
+      PathSelected.borrowHere hmem _hslot _hty, lv, lifetime, htyping => by
+        have hselectedVarMem :
+            selectedName ∈ PartialTy.vars (.ty (.borrow mutable targets)) := by
+          have hmemMap :
+              LVal.base (.var selectedName) ∈ targets.map LVal.base :=
+            List.mem_map_of_mem hmem
+          simpa [PartialTy.vars, Ty.vars, LVal.base] using hmemMap
+        exact (lvalTyping_vars_rank_lt hφ).1 htyping selectedName hselectedVarMem
+    | .box inner, () :: path, selectedName, selectedSlot, selectedTy,
+      PathSelected.box hinner, lv, lifetime, htyping => by
+        have hderef : LValTyping env (.deref lv) inner lifetime :=
+          LValTyping.box htyping
+        simpa [LVal.base] using
+          PathSelected.rank_lt_of_lvalTyping hφ hinner hderef
+    | .ty (.borrow mutable targets), () :: path, selectedName, selectedSlot,
+      selectedTy, PathSelected.borrowStep htargets, lv, lifetime, htyping => by
+        exact TargetsPathSelected.rank_lt_of_lvalTyping hφ htargets htyping
+
+  theorem TargetsPathSelected.rank_lt_of_lvalTyping {env : Env} {φ : Name → Nat}
+      (hφ : LinearizedBy φ env) :
+      ∀ {mutable : Bool} {targets : List LVal} {path : List Unit}
+        {selectedName : Name} {selectedSlot : EnvSlot} {selectedTy : Ty},
+        TargetsPathSelected env targets path selectedName selectedSlot selectedTy →
+        ∀ {lv : LVal} {lifetime : Lifetime},
+          LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
+          φ selectedName < φ (LVal.base lv)
+    | mutable, targets, path, selectedName, selectedSlot, selectedTy,
+      TargetsPathSelected.target hmem htargetTyping hpath, lv, lifetime, htyping => by
+        have hselectedLtTarget :
+            φ selectedName < φ (LVal.base _) :=
+          PathSelected.rank_lt_of_lvalTyping hφ hpath htargetTyping
+        have htargetMem :
+            LVal.base _ ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+          mem_partialTy_vars_iff.mpr
+            ⟨mutable, targets, _, PartialTyContains.here, hmem, rfl⟩
+        have htargetLtLv :
+            φ (LVal.base _) < φ (LVal.base lv) :=
+          (lvalTyping_vars_rank_lt hφ).1 htyping _ htargetMem
+        exact lt_trans hselectedLtTarget htargetLtLv
+end
+
+theorem PathSelected.of_partialTyUnion {env : Env} {left right union : PartialTy}
+    {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+    {selectedTy : Ty} :
+    PartialTyUnion left right union →
+    PathSelected env union path selectedName selectedSlot selectedTy →
+    PathSelected env left path selectedName selectedSlot selectedTy ∨
+      PathSelected env right path selectedName selectedSlot selectedTy := by
+  intro hunion hselected
+  refine PathSelected.rec
+    (motive_1 := fun union path selectedName selectedSlot selectedTy _ =>
+      ∀ left right,
+        PartialTyUnion left right union →
+        PathSelected env left path selectedName selectedSlot selectedTy ∨
+          PathSelected env right path selectedName selectedSlot selectedTy)
+    (motive_2 := fun _targets _path _selectedName _selectedSlot _selectedTy _ =>
+      True)
+    ?borrowHere ?box ?borrowStep ?target hselected left right hunion
+  case borrowHere =>
+    intro mutable targets selectedName selectedSlot selectedTy hmem hslot hty
+      left right hunion
+    rcases PartialTyStrengthens.to_borrow_right
+        (PartialTyUnion.left_strengthens hunion) with
+      ⟨leftTargets, hleftEq, _hleftSubset⟩
+    rcases PartialTyStrengthens.to_borrow_right
+        (PartialTyUnion.right_strengthens hunion) with
+      ⟨rightTargets, hrightEq, _hrightSubset⟩
+    subst hleftEq
+    subst hrightEq
+    rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
+    · exact Or.inl (PathSelected.borrowHere hleft hslot hty)
+    · exact Or.inr (PathSelected.borrowHere hright hslot hty)
+  case box =>
+    intro inner path selectedName selectedSlot selectedTy hinner ih left right hunion
+    have hleftStrength := PartialTyUnion.left_strengthens hunion
+    cases hleftStrength with
+    | reflex =>
+        exact Or.inl (PathSelected.box hinner)
+    | box hleftInner =>
+        have hrightStrength := PartialTyUnion.right_strengthens hunion
+        cases hrightStrength with
+        | reflex =>
+            exact Or.inr (PathSelected.box hinner)
+        | box hrightInner =>
+            rcases ih _ _ (PartialTyUnion.box_inv hunion) with hleft | hright
+            · exact Or.inl (PathSelected.box hleft)
+            · exact Or.inr (PathSelected.box hright)
+  case borrowStep =>
+    intro mutable targets path selectedName selectedSlot selectedTy htargets _ih
+      left right hunion
+    cases htargets with
+    | target hmem htargetTyping hpath =>
+        rcases PartialTyStrengthens.to_borrow_right
+            (PartialTyUnion.left_strengthens hunion) with
+          ⟨leftTargets, hleftEq, _hleftSubset⟩
+        rcases PartialTyStrengthens.to_borrow_right
+            (PartialTyUnion.right_strengthens hunion) with
+          ⟨rightTargets, hrightEq, _hrightSubset⟩
+        subst hleftEq
+        subst hrightEq
+        rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
+        · exact Or.inl (PathSelected.borrowStep
+            (TargetsPathSelected.target hleft htargetTyping hpath))
+        · exact Or.inr (PathSelected.borrowStep
+            (TargetsPathSelected.target hright htargetTyping hpath))
+  case target =>
+    intros
+    trivial
+
+theorem TargetsPathSelected.of_lvalTargetsTyping {env : Env}
+    {targets : List LVal} {pt : PartialTy} {lifetime : Lifetime}
+    {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+    {selectedTy : Ty} :
+    LValTargetsTyping env targets pt lifetime →
+    PathSelected env pt path selectedName selectedSlot selectedTy →
+    TargetsPathSelected env targets path selectedName selectedSlot selectedTy := by
+  intro htargets hselected
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _target _ty _lifetime _htyping => True)
+    (motive_2 := fun targets pt lifetime _htyping =>
+      ∀ {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+        {selectedTy : Ty},
+        PathSelected env pt path selectedName selectedSlot selectedTy →
+        TargetsPathSelected env targets path selectedName selectedSlot selectedTy)
+    ?var ?box ?borrow ?singleton ?cons htargets hselected
+  case var => intros; trivial
+  case box => intros; trivial
+  case borrow => intros; trivial
+  case singleton =>
+      intro target ty lifetime htarget _ih path selectedName selectedSlot selectedTy hselected
+      exact TargetsPathSelected.target (by simp) htarget hselected
+  case cons =>
+      intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+        hhead _hrest hunion _hintersection _ihHead ihRest
+        path selectedName selectedSlot selectedTy hselected
+      rcases PathSelected.of_partialTyUnion hunion hselected with hheadSelected |
+        hrestSelected
+      · exact TargetsPathSelected.target (by simp) hhead hheadSelected
+      · cases ihRest hrestSelected with
+        | target hmem htargetTyping hpath =>
+            exact TargetsPathSelected.target (List.mem_cons_of_mem _ hmem)
+              htargetTyping hpath
+
+theorem PathSelected.updateAtPath_map {env writeEnv : Env}
+    {oldTy updatedTy : PartialTy} {path : List Unit} {rank : Nat}
+    {rhsTy selectedTy : Ty} {selectedName : Name} {selectedSlot : EnvSlot}
+    {φ : Name → Nat} {rootRank : Nat} :
+    (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+    PathSelected env oldTy path selectedName selectedSlot selectedTy →
+    UpdateAtPath rank env path oldTy rhsTy writeEnv updatedTy →
+    (∀ {branchRank : Nat} {target : LVal} {pt : PartialTy}
+      {lifetime : Lifetime} {branchPath : List Unit} {branchResult : Env},
+      φ (LVal.base target) < rootRank →
+      LValTyping env target pt lifetime →
+      PathSelected env pt branchPath selectedName selectedSlot selectedTy →
+      EnvWrite branchRank env (prependPath branchPath target) rhsTy branchResult →
+      EnvSameShapeStrengthening
+        (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+        branchResult) →
+    EnvSameShapeStrengthening
+        (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+        writeEnv ∧
+      PartialTyStrengthens oldTy updatedTy ∧
+      PartialTy.sameShape oldTy updatedTy := by
+  intro hbelow hselected hupdate hbranch
+  refine (PathSelected.rec
+    (motive_1 := fun oldTy path selectedName selectedSlot selectedTy _hselected =>
+      ∀ {rank : Nat} {updatedTy : PartialTy} {writeEnv : Env},
+        (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+        UpdateAtPath rank env path oldTy rhsTy writeEnv updatedTy →
+        (∀ {branchRank : Nat} {target : LVal} {pt : PartialTy}
+          {lifetime : Lifetime} {branchPath : List Unit} {branchResult : Env},
+          φ (LVal.base target) < rootRank →
+          LValTyping env target pt lifetime →
+          PathSelected env pt branchPath selectedName selectedSlot selectedTy →
+          EnvWrite branchRank env (prependPath branchPath target) rhsTy branchResult →
+          EnvSameShapeStrengthening
+            (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+            branchResult) →
+        EnvSameShapeStrengthening
+            (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+            writeEnv ∧
+          PartialTyStrengthens oldTy updatedTy ∧
+          PartialTy.sameShape oldTy updatedTy)
+    (motive_2 := fun _targets _path _selectedName _selectedSlot _selectedTy _ =>
+      True)
+    ?borrowHere ?box ?borrowStep ?target hselected) hbelow hupdate hbranch
+  case borrowHere =>
+      intro mutable targets selectedName selectedSlot selectedTy hmem hselectedSlot
+        hselectedTyEq rank updatedTy writeEnv hbelow hupdate hbranch
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+        cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        exact ⟨
+          WriteBorrowTargets.selected_var_strong_to_result_map
+            (Nat.succ_pos rank) hwrites hmem hselectedSlot hselectedTyEq,
+          PartialTyStrengthens.reflex,
+          PartialTy.sameShape_refl _⟩
+  case box =>
+      intro inner path selectedName selectedSlot selectedTy hinner ih
+        rank updatedTy writeEnv hbelow hupdate hbranch
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq, hinnerUpdate⟩
+        cases htyEq
+        cases hupdatedEq
+        have hbelowInner :
+            ∀ v, v ∈ PartialTy.vars inner → φ v < rootRank := by
+          intro v hv
+          exact hbelow v (by simpa [PartialTy.vars] using hv)
+        rcases ih hbelowInner hinnerUpdate hbranch with
+          ⟨hmap, hstrength, hshape⟩
+        exact ⟨hmap, PartialTyStrengthens.box hstrength,
+          by simpa [PartialTy.sameShape] using hshape⟩
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case borrowStep =>
+      intro mutable targets path selectedName selectedSlot selectedTy htargetsSelected _ih
+        rank updatedTy writeEnv hbelow hupdate hbranch
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+        cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        cases htargetsSelected with
+        | target htargetMem htargetTyping htargetSelected =>
+            rename_i branchTarget branchPt branchLifetime
+            have htargetRank :
+                φ (LVal.base branchTarget) < rootRank := by
+              exact hbelow (LVal.base branchTarget)
+                (mem_partialTy_vars_iff.mpr
+                  ⟨true, _, branchTarget, PartialTyContains.here, htargetMem, rfl⟩)
+            have hleaves :=
+              WriteBorrowTargets.initialized_leaves_of_typed hwrites
+            have hmap :
+                EnvSameShapeStrengthening
+                  (env.update selectedName
+                    { selectedSlot with ty := .ty rhsTy })
+                  writeEnv :=
+              WriteBorrowTargets.selected_branch_to_result_map
+                (Nat.succ_pos rank) hwrites hleaves htargetMem
+                (fun branchResult hbranchWrite =>
+                  hbranch htargetRank htargetTyping htargetSelected hbranchWrite)
+            exact ⟨hmap, PartialTyStrengthens.reflex,
+              PartialTy.sameShape_refl _⟩
+  case target =>
+      intros
+      trivial
+
+theorem EnvWrite.selected_path_map {rank : Nat} {env result : Env}
+    {lv : LVal} {pt : PartialTy} {lifetime : Lifetime} {path : List Unit}
+    {rhsTy selectedTy : Ty} {selectedName : Name} {selectedSlot : EnvSlot}
+    {φ : Name → Nat} :
+    LinearizedBy φ env →
+    LValTyping env lv pt lifetime →
+    PathSelected env pt path selectedName selectedSlot selectedTy →
+    EnvWrite rank env (prependPath path lv) rhsTy result →
+    EnvSameShapeStrengthening
+      (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+      result := by
+  intro hφ htyping₀ hselected₀ hwrite₀
+  let rec go (lv : LVal) {pt : PartialTy} {lifetime : Lifetime}
+      {path : List Unit} {rank : Nat} {result : Env} {rhsTy selectedTy : Ty}
+      {selectedName : Name} {selectedSlot : EnvSlot}
+      (htyping : LValTyping env lv pt lifetime)
+      (hselected : PathSelected env pt path selectedName selectedSlot selectedTy)
+      (hwrite : EnvWrite rank env (prependPath path lv) rhsTy result) :
+      EnvSameShapeStrengthening
+        (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+        result := by
+    cases htyping with
+    | var hslot =>
+        rename_i x slot
+        cases hwrite with
+        | @intro _rank _env₁ writeEnv _writeLv writeSlot _writeTy updatedTy
+            hwriteSlot hupdate =>
+            simp [LVal.base] at hwriteSlot
+            have hslotEq : writeSlot = slot := by
+              have hsome : some writeSlot = some slot := by
+                rw [← hwriteSlot, hslot]
+              exact Option.some.inj hsome
+            subst writeSlot
+            have hupdatePath :
+                UpdateAtPath rank env path slot.ty rhsTy writeEnv updatedTy := by
+              simpa [path_prependPath, LVal.path] using hupdate
+            rcases PathSelected.updateAtPath_map
+                (φ := φ) (rootRank := φ x)
+                (hφ x slot hslot) hselected hupdatePath
+                (fun {branchRank target pt lifetime branchPath branchResult}
+                    hrank hbranchTyping hbranchSelected hbranchWrite =>
+                  go target (pt := pt) (lifetime := lifetime)
+                    (path := branchPath) (rank := branchRank)
+                    (result := branchResult) (rhsTy := rhsTy)
+                    (selectedTy := selectedTy) (selectedName := selectedName)
+                    (selectedSlot := selectedSlot)
+                    hbranchTyping hbranchSelected hbranchWrite) with
+              ⟨hmap, hstrength, hshape⟩
+            have hselectedRankLt :
+                φ selectedName < φ x :=
+              PathSelected.rank_lt_of_lvalTyping hφ hselected
+                (LValTyping.var hslot)
+            have hselectedNeX : selectedName ≠ x := by
+              intro hEq
+              subst hEq
+              exact Nat.lt_irrefl _ hselectedRankLt
+            have hxNeSelected : x ≠ selectedName := by
+              intro hEq
+              exact hselectedNeX hEq.symm
+            have hslotStrong :
+                (env.update selectedName
+                  { selectedSlot with ty := .ty rhsTy }).slotAt
+                    (LVal.base (prependPath path (LVal.var x))) =
+                  some slot := by
+              simpa [Env.update, LVal.base, hxNeSelected] using hslot
+            have hfinal :
+                EnvSameShapeStrengthening
+                  (env.update selectedName
+                    { selectedSlot with ty := .ty rhsTy })
+                  (writeEnv.update
+                    (LVal.base (prependPath path (LVal.var x)))
+                    { slot with ty := updatedTy }) :=
+              EnvSameShapeStrengthening.update_result_strengthening
+                hmap hslotStrong rfl hstrength hshape
+            simpa [LVal.base] using hfinal
+    | box hinner =>
+        exact go _ (path := () :: path) (rank := rank) (result := result)
+          (rhsTy := rhsTy) (selectedTy := selectedTy)
+          (selectedName := selectedName) (selectedSlot := selectedSlot)
+          hinner (PathSelected.box hselected)
+          (by simpa [prependPath_deref] using hwrite)
+    | borrow hborrow htargets =>
+        have htargetSelected :=
+          TargetsPathSelected.of_lvalTargetsTyping htargets hselected
+        exact go _ (path := () :: path) (rank := rank)
+          (result := result) (rhsTy := rhsTy) (selectedTy := selectedTy)
+          (selectedName := selectedName) (selectedSlot := selectedSlot)
+          hborrow (PathSelected.borrowStep htargetSelected)
+          (by simpa [prependPath_deref] using hwrite)
+  termination_by (φ (LVal.base lv), sizeOf lv)
+  decreasing_by
+    all_goals
+      try subst_vars
+      simp [LVal.base]
+      first
+      | exact Prod.Lex.right _ (by simp)
+      | exact Prod.Lex.left _ _ (by assumption)
+  exact go lv htyping₀ hselected₀ hwrite₀
+
+theorem EnvWrite.deref_var_borrow_selected_var_map_of_rank
+    {rank : Nat} {env result : Env} {sourceName selectedName : Name}
+    {sourceSlot selectedSlot : EnvSlot} {mutable : Bool} {targets : List LVal}
+    {rhsTy selectedTy : Ty} {φ : Name → Nat} :
+    LinearizedBy φ env →
+    env.slotAt sourceName = some sourceSlot →
+    sourceSlot.ty = .ty (.borrow mutable targets) →
+    EnvWrite rank env (.deref (.var sourceName)) rhsTy result →
+    (.var selectedName) ∈ targets →
+    env.slotAt selectedName = some selectedSlot →
+    selectedSlot.ty = .ty selectedTy →
+    EnvSameShapeStrengthening
+      (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+      result := by
+  intro hφ hsourceSlot hsourceTy hwrite hmem hselectedSlot hselectedTy
+  cases hwrite with
+  | @intro _rank _env₁ writeEnv lv writeSlot _ty updatedTy hwriteSlot hupdate =>
+      simp [LVal.base] at hwriteSlot
+      have hslotEq : writeSlot = sourceSlot := by
+        have hsome : some writeSlot = some sourceSlot := by
+          rw [← hwriteSlot, hsourceSlot]
+        exact Option.some.inj hsome
+      subst writeSlot
+      have hupdateCons :
+          UpdateAtPath rank env [()] sourceSlot.ty rhsTy writeEnv updatedTy := by
+        simpa [LVal.path, LVal.base] using hupdate
+      rw [hsourceTy] at hupdateCons
+      rcases UpdateAtPath.cons_inv hupdateCons with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+        cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        have hselectedRankLt : φ selectedName < φ sourceName := by
+          have hselectedVarMem :
+              selectedName ∈ PartialTy.vars sourceSlot.ty := by
+            rw [hsourceTy]
+            have hmemMap :
+                LVal.base (.var selectedName) ∈ targets.map LVal.base :=
+              List.mem_map_of_mem hmem
+            simpa [PartialTy.vars, Ty.vars, LVal.base] using hmemMap
+          exact hφ sourceName sourceSlot hsourceSlot selectedName hselectedVarMem
+        have hselectedNeSource : selectedName ≠ sourceName := by
+          intro hEq
+          subst hEq
+          exact Nat.lt_irrefl _ hselectedRankLt
+        have hsourceNeSelected : sourceName ≠ selectedName := by
+          intro hEq
+          exact hselectedNeSource hEq.symm
+        have hfanMap :
+            EnvSameShapeStrengthening
+              (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+              writeEnv :=
+          WriteBorrowTargets.selected_var_strong_to_result_map
+            (Nat.succ_pos rank) hwrites hmem hselectedSlot hselectedTy
+        have hsourceRebuild :
+            (env.update selectedName
+              { selectedSlot with ty := .ty rhsTy }).slotAt sourceName =
+              some { sourceSlot with ty := .ty (.borrow true targets) } := by
+          have hsourceStrong :
+              (env.update selectedName
+                { selectedSlot with ty := .ty rhsTy }).slotAt sourceName =
+                some sourceSlot := by
+            simpa [Env.update, hsourceNeSelected] using hsourceSlot
+          have hslotRebuild :
+              { sourceSlot with ty := .ty (.borrow true targets) } = sourceSlot := by
+            cases sourceSlot
+            simp at hsourceTy ⊢
+            exact hsourceTy.symm
+          simpa [hslotRebuild] using hsourceStrong
+        have hmapFinal :=
+          EnvSameShapeStrengthening.update_result_existing_slot
+            hfanMap hsourceRebuild
+        simpa [LVal.base, hupdatedEq] using hmapFinal
+
 theorem EnvWrite.deref_var_borrow_selected_var_map
     {rank : Nat} {env result : Env} {sourceName selectedName : Name}
     {sourceSlot selectedSlot : EnvSlot} {mutable : Bool} {targets : List LVal}
@@ -476,6 +1094,68 @@ theorem EnvWrite.deref_var_borrow_selected_var_map
           exact hnotWrite
             (Or.inl ⟨sourceName, targets, .var sourceName,
               hcontains, hmemSource, hconflict⟩)
+        have hsourceNeSelected : sourceName ≠ selectedName := by
+          intro hEq
+          exact hselectedNeSource hEq.symm
+        have hfanMap :
+            EnvSameShapeStrengthening
+              (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+              writeEnv :=
+          WriteBorrowTargets.selected_var_strong_to_result_map
+            (Nat.succ_pos rank) hwrites hmem hselectedSlot hselectedTy
+        have hsourceRebuild :
+            (env.update selectedName
+              { selectedSlot with ty := .ty rhsTy }).slotAt sourceName =
+              some { sourceSlot with ty := .ty (.borrow true targets) } := by
+          have hsourceStrong :
+              (env.update selectedName
+                { selectedSlot with ty := .ty rhsTy }).slotAt sourceName =
+                some sourceSlot := by
+            simpa [Env.update, hsourceNeSelected] using hsourceSlot
+          have hslotRebuild :
+              { sourceSlot with ty := .ty (.borrow true targets) } = sourceSlot := by
+            cases sourceSlot
+            simp at hsourceTy ⊢
+            exact hsourceTy.symm
+          simpa [hslotRebuild] using hsourceStrong
+        have hmapFinal :=
+          EnvSameShapeStrengthening.update_result_existing_slot
+            hfanMap hsourceRebuild
+        simpa [LVal.base, hupdatedEq] using hmapFinal
+
+theorem EnvWrite.deref_var_borrow_selected_var_map_of_ne
+    {rank : Nat} {env result : Env} {sourceName selectedName : Name}
+    {sourceSlot selectedSlot : EnvSlot} {mutable : Bool} {targets : List LVal}
+    {rhsTy selectedTy : Ty} :
+    selectedName ≠ sourceName →
+    env.slotAt sourceName = some sourceSlot →
+    sourceSlot.ty = .ty (.borrow mutable targets) →
+    EnvWrite rank env (.deref (.var sourceName)) rhsTy result →
+    (.var selectedName) ∈ targets →
+    env.slotAt selectedName = some selectedSlot →
+    selectedSlot.ty = .ty selectedTy →
+    EnvSameShapeStrengthening
+      (env.update selectedName { selectedSlot with ty := .ty rhsTy })
+      result := by
+  intro hselectedNeSource hsourceSlot hsourceTy hwrite hmem hselectedSlot
+    hselectedTy
+  cases hwrite with
+  | @intro _rank _env₁ writeEnv lv writeSlot _ty updatedTy hwriteSlot hupdate =>
+      simp [LVal.base] at hwriteSlot
+      have hslotEq : writeSlot = sourceSlot := by
+        have hsome : some writeSlot = some sourceSlot := by
+          rw [← hwriteSlot, hsourceSlot]
+        exact Option.some.inj hsome
+      subst writeSlot
+      have hupdateCons :
+          UpdateAtPath rank env [()] sourceSlot.ty rhsTy writeEnv updatedTy := by
+        simpa [LVal.path, LVal.base] using hupdate
+      rw [hsourceTy] at hupdateCons
+      rcases UpdateAtPath.cons_inv hupdateCons with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+        cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
         have hsourceNeSelected : sourceName ≠ selectedName := by
           intro hEq
           exact hselectedNeSource hEq.symm
@@ -4631,6 +5311,249 @@ theorem RuntimeFrame.locReads_varTarget_false {store : ProgramStore}
       exact hvar
 
 /--
+A finite value-abstraction derivation cannot validate a slot whose value is an
+owning reference back to the slot's own location.  This is not an additional
+runtime invariant: it is a structural consequence of `ValidPartialValue`.
+-/
+theorem ValidPartialValue.no_self_owning_ref {store : ProgramStore}
+    {location : Location} {lifetime : Lifetime} {ty : PartialTy} :
+    store.slotAt location =
+      some { value := .value (owningRef location), lifetime := lifetime } →
+    ¬ ValidPartialValue store (.value (owningRef location)) ty := by
+  intro hslot hvalid
+  have hno :
+      ∀ {value ty},
+        ValidPartialValue store value ty →
+        ∀ {location lifetime},
+          store.slotAt location =
+            some { value := .value (owningRef location), lifetime := lifetime } →
+          value = .value (owningRef location) →
+          False := by
+    intro value ty hvalid
+    induction hvalid with
+    | unit =>
+        intro location lifetime _hslot hvalue
+        simp [owningRef] at hvalue
+    | int =>
+        intro location lifetime _hslot hvalue
+        simp [owningRef] at hvalue
+    | undef =>
+        intro location lifetime _hslot hvalue
+        simp at hvalue
+    | @borrow borrowedLocation mutable targets target hmem hloc =>
+        intro location lifetime _hslot hvalue
+        simp [owningRef] at hvalue
+    | @box ownerLocation slot inner hownedSlot _hinner ih =>
+        intro location lifetime hslot hvalue
+        have hownerEq : ownerLocation = location := by
+          simpa [owningRef] using hvalue
+        subst location
+        have hslotEq :
+            slot =
+              { value := .value (owningRef ownerLocation),
+                lifetime := lifetime } :=
+          Option.some.inj (hownedSlot.symm.trans hslot)
+        subst hslotEq
+        exact ih hslot rfl
+    | @boxFull ownerLocation slot innerTy hownedSlot _hinner ih =>
+        intro location lifetime hslot hvalue
+        have hownerEq : ownerLocation = location := by
+          simpa [owningRef] using hvalue
+        subst location
+        have hslotEq :
+            slot =
+              { value := .value (owningRef ownerLocation),
+                lifetime := lifetime } :=
+          Option.some.inj (hownedSlot.symm.trans hslot)
+        subst hslotEq
+        exact ih hslot rfl
+  exact hno hvalid hslot rfl
+
+/-- Any direct owner carried by a valid partial value is in its reachability set. -/
+theorem RuntimeFrame.reaches_of_mem_partialValueOwningLocations
+    {store : ProgramStore} {value : PartialValue} {ty : PartialTy}
+    {owned : Location} :
+    ValidPartialValue store value ty →
+    owned ∈ partialValueOwningLocations value →
+    RuntimeFrame.Reaches store value ty owned := by
+  intro hvalid hmem
+  cases hvalid with
+  | unit =>
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | int =>
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | undef =>
+      simp [partialValueOwningLocations] at hmem
+  | borrow htargetMem hloc =>
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | @box location slot inner hslot _hinner =>
+      have hownedEq : owned = location := by
+        simpa [partialValueOwningLocations, valueOwningLocations,
+          valueOwnedLocation?] using hmem
+      subst hownedEq
+      exact RuntimeFrame.Reaches.boxHere hslot
+  | @boxFull location slot innerTy hslot _hinner =>
+      have hownedEq : owned = location := by
+        simpa [partialValueOwningLocations, valueOwningLocations,
+          valueOwnedLocation?] using hmem
+      subst hownedEq
+      exact RuntimeFrame.Reaches.boxFullHere hslot
+
+/--
+Reachability with the reached slot's static partial type.  This is a proof-side
+refinement of `RuntimeFrame.Reaches`: following an owning reference descends
+into the type of the pointed-to slot.
+-/
+inductive RuntimeFrame.ReachesSlot (store : ProgramStore) :
+    PartialValue → PartialTy → Location → StoreSlot → PartialTy → Prop where
+  | boxHere {location : Location} {slot : StoreSlot} {inner : PartialTy} :
+      store.slotAt location = some slot →
+      ValidPartialValue store slot.value inner →
+      RuntimeFrame.ReachesSlot store
+        (.value (.ref { location := location, owner := true })) (.box inner)
+        location slot inner
+  | boxInner {location reached : Location} {slot reachedSlot : StoreSlot}
+      {inner reachedTy : PartialTy} :
+      store.slotAt location = some slot →
+      RuntimeFrame.ReachesSlot store slot.value inner reached reachedSlot
+        reachedTy →
+      RuntimeFrame.ReachesSlot store
+        (.value (.ref { location := location, owner := true })) (.box inner)
+        reached reachedSlot reachedTy
+  | boxFullHere {location : Location} {slot : StoreSlot} {ty : Ty} :
+      store.slotAt location = some slot →
+      ValidPartialValue store slot.value (.ty ty) →
+      RuntimeFrame.ReachesSlot store
+        (.value (.ref { location := location, owner := true }))
+        (.ty (.box ty)) location slot (.ty ty)
+  | boxFullInner {location reached : Location} {slot reachedSlot : StoreSlot}
+      {ty : Ty} {reachedTy : PartialTy} :
+      store.slotAt location = some slot →
+      RuntimeFrame.ReachesSlot store slot.value (.ty ty) reached reachedSlot
+        reachedTy →
+      RuntimeFrame.ReachesSlot store
+        (.value (.ref { location := location, owner := true }))
+        (.ty (.box ty)) reached reachedSlot reachedTy
+
+theorem RuntimeFrame.ReachesSlot.reaches {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {location : Location}
+    {slot : StoreSlot} {slotTy : PartialTy} :
+    RuntimeFrame.ReachesSlot store value ty location slot slotTy →
+    RuntimeFrame.Reaches store value ty location := by
+  intro hreach
+  induction hreach with
+  | boxHere hslot _hvalid =>
+      exact RuntimeFrame.Reaches.boxHere hslot
+  | boxInner hslot _hinner ih =>
+      exact RuntimeFrame.Reaches.boxInner hslot ih
+  | boxFullHere hslot _hvalid =>
+      exact RuntimeFrame.Reaches.boxFullHere hslot
+  | boxFullInner hslot _hinner ih =>
+      exact RuntimeFrame.Reaches.boxFullInner hslot ih
+
+theorem RuntimeFrame.ReachesSlot.valid {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {location : Location}
+    {slot : StoreSlot} {slotTy : PartialTy} :
+    RuntimeFrame.ReachesSlot store value ty location slot slotTy →
+    ValidPartialValue store slot.value slotTy := by
+  intro hreach
+  induction hreach with
+  | boxHere _hslot hvalid =>
+      exact hvalid
+  | boxInner _hslot _hinner ih =>
+      exact ih
+  | boxFullHere _hslot hvalid =>
+      exact hvalid
+  | boxFullInner _hslot _hinner ih =>
+      exact ih
+
+theorem RuntimeFrame.ReachesSlot.ty_size_lt {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {location : Location}
+    {slot : StoreSlot} {slotTy : PartialTy} :
+    RuntimeFrame.ReachesSlot store value ty location slot slotTy →
+    sizeOf slotTy < sizeOf ty := by
+  intro hreach
+  induction hreach with
+  | boxHere =>
+      simp
+  | boxInner _hslot _hinner ih =>
+      exact lt_trans ih (by simp)
+  | boxFullHere =>
+      simp
+  | boxFullInner _hslot _hinner ih =>
+      exact lt_trans ih (by simp)
+
+theorem RuntimeFrame.reachesSlot_of_reaches {store : ProgramStore}
+    {env : Env} {slotLifetime : Lifetime}
+    {value : PartialValue} {ty : PartialTy} {location : Location} :
+    PartialTyBorrowsWellFormedInSlot env slotLifetime ty →
+    ValidPartialValue store value ty →
+    RuntimeFrame.Reaches store value ty location →
+    ∃ slot slotTy,
+      RuntimeFrame.ReachesSlot store value ty location slot slotTy := by
+  intro hborrows hvalid hreach
+  induction hvalid generalizing env slotLifetime location with
+  | unit =>
+      cases hreach
+  | int =>
+      cases hreach
+  | undef =>
+      cases hreach
+  | @borrow borrowedLocation mutable targets target hmem hloc =>
+      cases hreach with
+      | @borrow _borrowedLocation readLocation _mutable _targets target' hmem' _hloc' hreads =>
+          rcases hborrows PartialTyContains.here target' hmem' with
+            ⟨_targetTy, _targetLifetime, _htyping, _houtlives, _hbase,
+              hvar⟩
+          exact False.elim (RuntimeFrame.locReads_varTarget_false hvar hreads)
+  | @box ownerLocation slot inner hslot hinner ih =>
+      cases hreach with
+      | @boxHere _ reachedSlot _ hreachSlot =>
+          have hslotEq : slot = reachedSlot := by
+            rw [hslot] at hreachSlot
+            exact Option.some.inj hreachSlot
+          subst hslotEq
+          exact ⟨slot, inner, RuntimeFrame.ReachesSlot.boxHere hslot hinner⟩
+      | @boxInner _ reachedSlot _ _ hreachSlot hinnerReach =>
+          have hslotEq : reachedSlot = slot := by
+            rw [hslot] at hreachSlot
+            exact Option.some.inj hreachSlot.symm
+          subst hslotEq
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.box hcontains)
+          rcases ih hinnerBorrows hinnerReach with
+            ⟨innerSlot, innerTy, hinnerSlot⟩
+          exact ⟨innerSlot, innerTy,
+            RuntimeFrame.ReachesSlot.boxInner hslot hinnerSlot⟩
+  | @boxFull ownerLocation slot innerTy hslot hinner ih =>
+      cases hreach with
+      | @boxFullHere _ reachedSlot _ hreachSlot =>
+          have hslotEq : slot = reachedSlot := by
+            rw [hslot] at hreachSlot
+            exact Option.some.inj hreachSlot
+          subst hslotEq
+          exact ⟨slot, .ty innerTy,
+            RuntimeFrame.ReachesSlot.boxFullHere hslot hinner⟩
+      | @boxFullInner _ reachedSlot _ _ hreachSlot hinnerReach =>
+          have hslotEq : reachedSlot = slot := by
+            rw [hslot] at hreachSlot
+            exact Option.some.inj hreachSlot.symm
+          subst hslotEq
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.tyBox hcontains)
+          rcases ih hinnerBorrows hinnerReach with
+            ⟨innerSlot, innerTy, hinnerSlot⟩
+          exact ⟨innerSlot, innerTy,
+            RuntimeFrame.ReachesSlot.boxFullInner hslot hinnerSlot⟩
+
+/--
 Well-formed borrow targets are variable lvalues, so a borrowed reference whose
 type is well-formed never reaches a variable slot through target resolution.
 Owning references may reach heap slots; those are also disjoint from variables.
@@ -4699,6 +5622,400 @@ theorem RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
     (ValueOwnerTargetsHeap.partial hvalueHeap)
     (PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellTy)
     hreach
+
+/--
+Runtime owner-spine selected by a static lvalue path.
+
+`StoreOwnerSpine S root rootSlot rootTy path leaf leafSlot leafTy` says that
+starting from `root`, whose slot is valid at `rootTy`, following the owned-box
+selectors in `path` reaches `leaf`, whose slot is valid at `leafTy`.
+-/
+inductive StoreOwnerSpine (store : ProgramStore) :
+    Location → StoreSlot → PartialTy → Path → Location → StoreSlot → PartialTy → Prop where
+  | nil {storage : Location} {slot : StoreSlot} {ty : PartialTy} :
+      store.slotAt storage = some slot →
+      ValidPartialValue store slot.value ty →
+      StoreOwnerSpine store storage slot ty [] storage slot ty
+  | box {storage owned leaf : Location} {slot ownedSlot leafSlot : StoreSlot}
+      {inner leafTy : PartialTy} {path : Path} :
+      store.slotAt storage = some slot →
+      slot.value = .value (owningRef owned) →
+      StoreOwnerSpine store owned ownedSlot inner path leaf leafSlot leafTy →
+      StoreOwnerSpine store storage slot (.box inner) (() :: path) leaf leafSlot leafTy
+
+namespace StoreOwnerSpine
+
+theorem storage_slot {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    store.slotAt storage = some slot := by
+  intro hspine
+  cases hspine with
+  | nil hslot _hvalid =>
+      exact hslot
+  | box hslot _howns _htail =>
+      exact hslot
+
+theorem valid {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    ValidPartialValue store slot.value ty := by
+  intro hspine
+  induction hspine with
+  | nil _hslot hvalid =>
+      exact hvalid
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
+      _htail ih =>
+      have hbox : ValidPartialValue store (.value (owningRef owned)) (.box inner) :=
+        ValidPartialValue.box
+        (location := owned) (slot := ownedSlot)
+        (StoreOwnerSpine.storage_slot _htail)
+        ih
+      simpa [howner] using hbox
+
+theorem leaf_slot {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    store.slotAt leaf = some leafSlot := by
+  intro hspine
+  induction hspine with
+  | nil hslot _hvalid =>
+      exact hslot
+  | box _hslot _howner _htail ih =>
+      exact ih
+
+theorem leaf_valid {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    ValidPartialValue store leafSlot.value leafTy := by
+  intro hspine
+  induction hspine with
+  | nil _hslot hvalid =>
+      exact hvalid
+  | box _hslot _howner _htail ih =>
+      exact ih
+
+theorem ownsAt_of_box {store : ProgramStore} {storage owned leaf : Location}
+    {slot ownedSlot leafSlot : StoreSlot} {inner leafTy : PartialTy}
+    {path : Path} :
+    store.slotAt storage = some slot →
+    slot.value = .value (owningRef owned) →
+    StoreOwnerSpine store owned ownedSlot inner path leaf leafSlot leafTy →
+    ProgramStore.OwnsAt store owned storage := by
+  intro hslot howner _htail
+  refine ⟨slot.lifetime, ?_⟩
+  cases slot with
+  | mk slotValue slotLifetime =>
+      cases howner
+      simpa [owningRef] using hslot
+
+theorem ownsTransitively_of_nonempty {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    path ≠ [] →
+    ProgramStore.OwnsTransitively store storage leaf := by
+  intro hspine hnonempty
+  induction hspine with
+  | nil =>
+      exact False.elim (hnonempty rfl)
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner htail ih =>
+      have howns : ProgramStore.OwnsAt store owned storage :=
+        ownsAt_of_box hslot howner htail
+      cases htail with
+      | nil _hownedSlot _hvalid =>
+          exact ProgramStore.OwnsTransitively.direct howns
+      | box _htailSlot _htailValue _htailTail =>
+          exact ProgramStore.OwnsTransitively.trans howns (ih (by simp))
+
+theorem ownsTransitively_of_cons {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty (() :: path) leaf leafSlot leafTy →
+    ProgramStore.OwnsTransitively store storage leaf := by
+  intro hspine
+  exact ownsTransitively_of_nonempty hspine (by simp)
+
+theorem leaf_ne_storage_of_cons {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
+    StoreOwnerSpine store storage slot ty (() :: path) leaf leafSlot leafTy →
+    leaf ≠ storage := by
+  intro hspine hleaf
+  have hcycle : ProgramStore.OwnsTransitively store storage storage := by
+    simpa [hleaf] using ownsTransitively_of_cons hspine
+  exact ValidPartialValue.no_storage_ownership_cycle
+    (StoreOwnerSpine.storage_slot hspine)
+    (StoreOwnerSpine.valid hspine)
+    hcycle
+
+theorem snoc_box {store : ProgramStore} {root storage owned : Location}
+    {rootSlot slot ownedSlot : StoreSlot} {rootTy leafTy inner : PartialTy}
+    {path : Path} :
+    StoreOwnerSpine store root rootSlot rootTy path storage slot leafTy →
+    leafTy = .box inner →
+    slot.value = .value (owningRef owned) →
+    store.slotAt owned = some ownedSlot →
+    ValidPartialValue store ownedSlot.value inner →
+    StoreOwnerSpine store root rootSlot rootTy (() :: path) owned ownedSlot inner := by
+  intro hspine hleafTy howner hownedSlot hinnerValid
+  induction hspine generalizing inner owned ownedSlot with
+  | nil hslot hvalid =>
+      subst hleafTy
+      exact StoreOwnerSpine.box hslot howner
+        (StoreOwnerSpine.nil hownedSlot hinnerValid)
+  | @box root first storage rootSlot firstSlot slot rootInner leafTy path hrootSlot
+      hrootOwner htail ih =>
+      subst hleafTy
+      exact StoreOwnerSpine.box hrootSlot hrootOwner
+        (ih rfl howner hownedSlot hinnerValid)
+
+theorem of_lvalTyping_box {store : ProgramStore} {env : Env}
+    {current : Lifetime} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    ∀ {lv : LVal} {inner : PartialTy} {lifetime : Lifetime},
+      LValTyping env lv (.box inner) lifetime →
+      ∃ envSlot rootSlot leaf leafSlot,
+        env.slotAt (LVal.base lv) = some envSlot ∧
+        store.slotAt (VariableProjection (LVal.base lv)) = some rootSlot ∧
+        rootSlot.lifetime = envSlot.lifetime ∧
+        store.loc lv = some leaf ∧
+        store.slotAt leaf = some leafSlot ∧
+        StoreOwnerSpine store (VariableProjection (LVal.base lv)) rootSlot
+          envSlot.ty (LVal.path lv) leaf leafSlot (.box inner) := by
+  intro hwell hsafe lv
+  induction lv with
+  | var x =>
+      intro inner lifetime htyping
+      rcases LValTyping.var_inv htyping with ⟨envSlot, henv, hty, hlifetime⟩
+      rcases hsafe.2 x envSlot henv with ⟨value, hstore, hvalid⟩
+      have hvalidBox : ValidPartialValue store value (.box inner) := by
+        simpa [hty] using hvalid
+      refine ⟨envSlot, { value := value, lifetime := envSlot.lifetime },
+        VariableProjection x, { value := value, lifetime := envSlot.lifetime },
+        henv, hstore, rfl, ?_, hstore, ?_⟩
+      · simp [ProgramStore.loc, VariableProjection]
+      · simpa [LVal.base, LVal.path, hty] using
+          (StoreOwnerSpine.nil hstore hvalidBox)
+  | deref source ih =>
+      intro inner lifetime htyping
+      have hsourceTyping :
+          LValTyping env source (.box (.box inner)) lifetime :=
+        LValTyping.deref_box_inv htyping
+      rcases ih hsourceTyping with
+        ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henv, hrootSlot,
+          hrootLifetime, hsourceLoc, hsourceSlot, hspine⟩
+      have hsourceValid :
+          ValidPartialValue store sourceSlot.value (.box (.box inner)) :=
+        StoreOwnerSpine.leaf_valid hspine
+      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+      cases hsourceValid with
+      | @box ownerLocation ownerSlot _ hownedSlot hinnerValid =>
+          have hderefLoc :
+              store.loc (.deref source) = some ownerLocation := by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+          have hspineDeref :
+              StoreOwnerSpine store (VariableProjection (LVal.base source))
+                rootSlot envSlot.ty (() :: LVal.path source) ownerLocation
+                ownerSlot (.box inner) :=
+            StoreOwnerSpine.snoc_box hspine rfl rfl hownedSlot hinnerValid
+          refine ⟨envSlot, rootSlot, ownerLocation, ownerSlot, ?_, ?_,
+            hrootLifetime, hderefLoc, hownedSlot, ?_⟩
+          · simpa [LVal.base] using henv
+          · simpa [LVal.base] using hrootSlot
+          · simpa [LVal.base, LVal.path_deref_cons] using hspineDeref
+
+theorem valid_after_updateAtPath_nonempty {store : ProgramStore} {env writeEnv : Env}
+    {root leaf : Location} {rootSlot leafSlot : StoreSlot}
+    {rootTy leafTy updatedTy : PartialTy} {path : Path}
+    {rhsTy : Ty} {value : Value} :
+    StoreOwnerSpine store root rootSlot rootTy path leaf leafSlot leafTy →
+    path ≠ [] →
+    UpdateAtPath 0 env path rootTy rhsTy writeEnv updatedTy →
+    ValidPartialValue
+      (store.update leaf { leafSlot with value := .value value })
+      (.value value) (.ty rhsTy) →
+    ValidPartialValue
+      (store.update leaf { leafSlot with value := .value value })
+      rootSlot.value updatedTy := by
+  intro hspine hnonempty hupdate hnewLeafValid
+  induction hspine generalizing env writeEnv updatedTy rhsTy value with
+  | nil =>
+      exact False.elim (hnonempty rfl)
+  | @box storage owned leaf slot ownedSlot leafSlot spineInner leafTy path hslot howner
+      htail ih =>
+      cases hupdate with
+      | @box _env₁ _env₂ _rank _path _inner updatedInner _ty hinnerUpdate =>
+          cases htail with
+          | nil hownedSlot _holdValid =>
+              cases hinnerUpdate with
+              | strong =>
+                  have hownedSlotWrite :
+                      (store.update owned { ownedSlot with value := .value value }).slotAt
+                        owned =
+                        some { value := .value value, lifetime := ownedSlot.lifetime } := by
+                    simp [ProgramStore.update]
+                  have hbox :
+                      ValidPartialValue
+                        (store.update owned { ownedSlot with value := .value value })
+                        (.value (owningRef owned)) (.box (.ty rhsTy)) :=
+                    ValidPartialValue.box hownedSlotWrite hnewLeafValid
+                  simpa [howner] using hbox
+          | box htailSlot htailOwner htailTail =>
+              have htailSpine :=
+                StoreOwnerSpine.box htailSlot htailOwner htailTail
+              have htailValid :
+                  ValidPartialValue
+                    (store.update leaf
+                      { leafSlot with value := .value value })
+                    ownedSlot.value updatedInner := by
+                exact ih (by simp) hinnerUpdate hnewLeafValid
+              have hleafNeOwned : leaf ≠ owned :=
+                StoreOwnerSpine.leaf_ne_storage_of_cons htailSpine
+              have hownedSlotWrite :
+                  (store.update leaf
+                    { leafSlot with value := .value value }).slotAt owned =
+                    some ownedSlot := by
+                have hownedNeLeaf : owned ≠ leaf := by
+                  intro h
+                  exact hleafNeOwned h.symm
+                simpa [ProgramStore.update, hownedNeLeaf] using
+                  (StoreOwnerSpine.storage_slot htailSpine)
+              have hbox :
+                  ValidPartialValue
+                    (store.update leaf
+                      { leafSlot with value := .value value })
+                    (.value (owningRef owned)) (.box updatedInner) :=
+                ValidPartialValue.box hownedSlotWrite htailValid
+              simpa [howner] using hbox
+
+theorem updateAtPath_rank_zero_env_eq {store : ProgramStore} {env writeEnv : Env}
+    {root leaf : Location} {rootSlot leafSlot : StoreSlot}
+    {rootTy leafTy updatedTy : PartialTy} {path : Path}
+    {rhsTy : Ty} :
+    StoreOwnerSpine store root rootSlot rootTy path leaf leafSlot leafTy →
+    UpdateAtPath 0 env path rootTy rhsTy writeEnv updatedTy →
+    writeEnv = env := by
+  intro hspine hupdate
+  induction hspine generalizing env writeEnv updatedTy rhsTy with
+  | nil _hslot _hvalid =>
+      cases hupdate with
+      | strong =>
+          rfl
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
+      htail ih =>
+      cases hupdate with
+      | box hinner =>
+          exact ih hinner
+
+theorem not_reaches_leaf_of_not_reaches_root {store : ProgramStore}
+    {env : Env} {slotLifetime : Lifetime}
+    {root leaf : Location} {rootSlot leafSlot : StoreSlot}
+    {rootTy leafTy : PartialTy} {path : Path}
+    {value : Value} {rhsTy : Ty} :
+    ValidRuntimeState store (.val value) →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty rhsTy) →
+    ValidValue store value rhsTy →
+    StoreOwnerSpine store root rootSlot rootTy path leaf leafSlot leafTy →
+    (∀ reached,
+      RuntimeFrame.Reaches store (.value value) (.ty rhsTy) reached →
+      reached ≠ root) →
+    ∀ reached,
+      RuntimeFrame.Reaches store (.value value) (.ty rhsTy) reached →
+      reached ≠ leaf := by
+  intro hvalidRuntime hborrows hvalidValue hspine
+  induction hspine with
+  | nil _hslot _hvalid =>
+      intro hrootNoReach
+      exact hrootNoReach
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
+      htail ih =>
+      intro hstorageNoReach
+      have howns : ProgramStore.OwnsAt store owned storage :=
+        StoreOwnerSpine.ownsAt_of_box hslot howner htail
+      have hownedNoReach :
+          ∀ reached,
+            RuntimeFrame.Reaches store (.value value) (.ty rhsTy) reached →
+            reached ≠ owned := by
+        intro reached hreach hreached
+        subst reached
+        rcases RuntimeFrame.reaches_owner_source_of_validPartialValue
+            hborrows hvalidValue hreach with hdirect | hsource
+        · exact
+            (ValidRuntimeState.storeTermDisjoint hvalidRuntime owned
+              (by
+                simpa [termOwningLocations, termValues,
+                  partialValueOwningLocations, valueOwningLocations,
+                  valueOwnedLocation?] using hdirect))
+              ⟨storage, howns⟩
+        · rcases hsource with ⟨sourceStorage, hsourceReach, hsourceOwns⟩
+          have hstorageEq : sourceStorage = storage :=
+            (ValidRuntimeState.validStore hvalidRuntime) owned
+              sourceStorage storage hsourceOwns howns
+          exact hstorageNoReach sourceStorage hsourceReach hstorageEq
+      exact ih hownedNoReach
+
+theorem stored_var_not_reaches_leaf_of_not_reaches_root {store : ProgramStore}
+    {env : Env} {slotLifetime storedLifetime : Lifetime}
+    {storedName : Name} {storedValue : PartialValue} {storedTy : PartialTy}
+    {root leaf : Location} {rootSlot leafSlot : StoreSlot}
+    {rootTy leafTy : PartialTy} {path : Path} :
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    store.slotAt (VariableProjection storedName) =
+      some { value := storedValue, lifetime := storedLifetime } →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime storedTy →
+    ValidPartialValue store storedValue storedTy →
+    StoreOwnerSpine store root rootSlot rootTy path leaf leafSlot leafTy →
+    VariableProjection storedName ≠ root →
+    (∀ reached,
+      RuntimeFrame.Reaches store storedValue storedTy reached →
+      reached ≠ root) →
+    ∀ reached,
+      RuntimeFrame.Reaches store storedValue storedTy reached →
+      reached ≠ leaf := by
+  intro hvalidStore hheap hstored hborrows hvalid hspine
+  induction hspine with
+  | nil _hslot _hvalidRoot =>
+      intro _hstoredNeRoot hrootNoReach
+      exact hrootNoReach
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
+      htail ih =>
+      intro hstoredNeStorage hstorageNoReach
+      have howns : ProgramStore.OwnsAt store owned storage :=
+        StoreOwnerSpine.ownsAt_of_box hslot howner htail
+      have hownedNoReach :
+          ∀ reached,
+            RuntimeFrame.Reaches store storedValue storedTy reached →
+            reached ≠ owned := by
+        intro reached hreach hreached
+        subst reached
+        rcases RuntimeFrame.reaches_owner_source_of_validPartialValue
+            hborrows hvalid hreach with hdirect | hsource
+        · have hstoredOwns :
+              ProgramStore.OwnsAt store owned (VariableProjection storedName) := by
+            have hstoredValue :
+                storedValue = .value (owningRef owned) :=
+              eq_owningRef_of_mem_partialValueOwningLocations hdirect
+            exact ⟨storedLifetime, by
+              cases hstoredValue
+              simpa [owningRef] using hstored⟩
+          have hstorageEq : VariableProjection storedName = storage :=
+            hvalidStore owned (VariableProjection storedName) storage
+              hstoredOwns howns
+          exact hstoredNeStorage hstorageEq
+        · rcases hsource with ⟨sourceStorage, hsourceReach, hsourceOwns⟩
+          have hstorageEq : sourceStorage = storage :=
+            hvalidStore owned sourceStorage storage hsourceOwns howns
+          exact hstorageNoReach sourceStorage hsourceReach hstorageEq
+      have hstoredNeOwned : VariableProjection storedName ≠ owned := by
+        intro hstoredEq
+        have hownedHeap : ∃ address, owned = .heap address :=
+          hheap owned ⟨storage, howns⟩
+        rcases hownedHeap with ⟨address, hownedHeap⟩
+        rw [← hstoredEq] at hownedHeap
+        cases hownedHeap
+      exact ih hstoredNeOwned hownedNoReach
+
+end StoreOwnerSpine
 
 /-- Direct variable `move` multistep preservation with the frame facts derived
 from well-formedness rather than supplied as an obligation. -/
@@ -5954,31 +7271,31 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                                             intro dropValue hmem howned
                                             simp at hmem
                                             subst hmem
-                                            have hselfOwns :
-                                                ProgramStore.OwnsAt midStore
-                                                  ownerLocation ownerLocation := by
-                                              have holdValue :
-                                                  ownerSlot.value =
-                                                    .value
-                                                      (owningRef
-                                                        ownerLocation) :=
-                                                eq_owningRef_of_mem_partialValueOwningLocations
-                                                  howned
-                                              exact ⟨ownerSlot.lifetime, by
-                                                cases ownerSlot with
-                                                | mk oldValue oldLifetime =>
-                                                    cases holdValue
-                                                    simpa [owningRef] using
-                                                      hownedSlot⟩
-                                            have hstorageEq :
-                                                ownerLocation =
-                                                  VariableProjection x :=
-                                              (ValidRuntimeState.validStore
-                                                hvalidInner) ownerLocation
-                                                ownerLocation
-                                                (VariableProjection x)
-                                                hselfOwns hownsLhsByX
-                                            exact hownerNeVarX hstorageEq
+                                            have holdValue :
+                                                ownerSlot.value =
+                                                  .value
+                                                    (owningRef
+                                                      ownerLocation) :=
+                                              eq_owningRef_of_mem_partialValueOwningLocations
+                                                howned
+                                            have hselfSlot :
+                                                midStore.slotAt ownerLocation =
+                                                  some
+                                                    { value := .value
+                                                        (owningRef
+                                                          ownerLocation),
+                                                      lifetime :=
+                                                        ownerSlot.lifetime } := by
+                                              cases ownerSlot with
+                                              | mk oldValue oldLifetime =>
+                                                  cases holdValue
+                                                  simpa [owningRef] using
+                                                    hownedSlot
+                                            exact
+                                              (ValidPartialValue.no_self_owning_ref
+                                                hselfSlot)
+                                                (by simpa [holdValue] using
+                                                  hinnerValid)
                                           have havoidOwnerLocation :
                                               DropsAvoids
                                                 (midStore.update ownerLocation
@@ -6604,7 +7921,805 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                                           exact ⟨hvalidRuntimeFinal, hsafeFinal,
                                             ValidPartialValue.unit⟩
                           | deref source =>
-                              sorry
+                              have hownerSpine :
+                                  ∃ baseEnvSlot rootSlot,
+                                    _env₂.slotAt
+                                        (LVal.base source.deref.deref) =
+                                      some baseEnvSlot ∧
+                                    midStore.slotAt
+                                        (VariableProjection
+                                          (LVal.base source.deref.deref)) =
+                                      some rootSlot ∧
+                                    rootSlot.lifetime = baseEnvSlot.lifetime ∧
+                                    StoreOwnerSpine midStore
+                                      (VariableProjection
+                                        (LVal.base source.deref.deref))
+                                      rootSlot baseEnvSlot.ty
+                                      (LVal.path source.deref.deref)
+                                      lhsLocation overwrittenSlot _oldTy := by
+                                rcases StoreOwnerSpine.of_lvalTyping_box
+                                    hwellInner hsafeInner hsourceBox with
+                                  ⟨baseEnvSlot, rootSlot, sourceLocation,
+                                    sourceSlot, henvBase, hrootSlot,
+                                    hrootLifetime, hsourceLoc, hsourceSlot,
+                                    hsourceSpine⟩
+                                have hsourceValid :
+                                    ValidPartialValue midStore sourceSlot.value
+                                      (.box _oldTy) :=
+                                  StoreOwnerSpine.leaf_valid hsourceSpine
+                                rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+                                cases hsourceValid with
+                                | @box ownerLocation ownerSlot _ hownedSlot hinnerValid =>
+                                    have hlhsLocFromSource :
+                                        midStore.loc source.deref.deref =
+                                          some ownerLocation := by
+                                      change
+                                        ((midStore.loc source.deref).bind
+                                          (fun location =>
+                                            (midStore.slotAt location).bind
+                                              (fun slot =>
+                                                match slot.value with
+                                                | .value (.ref ref) =>
+                                                    some ref.location
+                                                | .value _ => none
+                                                | .undef => none))) =
+                                          some ownerLocation
+                                      simp [hsourceLoc, hsourceSlot]
+                                    have hownerEq : ownerLocation = lhsLocation := by
+                                      rw [hlhsLoc] at hlhsLocFromSource
+                                      exact (Option.some.inj hlhsLocFromSource).symm
+                                    subst hownerEq
+                                    have hslotEqOld : ownerSlot = overwrittenSlot := by
+                                      rw [hlhsSlot] at hownedSlot
+                                      exact (Option.some.inj hownedSlot).symm
+                                    subst hslotEqOld
+                                    have hspineFull :
+                                        StoreOwnerSpine midStore
+                                          (VariableProjection
+                                            (LVal.base source.deref))
+                                          rootSlot baseEnvSlot.ty
+                                          (() :: LVal.path source.deref)
+                                          ownerLocation ownerSlot _oldTy :=
+                                      StoreOwnerSpine.snoc_box hsourceSpine rfl rfl
+                                        hownedSlot hinnerValid
+                                    exact ⟨baseEnvSlot, rootSlot,
+                                      by simpa [LVal.base] using henvBase,
+                                      by simpa [LVal.base] using hrootSlot,
+                                      hrootLifetime,
+                                      by
+                                        simpa [LVal.base, LVal.path_deref_cons]
+                                          using hspineFull⟩
+                              rw [hwriteStoreEq] at hdrops
+                              rcases hownerSpine with
+                                ⟨baseEnvSlot, rootSlot, henvBase,
+                                  hrootSlot, hrootLifetime, hspine⟩
+                              have hwriteEnvSlotEq :
+                                  writeEnvSlot = baseEnvSlot := by
+                                rw [hbase] at henvBase
+                                exact Option.some.inj henvBase
+                              cases hwriteEnvSlotEq
+                              have hwriteMiddleEq : _env₂ = _writeMiddle :=
+                                (StoreOwnerSpine.updateAtPath_rank_zero_env_eq
+                                  hspine hupdate).symm
+                              cases hwriteMiddleEq
+                              have hpathNonempty :
+                                  LVal.path source.deref.deref ≠ [] := by
+                                simp [LVal.path_deref_cons]
+                              have hspineCons :
+                                  StoreOwnerSpine midStore
+                                    (VariableProjection
+                                      (LVal.base source.deref))
+                                    rootSlot writeEnvSlot.ty
+                                    (() :: LVal.path source.deref)
+                                    lhsLocation overwrittenSlot _oldTy := by
+                                simpa [LVal.base, LVal.path_deref_cons] using
+                                  hspine
+                              have hleafNeRoot :
+                                  lhsLocation ≠
+                                    VariableProjection
+                                      (LVal.base source.deref.deref) := by
+                                have hne :=
+                                  StoreOwnerSpine.leaf_ne_storage_of_cons
+                                    hspineCons
+                                simpa [LVal.base] using hne
+                              have hleafOwned :
+                                  ProgramStore.Owns midStore lhsLocation :=
+                                ProgramStore.OwnsTransitively.to_owns
+                                  (StoreOwnerSpine.ownsTransitively_of_nonempty
+                                    hspine hpathNonempty)
+                              have hlhsHeap :
+                                  ∃ address, lhsLocation = .heap address :=
+                                (ValidRuntimeState.storeOwnerTargetsHeap
+                                  hvalidInner) lhsLocation hleafOwned
+                              have hvalidAssign :
+                                  ValidRuntimeState midStore
+                                    (.assign source.deref.deref (.val value)) :=
+                                validRuntimeState_assign_value_of_value
+                                  hvalidInner
+                              have hvalueHeap :
+                                  ValueOwnerTargetsHeap value :=
+                                TermOwnerTargetsHeap.value
+                                  (ValidRuntimeState.termOwnerTargetsHeap
+                                    hvalidInner)
+                              have hvaluePartialHeap :
+                                  PartialValueOwnerTargetsHeap (.value value) :=
+                                ValueOwnerTargetsHeap.partial hvalueHeap
+                              have hborrowsRhs :
+                                  PartialTyBorrowsWellFormedInSlot _env₂
+                                    _targetLifetime (.ty _rhsTy) :=
+                                PartialTyBorrowsWellFormedInSlot.of_wellFormedTy
+                                  hwellTy
+                              have hrootNoReach :
+                                  ∀ reached,
+                                    RuntimeFrame.Reaches midStore
+                                      (.value value) (.ty _rhsTy) reached →
+                                    reached ≠
+                                      VariableProjection
+                                        (LVal.base source.deref.deref) := by
+                                intro reached hreach
+                                exact
+                                  RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                                    (ValidRuntimeState.storeOwnerTargetsHeap
+                                      hvalidInner)
+                                    hvaluePartialHeap hborrowsRhs hreach
+                              have hvalueNoReachLhs :
+                                  ∀ reached,
+                                    RuntimeFrame.Reaches midStore
+                                      (.value value) (.ty _rhsTy) reached →
+                                    reached ≠ lhsLocation :=
+                                StoreOwnerSpine.not_reaches_leaf_of_not_reaches_root
+                                  hvalidInner hborrowsRhs hvalidValue hspine
+                                  hrootNoReach
+                              have hnewValueValidWrite :
+                                  ValidValue
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value })
+                                    value _rhsTy :=
+                                RuntimeFrame.validValue_update_of_not_reaches
+                                  hvalidValue hvalueNoReachLhs
+                              have hnewLeafSlotWrite :
+                                  (midStore.update lhsLocation
+                                    { overwrittenSlot with
+                                      value := .value value }).slotAt
+                                    lhsLocation =
+                                    some
+                                      { value := .value value,
+                                        lifetime := overwrittenSlot.lifetime } := by
+                                simp [ProgramStore.update]
+                              have hnewRootValidWrite :
+                                  ValidPartialValue
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value })
+                                    rootSlot.value _updatedTy :=
+                                StoreOwnerSpine.valid_after_updateAtPath_nonempty
+                                  hspine hpathNonempty hupdate
+                                  hnewValueValidWrite
+                              have hrootNeLeaf :
+                                  VariableProjection
+                                      (LVal.base source.deref.deref) ≠
+                                    lhsLocation := by
+                                intro hrootEq
+                                exact hleafNeRoot hrootEq.symm
+                              have hrootSlotWrite :
+                                  (midStore.update lhsLocation
+                                    { overwrittenSlot with
+                                      value := .value value }).slotAt
+                                    (VariableProjection
+                                      (LVal.base source.deref.deref)) =
+                                    some rootSlot := by
+                                simpa [ProgramStore.update, hrootNeLeaf] using
+                                  hrootSlot
+                              have hrootSlotWriteEnv :
+                                  (midStore.update lhsLocation
+                                    { overwrittenSlot with
+                                      value := .value value }).slotAt
+                                    (VariableProjection
+                                      (LVal.base source.deref.deref)) =
+                                    some
+                                      { value := rootSlot.value,
+                                        lifetime := writeEnvSlot.lifetime } := by
+                                rw [← hrootLifetime]
+                                simpa using hrootSlotWrite
+                              have hwriteValidStore :
+                                  ValidStore
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value }) := by
+                                exact validStore_update_disjoint
+                                  (updatedLocation := lhsLocation)
+                                  (slot :=
+                                    { overwrittenSlot with
+                                      value := .value value })
+                                  (ValidRuntimeState.validStore hvalidInner)
+                                  (by
+                                    intro owned hmem howns
+                                    exact
+                                      (ValidRuntimeState.storeTermDisjoint
+                                        hvalidInner owned
+                                        (by
+                                          simpa [termOwningLocations,
+                                            termValues,
+                                            partialValueOwningLocations]
+                                            using hmem))
+                                      howns)
+                              have hwriteStoreConcrete :
+                                  midStore.write source.deref.deref
+                                    (.value value) =
+                                    some
+                                      (midStore.update lhsLocation
+                                        { overwrittenSlot with
+                                          value := .value value }) := by
+                                simpa [hwriteStoreEq] using hwriteStore
+                              have hwriteOwnerHeap :
+                                  StoreOwnerTargetsHeap
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value }) :=
+                                storeOwnerTargetsHeap_write
+                                  (ValidRuntimeState.storeOwnerTargetsHeap
+                                    hvalidInner)
+                                  hvaluePartialHeap hwriteStoreConcrete
+                              have hdropValuesHeap :
+                                  ∀ dropValue,
+                                    dropValue ∈ [overwrittenSlot.value] →
+                                    PartialValueOwnerTargetsHeap dropValue := by
+                                intro dropValue hmem
+                                simp at hmem
+                                subst hmem
+                                exact partialValueOwnerTargetsHeap_of_slot
+                                  (ValidRuntimeState.storeOwnerTargetsHeap
+                                    hvalidInner) hlhsSlot
+                              have havoidRoot :
+                                  DropsAvoids
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value })
+                                    [overwrittenSlot.value]
+                                    (VariableProjection
+                                      (LVal.base source.deref.deref)) :=
+                                dropsAvoids_var_of_ownerTargetsHeap
+                                  hdrops hwriteOwnerHeap hdropValuesHeap
+                              have hrootUpdatedEnvSlot :
+                                  (_env₂.update
+                                    (LVal.base source.deref.deref)
+                                    { ty := _updatedTy,
+                                      lifetime := writeEnvSlot.lifetime }).slotAt
+                                      (LVal.base source.deref.deref) =
+                                    some
+                                      { ty := _updatedTy,
+                                        lifetime := writeEnvSlot.lifetime } := by
+                                simp [Env.update]
+                              have hnewBorrowsRoot :
+                                  PartialTyBorrowsWellFormedInSlot
+                                    (_env₂.update
+                                      (LVal.base source.deref.deref)
+                                      { ty := _updatedTy,
+                                        lifetime := writeEnvSlot.lifetime })
+                                    writeEnvSlot.lifetime _updatedTy := by
+                                intro mutable targets hcontains
+                                exact hwellOut.1
+                                  (LVal.base source.deref.deref)
+                                  { ty := _updatedTy,
+                                    lifetime := writeEnvSlot.lifetime }
+                                  mutable targets hrootUpdatedEnvSlot
+                                  ⟨{ ty := _updatedTy,
+                                      lifetime := writeEnvSlot.lifetime },
+                                    hrootUpdatedEnvSlot, hcontains⟩
+                              have hnewGraphDisjoint :
+                                  ∀ reached,
+                                    RuntimeFrame.Reaches
+                                      (midStore.update lhsLocation
+                                        { overwrittenSlot with
+                                          value := .value value })
+                                      rootSlot.value _updatedTy reached →
+                                    ∀ dropValue,
+                                      dropValue ∈ [overwrittenSlot.value] →
+                                      reached ∉
+                                        partialValueOwningLocations
+                                          dropValue := by
+                                intro reached hreach dropValue hmem howned
+                                simp at hmem
+                                subst hmem
+                                have holdOwns :
+                                    ProgramStore.OwnsAt midStore reached
+                                      lhsLocation := by
+                                  have holdValue :
+                                      overwrittenSlot.value =
+                                        .value (owningRef reached) :=
+                                    eq_owningRef_of_mem_partialValueOwningLocations
+                                      howned
+                                  exact ⟨overwrittenSlot.lifetime, by
+                                    cases overwrittenSlot with
+                                    | mk oldValue oldLifetime =>
+                                        cases holdValue
+                                        simpa [owningRef] using hlhsSlot⟩
+                                rcases RuntimeFrame.reaches_owner_source_of_validPartialValue
+                                    hnewBorrowsRoot hnewRootValidWrite
+                                    hreach with hdirect | hsource
+                                · have hrootValueOwns :
+                                      rootSlot.value =
+                                        .value (owningRef reached) :=
+                                    eq_owningRef_of_mem_partialValueOwningLocations
+                                      hdirect
+                                  have hrootOwns :
+                                      ProgramStore.OwnsAt midStore reached
+                                        (VariableProjection
+                                          (LVal.base source.deref.deref)) :=
+                                    ⟨rootSlot.lifetime, by
+                                      cases rootSlot with
+                                      | mk rootValue rootLifetime =>
+                                          cases hrootValueOwns
+                                          simpa [owningRef] using
+                                            hrootSlot⟩
+                                  have hstorageEq :
+                                      VariableProjection
+                                          (LVal.base source.deref.deref) =
+                                        lhsLocation :=
+                                    (ValidRuntimeState.validStore hvalidInner)
+                                      reached
+                                      (VariableProjection
+                                        (LVal.base source.deref.deref))
+                                      lhsLocation hrootOwns holdOwns
+                                  exact hleafNeRoot hstorageEq.symm
+                                · rcases hsource with
+                                    ⟨storage, _hstorageReach, hownsWrite⟩
+                                  rcases hownsWrite with
+                                    ⟨ownerLifetime, hownerSlotWrite⟩
+                                  by_cases hstorageLeaf :
+                                      storage = lhsLocation
+                                  · subst storage
+                                    have hnewOwnsReached :
+                                        PartialValue.value value =
+                                          PartialValue.value
+                                            (owningRef reached) := by
+                                      have hslotEq :
+                                          { overwrittenSlot with
+                                            value := PartialValue.value value } =
+                                            StoreSlot.mk
+                                              (PartialValue.value
+                                                (owningRef reached))
+                                              ownerLifetime := by
+                                        simpa [ProgramStore.update] using
+                                          hownerSlotWrite
+                                      exact congrArg StoreSlot.value hslotEq
+                                    have htermOwns :
+                                        reached ∈
+                                          termOwningLocations (.val value) := by
+                                      simpa [termOwningLocations, termValues,
+                                        valueOwningLocations,
+                                        partialValueOwningLocations]
+                                        using
+                                          mem_partialValueOwningLocations_of_eq_owningRef
+                                            hnewOwnsReached
+                                    exact
+                                      (ValidRuntimeState.storeTermDisjoint
+                                        hvalidInner reached htermOwns)
+                                      ⟨lhsLocation, holdOwns⟩
+                                  · have hownerStore :
+                                        ProgramStore.OwnsAt midStore reached
+                                          storage :=
+                                      ⟨ownerLifetime, by
+                                        simpa [ProgramStore.update,
+                                          hstorageLeaf] using
+                                          hownerSlotWrite⟩
+                                    have hstorageEq :
+                                        storage = lhsLocation :=
+                                      (ValidRuntimeState.validStore
+                                        hvalidInner) reached storage
+                                        lhsLocation hownerStore holdOwns
+                                    exact hstorageLeaf hstorageEq
+                              have hnewRootValidFinal :
+                                  ValidPartialValue finalStore
+                                    rootSlot.value _updatedTy :=
+                                RuntimeFrame.validPartialValue_drops_of_avoids_reaches
+                                  hdrops hnewRootValidWrite
+                                  (by
+                                    intro reached hreach
+                                    exact
+                                      RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValue
+                                        hdrops hwriteValidStore
+                                        hrootSlotWriteEnv hnewBorrowsRoot
+                                        hnewRootValidWrite havoidRoot
+                                        hnewGraphDisjoint hreach)
+                              have hallocatedWrite :
+                                  StoreOwnersAllocated
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value }) :=
+                                storeOwnersAllocated_write_value_of_validValue
+                                  (ValidRuntimeState.storeOwnersAllocated
+                                    hvalidInner)
+                                  hvalidValue hwriteStoreConcrete
+                              have hrootWrite :
+                                  HeapSlotsRootLifetime
+                                    (midStore.update lhsLocation
+                                      { overwrittenSlot with
+                                        value := .value value }) :=
+                                heapSlotsRootLifetime_write
+                                  (ValidRuntimeState.heapSlotsRootLifetime
+                                    hvalidInner)
+                                  hwriteStoreConcrete
+                              have hdropDisjoint :
+                                  ∀ owned,
+                                    owned ∈
+                                      partialValuesOwningLocations
+                                        [overwrittenSlot.value] →
+                                    ¬ ProgramStore.Owns
+                                      (midStore.update lhsLocation
+                                        { overwrittenSlot with
+                                          value := .value value })
+                                      owned := by
+                                intro owned hmem howns
+                                simp [partialValuesOwningLocations] at hmem
+                                have holdOwns :
+                                    ProgramStore.OwnsAt midStore owned
+                                      lhsLocation := by
+                                  have holdValue :
+                                      overwrittenSlot.value =
+                                        .value (owningRef owned) :=
+                                    eq_owningRef_of_mem_partialValueOwningLocations
+                                      hmem
+                                  exact ⟨overwrittenSlot.lifetime, by
+                                    cases overwrittenSlot with
+                                    | mk oldValue oldLifetime =>
+                                        cases holdValue
+                                        simpa [owningRef] using hlhsSlot⟩
+                                rw [ProgramStore.Owns] at howns
+                                rcases howns with
+                                  ⟨storage, ownerLifetime,
+                                    hownerSlotWrite⟩
+                                by_cases hstorageLeaf :
+                                    storage = lhsLocation
+                                · subst storage
+                                  have hnewOwnsOld :
+                                      owned ∈
+                                        partialValueOwningLocations
+                                          (.value value) := by
+                                    have hslotEq :
+                                        { overwrittenSlot with
+                                          value := PartialValue.value value } =
+                                          StoreSlot.mk
+                                            (PartialValue.value
+                                              (owningRef owned))
+                                            ownerLifetime := by
+                                      simpa [ProgramStore.update] using
+                                        hownerSlotWrite
+                                    exact
+                                      mem_partialValueOwningLocations_of_eq_owningRef
+                                        (congrArg StoreSlot.value hslotEq)
+                                  exact
+                                    (ValidRuntimeState.storeTermDisjoint
+                                      hvalidInner owned
+                                      (by
+                                        simpa [termOwningLocations,
+                                          termValues,
+                                          partialValueOwningLocations]
+                                          using hnewOwnsOld))
+                                    ⟨lhsLocation, holdOwns⟩
+                                · have hownerOld :
+                                      ProgramStore.OwnsAt midStore owned
+                                        storage :=
+                                    ⟨ownerLifetime, by
+                                      simpa [ProgramStore.update,
+                                        hstorageLeaf] using
+                                        hownerSlotWrite⟩
+                                  have hstorageEq :
+                                      storage = lhsLocation :=
+                                    (ValidRuntimeState.validStore hvalidInner)
+                                      owned storage lhsLocation hownerOld
+                                      holdOwns
+                                  exact hstorageLeaf hstorageEq
+                              have hallocatedFinal :
+                                  StoreOwnersAllocated finalStore :=
+                                drops_storeOwnersAllocated_of_disjoint
+                                  hdrops hwriteValidStore hallocatedWrite
+                                  hdropDisjoint
+                              have hheapFinal :
+                                  StoreOwnerTargetsHeap finalStore :=
+                                drops_storeOwnerTargetsHeap hdrops
+                                  hwriteOwnerHeap
+                              have hrootFinal :
+                                  HeapSlotsRootLifetime finalStore :=
+                                drops_heapSlotsRootLifetime hdrops
+                                  hrootWrite
+                              have hvalidRuntimeFinal :
+                                  ValidRuntimeState finalStore (.val .unit) :=
+                                validRuntimeState_assign_step_of_postWriteDrop_invariants
+                                  (lifetime := _lifetime)
+                                  hvalidAssign hallocatedFinal hheapFinal
+                                  hrootFinal hread hwriteStoreConcrete hdrops
+                              have hrootSlotFinal :
+                                  finalStore.slotAt
+                                    (VariableProjection
+                                      (LVal.base source.deref.deref)) =
+                                    some
+                                      { value := rootSlot.value,
+                                        lifetime := writeEnvSlot.lifetime } :=
+                                dropsAvoids_slotAt_preserved hdrops
+                                  havoidRoot hrootSlotWriteEnv
+                              have hsafeFinal :
+                                  finalStore ∼ₛ
+                                    (_env₂.update
+                                      (LVal.base source.deref.deref)
+                                      { ty := _updatedTy,
+                                        lifetime := writeEnvSlot.lifetime }) := by
+                                refine safeAbstraction_update_var_partial_of_preserved
+                                  hbase hrootSlotFinal hnewRootValidFinal rfl
+                                  ?domainNested ?preserveNested
+                                · intro y hyBase
+                                  constructor
+                                  · intro hdomainStore
+                                    rcases hdomainStore with
+                                      ⟨slotY, hslotYFinal⟩
+                                    have hslotYWrite :
+                                        (midStore.update lhsLocation
+                                          { overwrittenSlot with
+                                            value := .value value }).slotAt
+                                          (VariableProjection y) =
+                                          some slotY :=
+                                      drops_slotAt_of_slotAt hdrops
+                                        hslotYFinal
+                                    have hyLeaf :
+                                        VariableProjection y ≠
+                                          lhsLocation := by
+                                      intro hyLeaf
+                                      rcases hlhsHeap with
+                                        ⟨address, hheap⟩
+                                      rw [← hyLeaf] at hheap
+                                      cases hheap
+                                    have hslotYStore :
+                                        midStore.slotAt
+                                          (VariableProjection y) =
+                                          some slotY := by
+                                      simpa [ProgramStore.update, hyLeaf] using
+                                        hslotYWrite
+                                    exact (hsafeInner.1 y).mp
+                                      ⟨slotY, hslotYStore⟩
+                                  · intro hdomainEnv
+                                    rcases hdomainEnv with
+                                      ⟨otherEnvSlot, henvY⟩
+                                    rcases hsafeInner.2 y otherEnvSlot
+                                        henvY with
+                                      ⟨oldValue, hslotY, _hvalidOld⟩
+                                    have hyLeaf :
+                                        VariableProjection y ≠
+                                          lhsLocation := by
+                                      intro hyLeaf
+                                      rcases hlhsHeap with
+                                        ⟨address, hheap⟩
+                                      rw [← hyLeaf] at hheap
+                                      cases hheap
+                                    have hslotYWrite :
+                                        (midStore.update lhsLocation
+                                          { overwrittenSlot with
+                                            value := .value value }).slotAt
+                                          (VariableProjection y) =
+                                          some
+                                            { value := oldValue,
+                                              lifetime :=
+                                                otherEnvSlot.lifetime } := by
+                                      simpa [ProgramStore.update, hyLeaf] using
+                                        hslotY
+                                    have havoidY :
+                                        DropsAvoids
+                                          (midStore.update lhsLocation
+                                            { overwrittenSlot with
+                                              value := .value value })
+                                          [overwrittenSlot.value]
+                                          (VariableProjection y) :=
+                                      dropsAvoids_var_of_ownerTargetsHeap
+                                        hdrops hwriteOwnerHeap
+                                        hdropValuesHeap
+                                    exact ⟨_,
+                                      dropsAvoids_slotAt_preserved hdrops
+                                        havoidY hslotYWrite⟩
+                                · intro y otherEnvSlot hyBase henvY
+                                  rcases hsafeInner.2 y otherEnvSlot henvY
+                                    with ⟨oldValue, hslotY, hvalidOld⟩
+                                  have hyLeaf :
+                                      VariableProjection y ≠ lhsLocation := by
+                                    intro hyLeaf
+                                    rcases hlhsHeap with ⟨address, hheap⟩
+                                    rw [← hyLeaf] at hheap
+                                    cases hheap
+                                  have hslotYWrite :
+                                      (midStore.update lhsLocation
+                                        { overwrittenSlot with
+                                          value := .value value }).slotAt
+                                        (VariableProjection y) =
+                                        some
+                                          { value := oldValue,
+                                            lifetime :=
+                                              otherEnvSlot.lifetime } := by
+                                    simpa [ProgramStore.update, hyLeaf] using
+                                      hslotY
+                                  have havoidY :
+                                      DropsAvoids
+                                        (midStore.update lhsLocation
+                                          { overwrittenSlot with
+                                            value := .value value })
+                                        [overwrittenSlot.value]
+                                        (VariableProjection y) :=
+                                    dropsAvoids_var_of_ownerTargetsHeap
+                                      hdrops hwriteOwnerHeap hdropValuesHeap
+                                  have hborrowsOld :
+                                      PartialTyBorrowsWellFormedInSlot _env₂
+                                        otherEnvSlot.lifetime
+                                        otherEnvSlot.ty := by
+                                    intro mutable targets hcontains
+                                    exact hwellInner.1 y otherEnvSlot
+                                      mutable targets henvY
+                                      ⟨otherEnvSlot, henvY, hcontains⟩
+                                  have hvalueHeapOld :
+                                      PartialValueOwnerTargetsHeap oldValue :=
+                                    partialValueOwnerTargetsHeap_of_slot
+                                      (ValidRuntimeState.storeOwnerTargetsHeap
+                                        hvalidInner) hslotY
+                                  have hvarYNeRoot :
+                                      VariableProjection y ≠
+                                        VariableProjection
+                                          (LVal.base source.deref.deref) := by
+                                    intro hvarEq
+                                    exact hyBase (by cases hvarEq; rfl)
+                                  have hrootNoReachOld :
+                                      ∀ reached,
+                                        RuntimeFrame.Reaches midStore
+                                          oldValue otherEnvSlot.ty reached →
+                                        reached ≠
+                                          VariableProjection
+                                            (LVal.base source.deref.deref) := by
+                                    intro reached hreach
+                                    exact
+                                      RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                                        (ValidRuntimeState.storeOwnerTargetsHeap
+                                          hvalidInner)
+                                        hvalueHeapOld hborrowsOld hreach
+                                  have holdNoReachLeaf :
+                                      ∀ reached,
+                                        RuntimeFrame.Reaches midStore
+                                          oldValue otherEnvSlot.ty reached →
+                                        reached ≠ lhsLocation :=
+                                    StoreOwnerSpine.stored_var_not_reaches_leaf_of_not_reaches_root
+                                      (ValidRuntimeState.validStore hvalidInner)
+                                      (ValidRuntimeState.storeOwnerTargetsHeap
+                                        hvalidInner)
+                                      hslotY hborrowsOld hvalidOld hspine
+                                      hvarYNeRoot hrootNoReachOld
+                                  have hvalidOldWrite :
+                                      ValidPartialValue
+                                        (midStore.update lhsLocation
+                                          { overwrittenSlot with
+                                            value := .value value })
+                                        oldValue otherEnvSlot.ty :=
+                                    RuntimeFrame.validPartialValue_update_of_not_reaches
+                                      hvalidOld holdNoReachLeaf
+                                  have holdGraphDisjoint :
+                                      ∀ reached,
+                                        RuntimeFrame.Reaches
+                                          (midStore.update lhsLocation
+                                            { overwrittenSlot with
+                                              value := .value value })
+                                          oldValue otherEnvSlot.ty reached →
+                                        ∀ dropValue,
+                                          dropValue ∈ [overwrittenSlot.value] →
+                                          reached ∉
+                                            partialValueOwningLocations
+                                              dropValue := by
+                                    intro reached hreach dropValue hmem
+                                      howned
+                                    simp at hmem
+                                    subst hmem
+                                    have holdOwns :
+                                        ProgramStore.OwnsAt midStore
+                                          reached lhsLocation := by
+                                      have holdValue :
+                                          overwrittenSlot.value =
+                                            .value (owningRef reached) :=
+                                        eq_owningRef_of_mem_partialValueOwningLocations
+                                          howned
+                                      exact ⟨overwrittenSlot.lifetime, by
+                                        cases overwrittenSlot with
+                                        | mk oldValueX oldLifetimeX =>
+                                            cases holdValue
+                                            simpa [owningRef] using
+                                              hlhsSlot⟩
+                                    rcases RuntimeFrame.reaches_owner_source_of_validPartialValue
+                                        hborrowsOld hvalidOldWrite
+                                        hreach with hdirect | hsource
+                                    · have holdValueOwns :
+                                          oldValue =
+                                            .value (owningRef reached) :=
+                                        eq_owningRef_of_mem_partialValueOwningLocations
+                                          hdirect
+                                      have hownsY :
+                                          ProgramStore.OwnsAt midStore
+                                            reached
+                                            (VariableProjection y) :=
+                                        ⟨otherEnvSlot.lifetime, by
+                                          cases holdValueOwns
+                                          simpa [owningRef] using
+                                            hslotY⟩
+                                      have hstorageEq :
+                                          VariableProjection y =
+                                            lhsLocation :=
+                                        (ValidRuntimeState.validStore
+                                          hvalidInner) reached
+                                          (VariableProjection y)
+                                          lhsLocation hownsY holdOwns
+                                      exact hyLeaf hstorageEq
+                                    · rcases hsource with
+                                        ⟨storage, _hstorageReach,
+                                          hownsWrite⟩
+                                      rcases hownsWrite with
+                                        ⟨ownerLifetime,
+                                          hownerSlotWrite⟩
+                                      by_cases hstorageLeaf :
+                                          storage = lhsLocation
+                                      · subst storage
+                                        have hnewOwnsReached :
+                                            PartialValue.value value =
+                                              PartialValue.value
+                                                (owningRef reached) := by
+                                          have hslotEq :
+                                              { overwrittenSlot with
+                                                value :=
+                                                  PartialValue.value value } =
+                                                StoreSlot.mk
+                                                  (PartialValue.value
+                                                    (owningRef reached))
+                                                  ownerLifetime := by
+                                            simpa [ProgramStore.update] using
+                                              hownerSlotWrite
+                                          exact congrArg StoreSlot.value
+                                            hslotEq
+                                        have htermOwns :
+                                            reached ∈
+                                              termOwningLocations
+                                                (.val value) := by
+                                          simpa [termOwningLocations,
+                                            termValues, valueOwningLocations,
+                                            partialValueOwningLocations]
+                                            using
+                                              mem_partialValueOwningLocations_of_eq_owningRef
+                                                hnewOwnsReached
+                                        exact
+                                          (ValidRuntimeState.storeTermDisjoint
+                                            hvalidInner reached htermOwns)
+                                          ⟨lhsLocation, holdOwns⟩
+                                      · have hownerStore :
+                                            ProgramStore.OwnsAt midStore
+                                              reached storage :=
+                                          ⟨ownerLifetime, by
+                                            simpa [ProgramStore.update,
+                                              hstorageLeaf] using
+                                              hownerSlotWrite⟩
+                                        have hstorageEq :
+                                            storage = lhsLocation :=
+                                          (ValidRuntimeState.validStore
+                                            hvalidInner) reached storage
+                                            lhsLocation hownerStore holdOwns
+                                        exact hstorageLeaf hstorageEq
+                                  have hvalidOldFinal :
+                                      ValidPartialValue finalStore oldValue
+                                        otherEnvSlot.ty :=
+                                    RuntimeFrame.validPartialValue_drops_of_avoids_reaches
+                                      hdrops hvalidOldWrite
+                                      (by
+                                        intro reached hreach
+                                        exact
+                                          RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValue
+                                            hdrops hwriteValidStore
+                                            hslotYWrite hborrowsOld
+                                            hvalidOldWrite havoidY
+                                            holdGraphDisjoint hreach)
+                                  exact ⟨oldValue,
+                                    dropsAvoids_slotAt_preserved hdrops
+                                      havoidY hslotYWrite,
+                                    hvalidOldFinal⟩
+                              exact ⟨hvalidRuntimeFinal, hsafeFinal,
+                                ValidPartialValue.unit⟩
                   | borrow hsourceBorrow htargets =>
                       rename_i mutable targets borrowLifetime
                       have hsourceLocation :
@@ -6698,22 +8813,24 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                                       hmemberTyping hselectedShape hwellTy
                                       hselectedStrongWrite hvalidValue
                                       hselectedStep
-                                  cases lv with
-                                  | var sourceName =>
-                                      rcases LValTyping.var_inv hsourceBorrow with
-                                        ⟨sourceEnvSlot, hsourceEnvSlot,
-                                          hsourceTy, _hsourceLifetime⟩
-                                      have hmap :
-                                          EnvSameShapeStrengthening
-                                            selectedStrongEnv _env₃ :=
-                                        EnvWrite.deref_var_borrow_selected_var_map
-                                          hsourceEnvSlot hsourceTy hwrite
-                                          hnotWrite htargetMem hselectedEnvSlot
-                                          _hselectedTyEq
-                                      exact TerminalStateSafe.transport_sameShape
-                                        hselectedTerminal hmap.1 hmap.2
-                                  | deref source =>
-                                      sorry
+                                  have hpathSelected :
+                                      PathSelected _env₂
+                                        (.ty (.borrow mutable targets)) [()]
+                                        selectedName selectedEnvSlot memberTy :=
+                                    PathSelected.borrowHere htargetMem
+                                      hselectedEnvSlot _hselectedTyEq
+                                  rcases hwellInner.2.2.2 with ⟨φ, hφ⟩
+                                  have hmap :
+                                      EnvSameShapeStrengthening
+                                        selectedStrongEnv _env₃ := by
+                                    dsimp [selectedStrongEnv]
+                                    exact
+                                      EnvWrite.selected_path_map
+                                        (φ := φ) hφ hsourceBorrow
+                                        hpathSelected
+                                        (by simpa [prependPath] using hwrite)
+                                  exact TerminalStateSafe.transport_sameShape
+                                    hselectedTerminal hmap.1 hmap.2
                               | deref selectedSource =>
                                   cases htargetVar
         exact ⟨hwellOut, hterminal⟩)
