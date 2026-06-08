@@ -11,11 +11,12 @@ matter when comparing theorem statements.
 
 ### Type and Borrow System
 
-- **Variable-only source lvalues.**  The paper permits general lvalues in move,
-  borrow, and borrow target positions.  The mechanisation adds `LValIsVar` to
-  `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, and the borrow-target invariant.
-  Assignment lhs lvalues are not variable-restricted: `T-Assign` uses `EnvWrite`
-  and can write through mutable references.  See `LwRust/Paper/Typing.lean`.
+- **Variable-only move/borrow sources and borrow targets.**  The paper permits
+  general lvalues in move, borrow, and borrow target positions.  The
+  mechanisation still adds `LValIsVar` to `T-Move`, `T-MutBorrow`,
+  `T-ImmBorrow`, and the borrow-target invariant.  Assignment lhs lvalues are
+  not variable-restricted: `T-Assign` uses `EnvWrite` and can write through
+  mutable references.  See `LwRust/Paper/Typing.lean`.
 
 - **Restricted block and sequence drops.**  The paper allows general owning
   temporaries and relies on full recursive drop preservation.  The mechanised
