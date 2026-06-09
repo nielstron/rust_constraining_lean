@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
+import LwRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
 
 /-!
 # Source-level initial-state corollaries
@@ -239,18 +239,18 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
         _htypingEq candidate hmem
       simp [termValues] at hmem)
-    (by
-      intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-        _hLv _hvar _hnotWrite _hmove _htypingEq candidate hmem
-      simp [termValues] at hmem)
-    (by
-      intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar
-        _hmutable _hnotWrite _htypingEq candidate hmem
-      simp [termValues] at hmem)
-    (by
-      intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar
-        _hnotRead _htypingEq candidate hmem
-      simp [termValues] at hmem)
+      (by
+        intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
+          _hLv _hnotWrite _hmove _htypingEq candidate hmem
+        simp [termValues] at hmem)
+      (by
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv
+          _hmutable _hnotWrite _htypingEq candidate hmem
+        simp [termValues] at hmem)
+      (by
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv
+          _hnotRead _htypingEq candidate hmem
+        simp [termValues] at hmem)
     (by
       intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
         candidate hmem
@@ -364,19 +364,21 @@ theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ₛ Env.empty ∧
-    (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
-    OperationalStoreProgress ProgramStore.empty ∧
-    (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
+      ProgramStore.empty ∼ₛ Env.empty ∧
+      (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
+      BorrowSafeEnv Env.empty ∧
+      OperationalStoreProgress ProgramStore.empty ∧
+      (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
   intro htyping
   exact ⟨emptyInitialRuntimeState_valid_of_typing htyping,
     emptyInitialValidStoreTyping_of_typing htyping,
-    safeAbstraction_empty,
-    wellFormedEnv_empty_all,
-    operationalStoreProgress_empty,
-    by
-      intro env lifetime
-      exact storeTypingRefsWellFormed_empty env lifetime⟩
+      safeAbstraction_empty,
+      wellFormedEnv_empty_all,
+      borrowSafeEnv_empty,
+      operationalStoreProgress_empty,
+      by
+        intro env lifetime
+        exact storeTypingRefsWellFormed_empty env lifetime⟩
 
 /-- **Lemma 4.10.** Empty-store/source-term instance of Progress. -/
 theorem sourceInitial_progress {term : Term} {lifetime : Lifetime}
@@ -418,8 +420,8 @@ theorem emptyInitial_progress {term : Term} {lifetime : Lifetime}
     ProgressResult ProgramStore.empty lifetime term := by
   intro htyping
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
-      _hrefs⟩
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hborrowSafe,
+      hstoreProgress, _hrefs⟩
   exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping hwellFormed
     hsafe hstoreProgress htyping
 
@@ -434,11 +436,11 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     TerminalStateSafe finalStore finalValue env₂ ty := by
   intro htyping hmulti
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hstoreProgress,
-      hrefs⟩
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, hborrowSafe,
+      _hstoreProgress, hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact preservation hrefs hsource hvalidRuntime hvalidStoreTyping
-    (wellFormedEnv_empty lifetime) hsafe htyping hmulti
+    (wellFormedEnv_empty lifetime) hborrowSafe hsafe htyping hmulti
 
 /--
 **Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.
@@ -468,11 +470,11 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
         TerminalStateSafe finalStore finalValue env₂ ty := by
   intro htyping hterminates
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
-      hrefs⟩
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
+      hstoreProgress, hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact typeAndBorrowSafety hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed
-    hsafe hstoreProgress htyping hterminates
+    hborrowSafe hsafe hstoreProgress htyping hterminates
 
 /--
 **Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.

@@ -27,9 +27,9 @@ Section 4 is mechanized for the strengthened calculus documented in the README.
 The README separates shortcuts to eliminate from intentional repairs and
 strengthenings to keep.  In brief:
 
-* shortcuts: preservation still uses a variable-specialized `R-Move`
-  store-preservation fragment; the typing rules for move/borrow sources and
-  stored borrow targets are lvalue-general;
+* move sources are lvalue-general where the paper permits them; `EnvMove` is
+  intentionally `Strike`-based and therefore cannot move out through borrowed
+  references, matching Definition 3.18;
 * theorem interface: Theorem 4.12 exposes `TerminatesAsValue` instead of
   proving terminal existence.  The nontermination-friendly local safety
   statement is `progress_runtime_step`;

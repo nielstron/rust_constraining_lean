@@ -22,10 +22,10 @@ One file per core lemma/theorem of `lw_rust.pdf` Section 4 and Appendix 9.  Each
 file states the paper result, wires it to the mechanization in
 `LwRust.Paper.Soundness`, and records its status.  The README separates the
 remaining shortcuts to eliminate from intentional repairs/strengthenings to
-keep.  The remaining source-lvalue shortcut is in preservation's
-variable-specialized `R-Move` store-preservation fragment; the core typing rules
-for move/borrow sources and stored borrow targets are lvalue-general.  The
-current shortcuts also include restricted sequence/block drops.  Theorem 4.12 is
+keep.  Move sources are lvalue-general where the paper permits them; moves
+through borrowed references are intentionally untypeable because `EnvMove`
+follows the paper's `Strike` definition.  The current shortcuts include
+restricted sequence/block drops.  Theorem 4.12 is
 currently the conditional terminal-safety form; Lemma
 4.10 provides the local progress theorem used for nontermination-friendly safety
 statements.

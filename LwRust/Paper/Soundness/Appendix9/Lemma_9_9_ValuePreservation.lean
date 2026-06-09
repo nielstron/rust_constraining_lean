@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
+import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 
 /-!
 # Lemma 9.9 (Value Preservation)
@@ -25,16 +25,17 @@ theorem lemma_9_9_valuePreservation
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     SourceTerm term →
-    ValidRuntimeState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    store ∼ₛ env₁ →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      BorrowSafeEnv env₁ →
+      store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ValidValue finalStore finalValue ty := by
-  intro hrefs hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
-  exact (preservation hrefs hsource hvalid hstoreTyping
-    hwellFormed hsafe htyping hmulti).2.2
+    intro hrefs hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
+    exact (preservation hrefs hsource hvalid hstoreTyping
+      hwellFormed hborrowSafe hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

@@ -14,14 +14,6 @@ The goal is to reduce these to 0.
   paper's more future-proof `Gamma2 >= Gamma3` shape.  That weakening relation
   should be reintroduced for control flow, loops, and recursive calls.
 
-- **Preservation still has variable-source proof fragments.**  The typing rules
-  now state `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, and stored borrow-target
-  well-formedness over lvalues, matching the paper.  The remaining shortcut is
-  in the preservation proof infrastructure: the `R-Move` store-preservation
-  fragment is still specialized to direct variables and must be generalized to
-  owner paths such as `*x`.
-
-
 ## Improvements
 
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
@@ -60,10 +52,10 @@ These deviations from the paper should be kept.
 - **Borrow well-formedness is preserved per target.**  Runtime borrow
   well-formedness uses `BorrowTargetsWellFormed`, which requires each target to
   be individually typeable, outlive the borrow lifetime, have a base slot that
-  survives for that lifetime, and satisfy the variable-target restriction.  Joint
-  target-list typing is still required where coherence or shape arguments need
-  it, but it is not used as the global invariant: environment joins can merge
-  target lists whose pointee types do not have a joint type.
+  survives for that lifetime.  Joint target-list typing is still required where
+  coherence or shape arguments need it, but it is not used as the global
+  invariant: environment joins can merge target lists whose pointee types do not
+  have a joint type.
 
 - **Well-formed environments carry extra borrow invariants.**  `WellFormedEnv`
   is augmented with `Coherent` and `Linearizable`.  `Coherent` records joint

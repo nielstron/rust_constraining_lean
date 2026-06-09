@@ -13,6 +13,59 @@ open Core
 
 /-! ## Section 4.3: Borrow Invariance -/
 
+/--
+Definition 4.13, borrow-safe environment.
+
+The paper phrases this over variables in `dom(Γ)` and borrowed lvalues inside
+contained borrow types.  The containment premises already imply the relevant
+variables are present in the environment.
+-/
+def BorrowSafeEnv (env : Env) : Prop :=
+  ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
+    env ⊢ x ↝ (&mut targetsMutable) →
+    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    x = y
+
+theorem BorrowSafeEnv.same_root_of_mut_conflict {env : Env}
+    {x y : Name} {mutable : Bool}
+    {targetsMutable targetsOther : List LVal}
+    {targetMutable targetOther : LVal} :
+    BorrowSafeEnv env →
+    env ⊢ x ↝ (&mut targetsMutable) →
+    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    x = y := by
+  intro hsafe hmutable hother htargetMutable htargetOther hconflict
+  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    hmutable hother htargetMutable htargetOther hconflict
+
+theorem BorrowSafeEnv.no_other_root_conflict {env : Env}
+    {x y : Name} {mutable : Bool}
+    {targetsMutable targetsOther : List LVal}
+    {targetMutable targetOther : LVal} :
+    BorrowSafeEnv env →
+    x ≠ y →
+    env ⊢ x ↝ (&mut targetsMutable) →
+    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    ¬ targetMutable ⋈ targetOther := by
+  intro hsafe hne hmutable hother htargetMutable htargetOther hconflict
+  exact hne
+    (BorrowSafeEnv.same_root_of_mut_conflict hsafe hmutable hother
+      htargetMutable htargetOther hconflict)
+
+theorem PathConflicts.symm {left right : LVal} :
+    left ⋈ right →
+    right ⋈ left := by
+  intro h
+  exact Eq.symm h
+
 @[simp] theorem containedBorrowsWellFormed_empty :
     ContainedBorrowsWellFormed Env.empty := by
   intro x slot mutable targets hslot _hcontains
@@ -496,6 +549,99 @@ theorem partialTy_vars_mem_contains {pt : PartialTy} :
     (by intro s _ih v hv;
         exact (List.not_mem_nil (show v ∈ ([] : List Name) from hv)).elim)
     pt
+
+/--
+If a mutable-borrow target's base occurs in another root's type, borrow safety
+forces that root to be the mutable-borrow authority itself.
+-/
+theorem BorrowSafeEnv.same_root_of_mut_target_var {env : Env}
+    {authority y : Name} {targetsMutable : List LVal} {targetMutable : LVal}
+    {slot : EnvSlot} :
+    BorrowSafeEnv env →
+    env ⊢ authority ↝ (&mut targetsMutable) →
+    targetMutable ∈ targetsMutable →
+    env.slotAt y = some slot →
+    LVal.base targetMutable ∈ PartialTy.vars slot.ty →
+    authority = y := by
+  intro hsafe hmut htargetMutable hslotY hvars
+  rcases partialTy_vars_mem_contains (pt := slot.ty)
+      (LVal.base targetMutable) hvars with
+    ⟨mutable, targetsOther, hcontainsOther, targetOther, htargetOther,
+      hbaseOther⟩
+  exact BorrowSafeEnv.same_root_of_mut_conflict hsafe hmut
+    ⟨slot, hslotY, hcontainsOther⟩ htargetMutable htargetOther
+    (by simp [PathConflicts, hbaseOther])
+
+theorem BorrowSafeEnv.no_other_root_mut_target_var {env : Env}
+    {authority y : Name} {targetsMutable : List LVal} {targetMutable : LVal}
+    {slot : EnvSlot} :
+    BorrowSafeEnv env →
+    authority ≠ y →
+    env ⊢ authority ↝ (&mut targetsMutable) →
+    targetMutable ∈ targetsMutable →
+    env.slotAt y = some slot →
+    ¬ LVal.base targetMutable ∈ PartialTy.vars slot.ty := by
+  intro hsafe hne hmut htargetMutable hslotY hvars
+  exact hne
+    (BorrowSafeEnv.same_root_of_mut_target_var hsafe hmut htargetMutable
+      hslotY hvars)
+
+/--
+If a variable at the base of a known mutable-borrow target is write-prohibited,
+then every borrow witness responsible for that prohibition lives in the mutable
+borrow's authority root.
+-/
+theorem BorrowSafeEnv.writeProhibited_var_witness_root_of_mut_target
+    {env : Env} {authority witness : Name}
+    {targetsMutable targetsOther : List LVal} {targetMutable targetOther : LVal}
+    {mutable : Bool} :
+    BorrowSafeEnv env →
+    env ⊢ authority ↝ (&mut targetsMutable) →
+    targetMutable ∈ targetsMutable →
+    env ⊢ witness ↝ (Ty.borrow mutable targetsOther) →
+    targetOther ∈ targetsOther →
+    targetOther ⋈ (.var (LVal.base targetMutable)) →
+    authority = witness := by
+  intro hsafe hmut htargetMutable hother htargetOther hconflict
+  exact BorrowSafeEnv.same_root_of_mut_conflict hsafe hmut hother
+    htargetMutable htargetOther (by
+      simpa [PathConflicts, LVal.base] using hconflict.symm)
+
+theorem BorrowSafeEnv.writeProhibited_var_of_mut_target_authority
+    {env : Env} {authority : Name}
+    {targetsMutable : List LVal} {targetMutable : LVal} :
+    BorrowSafeEnv env →
+    env ⊢ authority ↝ (&mut targetsMutable) →
+    targetMutable ∈ targetsMutable →
+    WriteProhibited env (.var (LVal.base targetMutable)) →
+    ∃ mutable targetsOther targetOther,
+      env ⊢ authority ↝ (Ty.borrow mutable targetsOther) ∧
+        targetOther ∈ targetsOther ∧
+        targetOther ⋈ (.var (LVal.base targetMutable)) := by
+  intro hsafe hmut htargetMutable hwrite
+  cases hwrite with
+  | inl hread =>
+      rcases hread with
+        ⟨witness, targetsOther, targetOther, hother, htargetOther,
+          hconflict⟩
+      have hauthority :
+          authority = witness :=
+        BorrowSafeEnv.writeProhibited_var_witness_root_of_mut_target
+          hsafe hmut htargetMutable hother htargetOther hconflict
+      subst hauthority
+      exact ⟨true, targetsOther, targetOther, hother, htargetOther,
+        hconflict⟩
+  | inr himm =>
+      rcases himm with
+        ⟨witness, targetsOther, targetOther, hother, htargetOther,
+          hconflict⟩
+      have hauthority :
+          authority = witness :=
+        BorrowSafeEnv.writeProhibited_var_witness_root_of_mut_target
+          hsafe hmut htargetMutable hother htargetOther hconflict
+      subst hauthority
+      exact ⟨false, targetsOther, targetOther, hother, htargetOther,
+        hconflict⟩
 
 /-- Variables occurring in a well-formed type are bound in the environment (each
 is the base of a borrow target, which types in `env`). -/

@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
+import LwRust.Paper.Soundness.Lemma_4_9_BorrowInvariance
 
 /-!
 # Corollary 4.14 (Borrow Safety)
@@ -33,22 +33,6 @@ open Core
 
 
 /-! ## Section 4.5.1: Borrow Safety -/
-
-/--
-Definition 4.13, borrow-safe environment.
-
-The paper phrases this over variables in `dom(Γ)` and borrowed lvals inside
-contained borrow types.  The containment premises already imply the relevant
-variables are present in the environment.
--/
-def BorrowSafeEnv (env : Env) : Prop :=
-  ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
-    env ⊢ x ↝ (&mut targetsMutable) →
-    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
-    targetMutable ∈ targetsMutable →
-    targetOther ∈ targetsOther →
-    targetMutable ⋈ targetOther →
-    x = y
 
 def TyBorrowFree (ty : Ty) : Prop :=
   ∀ mutable targets, ¬ PartialTyContains (.ty ty) (.borrow mutable targets)
@@ -977,7 +961,7 @@ theorem borrowSafety_immBorrow_result_extension {env env₂ : Env}
       (env₂.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) := by
   intro hsafe htyping hfresh
   cases htyping with
-  | immBorrow _hLv _hvar hnotRead =>
+  | immBorrow _hLv hnotRead =>
       exact borrowSafeEnv_update_fresh_immBorrow hsafe hfresh hnotRead
 
 theorem borrowSafety_mutBorrow_result_extension {env env₂ : Env}
@@ -990,7 +974,7 @@ theorem borrowSafety_mutBorrow_result_extension {env env₂ : Env}
       (env₂.update gamma { ty := .ty (.borrow true [lv]), lifetime := lifetime }) := by
   intro hsafe htyping hfresh
   cases htyping with
-  | mutBorrow _hLv _hvar _hmutable hnotWrite =>
+  | mutBorrow _hLv _hmutable hnotWrite =>
       exact borrowSafeEnv_update_fresh_mutBorrow hsafe hfresh hnotWrite
 
 /--
@@ -1354,7 +1338,7 @@ theorem borrowSafety_move_borrowFree_result_extension {env env₂ : Env}
     BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hsafe htyping hborrowFree
   cases htyping with
-  | move _hLv _hvar _hnotWrite hmove =>
+  | move _hLv _hnotWrite hmove =>
       exact borrowSafeEnv_update_fresh_borrowFree
         (borrowSafeEnv_move hsafe hmove) hborrowFree
 
@@ -1510,7 +1494,7 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
     targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
     htargetOther hconflict
   cases htyping with
-  | move hLv _hvar hnotWrite hmove =>
+  | move hLv hnotWrite hmove =>
       rcases LValTyping.var_inv hLv with
         ⟨sourceSlot, hslotSource, hsourceTy, _hsourceLifetime⟩
       by_cases ha : a = gamma
@@ -1796,7 +1780,7 @@ theorem borrowSafetyPreservation_move
     BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hborrowSafe htyping _hnotVar _hnotBorrowFree hfresh
   cases htyping with
-  | move hLv _hvar _hnotWrite hmove =>
+  | move hLv _hnotWrite hmove =>
       rcases hmove with ⟨slot, struck, hslot, hstrike, henv₂⟩
       subst henv₂
       exact borrowSafeEnv_move_result_extension_of_base_contains
@@ -2002,7 +1986,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
         typingPreservesBorrowSafeResult_copy_case hborrowSafe
           (TermTyping.copy (typing := _typing) hLv hcopy hnotRead) hfresh⟩)
     (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty}
-        hLv hvar hnotWrite hmove _hsource hborrowSafe =>
+        hLv hnotWrite hmove _hsource hborrowSafe =>
       by
         have hcore : BorrowSafeEnv _env₂ :=
           borrowSafeEnv_move hborrowSafe hmove
@@ -2020,34 +2004,34 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
         cases _lv with
         | var x =>
             exact borrowSafety_move_var_result_extension hborrowSafe
-              (TermTyping.move (typing := _typing) hLv hvar hnotWrite hmove) hfresh
+              (TermTyping.move (typing := _typing) hLv hnotWrite hmove) hfresh
         | deref lv =>
             by_cases hborrowFree : TyBorrowFree _ty
             · exact borrowSafety_move_borrowFree_result_extension
                 (typing := _typing) hborrowSafe
-                (TermTyping.move (typing := _typing) hLv hvar hnotWrite hmove)
+                (TermTyping.move (typing := _typing) hLv hnotWrite hmove)
                 hborrowFree
             · exact borrowSafetyPreservation_move (typing := _typing) hborrowSafe
-                (TermTyping.move (typing := _typing) hLv hvar hnotWrite hmove)
+                (TermTyping.move (typing := _typing) hLv hnotWrite hmove)
                 (by
                   intro x hvar
                   cases hvar)
                 hborrowFree
                 hfresh)
-    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hvar hmutable hnotWrite
+    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hmutable hnotWrite
         _hsource hborrowSafe =>
       ⟨hborrowSafe,
         tyBorrowSafeAgainstEnv_mutBorrow hnotWrite,
         fun gamma hfresh =>
         typingPreservesBorrowSafeResult_mutBorrow_case hborrowSafe
-          (TermTyping.mutBorrow (typing := _typing) hLv hvar hmutable hnotWrite) hfresh⟩)
-    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hvar hnotRead
+          (TermTyping.mutBorrow (typing := _typing) hLv hmutable hnotWrite) hfresh⟩)
+    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hnotRead
         _hsource hborrowSafe =>
       ⟨hborrowSafe,
         tyBorrowSafeAgainstEnv_immBorrow hnotRead,
         fun gamma hfresh =>
         typingPreservesBorrowSafeResult_immBorrow_case hborrowSafe
-          (TermTyping.immBorrow (typing := _typing) hLv hvar hnotRead) hfresh⟩)
+          (TermTyping.immBorrow (typing := _typing) hLv hnotRead) hfresh⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} hterm ih hsource hborrowSafe =>
       by
         have hinner := ih (SourceTerm.box_inner hsource) hborrowSafe
