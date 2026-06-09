@@ -653,6 +653,119 @@ theorem WriteBorrowTargets.sameShapeStrengthening_init {rank : Nat}
       (EnvJoin.left_sameShapeStrengthening hjoin hbranchShape)
   case intro => intros; trivial
 
+/--
+A write path that crosses a (mutable) borrow node of the walked type before the
+path is exhausted.
+
+Writes along such paths never strong-replace a leaf of the walked slot: at the
+borrow node the update fans out at positive rank (`W-MutBor`), where every leaf
+update is a weak join.  This is the discriminant separating the deref-of-borrow
+assignment from the rank-0 deref-of-box assignment (whose leaf is strongly
+replaced).
+-/
+inductive PathThroughBorrow : PartialTy → List Unit → Prop where
+  | borrowHere {mutable : Bool} {targets : List LVal} {path : List Unit} :
+      PathThroughBorrow (.ty (.borrow mutable targets)) (() :: path)
+  | box {inner : PartialTy} {path : List Unit} :
+      PathThroughBorrow inner path →
+      PathThroughBorrow (.box inner) (() :: path)
+
+@[simp] theorem List.Unit_append_cons (l s : List Unit) :
+    l ++ () :: s = () :: (l ++ s) := by
+  induction l with
+  | nil => rfl
+  | cons head tail ih =>
+      cases head
+      simp [ih]
+
+/--
+An update along a path that crosses a borrow node transports the whole
+environment by same-shape strengthening, and weakens the walked type itself
+by same-shape strengthening.
+
+The borrow node turns the rest of the update into a positive-rank fan-out
+(`WriteBorrowTargets`), whose initialized leaves are weak joins; the box prefix
+above the borrow node is rebuilt unchanged.
+-/
+theorem UpdateAtPath.sameShapeStrengthening_of_throughBorrow {rank : Nat}
+    {env writeEnv : Env} {path : List Unit} {pt updatedTy : PartialTy}
+    {rhsTy : Ty} :
+    PathThroughBorrow pt path →
+    UpdateAtPath rank env path pt rhsTy writeEnv updatedTy →
+    EnvSameShapeStrengthening env writeEnv ∧
+      PartialTyStrengthens pt updatedTy ∧
+      PartialTy.sameShape pt updatedTy := by
+  intro hthrough hupdate
+  induction hthrough generalizing rank writeEnv updatedTy with
+  | borrowHere =>
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+        cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        refine ⟨?_, PartialTyStrengthens.reflex, PartialTy.sameShape_refl _⟩
+        exact WriteBorrowTargets.sameShapeStrengthening_init
+          (Nat.succ_pos _) hwrites
+          (WriteBorrowTargets.initialized_leaves_of_typed hwrites)
+  | box _hinner ih =>
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq, hinnerUpdate⟩
+        cases htyEq
+        cases hupdatedEq
+        rcases ih hinnerUpdate with ⟨hmap, hstrength, hshape⟩
+        exact ⟨hmap, PartialTyStrengthens.box hstrength,
+          by simpa [PartialTy.sameShape] using hshape⟩
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+
+/--
+The slot type at the base of a borrow-typed lvalue crosses a borrow node along
+the lvalue's path extended by any suffix: the lvalue's own derefs walk the slot
+type through boxes and borrows, and the borrow type at the end is itself a
+borrow node consuming the first suffix step.
+-/
+theorem LValTyping.pathThroughBorrow_append {env : Env} {lv : LVal}
+    {pt : PartialTy} {lifetime : Lifetime}
+    (htyping : LValTyping env lv pt lifetime) :
+    ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+    ∀ (suffix : List Unit),
+      PathThroughBorrow pt suffix →
+      PathThroughBorrow slot.ty (LVal.path lv ++ suffix) := by
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lifetime _ =>
+      ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+      ∀ (suffix : List Unit),
+        PathThroughBorrow pt suffix →
+        PathThroughBorrow slot.ty (LVal.path lv ++ suffix))
+    (motive_2 := fun _targets _pt _lifetime _ => True)
+    ?var ?box ?borrow ?singleton ?cons htyping
+  case var =>
+    intro x slot hslot slot' hslot' suffix hsuffix
+    simp only [LVal.base] at hslot'
+    have hslotEq : slot = slot' := by
+      rw [hslot] at hslot'
+      exact Option.some.inj hslot'
+    subst hslotEq
+    simpa [LVal.path] using hsuffix
+  case box =>
+    intro source inner sourceLifetime _hsource ih slot hslot suffix hsuffix
+    have hsource :=
+      ih hslot (() :: suffix) (PathThroughBorrow.box hsuffix)
+    simpa [LVal.path, List.append_assoc] using hsource
+  case borrow =>
+    intro source mutable' targets' borrowLifetime targetLifetime targetTy
+      _hsource _htargets ihSource _ihTargets slot hslot suffix _hsuffix
+    have hsource :=
+      ihSource hslot (() :: suffix) PathThroughBorrow.borrowHere
+    simpa [LVal.path, List.append_assoc] using hsource
+  case singleton =>
+    intros
+    trivial
+  case cons =>
+    intros
+    trivial
+
 theorem lval_loc_var_rank_le_base {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
     {x : Name} {φ : Name → Nat} :
@@ -1966,7 +2079,25 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
               simpa [ProgramStore.update, hxUpdated, hlifetime'] using hstoreSlot
             refine ⟨oldValue, hslotFinal, ?_⟩
             have hglobalMap : EnvSameShapeStrengthening env env' := by
-              sorry
+              cases hwrite with
+              | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
+                  hwriteSlot hupdate =>
+                  have hwriteSlotBase :
+                      env.slotAt (LVal.base source) = some writeSlot := by
+                    simpa [LVal.base] using hwriteSlot
+                  have hthrough :
+                      PathThroughBorrow writeSlot.ty
+                        (LVal.path (.deref source)) := by
+                    simpa [LVal.path] using
+                      LValTyping.pathThroughBorrow_append hsourceBorrow
+                        hwriteSlotBase [()] PathThroughBorrow.borrowHere
+                  rcases UpdateAtPath.sameShapeStrengthening_of_throughBorrow
+                      hthrough hupdate with ⟨hmap, hstrength, hshape⟩
+                  have hfinal :=
+                    EnvSameShapeStrengthening.update_result_strengthening
+                      (resultSlot := { writeSlot with ty := updatedTy })
+                      hmap hwriteSlotBase rfl hstrength hshape
+                  simpa [LVal.base] using hfinal
             have holdValid :
                 ValidPartialValue
                   (store.update lhsLocation
