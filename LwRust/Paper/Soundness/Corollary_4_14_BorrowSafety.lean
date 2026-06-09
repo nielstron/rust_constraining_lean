@@ -2055,7 +2055,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           intro gamma hfresh
           exact borrowSafeEnv_update_box_of_update_inner (hinner.2.2 gamma hfresh)⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms hwellTy _hdropSafe hdrop _ih hsource hborrowSafe =>
+        hblockChild hterms hwellTy hdrop _ih hsource hborrowSafe =>
       by
         have hbody := _ih hsource hborrowSafe
         have hbodySafe : BorrowSafeEnv _env₂ :=
@@ -2103,7 +2103,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
       let h := _ih (SourceTerm.block_head hsource) hborrowSafe
       ⟨h.1, h.2.1⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-        _hterm _hnonOwner _hrest _ihHead _ihRest hsource hborrowSafe =>
+        _hterm _hrest _ihHead _ihRest hsource hborrowSafe =>
       by
         have hhead := _ihHead (SourceTerm.block_head hsource) hborrowSafe
         exact _ihRest (SourceTerm.block_tail hsource) hhead.1)

@@ -76,12 +76,7 @@ inductive CopyTy : Ty → Prop where
   | immBorrow {targets : List LVal} :
       CopyTy (.borrow false targets)
 
-/--
-Mechanized drop-safety classification for sequence temporaries.
-
-This is deliberately separate from `CopyTy`: unit and mutable borrows are
-non-owning at runtime, but they are not copy types in the paper.
--/
+/-- Runtime non-owner classification used by frame lemmas. -/
 inductive NonOwnerTy : Ty → Prop where
   | unit :
       NonOwnerTy .unit
@@ -89,29 +84,6 @@ inductive NonOwnerTy : Ty → Prop where
       NonOwnerTy .int
   | borrow {mutable : Bool} {targets : List LVal} :
       NonOwnerTy (.borrow mutable targets)
-
-/--
-Static drop-safety for partial types stored in a block-local slot.
-
-Owning `box` values require the paper's full recursive drop-preservation
-argument.  The mechanized block rule below allows the no-recursive-owner case:
-fully initialized non-owner values and `undef` are safe to erase at block exit.
--/
-def DropSafePartialTy : PartialTy → Prop
-  | .ty ty => NonOwnerTy ty
-  | .undef _ => True
-  | .box _ => False
-
-/--
-Every slot allocated in `lifetime` is statically safe to erase at lifetime drop.
-
-This is a mechanized strengthening of `T-Block`: block-local owning values are
-not allowed at the block boundary, so `R-BlockB` does not need an external
-drop-preservation premise.
--/
-def EnvLifetimeDropSafe (env : Env) (lifetime : Lifetime) : Prop :=
-  ∀ x slot, env.slotAt x = some slot → slot.lifetime = lifetime →
-    DropSafePartialTy slot.ty
 
 /-- Definition 3.7, type strengthening `T̃₁ ⊑ T̃₂`. -/
 inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
@@ -888,7 +860,6 @@ mutual
         LifetimeChild lifetime blockLifetime →
         TermListTyping env₁ typing blockLifetime terms ty env₂ →
         WellFormedTy env₂ ty lifetime →
-        EnvLifetimeDropSafe env₂ blockLifetime →
         env₃ = env₂.dropLifetime blockLifetime →
         TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃
     /-- T-Declare. -/
@@ -922,18 +893,10 @@ mutual
         {term : Term} {ty : Ty} :
         TermTyping env₁ typing lifetime term ty env₂ →
         TermListTyping env₁ typing lifetime [term] ty env₂
-    /--
-    T-Seq, environment threading through `t₁; ...; tₙ`.
-
-    Mechanized strengthening: non-final sequence temporaries must be
-    non-owning.  The paper permits owning temporaries and relies on a general
-    recursive drop-preservation argument; this calculus keeps the same runtime
-    `R-Seq` rule but statically allows only the no-op-drop sequence case.
-    -/
+    /-- T-Seq, environment threading through `t₁; ...; tₙ`. -/
     | cons {env₁ env₂ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {term : Term} {rest : List Term} {termTy finalTy : Ty} :
         TermTyping env₁ typing lifetime term termTy env₂ →
-        NonOwnerTy termTy →
         TermListTyping env₂ typing lifetime rest finalTy env₃ →
         TermListTyping env₁ typing lifetime (term :: rest) finalTy env₃
 end
@@ -948,16 +911,14 @@ theorem TermTyping.block_two {env₁ env₂ env₃ env₄ : Env}
     {first second : Term} {firstTy resultTy : Ty} :
     LifetimeChild lifetime blockLifetime →
     TermTyping env₁ typing blockLifetime first firstTy env₂ →
-    NonOwnerTy firstTy →
     TermTyping env₂ typing blockLifetime second resultTy env₃ →
     WellFormedTy env₃ resultTy lifetime →
-    EnvLifetimeDropSafe env₃ blockLifetime →
     env₄ = env₃.dropLifetime blockLifetime →
     TermTyping env₁ typing lifetime (.block blockLifetime [first, second]) resultTy env₄ := by
-  intro hchild hfirst hnonOwner hsecond hwellTy hdropSafe hdrop
+  intro hchild hfirst hsecond hwellTy hdrop
   exact TermTyping.block hchild
-    (TermListTyping.cons hfirst hnonOwner (TermListTyping.singleton hsecond))
-    hwellTy hdropSafe hdrop
+    (TermListTyping.cons hfirst (TermListTyping.singleton hsecond))
+    hwellTy hdrop
 
 end Paper
 end LwRust

@@ -5126,7 +5126,7 @@ theorem typingPreservesWellFormed_of_landmarks
       let result := ih htypingEq hwellFormed
       ⟨result.1, WellFormedTy.box result.2⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms hwellTy _hdropSafe hdrop ih htypingEq hwellFormed =>
+        hblockChild hterms hwellTy hdrop ih htypingEq hwellFormed =>
       let bodyResult :=
         ih htypingEq
           (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
@@ -5152,7 +5152,7 @@ theorem typingPreservesWellFormed_of_landmarks
         hwellFormed =>
       ih htypingEq hwellFormed)
       (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-          _hterm _hnonOwner _hrest ihHead ihRest htypingEq hwellFormed =>
+          _hterm _hrest ihHead ihRest htypingEq hwellFormed =>
         let headResult := ihHead htypingEq hwellFormed
         ihRest htypingEq headResult.1)
       htyping rfl hwellFormed
@@ -5215,7 +5215,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       let result := ih htypingEq hwellFormed
       ⟨result.1, WellFormedTy.box result.2⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms hwellTy _hdropSafe hdrop ih htypingEq hwellFormed =>
+        hblockChild hterms hwellTy hdrop ih htypingEq hwellFormed =>
       let bodyResult :=
         ih htypingEq
           (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
@@ -5251,7 +5251,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         hwellFormed =>
       ih htypingEq hwellFormed)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-        _hterm _hnonOwner _hrest ihHead ihRest htypingEq hwellFormed =>
+        _hterm _hrest ihHead ihRest htypingEq hwellFormed =>
       let headResult := ihHead htypingEq hwellFormed
       ihRest htypingEq headResult.1)
     htyping rfl hwellFormed
@@ -6635,24 +6635,20 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                     hvalidOldFinal⟩
               exact ⟨hvalidRuntimeFinal, hsafeFinal, ValidPartialValue.unit⟩
 
-/--
-Singleton value block preservation for `R-BlockB` under the mechanized
-block-local drop-safety condition carried by `T-Block`.
--/
-theorem preservation_blockB_value_multistep_runtime_of_envDropSafe
+/-- Singleton value block preservation for `R-BlockB` using recursive drop preservation. -/
+theorem preservation_blockB_value_multistep_runtime_of_runtimeDrop
     {store finalStore : ProgramStore} {env : Env}
     {lifetime blockLifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
     ValidRuntimeState store (.block blockLifetime [.val value]) →
     store ∼ₛ env →
     LifetimeChild lifetime blockLifetime →
-    EnvLifetimeDropSafe env blockLifetime →
     WellFormedEnv env blockLifetime →
     WellFormedTy env ty lifetime →
     ValidValue store value ty →
     MultiStep store lifetime (.block blockLifetime [.val value])
       finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue (env.dropLifetime blockLifetime) ty := by
-  intro hvalidRuntime hsafe hchild hdropSafe hwellBody hwellTy hvalidValue hmulti
+  intro hvalidRuntime hsafe hchild hwellBody hwellTy hvalidValue hmulti
   exact preservation_runtime_multistep_of_step_to_value
     (term := .block blockLifetime [.val value])
     (env := env.dropLifetime blockLifetime)
@@ -6669,70 +6665,217 @@ theorem preservation_blockB_value_multistep_runtime_of_envDropSafe
       intro store' steppedValue hstep
       cases hstep with
       | blockB hdrops =>
-          have hresultValue : ValidValue store' value ty :=
-            validPartialValue_dropsLifetime_of_envDropSafe
-              hsafe hdropSafe
+          have hdropDisjoint : LifetimeDropOwnersDisjoint store blockLifetime :=
+            lifetimeDropOwnersDisjoint_of_heapRootLifetime
+              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
               (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
-              hchild hvalidValue
+              hchild
+          cases hdrops with
+          | intro hdropSet hdropsRaw =>
+          let hdropsLifetime : DropsLifetime store blockLifetime store' :=
+            ProgramStore.DropsLifetime.intro hdropSet hdropsRaw
+          have hresultValue : ValidValue store' value ty :=
+            RuntimeFrame.validPartialValue_drops_of_avoids_reaches
+              hdropsRaw hvalidValue
               (by
-                intro location hreach x
-                have hvalueHeap : ValueOwnerTargetsHeap value :=
-                  TermOwnerTargetsHeap.value
-                    (termOwnerTargetsHeap_block_value
-                      (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
-                exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
-                  (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-                  hvalueHeap hwellTy hreach)
-              hdrops
+                intro location hreach
+                exact RuntimeFrame.dropsAvoids_of_reaches_validPartialValue
+                  hdropsRaw
+                  (ValidRuntimeState.validStore hvalidRuntime)
+                  (PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellTy)
+                  hvalidValue
+                  (by
+                    intro owned howned
+                    exact ValidRuntimeState.storeTermDisjoint hvalidRuntime owned
+                      (by
+                        simpa [termOwningLocations, termValues,
+                          partialValueOwningLocations] using howned))
+                  (by
+                    intro reached hreach dropValue hmem howned
+                    rcases (hdropSet dropValue).mp hmem with
+                      ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime,
+                        hdropValue⟩
+                    have hreachedEq : reached = dropLocation :=
+                      eq_location_of_mem_lifetime_drop_value hdropValue howned
+                    cases dropLocation with
+                    | var y =>
+                        have hreachVar :
+                            RuntimeFrame.Reaches store (.value value) (.ty ty)
+                              (VariableProjection y) := by
+                          simpa [VariableProjection, hreachedEq] using hreach
+                        exact RuntimeFrame.value_reaches_ne_var_of_wellFormedTy
+                          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                          (TermOwnerTargetsHeap.value
+                            (termOwnerTargetsHeap_block_value
+                              (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+                          (x := y) hwellTy hreachVar rfl
+                    | heap address =>
+                        have hroot : dropSlot.lifetime = Lifetime.root :=
+                          ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime
+                            address dropSlot hdropSlot
+                        exact LifetimeChild.child_ne_root hchild
+                          (hdropLifetime ▸ hroot))
+                  hreach)
           have hpreserve :
               ∀ x envSlot,
                 env.slotAt x = some envSlot →
                 envSlot.lifetime ≠ blockLifetime →
                 ∃ oldValue,
-                  store'.slotAt (VariableProjection x) =
-                    some { value := oldValue, lifetime := envSlot.lifetime } ∧
-                  ValidPartialValue store' oldValue envSlot.ty := by
+                store'.slotAt (VariableProjection x) =
+                  some { value := oldValue, lifetime := envSlot.lifetime } ∧
+                ValidPartialValue store' oldValue envSlot.ty := by
             intro x envSlot henvSlot hsurvives
             rcases hsafe.2 x envSlot henvSlot with
               ⟨oldValue, hstoreSlot, hvalidOld⟩
-            have hvalidOld' : ValidPartialValue store' oldValue envSlot.ty :=
-              validPartialValue_dropsLifetime_of_envDropSafe
-                hsafe hdropSafe
-                (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
-                hchild hvalidOld
+            have hborrows :
+                PartialTyBorrowsWellFormedInSlot env envSlot.lifetime
+                  envSlot.ty := by
+              intro mutable targets hcontains
+              exact hwellBody.1 x envSlot mutable targets henvSlot
+                ⟨envSlot, henvSlot, hcontains⟩
+            have havoidVar :
+                DropsAvoids store _ (VariableProjection x) :=
+              dropsAvoids_var_of_not_owning_var hdropsRaw
+                (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                 (by
-                  intro location hreach y
-                  have hvalueHeap : PartialValueOwnerTargetsHeap oldValue :=
-                    partialValueOwnerTargetsHeap_of_slot
-                      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-                      hstoreSlot
-                  have hborrows :
-                      PartialTyBorrowsWellFormedInSlot env envSlot.lifetime
-                        envSlot.ty := by
-                    intro mutable targets hcontains
-                    exact hwellBody.1 x envSlot mutable targets henvSlot
-                      ⟨envSlot, henvSlot, hcontains⟩
-                  exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
-                    (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-                    hvalueHeap hborrows hreach)
-                hdrops
+                  intro dropValue hmem hownsVar
+                  rcases (hdropSet dropValue).mp hmem with
+                    ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime,
+                      hdropValue⟩
+                  have howned :
+                      (VariableProjection x : Location) = dropLocation :=
+                    eq_location_of_mem_lifetime_drop_value hdropValue hownsVar
+                  subst howned
+                  have hdropSlotEq :
+                      dropSlot =
+                        { value := oldValue, lifetime := envSlot.lifetime } := by
+                    rw [hstoreSlot] at hdropSlot
+                    injection hdropSlot with hdropSlotEq
+                    exact hdropSlotEq.symm
+                  subst hdropSlotEq
+                  exact hsurvives hdropLifetime)
+            have hvalidOld' : ValidPartialValue store' oldValue envSlot.ty :=
+              RuntimeFrame.validPartialValue_drops_of_avoids_reaches
+                hdropsRaw hvalidOld
+                (by
+                  intro reached hreach
+                  exact RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValue
+                    hdropsRaw
+                    (ValidRuntimeState.validStore hvalidRuntime)
+                    hstoreSlot hborrows hvalidOld havoidVar
+                    (by
+                      intro reached' hreach' dropValue hmem howned
+                      rcases (hdropSet dropValue).mp hmem with
+                        ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime,
+                          hdropValue⟩
+                      have hreachedEq : reached' = dropLocation :=
+                        eq_location_of_mem_lifetime_drop_value hdropValue howned
+                      have hownsReached :
+                          ProgramStore.Owns store reached' :=
+                        RuntimeFrame.store_owns_of_reaches_stored_validPartialValue
+                          hstoreSlot hborrows hvalidOld hreach'
+                      have hownsDrop : ProgramStore.Owns store dropLocation := by
+                        simpa [hreachedEq] using hownsReached
+                      exact hdropDisjoint dropLocation dropSlot hdropSlot
+                        hdropLifetime hownsDrop)
+                    hreach)
             have hstoreSlot' :
                 store'.slotAt (VariableProjection x) =
                   some { value := oldValue, lifetime := envSlot.lifetime } :=
-              dropsLifetime_preserves_var_slot_of_not_lifetime hdrops
+              dropsLifetime_preserves_var_slot_of_not_lifetime hdropsLifetime
                 (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                 (by simpa [VariableProjection] using hstoreSlot)
                 hsurvives
             exact ⟨oldValue, hstoreSlot', hvalidOld'⟩
           have hsafeDrop : store' ∼ₛ env.dropLifetime blockLifetime :=
-            dropPreservation_lifetime hsafe hdrops
-              (dropLifetime_domain_equiv_of_ownerTargetsHeap hsafe hdrops
+            dropPreservation_lifetime hsafe hdropsLifetime
+              (dropLifetime_domain_equiv_of_ownerTargetsHeap hsafe hdropsLifetime
                 (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime))
               hpreserve
           exact ⟨validRuntimeState_blockB_step_of_child hvalidRuntime hchild
-              (Step.blockB (lifetime := lifetime) hdrops),
+              (Step.blockB (lifetime := lifetime) hdropsLifetime),
             hsafeDrop, hresultValue⟩)
     hmulti
+
+/-- `R-Seq` preserves the safe abstraction for the remaining sequence env. -/
+theorem safeAbstraction_seq_value_drop
+    {store store' : ProgramStore} {env : Env}
+    {blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
+    WellFormedEnv env blockLifetime →
+    Drops store [.value value] store' →
+    store' ∼ₛ env := by
+  intro hsafe hvalidRuntime hwellFormed hdrops
+  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+    ValueOwnerTargetsHeap.partial
+      (TermOwnerTargetsHeap.value
+        (termOwnerTargetsHeap_block_head
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+  have hdropValuesHeap :
+      ∀ dropValue, dropValue ∈ [.value value] →
+        PartialValueOwnerTargetsHeap dropValue := by
+    intro dropValue hmem
+    simp at hmem
+    subst hmem
+    exact hvalueHeap
+  constructor
+  · intro x
+    constructor
+    · intro hstore'
+      rcases hstore' with ⟨slot, hslot'⟩
+      have hslot : store.slotAt (VariableProjection x) = some slot :=
+        drops_slotAt_of_slotAt hdrops hslot'
+      exact (hsafe.1 x).mp ⟨slot, hslot⟩
+    · intro henv
+      rcases (hsafe.1 x).mpr henv with ⟨slot, hslot⟩
+      have havoidVar : DropsAvoids store [.value value] (VariableProjection x) :=
+        dropsAvoids_var_of_ownerTargetsHeap hdrops
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+          hdropValuesHeap
+      exact ⟨slot, dropsAvoids_slotAt_preserved hdrops havoidVar hslot⟩
+  · intro x envSlot henvSlot
+    rcases hsafe.2 x envSlot henvSlot with
+      ⟨oldValue, hstoreSlot, hvalidOld⟩
+    have havoidVar : DropsAvoids store [.value value] (VariableProjection x) :=
+      dropsAvoids_var_of_ownerTargetsHeap hdrops
+        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+        hdropValuesHeap
+    have hstoreSlot' :
+        store'.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } :=
+      dropsAvoids_slotAt_preserved hdrops havoidVar hstoreSlot
+    have hborrows :
+        PartialTyBorrowsWellFormedInSlot env envSlot.lifetime envSlot.ty := by
+      intro mutable targets hcontains
+      exact hwellFormed.1 x envSlot mutable targets henvSlot
+        ⟨envSlot, henvSlot, hcontains⟩
+    have hvalidOld' : ValidPartialValue store' oldValue envSlot.ty :=
+      RuntimeFrame.validPartialValue_drops_of_avoids_reaches hdrops hvalidOld
+        (by
+          intro reached hreach
+          exact RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValue
+            hdrops
+            (ValidRuntimeState.validStore hvalidRuntime)
+            hstoreSlot hborrows hvalidOld havoidVar
+            (by
+              intro reached' hreach' dropValue hmem howned
+              simp at hmem
+              subst hmem
+              have hownsReached :
+                  ProgramStore.Owns store reached' :=
+                RuntimeFrame.store_owns_of_reaches_stored_validPartialValue
+                  hstoreSlot hborrows hvalidOld hreach'
+              exact
+                (ValidRuntimeState.storeTermDisjoint hvalidRuntime reached'
+                  (by
+                    have hhead :
+                        reached' ∈ valueOwningLocations value := by
+                      simpa [partialValueOwningLocations] using howned
+                    simp [termOwningLocations, termValues, hhead]))
+                hownsReached)
+            hreach)
+    exact ⟨oldValue, hstoreSlot', hvalidOld'⟩
 
 /--
 Lemma 4.11, Preservation.
@@ -6776,7 +6919,6 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         ValidStoreTyping store (.block blockLifetime terms) currentTyping →
         WellFormedEnv env blockLifetime →
         store ∼ₛ env →
-        EnvLifetimeDropSafe env₂ blockLifetime →
         WellFormedTy env₂ ty outerLifetime →
         MultiStep store outerLifetime (.block blockLifetime terms)
           finalStore (.val finalValue) →
@@ -6938,7 +7080,6 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         (hblockChild : LifetimeChild _lifetime _blockLifetime)
         (hterms : TermListTyping _env₁ _typing _blockLifetime _terms _ty _env₂)
         (hwellTy : WellFormedTy _env₂ _ty _lifetime)
-        (hdropSafe : EnvLifetimeDropSafe _env₂ _blockLifetime)
         (hdrop : _env₃ = _env₂.dropLifetime _blockLifetime)
         (ih : _typing = typing →
           SourceTerm (.block _blockLifetime _terms) →
@@ -6949,7 +7090,6 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             ValidStoreTyping store (.block _blockLifetime _terms) _typing →
             WellFormedEnv _env₁ _blockLifetime →
             store ∼ₛ _env₁ →
-            EnvLifetimeDropSafe _env₂ _blockLifetime →
             WellFormedTy _env₂ _ty outerLifetime →
             MultiStep store outerLifetime (.block _blockLifetime _terms)
               finalStore (.val finalValue) →
@@ -6969,7 +7109,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
       cases htypingEq
       have htermTyping :
           TermTyping _env₁ typing _lifetime (.block _blockLifetime _terms) _ty _env₃ :=
-        TermTyping.block hblockChild hterms hwellTy hdropSafe hdrop
+        TermTyping.block hblockChild hterms hwellTy hdrop
       have hwellOut : WellFormedEnv _env₃ _lifetime :=
         (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
           (ValidRuntimeState.validState hvalidRuntime)
@@ -6981,7 +7121,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             hvalidRuntime hvalidStoreTyping
             (WellFormedEnv.weaken hwellFormed
               (LifetimeChild.outlives hblockChild))
-            hsafe hdropSafe hwellTy hmulti
+            hsafe hwellTy hmulti
       exact And.intro hwellOut hterminal)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
         hfresh hterm hfreshOut _hcoh henv₃ ih
@@ -8848,7 +8988,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         exact ⟨hwellOut, hterminal⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih
         htypingEq hsource outerLifetime store finalStore finalValue hchild hvalidRuntime
-        hvalidStoreTyping hwellFormed hsafe hdropSafe hwellTy hmulti =>
+        hvalidStoreTyping hwellFormed hsafe hwellTy hmulti =>
       by
         cases htypingEq
         rcases multistep_block_head_to_value_inv hmulti with
@@ -8858,14 +8998,14 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             (validStoreTyping_block_singleton_inner hvalidStoreTyping)
             hwellFormed hsafe hinnerMulti with
           ⟨hwellInner, hterminalInner⟩
-        exact preservation_blockB_value_multistep_runtime_of_envDropSafe
+        exact preservation_blockB_value_multistep_runtime_of_runtimeDrop
           (validRuntimeState_block_singleton_value_of_value hterminalInner.1)
-          hterminalInner.2.1 hchild hdropSafe hwellInner hwellTy
+          hterminalInner.2.1 hchild hwellInner hwellTy
           hterminalInner.2.2 hblockValueMulti)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-        _hterm hnonOwner hrest _ihHead _ihRest
+        _hterm hrest _ihHead _ihRest
         htypingEq hsource outerLifetime store finalStore finalValue hchild
-        hvalidRuntime hvalidStoreTyping hwellFormed hsafe hdropSafe hwellTy hmulti =>
+        hvalidRuntime hvalidStoreTyping hwellFormed hsafe hwellTy hmulti =>
       by
         cases htypingEq
         cases _rest with
@@ -8883,8 +9023,6 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                 (validStoreTyping_block_head hvalidStoreTyping)
                 hwellFormed hsafe hinnerMulti with
               ⟨hwellInner, hterminalInner⟩
-            have hvalueNonOwner : valueOwnedLocation? value = none :=
-              validValue_nonOwner_of_nonOwnerTy hnonOwner hterminalInner.2.2
             have hvalueBlockValid :
                 ValidRuntimeState midStore
                   (.block _lifetime (.val value :: next :: restTail)) :=
@@ -8904,18 +9042,21 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
                       (.block _lifetime (.val value :: next :: restTail))
                       storeAfter (.block _lifetime (next :: restTail)) :=
                   Step.seq hdrops
-                rcases preservation_seq_nonOwner_step_runtime hvalueNonOwner
-                    hterminalInner.2.1 hvalueBlockValid hseqStep with
-                  ⟨hvalidTailAfter, hsafeTailAfter⟩
-                have hstoreAfter : storeAfter = midStore :=
-                  drops_value_nonOwner_eq hvalueNonOwner hdrops
+                have hvalidTailAfter :
+                    ValidRuntimeState storeAfter
+                      (.block _lifetime (next :: restTail)) :=
+                  validRuntimeState_seq_step hvalueBlockValid hseqStep
+                have hsafeTailAfter : storeAfter ∼ₛ _env₂ :=
+                  safeAbstraction_seq_value_drop hterminalInner.2.1
+                    hvalueBlockValid hwellInner hdrops
                 have htailStoreTyping :
-                    ValidStoreTyping storeAfter (.block _lifetime (next :: restTail)) typing := by
-                  rw [hstoreAfter]
-                  exact htailStoreTypingAtMid
+                    ValidStoreTyping storeAfter
+                      (.block _lifetime (next :: restTail)) typing :=
+                  validStoreTyping_sourceTerm_of_validStoreTyping hsourceTail
+                    htailStoreTypingAtMid
                 exact _ihRest rfl hsourceTail outerLifetime storeAfter finalStore
                   finalValue hchild hvalidTailAfter htailStoreTyping hwellInner
-                  hsafeTailAfter hdropSafe hwellTy htailMulti)
+                  hsafeTailAfter hwellTy htailMulti)
               (by
                 intro blockTerm blockRest storeAfter termAfter hterms hstep _htailMulti
                 cases hterms

@@ -18,10 +18,10 @@ Status: mechanized through Preservation (Lemma 4.11).  This is the
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
 * block `R-BlockB` — via Lemma 9.5
-  (`preservation_blockB_value_multistep_runtime_of_envDropSafe`) for terminal
+  (`preservation_blockB_value_multistep_runtime_of_runtimeDrop`) for terminal
   value blocks.
 
-The move, assignment, and strengthened block cases are discharged in
+The move, assignment, sequence-drop, and block-drop cases are discharged in
 `preservation`; the theorem below records the full store-preservation projection.
 -/
 

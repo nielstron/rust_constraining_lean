@@ -230,29 +230,6 @@ theorem validValue_nonOwner_of_nonOwnerTy {store : ProgramStore}
   cases hnonOwner <;> cases hvalid <;> simp [valueOwnedLocation?]
 
 /--
-Partial values valid at a drop-safe partial type are runtime non-owners.
-
-This is the bridge from the static block-local drop condition to the
-`Drops.nonOwner` case used by the concrete lifetime-drop preservation proof.
--/
-theorem validPartialValue_nonOwner_of_dropSafePartialTy {store : ProgramStore}
-    {value : PartialValue} {partialTy : PartialTy} :
-    DropSafePartialTy partialTy →
-    ValidPartialValue store value partialTy →
-    PartialValueNonOwner value := by
-  cases partialTy with
-  | ty ty =>
-      intro hsafe hvalid
-      cases hsafe <;> cases hvalid <;> simp
-  | undef ty =>
-      intro _hsafe hvalid
-      cases hvalid
-      simp
-  | box inner =>
-      intro hsafe _hvalid
-      cases hsafe
-
-/--
 Dropping a list of non-owning partial values preserves existing partial-value
 abstractions, since the store is unchanged.
 -/

@@ -19,12 +19,6 @@ The goal is to reduce these to 0.
   `EnvWrite` and can write through mutable references.  See
   `LwRust/Paper/Typing.lean`.
 
-- **Restricted block and sequence drops.**  The paper allows general owning
-  temporaries and relies on full recursive drop preservation.  The mechanised
-  typing rules allow only the no-recursive-owner cases: non-final sequence
-  terms must have `NonOwnerTy` and block-local slots must satisfy
-  `EnvLifetimeDropSafe`.
-
 ### Theorem Interface Notes
 
 - **Corollary 4.14 uses the core strengthening.**  The mechanised core result

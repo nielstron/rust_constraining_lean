@@ -2698,7 +2698,7 @@ theorem termListTyping_singleton_value_environment_eq {env₁ env₂ : Env}
   cases htyping with
   | singleton hterm =>
       exact valueTyping_environment_eq hterm
-  | cons _hterm _hnonOwner hrest =>
+  | cons _hterm hrest =>
       cases hrest
 
 /-- `T-Const` inversion for singleton value term lists. -/
@@ -2712,7 +2712,7 @@ theorem termListTyping_singleton_value_valueTyping {env₁ env₂ : Env}
       cases hterm with
       | const hvalueTyping =>
           exact hvalueTyping
-  | cons _hterm _hnonOwner hrest =>
+  | cons _hterm hrest =>
       cases hrest
 
 /--
@@ -2725,7 +2725,7 @@ theorem blockValueTyping_output_eq {env env' : Env} {typing : StoreTyping}
     env' = env.dropLifetime blockLifetime := by
   intro htyping
   cases htyping with
-  | block _hblockChild hterms _hwellFormed _hdropSafe hdrop =>
+  | block _hblockChild hterms _hwellFormed hdrop =>
       have henv₂ := termListTyping_singleton_value_environment_eq hterms
       rw [henv₂]
       exact hdrop
@@ -2737,7 +2737,7 @@ theorem blockValueTyping_valueTyping {env env' : Env} {typing : StoreTyping}
     ValueTyping typing value ty := by
   intro htyping
   cases htyping with
-  | block _hblockChild hterms _hwellFormed _hdropSafe _hdrop =>
+  | block _hblockChild hterms _hwellFormed _hdrop =>
       exact termListTyping_singleton_value_valueTyping hterms
 
 /--

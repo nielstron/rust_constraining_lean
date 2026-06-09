@@ -567,6 +567,28 @@ theorem reaches_owner_source_of_validPartialValue {env : Env}
           · rcases hsource with ⟨storage, hstorageReach, howns⟩
             exact Or.inr ⟨storage, Reaches.boxFullInner hslot hstorageReach, howns⟩
 
+/-- Every location reached from a stored valid value is owned by the store. -/
+theorem store_owns_of_reaches_stored_validPartialValue {env : Env}
+    {store : ProgramStore} {slotLifetime storageLifetime : Lifetime}
+    {storage : Location} {storedValue : PartialValue} {partialTy : PartialTy}
+    {location : Location} :
+    store.slotAt storage =
+      some { value := storedValue, lifetime := storageLifetime } →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+    ValidPartialValue store storedValue partialTy →
+    Reaches store storedValue partialTy location →
+    ProgramStore.Owns store location := by
+  intro hstored hborrows hvalid hreach
+  rcases reaches_owner_source_of_validPartialValue hborrows hvalid hreach with
+    hdirect | hsource
+  · have hstoredValue : storedValue = .value (owningRef location) :=
+      eq_owningRef_of_mem_partialValueOwningLocations hdirect
+    exact ⟨storage, storageLifetime, by
+      cases hstoredValue
+      simpa [owningRef] using hstored⟩
+  · rcases hsource with ⟨sourceStorage, _hsourceReach, howns⟩
+    exact ⟨sourceStorage, howns⟩
+
 /--
 If a valid partial value is stored in a slot whose location is protected from a
 drop, then every location inspected by that value's validity derivation is also
@@ -594,9 +616,8 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
           reached ∉ partialValueOwningLocations dropValue) →
       Reaches store storedValue partialTy location →
       DropsAvoids store values location := by
-  intro hdrops hvalidStore
-  intro env slotLifetime storageLifetime storage storedValue partialTy location hstored hborrows hvalid
-    havoidStorage hdisjoint hreach
+  intro hdrops hvalidStore env slotLifetime storageLifetime storage storedValue
+    partialTy location hstored hborrows hvalid havoidStorage hdisjoint hreach
   induction hvalid generalizing env slotLifetime storageLifetime storage location with
   | unit =>
       cases hreach
@@ -689,6 +710,133 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
               | mk slotValue slotLifetime =>
                   simpa using hslot)
             hinnerBorrows hrootAvoid
+            (by
+              intro innerReached hinnerReached dropValue hmem howned
+              exact hdisjoint innerReached
+                (Reaches.boxFullInner hslot hinnerReached) dropValue hmem howned)
+            hinnerReach
+
+/--
+If the direct owners carried by a valid value are disjoint from the store, then
+every location reached by the value is protected from a drop list whose explicit
+owners are disjoint from that reachability footprint.
+-/
+theorem dropsAvoids_of_reaches_validPartialValue
+    {store store' : ProgramStore} {values : List PartialValue}
+    {env : Env} {slotLifetime : Lifetime}
+    {value : PartialValue} {partialTy : PartialTy} {location : Location} :
+    Drops store values store' →
+    ValidStore store →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+    ValidPartialValue store value partialTy →
+    (∀ owned,
+      owned ∈ partialValueOwningLocations value →
+        ¬ ProgramStore.Owns store owned) →
+    (∀ reached,
+      Reaches store value partialTy reached →
+        ∀ dropValue, dropValue ∈ values →
+          reached ∉ partialValueOwningLocations dropValue) →
+    Reaches store value partialTy location →
+    DropsAvoids store values location := by
+  intro hdrops hvalidStore hborrows hvalid hnotStoreOwned hdisjoint hreach
+  induction hvalid generalizing env slotLifetime location with
+  | unit =>
+      cases hreach
+  | int =>
+      cases hreach
+  | undef =>
+      cases hreach
+  | @borrow borrowedLocation mutable targets target hmem hloc =>
+      cases hreach with
+      | @borrow _borrowedLocation readLocation _mutable _targets target' hmem' _hloc' hreads =>
+          rcases hborrows PartialTyContains.here target' hmem' with
+            ⟨_targetTy, _targetLifetime, _htyping, _houtlives, _hbase, hvar⟩
+          exact False.elim (LocReads.false_of_lvalIsVar hvar hreads)
+  | @box ownerLocation slot inner hslot hinnerValid _ih =>
+      cases hreach with
+      | boxHere hreachSlot =>
+          exact dropsAvoids_of_not_owns_and_not_mem hdrops
+            (by
+              intro dropValue hmem
+              exact hdisjoint ownerLocation (Reaches.boxHere hreachSlot)
+                dropValue hmem)
+            (hnotStoreOwned ownerLocation (by
+              simp [partialValueOwningLocations, valueOwningLocations,
+                valueOwnedLocation?]))
+      | @boxInner _ reachSlot _ _ hreachSlot hinnerReach =>
+          have hrootAvoid : DropsAvoids store values ownerLocation :=
+            dropsAvoids_of_not_owns_and_not_mem hdrops
+              (by
+                intro dropValue hmem
+                exact hdisjoint ownerLocation (Reaches.boxHere hreachSlot)
+                  dropValue hmem)
+              (hnotStoreOwned ownerLocation (by
+                simp [partialValueOwningLocations, valueOwningLocations,
+                  valueOwnedLocation?]))
+          have hslotEq : reachSlot = slot := by
+            rw [hslot] at hreachSlot
+            injection hreachSlot with hslotEq
+            exact hslotEq.symm
+          subst reachSlot
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.box hcontains)
+          exact dropsAvoids_of_reaches_stored_validPartialValue hdrops hvalidStore
+            (env := env) (slotLifetime := slotLifetime)
+            (storageLifetime := slot.lifetime) (storage := ownerLocation)
+            (storedValue := slot.value) (partialTy := inner)
+            (location := location)
+            (by
+              cases slot with
+              | mk slotValue slotLifetime =>
+                  simpa using hslot)
+            hinnerBorrows hinnerValid hrootAvoid
+            (by
+              intro innerReached hinnerReached dropValue hmem howned
+              exact hdisjoint innerReached
+                (Reaches.boxInner hslot hinnerReached) dropValue hmem howned)
+            hinnerReach
+  | @boxFull ownerLocation slot innerTy hslot hinnerValid _ih =>
+      cases hreach with
+      | boxFullHere hreachSlot =>
+          exact dropsAvoids_of_not_owns_and_not_mem hdrops
+            (by
+              intro dropValue hmem
+              exact hdisjoint ownerLocation (Reaches.boxFullHere hreachSlot)
+                dropValue hmem)
+            (hnotStoreOwned ownerLocation (by
+              simp [partialValueOwningLocations, valueOwningLocations,
+                valueOwnedLocation?]))
+      | @boxFullInner _ reachSlot _ _ hreachSlot hinnerReach =>
+          have hrootAvoid : DropsAvoids store values ownerLocation :=
+            dropsAvoids_of_not_owns_and_not_mem hdrops
+              (by
+                intro dropValue hmem
+                exact hdisjoint ownerLocation (Reaches.boxFullHere hreachSlot)
+                  dropValue hmem)
+              (hnotStoreOwned ownerLocation (by
+                simp [partialValueOwningLocations, valueOwningLocations,
+                  valueOwnedLocation?]))
+          have hslotEq : reachSlot = slot := by
+            rw [hslot] at hreachSlot
+            injection hreachSlot with hslotEq
+            exact hslotEq.symm
+          subst reachSlot
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.tyBox hcontains)
+          exact dropsAvoids_of_reaches_stored_validPartialValue hdrops hvalidStore
+            (env := env) (slotLifetime := slotLifetime)
+            (storageLifetime := slot.lifetime) (storage := ownerLocation)
+            (storedValue := slot.value) (partialTy := .ty innerTy)
+            (location := location)
+            (by
+              cases slot with
+              | mk slotValue slotLifetime =>
+                  simpa using hslot)
+            hinnerBorrows hinnerValid hrootAvoid
             (by
               intro innerReached hinnerReached dropValue hmem howned
               exact hdisjoint innerReached

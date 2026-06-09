@@ -1329,7 +1329,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing lifetime blockLifetime _terms _ty
-          hchild _hterms _hwellTy _hdropSafe hdrop ih x sourceSlot houtlives hslot
+          hchild _hterms _hwellTy hdrop ih x sourceSlot houtlives hslot
         rcases ih (LifetimeOutlives.trans houtlives (LifetimeChild.outlives hchild))
             hslot with
           ⟨bodySlot, hbodySlot, hbodyLifetime⟩
@@ -1367,7 +1367,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-          _hterm _hnonOwner _hrest ihHead ihRest x sourceSlot houtlives hslot
+          _hterm _hrest ihHead ihRest x sourceSlot houtlives hslot
         rcases ihHead houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
         have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
           rw [← hmidLifetime]
@@ -1419,7 +1419,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing lifetime blockLifetime _terms _ty
-          hchild _hterms _hwellTy _hdropSafe hdrop ih x sourceSlot houtlives hslot
+          hchild _hterms _hwellTy hdrop ih x sourceSlot houtlives hslot
         rcases ih (LifetimeOutlives.trans houtlives (LifetimeChild.outlives hchild))
             hslot with
           ⟨bodySlot, hbodySlot, hbodyLifetime⟩
@@ -1457,7 +1457,7 @@ theorem TermTyping.slot_lifetime_survives :
         exact ih houtlives hslot)
       (by
         intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-          _hterm _hnonOwner _hrest ihHead ihRest x sourceSlot houtlives hslot
+          _hterm _hrest ihHead ihRest x sourceSlot houtlives hslot
         rcases ihHead houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
         have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
           rw [← hmidLifetime]

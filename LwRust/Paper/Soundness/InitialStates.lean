@@ -182,7 +182,7 @@ theorem sourceInitial_blockB_value_borrowSafety_result_extension
       BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hsource htyping hfresh hfreshCoherence
   cases htyping with
-  | block _hblockChild hterms hwellTy _hdropSafe hdrop =>
+  | block _hblockChild hterms hwellTy hdrop =>
       have hvalueTyping := termListTyping_singleton_value_valueTyping hterms
       have henvList : Env.empty = _ :=
         termListTyping_singleton_value_environment_eq hterms
@@ -257,7 +257,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       exact ih htypingEq candidate (by simpa [termValues] using hmem))
     (by
       intro _env₁ _env₂ _env₃ _typing _lifetime blockLifetime _terms _ty
-        _hchild _hterms _hwellTy _hdropSafe _hdrop ih htypingEq
+        _hchild _hterms _hwellTy _hdrop ih htypingEq
       exact ih htypingEq)
     (by
       intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty
@@ -275,7 +275,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       exact ih htypingEq candidate hmem)
     (by
       intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-        _hterm _hnonOwner _hrest ihHead ihRest htypingEq candidate hmem
+        _hterm _hrest ihHead ihRest htypingEq candidate hmem
       simp [termValues] at hmem
       rcases hmem with hhead | htail
       · exact ihHead htypingEq candidate hhead

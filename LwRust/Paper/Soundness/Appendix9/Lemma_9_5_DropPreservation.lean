@@ -6,23 +6,21 @@ import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 > Let `S` be a program store; let `Γ` be a well-formed typing environment with
 > respect to a lifetime `l` where `S ∼ Γ`.  Then `drop(S, l) ∼ drop(Γ, l)`.
 
-Status: **partial appendix support** — the full paper statement for arbitrary
-recursive drops is not used by the closed Section 4 proof.  Preservation uses
-the strengthened drop-safe block-local rule, whose required `R-BlockB`
-safe-abstraction half for terminal value blocks is mechanized here:
+Status: mechanized in the form needed by the closed Section 4 proof.  Recursive
+drops are framed by explicit reachability/disjointness facts from the runtime
+validity package:
 
 * `dropsLifetime_validStore`, `drops_validStore` — dropping preserves store
   validity;
 * `dropsLifetime_storeOwnersAllocated`, `drops_storeOwnersAllocated_of_disjoint`
   — owner-allocation is preserved under the lifetime-disjointness side condition;
-* `preservation_blockB_value_multistep_runtime_of_envDropSafe` — the
-  safe-abstraction half used by Preservation for terminal value blocks;
+* `preservation_blockB_value_multistep_runtime_of_runtimeDrop` — the
+  recursive lifetime-drop preservation used by Preservation for terminal value
+  blocks;
+* `safeAbstraction_seq_value_drop` — safe-abstraction preservation for
+  recursive drops of non-final sequence temporaries;
 * `lemma_9_5_value_drops_frame` — recursive value drops preserve a value
   abstraction when the drop avoids every reached location.
-
-The unrestricted Appendix 9.5 theorem would require a full recursive
-drop-preservation argument for arbitrary owner values, which this mechanization
-avoids by strengthening `T-Block`.
 -/
 
 namespace LwRust.Paper.Soundness

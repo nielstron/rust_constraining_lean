@@ -1644,6 +1644,68 @@ theorem dropsAvoids_var_of_not_owning_var
           · exact hvalues value (by simp [hrest])))
 
 /--
+If neither the explicit drop list nor the store owns `location`, then recursive
+dropping avoids `location`.
+-/
+theorem dropsAvoids_of_not_owns_and_not_mem
+    {store store' : ProgramStore} {values : List PartialValue}
+    {location : Location} :
+    Drops store values store' →
+    (∀ value, value ∈ values → location ∉ partialValueOwningLocations value) →
+    ¬ ProgramStore.Owns store location →
+    DropsAvoids store values location := by
+  intro hdrops
+  induction hdrops generalizing location with
+  | nil =>
+      intro _hnotMem _hnotOwns
+      exact DropsAvoids.nil
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hnotMem hnotOwns
+      exact DropsAvoids.nonOwner hnonOwner
+        (ih (by
+          intro value hmem
+          exact hnotMem value (by simp [hmem])) hnotOwns)
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hnotMem hnotOwns
+      exact DropsAvoids.ownerMissing howner hmissing
+        (ih (by
+          intro value hmem
+          exact hnotMem value (by simp [hmem])) hnotOwns)
+  | ownerPresent howner hpresent _hdrops ih =>
+      intro hnotMem hnotOwns
+      rename_i storeBefore _storeAfter ref slot rest
+      have hrefNe : ref.location ≠ location := by
+        intro href
+        exact hnotMem (.value (.ref ref)) (by simp)
+          (by
+            simpa [href] using mem_partialValueOwningLocations_ref_true howner)
+      have htailNotMem :
+          ∀ value, value ∈ slot.value :: rest →
+            location ∉ partialValueOwningLocations value := by
+        intro value hmem
+        simp at hmem
+        rcases hmem with hslotValue | hrest
+        · subst hslotValue
+          intro howned
+          have hslotOwns :
+              ProgramStore.OwnsAt storeBefore location ref.location := by
+            have hslotValueEq : slot.value = .value (owningRef location) :=
+              eq_owningRef_of_mem_partialValueOwningLocations howned
+            exact ⟨slot.lifetime, by
+              cases slot with
+              | mk slotValue slotLifetime =>
+                  cases hslotValueEq
+                  simpa [owningRef] using hpresent⟩
+          exact hnotOwns ⟨ref.location, hslotOwns⟩
+        · exact hnotMem value (by simp [hrest])
+      have hnotOwnsAfterErase :
+          ¬ ProgramStore.Owns (storeBefore.erase ref.location) location := by
+        intro howns
+        exact hnotOwns (owns_erase howns)
+      exact DropsAvoids.ownerPresent howner hpresent hrefNe
+        (ih htailNotMem hnotOwnsAfterErase)
+
+/--
 If `storage` continues to protect an ownership edge to `owned`, then a drop
 list that avoids `storage` also avoids `owned`, provided the explicit drop-list
 heads do not themselves contain an owning reference to `owned`.

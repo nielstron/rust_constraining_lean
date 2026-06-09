@@ -15,8 +15,8 @@ Paper statement (Section 4.4):
 Status: proved for the strengthened rule-carried formulation over source
 continuations.  This excludes arbitrary pre-existing runtime references in
 unevaluated continuation terms, which are not produced by source-initial runs.
-The block case handles general term lists; non-final sequence temporaries remain
-restricted to `NonOwnerTy`.
+The block case handles general term lists, recursive sequence drops, and
+recursive block-lifetime drops.
 -/
 
 namespace LwRust

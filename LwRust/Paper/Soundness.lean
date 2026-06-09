@@ -28,8 +28,7 @@ The README separates shortcuts to eliminate from intentional repairs and
 strengthenings to keep.  In brief:
 
 * shortcuts: move/borrow source redexes and stored borrow targets are still
-  variable-restricted; block/sequence typing currently admits only the
-  no-recursive-owner drop cases;
+  variable-restricted;
 * theorem interface: Theorem 4.12 exposes `TerminatesAsValue` instead of
   proving terminal existence.  The nontermination-friendly local safety
   statement is `progress_runtime_step`;
