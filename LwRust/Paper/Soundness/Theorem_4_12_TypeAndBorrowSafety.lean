@@ -20,7 +20,9 @@ progress component `typeAndBorrowProgress`, or its non-terminal corollary
 `progress_runtime_step`.
 
 The preservation-backed terminal safety component is scoped to `SourceTerm`
-continuations.  Empty-initial source theorems derive that premise from
+continuations for arbitrary runtime store typings.  Empty-initial wrappers such
+as `emptyInitial_typeAndBorrowSafety` and
+`theorem_4_12_typeAndBorrowSafety_emptyInitial` derive that premise from
 typability under `StoreTyping.empty`.
 -/
 

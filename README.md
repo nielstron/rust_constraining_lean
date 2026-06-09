@@ -25,12 +25,6 @@ The goal is to reduce these to 0.
   terms must have `NonOwnerTy` and block-local slots must satisfy
   `EnvLifetimeDropSafe`.
 
-- **Full box replacement is shape-compatible only at exact type.**  The paper's
-  shape relation permits owner replacement along matching box shapes.  The
-  mechanisation now includes exact `Box<T>` compatibility
-  (`ShapeCompatible.tyBox`) so assignment such as `Box<Int> := Box<Int>` is
-  accepted, without adding a broad recursive full-box compatibility rule.
-
 ### Theorem Interface Notes
 
 - **Corollary 4.14 uses the core strengthening.**  The mechanised core result
@@ -96,7 +90,10 @@ These deviations from the paper should be kept.
 - **Terminal preservation/safety is source-continuation scoped.**  Lemma 4.11
   and the terminal-safety half of Theorem 4.12 assume `SourceTerm`.  Arbitrary
   runtime constants can already contain references in unevaluated continuations;
-  source-initial empty-store theorems derive `SourceTerm` from typability.
+  `SourceTerm` is therefore not derivable from typability for arbitrary
+  nonempty store typings.  Source-initial empty-store theorems derive it from
+  typability (`termTyping_empty_sourceTerm`), so the empty-initial Lemma 4.11
+  and Theorem 4.12 wrappers have no `SourceTerm` premise.
 
 - **`R-Declare` is an update rule; freshness is proof-side.**  The small-step
   `Step.declare` constructor updates the variable slot directly.  The freshness

@@ -23,22 +23,20 @@ per-result lemma files (each carries the material needed to prove its result and
 ends with the paper-facing statement) and in the Appendix 9 files.  Generic,
 reusable typing/runtime facts live under `Soundness.Helpers`.
 
-Section 4 is mechanized for the strengthened calculus with the following
-documented deviations from the paper rules:
+Section 4 is mechanized for the strengthened calculus documented in the README.
+The README separates shortcuts to eliminate from intentional repairs and
+strengthenings to keep.  In brief:
 
-* the abstract `ProgramStore` exposes progress totality as
-  `OperationalStoreProgress`; concrete finite stores instantiate it;
-* the current Theorem 4.12 wrapper is conditional terminal safety: it exposes
-  `TerminatesAsValue` instead of proving the paper's terminal-existence
-  conclusion.  The nontermination-friendly local safety statement is
-  `progress_runtime_step`, which says a well-typed non-terminal state can step;
-* move/borrow source redexes and stored borrow targets are restricted to
-  variable lvalues; assignment lvalues use `EnvWrite` and may be dereferences;
-* declaration and assignment typing carry the local coherence/rank facts needed
-  by the `lw_rust_followup` linearizability argument;
-* block/sequence typing is strengthened to singleton/drop-safe blocks and
-  non-owning non-final sequence temporaries, avoiding an unproved general
-  recursive drop-preservation theorem.
+* shortcuts: move/borrow source redexes and stored borrow targets are still
+  variable-restricted; block/sequence typing currently admits only the
+  no-recursive-owner drop cases;
+* theorem interface: Theorem 4.12 exposes `TerminatesAsValue` instead of
+  proving terminal existence.  The nontermination-friendly local safety
+  statement is `progress_runtime_step`;
+* repairs/strengthenings: the abstract `ProgramStore` exposes progress
+  totality as `OperationalStoreProgress`, declaration and assignment carry the
+  local coherence/rank facts needed by preservation, and source-initial wrappers
+  derive `SourceTerm` from empty-store typability.
 
 The lemma files form a linear chain following the paper order
 (4.10 → 4.9 → 4.11 → 4.12 → 4.14), with the source-initial corollaries and the

@@ -441,6 +441,20 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     (wellFormedEnv_empty lifetime) hsafe htyping hmulti
 
 /--
+**Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.
+
+Unlike the general runtime preservation wrapper, this has no `SourceTerm`
+premise: for empty source store typing, `SourceTerm` follows from typability by
+`termTyping_empty_sourceTerm`.
+-/
+theorem lemma_4_11_preservation_emptyInitial {term : Term} {lifetime : Lifetime}
+    {ty : Ty} {env₂ : Env} {finalStore : ProgramStore} {finalValue : Value} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
+    TerminalStateSafe finalStore finalValue env₂ ty :=
+  emptyInitial_preservation
+
+/--
 **Theorem 4.12.** Empty-initial conditional type-and-borrow safety for any term
 typed from the empty initial runtime state.
 -/
@@ -459,6 +473,23 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact typeAndBorrowSafety hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed
     hsafe hstoreProgress htyping hterminates
+
+/--
+**Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.
+
+This is the conditional terminal-safety form specialized to source-initial
+programs.  It has no `SourceTerm` premise because `StoreTyping.empty`
+typability derives it.
+-/
+theorem theorem_4_12_typeAndBorrowSafety_emptyInitial {term : Term}
+    {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    TerminatesAsValue ProgramStore.empty lifetime term →
+    ProgressResult ProgramStore.empty lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty :=
+  emptyInitial_typeAndBorrowSafety
 
 /-- **Lemma 4.10.** Empty-store/source-term non-terminal step corollary. -/
 theorem sourceInitial_progress_step {term : Term} {lifetime : Lifetime}

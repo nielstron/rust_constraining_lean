@@ -39,47 +39,71 @@ theorem partialTyStrengthens_trans {left middle right : PartialTy} :
     PartialTyStrengthens middle right →
     PartialTyStrengthens left right := by
   intro hleft hright
-  induction hright generalizing left with
+  induction hleft generalizing right with
   | reflex =>
-      exact hleft
+      exact hright
   | box hbox ih =>
-      cases hleft with
+      cases hright with
       | reflex =>
           exact PartialTyStrengthens.box hbox
       | box hinner =>
           exact PartialTyStrengthens.box (ih hinner)
-  | borrow hsubset₂ =>
-      cases hleft with
+      | boxIntoUndef hinner =>
+          exact PartialTyStrengthens.boxIntoUndef (ih hinner)
+  | tyBox hbox ih =>
+      cases hright with
       | reflex =>
-          exact PartialTyStrengthens.borrow hsubset₂
-      | borrow hsubset₁ =>
+          exact PartialTyStrengthens.tyBox hbox
+      | tyBox hinner =>
+          exact PartialTyStrengthens.tyBox (ih hinner)
+      | intoUndef hinner =>
+          cases hinner with
+          | reflex =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.tyBox hbox)
+          | tyBox hrightInner =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.tyBox (ih hrightInner))
+  | borrow hsubset₁ =>
+      cases hright with
+      | reflex =>
+          exact PartialTyStrengthens.borrow hsubset₁
+      | borrow hsubset₂ =>
           exact PartialTyStrengthens.borrow
             (fun target hmem => hsubset₂ (hsubset₁ hmem))
+      | intoUndef hinner =>
+          cases hinner with
+          | reflex =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.borrow hsubset₁)
+          | borrow hsubset₂ =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.borrow
+                  (fun target hmem => hsubset₂ (hsubset₁ hmem)))
   | undefLeft hundef ih =>
-      cases hleft with
+      cases hright with
       | reflex =>
           exact PartialTyStrengthens.undefLeft hundef
       | undefLeft hinner =>
           exact PartialTyStrengthens.undefLeft (ih hinner)
-      | intoUndef hinner =>
-          exact PartialTyStrengthens.intoUndef (ih hinner)
-      | boxIntoUndef hinner =>
-          cases hundef with
-          | reflex =>
-              exact PartialTyStrengthens.boxIntoUndef hinner
   | intoUndef hundef ih =>
-      cases hleft with
+      cases hright with
       | reflex =>
           exact PartialTyStrengthens.intoUndef hundef
-      | borrow hsubset =>
+      | undefLeft hinner =>
           exact PartialTyStrengthens.intoUndef
-            (ih (PartialTyStrengthens.borrow hsubset))
+            (ih hinner)
   | boxIntoUndef hundef ih =>
-      cases hleft with
+      cases hright with
       | reflex =>
           exact PartialTyStrengthens.boxIntoUndef hundef
-      | box hinner =>
-          exact PartialTyStrengthens.boxIntoUndef (ih hinner)
+      | undefLeft hinner =>
+          cases hinner with
+          | reflex =>
+              exact PartialTyStrengthens.boxIntoUndef hundef
+          | tyBox hbox =>
+              exact PartialTyStrengthens.boxIntoUndef
+                (ih (PartialTyStrengthens.undefLeft hbox))
 
 theorem PartialTyStrengthens.borrow_subset {mutable : Bool}
     {leftTargets rightTargets : List LVal} :
@@ -123,10 +147,15 @@ theorem PartialTyStrengthens.to_int_inv {sourceTy : Ty} :
 
 theorem PartialTyStrengthens.to_box_ty_inv {sourceTy inner : Ty} :
     PartialTyStrengthens (.ty sourceTy) (.ty (.box inner)) →
-    sourceTy = .box inner := by
+    ∃ sourceInner,
+      sourceTy = .box sourceInner ∧
+        PartialTyStrengthens (.ty sourceInner) (.ty inner) := by
   intro hstrength
-  cases hstrength
-  · rfl
+  cases hstrength with
+  | reflex =>
+      exact ⟨inner, rfl, PartialTyStrengthens.reflex⟩
+  | tyBox hinner =>
+      exact ⟨_, rfl, hinner⟩
 
 theorem PartialTyStrengthens.from_unit_inv {targetTy : Ty} :
     PartialTyStrengthens (.ty .unit) (.ty targetTy) →
@@ -144,10 +173,15 @@ theorem PartialTyStrengthens.from_int_inv {targetTy : Ty} :
 
 theorem PartialTyStrengthens.from_box_ty_inv {sourceInner targetTy : Ty} :
     PartialTyStrengthens (.ty (.box sourceInner)) (.ty targetTy) →
-    targetTy = .box sourceInner := by
+    ∃ targetInner,
+      targetTy = .box targetInner ∧
+        PartialTyStrengthens (.ty sourceInner) (.ty targetInner) := by
   intro hstrength
-  cases hstrength
-  · rfl
+  cases hstrength with
+  | reflex =>
+      exact ⟨sourceInner, rfl, PartialTyStrengthens.reflex⟩
+  | tyBox hinner =>
+      exact ⟨_, rfl, hinner⟩
 
 theorem PartialTyStrengthens.from_borrow_inv {mutable : Bool}
     {sourceTargets : List LVal} {targetTy : Ty} :
@@ -226,16 +260,22 @@ theorem PartialTyStrengthens.box_to_undef_inv {left : PartialTy} {right : Ty} :
 theorem PartialTyStrengthens.ty_to_ty_inv {left right : Ty} :
     PartialTyStrengthens (.ty left) (.ty right) →
     left = right ∨
-      ∃ mutable leftTargets rightTargets,
+      (∃ mutable leftTargets rightTargets,
         left = .borrow mutable leftTargets ∧
         right = .borrow mutable rightTargets ∧
-        leftTargets.Subset rightTargets := by
+        leftTargets.Subset rightTargets) ∨
+      (∃ leftInner rightInner,
+        left = .box leftInner ∧
+        right = .box rightInner ∧
+        PartialTyStrengthens (.ty leftInner) (.ty rightInner)) := by
   intro hstrength
   cases hstrength with
   | reflex =>
       exact Or.inl rfl
   | borrow hsubset =>
-      exact Or.inr ⟨_, _, _, rfl, rfl, hsubset⟩
+      exact Or.inr (Or.inl ⟨_, _, _, rfl, rfl, hsubset⟩)
+  | tyBox hinner =>
+      exact Or.inr (Or.inr ⟨_, _, rfl, rfl, hinner⟩)
 
 theorem PartialTyStrengthens.to_ty_right {source : PartialTy} {target : Ty} :
     PartialTyStrengthens source (.ty target) →
@@ -246,6 +286,8 @@ theorem PartialTyStrengthens.to_ty_right {source : PartialTy} {target : Ty} :
       exact ⟨target, rfl⟩
   | borrow _hsubset =>
       exact ⟨.borrow _ _, rfl⟩
+  | tyBox _hinner =>
+      exact ⟨.box _, rfl⟩
 
 theorem PartialTyUnion.right_full_of_ty_union {headTy resultTy : Ty}
     {restTy : PartialTy} :
@@ -293,6 +335,8 @@ theorem PartialTyUnion.ty_ty_full {left right : Ty} {union : PartialTy} :
       exact ⟨left, rfl⟩
   | borrow hsubset =>
       exact ⟨.borrow _ _, rfl⟩
+  | tyBox _hinner =>
+      exact ⟨.box _, rfl⟩
   | intoUndef hleftRight =>
       rename_i upperTy
       have hrightStrength := PartialTyUnion.right_strengthens hunion
@@ -527,6 +571,144 @@ theorem PartialTyUnion.borrow_append {mutable : Bool}
                 · exact hrightSubset hright)
         exact PartialTyStrengthens.intoUndef happendInner
 
+theorem PartialTyUnion.tyBox {left right union : Ty} :
+    PartialTyUnion (.ty left) (.ty right) (.ty union) →
+    PartialTyUnion (.ty (.box left)) (.ty (.box right)) (.ty (.box union)) := by
+  intro hunion
+  constructor
+  · intro candidate hcandidate
+    simp at hcandidate
+    rcases hcandidate with hcandidate | hcandidate
+    · subst hcandidate
+      exact PartialTyStrengthens.tyBox (PartialTyUnion.left_strengthens hunion)
+    · subst hcandidate
+      exact PartialTyStrengthens.tyBox (PartialTyUnion.right_strengthens hunion)
+  · intro upper hupper
+    have hleftUpper :
+        PartialTyStrengthens (.ty (.box left)) upper :=
+      hupper (by simp)
+    have hrightUpper :
+        PartialTyStrengthens (.ty (.box right)) upper :=
+      hupper (by simp)
+    cases hleftUpper with
+    | reflex =>
+        rcases PartialTyStrengthens.from_box_ty_inv hrightUpper with
+          ⟨rightUpper, hupperEq, hrightInner⟩
+        cases hupperEq
+        have hunionLeft : PartialTyStrengthens (.ty union) (.ty left) :=
+          hunion.2 (by
+            intro candidate hcandidate
+            simp at hcandidate
+            rcases hcandidate with hcandidate | hcandidate
+            · subst hcandidate
+              exact PartialTyStrengthens.reflex
+            · subst hcandidate
+              exact hrightInner)
+        exact PartialTyStrengthens.tyBox hunionLeft
+    | tyBox hleftInner =>
+        rename_i upperInner
+        rcases PartialTyStrengthens.from_box_ty_inv hrightUpper with
+          ⟨rightUpper, hupperEq, hrightInner⟩
+        cases hupperEq
+        have hunionUpper : PartialTyStrengthens (.ty union) (.ty upperInner) :=
+          hunion.2 (by
+            intro candidate hcandidate
+            simp at hcandidate
+            rcases hcandidate with hcandidate | hcandidate
+            · subst hcandidate
+              exact hleftInner
+            · subst hcandidate
+              exact hrightInner)
+        exact PartialTyStrengthens.tyBox hunionUpper
+    | intoUndef hleftInner =>
+        rename_i upperTy
+        rcases PartialTyStrengthens.from_box_ty_inv hleftInner with
+          ⟨leftUpper, hupperTyEq, hleftInnerTy⟩
+        cases hupperTyEq
+        have hrightInnerFull :
+            PartialTyStrengthens (.ty (.box right)) (.ty (.box leftUpper)) :=
+          PartialTyStrengthens.ty_to_undef_inv hrightUpper
+        rcases PartialTyStrengthens.from_box_ty_inv hrightInnerFull with
+          ⟨rightUpper, hrightEq, hrightInner⟩
+        cases hrightEq
+        have hunionUpper : PartialTyStrengthens (.ty union) (.ty leftUpper) :=
+          hunion.2 (by
+            intro candidate hcandidate
+            simp at hcandidate
+            rcases hcandidate with hcandidate | hcandidate
+            · subst hcandidate
+              exact hleftInnerTy
+            · subst hcandidate
+              exact hrightInner)
+        exact PartialTyStrengthens.intoUndef
+          (PartialTyStrengthens.tyBox hunionUpper)
+
+theorem PartialTyUnion.tyBox_inv {left right union : Ty} :
+    PartialTyUnion (.ty (.box left)) (.ty (.box right)) (.ty (.box union)) →
+    PartialTyUnion (.ty left) (.ty right) (.ty union) := by
+  intro hunion
+  constructor
+  · intro candidate hcandidate
+    simp at hcandidate
+    rcases hcandidate with hcandidate | hcandidate
+    · subst hcandidate
+      rcases PartialTyStrengthens.from_box_ty_inv
+          (PartialTyUnion.left_strengthens hunion) with
+        ⟨leftUpper, hupperEq, hleftInner⟩
+      cases hupperEq
+      exact hleftInner
+    · subst hcandidate
+      rcases PartialTyStrengthens.from_box_ty_inv
+          (PartialTyUnion.right_strengthens hunion) with
+        ⟨rightUpper, hupperEq, hrightInner⟩
+      cases hupperEq
+      exact hrightInner
+  · intro upper hupper
+    cases upper with
+    | ty upperTy =>
+        have hboxedUpper :
+            (.ty (.box upperTy)) ∈
+              upperBounds ({.ty (.box left), .ty (.box right)} : Set PartialTy) := by
+          intro candidate hcandidate
+          simp at hcandidate
+          rcases hcandidate with hcandidate | hcandidate
+          · subst hcandidate
+            exact PartialTyStrengthens.tyBox (hupper (by simp))
+          · subst hcandidate
+            exact PartialTyStrengthens.tyBox (hupper (by simp))
+        rcases PartialTyStrengthens.from_box_ty_inv (hunion.2 hboxedUpper) with
+          ⟨unionUpper, hupperEq, hunionInner⟩
+        cases hupperEq
+        exact hunionInner
+    | undef upperTy =>
+        have hboxedUpper :
+            (.undef (.box upperTy)) ∈
+              upperBounds ({.ty (.box left), .ty (.box right)} : Set PartialTy) := by
+          intro candidate hcandidate
+          simp at hcandidate
+          rcases hcandidate with hcandidate | hcandidate
+          · subst hcandidate
+            exact PartialTyStrengthens.intoUndef
+              (PartialTyStrengthens.tyBox
+                (PartialTyStrengthens.ty_to_undef_inv (hupper (by simp))))
+          · subst hcandidate
+            exact PartialTyStrengthens.intoUndef
+              (PartialTyStrengthens.tyBox
+                (PartialTyStrengthens.ty_to_undef_inv (hupper (by simp))))
+        have hboxedUnionToUndef :
+            PartialTyStrengthens (.ty (.box union)) (.ty (.box upperTy)) :=
+          PartialTyStrengthens.ty_to_undef_inv (hunion.2 hboxedUpper)
+        rcases PartialTyStrengthens.from_box_ty_inv hboxedUnionToUndef with
+          ⟨unionUpper, hupperEq, hunionInner⟩
+        cases hupperEq
+        exact PartialTyStrengthens.intoUndef hunionInner
+    | box upperInner =>
+        have hleftUpper : PartialTyStrengthens (.ty left) (.box upperInner) :=
+          hupper (show (.ty left : PartialTy) ∈
+            ({.ty left, .ty right} : Set PartialTy) by simp)
+        exact False.elim
+          (PartialTyStrengthens.not_ty_to_box hleftUpper)
+
 /--
 Bounded join existence.  If two full types both strengthen a common full bound
 `boundTy`, then their union exists and is itself bounded by `boundTy`.
@@ -543,23 +725,31 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
       PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) ∧
         PartialTyStrengthens (.ty unionTy) (.ty boundTy) := by
   intro hleft hright
-  cases boundTy with
-  | unit =>
+  have aux : ∀ boundTy : Ty, ∀ leftTy rightTy : Ty,
+      PartialTyStrengthens (.ty leftTy) (.ty boundTy) →
+      PartialTyStrengthens (.ty rightTy) (.ty boundTy) →
+      ∃ unionTy,
+        PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) ∧
+          PartialTyStrengthens (.ty unionTy) (.ty boundTy) := by
+    refine Ty.rec
+      (motive_1 := fun boundTy => ∀ leftTy rightTy : Ty,
+        PartialTyStrengthens (.ty leftTy) (.ty boundTy) →
+        PartialTyStrengthens (.ty rightTy) (.ty boundTy) →
+        ∃ unionTy,
+          PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) ∧
+            PartialTyStrengthens (.ty unionTy) (.ty boundTy))
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+    · intro leftTy rightTy hleft hright
       have hl : leftTy = .unit := PartialTyStrengthens.to_unit_inv hleft
       have hr : rightTy = .unit := PartialTyStrengthens.to_unit_inv hright
       subst hl; subst hr
       exact ⟨.unit, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
-  | int =>
+    · intro leftTy rightTy hleft hright
       have hl : leftTy = .int := PartialTyStrengthens.to_int_inv hleft
       have hr : rightTy = .int := PartialTyStrengthens.to_int_inv hright
       subst hl; subst hr
       exact ⟨.int, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
-  | box inner =>
-      have hl : leftTy = .box inner := PartialTyStrengthens.to_box_ty_inv hleft
-      have hr : rightTy = .box inner := PartialTyStrengthens.to_box_ty_inv hright
-      subst hl; subst hr
-      exact ⟨.box inner, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
-  | borrow mutable boundTargets =>
+    · intro mutable boundTargets leftTy rightTy hleft hright
       rcases PartialTyStrengthens.to_borrow_inv hleft with
         ⟨leftTargets, hleftEq, hleftSubset⟩
       rcases PartialTyStrengthens.to_borrow_inv hright with
@@ -572,6 +762,20 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
       rcases List.mem_append.mp htarget with hmem | hmem
       · exact hleftSubset hmem
       · exact hrightSubset hmem
+    · intro inner ih leftTy rightTy hleft hright
+      rcases PartialTyStrengthens.to_box_ty_inv hleft with
+        ⟨leftInner, hleftEq, hleftInnerLe⟩
+      rcases PartialTyStrengthens.to_box_ty_inv hright with
+        ⟨rightInner, hrightEq, hrightInnerLe⟩
+      subst hleftEq; subst hrightEq
+      rcases ih leftInner rightInner hleftInnerLe hrightInnerLe with
+        ⟨unionInner, hunionInner, hunionInnerLe⟩
+      exact ⟨.box unionInner, PartialTyUnion.tyBox hunionInner,
+        PartialTyStrengthens.tyBox hunionInnerLe⟩
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact aux boundTy leftTy rightTy hleft hright
 
 theorem PartialTyUnion.not_borrow_mismatch {leftMutable rightMutable : Bool}
     {leftTargets rightTargets : List LVal} {union : PartialTy} :
@@ -611,8 +815,22 @@ theorem PartialTyUnion.full_connected_union_exists
     PartialTyUnion (.ty leftRestTy) (.ty rightRestTy) (.ty joinRestTy) →
     ∃ joinTy, PartialTyUnion (.ty joinHeadTy) (.ty joinRestTy) (.ty joinTy) := by
   intro hleftUnion hheadUnion hrestUnion
-  cases joinHeadTy with
-  | unit =>
+  have aux : ∀ joinHeadTy : Ty,
+      ∀ leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy : Ty,
+        PartialTyUnion (.ty leftHeadTy) (.ty leftRestTy) (.ty leftTy) →
+        PartialTyUnion (.ty leftHeadTy) (.ty rightHeadTy) (.ty joinHeadTy) →
+        PartialTyUnion (.ty leftRestTy) (.ty rightRestTy) (.ty joinRestTy) →
+        ∃ joinTy, PartialTyUnion (.ty joinHeadTy) (.ty joinRestTy) (.ty joinTy) := by
+    refine Ty.rec
+      (motive_1 := fun joinHeadTy =>
+        ∀ leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy : Ty,
+          PartialTyUnion (.ty leftHeadTy) (.ty leftRestTy) (.ty leftTy) →
+          PartialTyUnion (.ty leftHeadTy) (.ty rightHeadTy) (.ty joinHeadTy) →
+          PartialTyUnion (.ty leftRestTy) (.ty rightRestTy) (.ty joinRestTy) →
+          ∃ joinTy, PartialTyUnion (.ty joinHeadTy) (.ty joinRestTy) (.ty joinTy))
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+    · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
+        hleftUnion hheadUnion hrestUnion
       have hleftHeadUnit : leftHeadTy = .unit :=
         PartialTyStrengthens.to_unit_inv
           (PartialTyUnion.left_strengthens hheadUnion)
@@ -633,7 +851,8 @@ theorem PartialTyUnion.full_connected_union_exists
           (PartialTyUnion.left_strengthens hrestUnion)
       subst hjoinRestUnit
       exact ⟨.unit, PartialTyUnion.self (.ty .unit)⟩
-  | int =>
+    · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
+        hleftUnion hheadUnion hrestUnion
       have hleftHeadInt : leftHeadTy = .int :=
         PartialTyStrengthens.to_int_inv
           (PartialTyUnion.left_strengthens hheadUnion)
@@ -654,7 +873,8 @@ theorem PartialTyUnion.full_connected_union_exists
           (PartialTyUnion.left_strengthens hrestUnion)
       subst hjoinRestInt
       exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
-  | borrow mutable joinHeadTargets =>
+    · intro mutable joinHeadTargets leftHeadTy leftRestTy rightHeadTy rightRestTy
+        leftTy joinRestTy hleftUnion hheadUnion hrestUnion
       rcases PartialTyStrengthens.to_borrow_inv
           (PartialTyUnion.left_strengthens hheadUnion) with
         ⟨leftHeadTargets, hleftHeadEq, _hleftHeadSubset⟩
@@ -676,42 +896,88 @@ theorem PartialTyUnion.full_connected_union_exists
       subst hjoinRestEq
       exact ⟨.borrow mutable (joinHeadTargets ++ _),
         PartialTyUnion.borrow_append⟩
-  | box joinHeadInner =>
-      have hleftHeadBox : leftHeadTy = .box joinHeadInner :=
-        PartialTyStrengthens.to_box_ty_inv
-          (PartialTyUnion.left_strengthens hheadUnion)
-      have hrightHeadBox : rightHeadTy = .box joinHeadInner :=
-        PartialTyStrengthens.to_box_ty_inv
-          (PartialTyUnion.right_strengthens hheadUnion)
-      subst hleftHeadBox
-      have hleftTyBox : leftTy = .box joinHeadInner :=
-        PartialTyStrengthens.from_box_ty_inv
-          (PartialTyUnion.left_strengthens hleftUnion)
-      subst hleftTyBox
-      have hleftRestBox : leftRestTy = .box joinHeadInner :=
-        PartialTyStrengthens.to_box_ty_inv
-          (PartialTyUnion.right_strengthens hleftUnion)
-      subst hleftRestBox
-      have hjoinRestBox : joinRestTy = .box joinHeadInner :=
-        PartialTyStrengthens.from_box_ty_inv
-          (PartialTyUnion.left_strengthens hrestUnion)
-      subst hjoinRestBox
-      exact ⟨.box joinHeadInner, PartialTyUnion.self (.ty (.box joinHeadInner))⟩
+    · intro joinHeadInner ih leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy
+        joinRestTy hleftUnion hheadUnion hrestUnion
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.left_strengthens hheadUnion) with
+        ⟨leftHeadInner, hleftHeadEq, _hleftHeadLe⟩
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.right_strengthens hheadUnion) with
+        ⟨rightHeadInner, hrightHeadEq, _hrightHeadLe⟩
+      subst hleftHeadEq; subst hrightHeadEq
+      rcases PartialTyStrengthens.from_box_ty_inv
+          (PartialTyUnion.left_strengthens hleftUnion) with
+        ⟨leftInner, hleftTyEq, _hleftHeadUpper⟩
+      subst hleftTyEq
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.right_strengthens hleftUnion) with
+        ⟨leftRestInner, hleftRestEq, _hleftRestUpper⟩
+      subst hleftRestEq
+      rcases PartialTyStrengthens.from_box_ty_inv
+          (PartialTyUnion.left_strengthens hrestUnion) with
+        ⟨joinRestInner, hjoinRestEq, _hjoinRestUpper⟩
+      subst hjoinRestEq
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.right_strengthens hrestUnion) with
+        ⟨rightRestInner, hrightRestEq, _hrightRestUpper⟩
+      subst hrightRestEq
+      have hleftInnerUnion :
+          PartialTyUnion (.ty leftHeadInner) (.ty leftRestInner) (.ty leftInner) :=
+        PartialTyUnion.tyBox_inv hleftUnion
+      have hheadInnerUnion :
+          PartialTyUnion (.ty leftHeadInner) (.ty rightHeadInner) (.ty joinHeadInner) :=
+        PartialTyUnion.tyBox_inv hheadUnion
+      have hrestInnerUnion :
+          PartialTyUnion (.ty leftRestInner) (.ty rightRestInner) (.ty joinRestInner) :=
+        PartialTyUnion.tyBox_inv hrestUnion
+      rcases ih leftHeadInner leftRestInner rightHeadInner rightRestInner leftInner
+          joinRestInner hleftInnerUnion hheadInnerUnion hrestInnerUnion with
+        ⟨joinInner, hjoinInner⟩
+      exact ⟨.box joinInner, PartialTyUnion.tyBox hjoinInner⟩
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact aux joinHeadTy leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy
+    joinRestTy hleftUnion hheadUnion hrestUnion
 
 theorem ShapeCompatible.full_partialTyUnion_exists {env : Env}
     {left right : Ty} :
     ShapeCompatible env (.ty left) (.ty right) →
     ∃ unionTy, PartialTyUnion (.ty left) (.ty right) (.ty unionTy) := by
   intro hshape
-  cases hshape with
-  | unit =>
-      exact ⟨.unit, PartialTyUnion.self (.ty .unit)⟩
-  | int =>
-      exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
-  | tyBox =>
-      exact ⟨.box _, PartialTyUnion.self (.ty (.box _))⟩
-  | borrow _hleft _hright _hcompatible =>
-      exact ⟨.borrow _ (_ ++ _), PartialTyUnion.borrow_append⟩
+  have aux : ∀ {leftPt rightPt : PartialTy},
+      ShapeCompatible env leftPt rightPt →
+      ∀ {left right : Ty}, leftPt = .ty left → rightPt = .ty right →
+        ∃ unionTy, PartialTyUnion (.ty left) (.ty right) (.ty unionTy) := by
+    intro leftPt rightPt h
+    induction h with
+    | unit =>
+        intro left right hleft hright
+        cases hleft; cases hright
+        exact ⟨.unit, PartialTyUnion.self (.ty .unit)⟩
+    | int =>
+        intro left right hleft hright
+        cases hleft; cases hright
+        exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
+    | tyBox _hinner ih =>
+        intro left right hleft hright
+        cases hleft; cases hright
+        rcases ih rfl rfl with ⟨unionInner, hunionInner⟩
+        exact ⟨.box unionInner, PartialTyUnion.tyBox hunionInner⟩
+    | box _hinner _ih =>
+        intro _left _right hleft _hright
+        cases hleft
+    | borrow _hleft _hright _hcompatible =>
+        intro left right hleft hright
+        cases hleft; cases hright
+        exact ⟨.borrow _ (_ ++ _), PartialTyUnion.borrow_append⟩
+    | undefLeft _hinner _ih =>
+        intro _left _right hleft _hright
+        cases hleft
+    | undefRight _hinner _ih =>
+        intro _left _right _hleft hright
+        cases hright
+  exact aux hshape rfl rfl
 
 /-- Definition 3.22 shape compatibility is symmetric. -/
 theorem ShapeCompatible.symm {env : Env} {left right : PartialTy} :
@@ -721,7 +987,7 @@ theorem ShapeCompatible.symm {env : Env} {left right : PartialTy} :
   induction h with
   | unit => exact ShapeCompatible.unit
   | int => exact ShapeCompatible.int
-  | tyBox => exact ShapeCompatible.tyBox
+  | tyBox _hinner ih => exact ShapeCompatible.tyBox ih
   | box _hinner ih => exact ShapeCompatible.box ih
   | borrow hleft hright _hcompat ih => exact ShapeCompatible.borrow hright hleft ih
   | undefLeft _hinner ih => exact ShapeCompatible.undefRight ih
@@ -816,8 +1082,10 @@ theorem ShapeCompatible.right_full_partialTyUnion_exists {env : Env}
       exact ⟨.ty .unit, PartialTyUnion.self (.ty .unit)⟩
   | int =>
       exact ⟨.ty .int, PartialTyUnion.self (.ty .int)⟩
-  | tyBox =>
-      exact ⟨.ty (.box _), PartialTyUnion.self (.ty (.box _))⟩
+  | tyBox hinner =>
+      rcases ShapeCompatible.full_partialTyUnion_exists hinner with
+        ⟨unionInner, hunionInner⟩
+      exact ⟨.ty (.box unionInner), PartialTyUnion.tyBox hunionInner⟩
   | borrow _hcompatible =>
       exact ⟨.ty (.borrow _ (_ ++ _)), PartialTyUnion.borrow_append⟩
   | undefLeft hinner =>
@@ -1024,13 +1292,34 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
       rcases PartialTyUnion.borrow_member hunion htarget with hleft | hright
       · exact Or.inl ⟨leftTargets, PartialTyContains.here, hleft⟩
       · exact Or.inr ⟨rightTargets, PartialTyContains.here, hright⟩
-  · intro inner _ih left right mutable targets target hunion hcontains htarget
+  · intro inner ih left right mutable targets target hunion hcontains htarget
     cases hcontains with
     | tyBox hinner =>
-      have hleft := PartialTyUnion.left_strengthens hunion
-      cases hleft with
-      | reflex =>
-          exact Or.inl ⟨targets, PartialTyContains.tyBox hinner, htarget⟩
+      rcases PartialTyStrengthens.to_ty_right
+          (PartialTyUnion.left_strengthens hunion) with
+        ⟨leftTy, hleftEq⟩
+      subst hleftEq
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.left_strengthens hunion) with
+        ⟨leftInner, hleftInnerEq, _hleftInnerLe⟩
+      subst hleftInnerEq
+      rcases PartialTyStrengthens.to_ty_right
+          (PartialTyUnion.right_strengthens hunion) with
+        ⟨rightTy, hrightEq⟩
+      subst hrightEq
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.right_strengthens hunion) with
+        ⟨rightInner, hrightInnerEq, _hrightInnerLe⟩
+      subst hrightInnerEq
+      rcases ih _ _ mutable targets target
+          (PartialTyUnion.tyBox_inv hunion) hinner htarget with
+        hleftBorrow | hrightBorrow
+      · rcases hleftBorrow with ⟨leftTargets, hcontainsLeft, hleftMem⟩
+        exact Or.inl
+          ⟨leftTargets, PartialTyContains.tyBox hcontainsLeft, hleftMem⟩
+      · rcases hrightBorrow with ⟨rightTargets, hcontainsRight, hrightMem⟩
+        exact Or.inr
+          ⟨rightTargets, PartialTyContains.tyBox hcontainsRight, hrightMem⟩
   · intro ty ih left right mutable targets target hunion hcontains htarget
     exact ih left right mutable targets target hunion hcontains htarget
   · intro inner ih left right mutable targets target hunion hcontains htarget
@@ -1742,11 +2031,38 @@ theorem PartialTy.sameShape_of_eqv {a b : PartialTy} (h : PartialTy.eqv a b) :
 theorem PartialTy.sameShape_of_shapeCompatible {env : Env} {a b : Ty} :
     ShapeCompatible env (.ty a) (.ty b) → PartialTy.sameShape (.ty a) (.ty b) := by
   intro h
-  cases h with
-  | unit => simp [PartialTy.sameShape, Ty.sameShape]
-  | int => simp [PartialTy.sameShape, Ty.sameShape]
-  | tyBox => exact PartialTy.sameShape_refl _
-  | borrow _ _ _ => simp [PartialTy.sameShape, Ty.sameShape]
+  have aux : ∀ {left right : PartialTy},
+      ShapeCompatible env left right →
+      ∀ {a b : Ty}, left = .ty a → right = .ty b →
+        PartialTy.sameShape (.ty a) (.ty b) := by
+    intro left right h
+    induction h with
+    | unit =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simp [PartialTy.sameShape, Ty.sameShape]
+    | int =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simp [PartialTy.sameShape, Ty.sameShape]
+    | tyBox _hinner ih =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simpa [PartialTy.sameShape, Ty.sameShape] using ih rfl rfl
+    | box _hinner _ih =>
+        intro _a _b hleft _hright
+        cases hleft
+    | borrow _ _ _ =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simp [PartialTy.sameShape, Ty.sameShape]
+    | undefLeft _hinner _ih =>
+        intro _a _b hleft _hright
+        cases hleft
+    | undefRight _hinner _ih =>
+        intro _a _b _hleft hright
+        cases hright
+  exact aux h rfl rfl
 
 /-- The union target list of two same-`mutable` borrows is subset-equivalent to
 the append of the operand target lists (`U` is the LUB, so `U ⊆ L ++ R`, while
@@ -1779,8 +2095,19 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
     (hunionA : PartialTyUnion (.ty headA) (.ty restA) (.ty tyA))
     (hunionB : PartialTyUnion (.ty headB) (.ty restB) (.ty tyB)) :
     Ty.eqv tyA tyB := by
-  cases headA with
-  | unit =>
+  have aux : ∀ headA : Ty, ∀ restA tyA headB restB tyB : Ty,
+      Ty.eqv headA headB → Ty.eqv restA restB →
+      PartialTyUnion (.ty headA) (.ty restA) (.ty tyA) →
+      PartialTyUnion (.ty headB) (.ty restB) (.ty tyB) →
+      Ty.eqv tyA tyB := by
+    refine Ty.rec
+      (motive_1 := fun headA => ∀ restA tyA headB restB tyB : Ty,
+        Ty.eqv headA headB → Ty.eqv restA restB →
+        PartialTyUnion (.ty headA) (.ty restA) (.ty tyA) →
+        PartialTyUnion (.ty headB) (.ty restB) (.ty tyB) →
+        Ty.eqv tyA tyB)
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+    · intro restA tyA headB restB tyB hhead hrest hunionA hunionB
       have hb : headB = .unit := by cases headB <;> simp_all [Ty.eqv]
       subst hb
       have htyA : tyA = .unit :=
@@ -1788,7 +2115,7 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
       have htyB : tyB = .unit :=
         PartialTyStrengthens.from_unit_inv (PartialTyUnion.left_strengthens hunionB)
       subst htyA; subst htyB; trivial
-  | int =>
+    · intro restA tyA headB restB tyB hhead hrest hunionA hunionB
       have hb : headB = .int := by cases headB <;> simp_all [Ty.eqv]
       subst hb
       have htyA : tyA = .int :=
@@ -1796,21 +2123,7 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
       have htyB : tyB = .int :=
         PartialTyStrengthens.from_int_inv (PartialTyUnion.left_strengthens hunionB)
       subst htyA; subst htyB; trivial
-  | box hA =>
-      cases headB with
-      | box hB =>
-          have htyA : tyA = .box hA :=
-            PartialTyStrengthens.from_box_ty_inv
-              (PartialTyUnion.left_strengthens hunionA)
-          have htyB : tyB = .box hB :=
-            PartialTyStrengthens.from_box_ty_inv
-              (PartialTyUnion.left_strengthens hunionB)
-          subst htyA; subst htyB
-          simpa [Ty.eqv] using hhead
-      | unit => simp [Ty.eqv] at hhead
-      | int => simp [Ty.eqv] at hhead
-      | borrow _ _ => simp [Ty.eqv] at hhead
-  | borrow mA tA =>
+    · intro mA tA restA tyA headB restB tyB hhead hrest hunionA hunionB
       cases headB with
       | borrow mB tB =>
           simp only [Ty.eqv] at hhead
@@ -1844,14 +2157,75 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
       | unit => simp [Ty.eqv] at hhead
       | int => simp [Ty.eqv] at hhead
       | box _ => simp [Ty.eqv] at hhead
+    · intro hA ih restA tyA headB restB tyB hhead hrest hunionA hunionB
+      cases headB with
+      | box hB =>
+          rcases PartialTyStrengthens.from_box_ty_inv
+              (PartialTyUnion.left_strengthens hunionA) with
+            ⟨tyAInner, htyAeq, _hheadAUpper⟩
+          subst htyAeq
+          rcases PartialTyStrengthens.to_box_ty_inv
+              (PartialTyUnion.right_strengthens hunionA) with
+            ⟨restAInner, hrestAeq, _hrestAUpper⟩
+          subst hrestAeq
+          rcases PartialTyStrengthens.from_box_ty_inv
+              (PartialTyUnion.left_strengthens hunionB) with
+            ⟨tyBInner, htyBeq, _hheadBUpper⟩
+          subst htyBeq
+          rcases PartialTyStrengthens.to_box_ty_inv
+              (PartialTyUnion.right_strengthens hunionB) with
+            ⟨restBInner, hrestBeq, _hrestBUpper⟩
+          subst hrestBeq
+          have hheadInner : Ty.eqv hA hB := by
+            simpa [Ty.eqv] using hhead
+          have hrestInner : Ty.eqv restAInner restBInner := by
+            simpa [Ty.eqv] using hrest
+          simpa [Ty.eqv] using
+            ih restAInner tyAInner hB restBInner tyBInner hheadInner hrestInner
+              (PartialTyUnion.tyBox_inv hunionA)
+              (PartialTyUnion.tyBox_inv hunionB)
+      | unit => simp [Ty.eqv] at hhead
+      | int => simp [Ty.eqv] at hhead
+      | borrow _ _ => simp [Ty.eqv] at hhead
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact aux headA restA tyA headB restB tyB hhead hrest hunionA hunionB
 
 /-- Strengthening within full types preserves shape: the strengthening rules
 that keep a `.ty` a `.ty` (W-Reflex, W-Bor) never change the head constructor. -/
 theorem ty_sameShape_of_strengthens {a b : Ty}
     (h : PartialTyStrengthens (.ty a) (.ty b)) : Ty.sameShape a b := by
-  cases h with
-  | reflex => exact Ty.sameShape_refl _
-  | borrow _ => simp [Ty.sameShape]
+  have aux : ∀ {left right : PartialTy},
+      PartialTyStrengthens left right →
+      ∀ {a b : Ty}, left = .ty a → right = .ty b → Ty.sameShape a b := by
+    intro left right h
+    induction h with
+    | reflex =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        exact Ty.sameShape_refl _
+    | box _hinner _ih =>
+        intro _a _b hleft _hright
+        cases hleft
+    | tyBox _hinner ih =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simpa [Ty.sameShape] using ih rfl rfl
+    | borrow _ =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simp [Ty.sameShape]
+    | undefLeft _hinner _ih =>
+        intro _a _b hleft _hright
+        cases hleft
+    | intoUndef _hinner _ih =>
+        intro _a _b _hleft hright
+        cases hright
+    | boxIntoUndef _hinner _ih =>
+        intro _a _b hleft _hright
+        cases hleft
+  exact aux h rfl rfl
 
 /-- W-Weak preserves shape: if the old slot type is shape compatible with the
 written full type, their join has the same shape as the old type.  The
@@ -1881,15 +2255,15 @@ theorem partialTyJoin_sameShape {env : Env} {old joined : PartialTy} {ty : Ty}
       | ty u => have := PartialTyStrengthens.to_int_inv hbound; subst this; trivial
       | box _ => cases hbound
       | undef _ => cases hbound
-  | tyBox =>
-      rename_i inner
-      have hbound : joined ≤ (PartialTy.ty (.box inner)) :=
-        hjoin.2 (by intro p hp; simp only [Set.mem_insert_iff,
-          Set.mem_singleton_iff] at hp; rcases hp with rfl | rfl <;> rfl)
-      cases joined with
-      | ty u => have := PartialTyStrengthens.to_box_ty_inv hbound; subst this; trivial
-      | box _ => cases hbound
-      | undef _ => cases hbound
+  | tyBox hinner =>
+      rcases PartialTyUnion.ty_ty_full hjoin with ⟨joinedTy, hjoinedEq⟩
+      subst hjoinedEq
+      rcases PartialTyStrengthens.from_box_ty_inv hleft with
+        ⟨joinedInner, hjoinedTyEq, hinnerLe⟩
+      subst hjoinedTyEq
+      have hinnerShape : Ty.sameShape _ joinedInner :=
+        ty_sameShape_of_strengthens hinnerLe
+      simpa [PartialTy.sameShape, Ty.sameShape] using hinnerShape
   | borrow hL hR hpointee =>
       rename_i mutable leftTargets rightTargets leftTy rightTy
       have hbound : joined ≤
@@ -1932,9 +2306,11 @@ theorem partialTyUnion_ty_left_sameShape {head rest union : Ty} :
       rcases PartialTyStrengthens.from_borrow_inv hstr with ⟨ut, hu, _⟩
       subst hu; simp [Ty.sameShape]
   | box t =>
-      have : union = .box t := PartialTyStrengthens.from_box_ty_inv hstr
-      subst this
-      simpa [Ty.sameShape] using Ty.sameShape_refl t
+      rcases PartialTyStrengthens.from_box_ty_inv hstr with
+        ⟨unionInner, hunionEq, hinnerStr⟩
+      subst hunionEq
+      exact Ty.sameShape_symm (by
+        simpa [Ty.sameShape] using ty_sameShape_of_strengthens hinnerStr)
 
 /-- **Unconditional left-shape preservation for a `.ty`-left join.**  When the
 left operand is a *defined* type `.ty a` (not `.undef`), the join with any
@@ -2158,6 +2534,151 @@ theorem lvalTargetsTyping_member_strengthens {env : Env}
         partialTyStrengthens_trans hstrength
           (PartialTyUnion.right_strengthens hunion)⟩
 
+theorem lvalTargetsTyping_ty_le_of_members {env : Env}
+    {targets : List LVal} {unionTy boundTy : Ty} {lifetime : Lifetime} :
+    LValTargetsTyping env targets (.ty unionTy) lifetime →
+    (∀ target, target ∈ targets → ∀ memberTy memberLifetime,
+      LValTyping env target (.ty memberTy) memberLifetime →
+      PartialTyStrengthens (.ty memberTy) (.ty boundTy)) →
+    PartialTyStrengthens (.ty unionTy) (.ty boundTy) := by
+  intro htargets hmem
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _ _ _ _ => True)
+    (motive_2 := fun targets partialTy _ _ =>
+      ∀ {unionTy : Ty}, partialTy = .ty unionTy →
+        (∀ target, target ∈ targets → ∀ memberTy memberLifetime,
+          LValTyping env target (.ty memberTy) memberLifetime →
+          PartialTyStrengthens (.ty memberTy) (.ty boundTy)) →
+        PartialTyStrengthens (.ty unionTy) (.ty boundTy))
+    ?var ?box ?borrow ?singleton ?cons htargets rfl hmem
+  · intro _x _slot _hslot
+    trivial
+  · intro _lv _inner _lifetime _htyping _ih
+    trivial
+  · intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+      _htyping _htargets _ihTyping _ihTargets
+    trivial
+  · intro target ty targetLifetime htyping _ihTyping unionTy hfull hmem
+    cases hfull
+    exact hmem target (by simp) ty targetLifetime htyping
+  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+      hhead hrest hunion _hintersection _ihHead ihRest selectedTy hfull hmem
+    cases hfull
+    rcases PartialTyUnion.right_full_of_ty_union hunion with
+      ⟨restFull, hrestFull⟩
+    subst hrestFull
+    have hheadLe : PartialTyStrengthens (.ty headTy) (.ty boundTy) :=
+      hmem target (by simp) headTy headLifetime hhead
+    have hrestLe : PartialTyStrengthens (.ty restFull) (.ty boundTy) :=
+      ihRest rfl (fun member hmember memberTy memberLifetime htyping =>
+        hmem member (List.mem_cons_of_mem target hmember)
+          memberTy memberLifetime htyping)
+    exact hunion.2 (by
+      intro candidate hcandidate
+      simp at hcandidate
+      rcases hcandidate with hcandidate | hcandidate
+      · subst hcandidate
+        exact hheadLe
+      · subst hcandidate
+        exact hrestLe)
+
+theorem partialTyStrengthens_ty_of_eqv {left right : Ty} :
+    Ty.eqv left right →
+    PartialTyStrengthens (.ty left) (.ty right) := by
+  intro heqv
+  have aux : ∀ left : Ty, ∀ right : Ty, Ty.eqv left right →
+      PartialTyStrengthens (.ty left) (.ty right) := by
+    refine Ty.rec
+      (motive_1 := fun left => ∀ right : Ty, Ty.eqv left right →
+        PartialTyStrengthens (.ty left) (.ty right))
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+    · intro right heqv
+      cases right <;> simp_all [Ty.eqv]
+    · intro right heqv
+      cases right <;> simp_all [Ty.eqv]
+    · intro mutable leftTargets right heqv
+      cases right with
+      | borrow rightMutable rightTargets =>
+          simp only [Ty.eqv] at heqv
+          obtain ⟨rfl, hsubset, _⟩ := heqv
+          exact PartialTyStrengthens.borrow hsubset
+      | unit => simp [Ty.eqv] at heqv
+      | int => simp [Ty.eqv] at heqv
+      | box _ => simp [Ty.eqv] at heqv
+    · intro leftInner ih right heqv
+      cases right with
+      | box rightInner =>
+          exact PartialTyStrengthens.tyBox (ih rightInner (by simpa [Ty.eqv] using heqv))
+      | unit => simp [Ty.eqv] at heqv
+      | int => simp [Ty.eqv] at heqv
+      | borrow _ _ => simp [Ty.eqv] at heqv
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact aux left right heqv
+
+theorem partialTyStrengthens_of_eqv :
+    {left right : PartialTy} → PartialTy.eqv left right → PartialTyStrengthens left right
+  | .ty _, .ty _, heqv => partialTyStrengthens_ty_of_eqv heqv
+  | .box left, .box right, heqv =>
+      PartialTyStrengthens.box (partialTyStrengthens_of_eqv (left := left) (right := right) heqv)
+  | .undef _, .undef _, heqv =>
+      PartialTyStrengthens.undefLeft (partialTyStrengthens_ty_of_eqv heqv)
+  | .ty _, .box _, heqv => by simp [PartialTy.eqv] at heqv
+  | .ty _, .undef _, heqv => by simp [PartialTy.eqv] at heqv
+  | .box _, .ty _, heqv => by simp [PartialTy.eqv] at heqv
+  | .box _, .undef _, heqv => by simp [PartialTy.eqv] at heqv
+  | .undef _, .ty _, heqv => by simp [PartialTy.eqv] at heqv
+  | .undef _, .box _, heqv => by simp [PartialTy.eqv] at heqv
+
+theorem partialTyStrengthens_eqv_right {c a b : PartialTy}
+    (hca : PartialTyStrengthens c a) (hab : PartialTy.eqv a b) :
+    PartialTyStrengthens c b :=
+  partialTyStrengthens_trans hca (partialTyStrengthens_of_eqv hab)
+
+theorem Ty.eqv_of_strengthens_both {left right : Ty} :
+    PartialTyStrengthens (.ty left) (.ty right) →
+    PartialTyStrengthens (.ty right) (.ty left) →
+    Ty.eqv left right := by
+  intro hlr hrl
+  have aux : ∀ left : Ty, ∀ right : Ty,
+      PartialTyStrengthens (.ty left) (.ty right) →
+      PartialTyStrengthens (.ty right) (.ty left) →
+      Ty.eqv left right := by
+    refine Ty.rec
+      (motive_1 := fun left => ∀ right : Ty,
+        PartialTyStrengthens (.ty left) (.ty right) →
+        PartialTyStrengthens (.ty right) (.ty left) →
+        Ty.eqv left right)
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+    · intro right hlr _hrl
+      have hright : right = .unit := PartialTyStrengthens.from_unit_inv hlr
+      subst hright
+      trivial
+    · intro right hlr _hrl
+      have hright : right = .int := PartialTyStrengthens.from_int_inv hlr
+      subst hright
+      trivial
+    · intro mutable leftTargets right hlr hrl
+      rcases PartialTyStrengthens.from_borrow_inv hlr with
+        ⟨rightTargets, hrightEq, hleftSubset⟩
+      subst hrightEq
+      have hrightSubset : rightTargets.Subset leftTargets :=
+        PartialTyStrengthens.borrow_subset hrl
+      exact ⟨rfl, hleftSubset, hrightSubset⟩
+    · intro leftInner ih right hlr hrl
+      rcases PartialTyStrengthens.from_box_ty_inv hlr with
+        ⟨rightInner, hrightEq, hinnerLr⟩
+      subst hrightEq
+      rcases PartialTyStrengthens.from_box_ty_inv hrl with
+        ⟨leftInner', hleftEq, hinnerRl⟩
+      cases hleftEq
+      exact ih rightInner hinnerLr hinnerRl
+    · intro _ _; trivial
+    · intro _ _; trivial
+    · intro _ _; trivial
+  exact aux left right hlr hrl
+
 /-- A target of the union borrow comes from some member's borrow targets. -/
 theorem lvalTargetsTyping_borrowTargets_mem {env : Env} :
     ∀ {tgts : List LVal} {m : Bool} {U : List LVal} {lu : Lifetime},
@@ -2200,74 +2721,25 @@ theorem lvalTargetsTyping_subsetEquiv_eqv {env : Env}
     (htA : LValTargetsTyping env tgtsA (.ty tyA) lA)
     (htB : LValTargetsTyping env tgtsB (.ty tyB) lB) :
     Ty.eqv tyA tyB := by
-  obtain ⟨h, hhmem⟩ : ∃ h, h ∈ tgtsA := by
-    cases htA with
-    | singleton _ => exact ⟨_, List.mem_cons_self⟩
-    | cons _ _ _ _ => exact ⟨_, List.mem_cons_self⟩
-  obtain ⟨hAty, hAlt, hAty_typing, hAty_le⟩ :=
-    lvalTargetsTyping_member_strengthens htA h hhmem
-  obtain ⟨hBty, hBlt, hBty_typing, hBty_le⟩ :=
-    lvalTargetsTyping_member_strengthens htB h (hAB hhmem)
-  have hh_eqv : Ty.eqv hAty hBty :=
-    hdet h (List.mem_append_left _ hhmem) _ _ _ _ hAty_typing hBty_typing
-  cases tyA with
-  | unit =>
-      have hAu : hAty = .unit := PartialTyStrengthens.to_unit_inv hAty_le
-      subst hAu
-      have hBu : hBty = .unit := by cases hBty <;> simp_all [Ty.eqv]
-      subst hBu
-      have : tyB = .unit := PartialTyStrengthens.from_unit_inv hBty_le
-      subst this; trivial
-  | int =>
-      have hAu : hAty = .int := PartialTyStrengthens.to_int_inv hAty_le
-      subst hAu
-      have hBu : hBty = .int := by cases hBty <;> simp_all [Ty.eqv]
-      subst hBu
-      have : tyB = .int := PartialTyStrengthens.from_int_inv hBty_le
-      subst this; trivial
-  | box cA =>
-      have hAbox : hAty = .box cA := by cases hAty_le; rfl
-      subst hAbox
-      have hBbox : ∃ cB, hBty = .box cB := by cases hBty <;> simp_all [Ty.eqv]
-      obtain ⟨cB, hBeq⟩ := hBbox
-      subst hBeq
-      have : tyB = .box cB :=
-        PartialTyStrengthens.from_box_ty_inv hBty_le
-      subst this
-      exact hh_eqv
-  | borrow m UA =>
-      rcases PartialTyStrengthens.to_borrow_inv hAty_le with ⟨hAtt, hAtyEq, _⟩
-      subst hAtyEq
-      cases hBty with
-      | borrow mB hBtt =>
-          simp only [Ty.eqv] at hh_eqv
-          obtain ⟨rfl, _, _⟩ := hh_eqv
-          rcases PartialTyStrengthens.from_borrow_inv hBty_le with ⟨UB, htyBeq, _⟩
-          subst htyBeq
-          refine ⟨rfl, ?_, ?_⟩
-          · intro x hx
-            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
-              lvalTargetsTyping_borrowTargets_mem htA x hx
-            obtain ⟨tBty, tBlt, tBtyping, tBle⟩ :=
-              lvalTargetsTyping_member_strengthens htB t (hAB htmem)
-            rcases PartialTyStrengthens.to_borrow_inv tBle with ⟨tt'', tBtyEq, htt''_UB⟩
-            subst tBtyEq
-            have hcmp := hdet t (List.mem_append_left _ htmem) _ _ _ _ httty tBtyping
-            simp only [Ty.eqv] at hcmp
-            exact htt''_UB (hcmp.2.1 hxtt)
-          · intro x hx
-            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
-              lvalTargetsTyping_borrowTargets_mem htB x hx
-            obtain ⟨tAty, tAlt, tAtyping, tAle⟩ :=
-              lvalTargetsTyping_member_strengthens htA t (hBA htmem)
-            rcases PartialTyStrengthens.to_borrow_inv tAle with ⟨tt'', tAtyEq, htt''_UA⟩
-            subst tAtyEq
-            have hcmp := hdet t (List.mem_append_right _ htmem) _ _ _ _ tAtyping httty
-            simp only [Ty.eqv] at hcmp
-            exact htt''_UA (hcmp.2.2 hxtt)
-      | unit => simp [Ty.eqv] at hh_eqv
-      | int => simp [Ty.eqv] at hh_eqv
-      | box _ => simp [Ty.eqv] at hh_eqv
+  have hABStrength : PartialTyStrengthens (.ty tyA) (.ty tyB) :=
+    lvalTargetsTyping_ty_le_of_members htA
+      (fun target htarget memberTy memberLifetime htyping =>
+        let ⟨otherTy, otherLifetime, hotherTyping, hotherLe⟩ :=
+          lvalTargetsTyping_member_strengthens htB target (hAB htarget)
+        have heqv : Ty.eqv memberTy otherTy :=
+          hdet target (List.mem_append_left _ htarget)
+            memberTy otherTy memberLifetime otherLifetime htyping hotherTyping
+        partialTyStrengthens_trans (partialTyStrengthens_ty_of_eqv heqv) hotherLe)
+  have hBAStrength : PartialTyStrengthens (.ty tyB) (.ty tyA) :=
+    lvalTargetsTyping_ty_le_of_members htB
+      (fun target htarget memberTy memberLifetime htyping =>
+        let ⟨otherTy, otherLifetime, hotherTyping, hotherLe⟩ :=
+          lvalTargetsTyping_member_strengthens htA target (hBA htarget)
+        have heqv : Ty.eqv memberTy otherTy :=
+          hdet target (List.mem_append_right _ htarget)
+            memberTy otherTy memberLifetime otherLifetime htyping hotherTyping
+        partialTyStrengthens_trans (partialTyStrengthens_ty_of_eqv heqv) hotherLe)
+  exact Ty.eqv_of_strengthens_both hABStrength hBAStrength
 
 /-- Two environments whose common slots carry `eqv` types.  This is the relation
 preserved by the write-fan-out join (both sides are one environment modified by
@@ -2290,74 +2762,25 @@ theorem lvalTargetsTyping_subsetEquiv_eqv_cross {e1 e2 : Env}
     (htA : LValTargetsTyping e1 tgtsA (.ty tyA) lA)
     (htB : LValTargetsTyping e2 tgtsB (.ty tyB) lB) :
     Ty.eqv tyA tyB := by
-  obtain ⟨h, hhmem⟩ : ∃ h, h ∈ tgtsA := by
-    cases htA with
-    | singleton _ => exact ⟨_, List.mem_cons_self⟩
-    | cons _ _ _ _ => exact ⟨_, List.mem_cons_self⟩
-  obtain ⟨hAty, hAlt, hAty_typing, hAty_le⟩ :=
-    lvalTargetsTyping_member_strengthens htA h hhmem
-  obtain ⟨hBty, hBlt, hBty_typing, hBty_le⟩ :=
-    lvalTargetsTyping_member_strengthens htB h (hAB hhmem)
-  have hh_eqv : Ty.eqv hAty hBty :=
-    hdet h (List.mem_append_left _ hhmem) _ _ _ _ hAty_typing hBty_typing
-  cases tyA with
-  | unit =>
-      have hAu : hAty = .unit := PartialTyStrengthens.to_unit_inv hAty_le
-      subst hAu
-      have hBu : hBty = .unit := by cases hBty <;> simp_all [Ty.eqv]
-      subst hBu
-      have : tyB = .unit := PartialTyStrengthens.from_unit_inv hBty_le
-      subst this; trivial
-  | int =>
-      have hAu : hAty = .int := PartialTyStrengthens.to_int_inv hAty_le
-      subst hAu
-      have hBu : hBty = .int := by cases hBty <;> simp_all [Ty.eqv]
-      subst hBu
-      have : tyB = .int := PartialTyStrengthens.from_int_inv hBty_le
-      subst this; trivial
-  | box cA =>
-      have hAbox : hAty = .box cA := by cases hAty_le; rfl
-      subst hAbox
-      have hBbox : ∃ cB, hBty = .box cB := by cases hBty <;> simp_all [Ty.eqv]
-      obtain ⟨cB, hBeq⟩ := hBbox
-      subst hBeq
-      have : tyB = .box cB :=
-        PartialTyStrengthens.from_box_ty_inv hBty_le
-      subst this
-      exact hh_eqv
-  | borrow m UA =>
-      rcases PartialTyStrengthens.to_borrow_inv hAty_le with ⟨hAtt, hAtyEq, _⟩
-      subst hAtyEq
-      cases hBty with
-      | borrow mB hBtt =>
-          simp only [Ty.eqv] at hh_eqv
-          obtain ⟨rfl, _, _⟩ := hh_eqv
-          rcases PartialTyStrengthens.from_borrow_inv hBty_le with ⟨UB, htyBeq, _⟩
-          subst htyBeq
-          refine ⟨rfl, ?_, ?_⟩
-          · intro x hx
-            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
-              lvalTargetsTyping_borrowTargets_mem htA x hx
-            obtain ⟨tBty, tBlt, tBtyping, tBle⟩ :=
-              lvalTargetsTyping_member_strengthens htB t (hAB htmem)
-            rcases PartialTyStrengthens.to_borrow_inv tBle with ⟨tt'', tBtyEq, htt''_UB⟩
-            subst tBtyEq
-            have hcmp := hdet t (List.mem_append_left _ htmem) _ _ _ _ httty tBtyping
-            simp only [Ty.eqv] at hcmp
-            exact htt''_UB (hcmp.2.1 hxtt)
-          · intro x hx
-            obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
-              lvalTargetsTyping_borrowTargets_mem htB x hx
-            obtain ⟨tAty, tAlt, tAtyping, tAle⟩ :=
-              lvalTargetsTyping_member_strengthens htA t (hBA htmem)
-            rcases PartialTyStrengthens.to_borrow_inv tAle with ⟨tt'', tAtyEq, htt''_UA⟩
-            subst tAtyEq
-            have hcmp := hdet t (List.mem_append_right _ htmem) _ _ _ _ tAtyping httty
-            simp only [Ty.eqv] at hcmp
-            exact htt''_UA (hcmp.2.2 hxtt)
-      | unit => simp [Ty.eqv] at hh_eqv
-      | int => simp [Ty.eqv] at hh_eqv
-      | box _ => simp [Ty.eqv] at hh_eqv
+  have hABStrength : PartialTyStrengthens (.ty tyA) (.ty tyB) :=
+    lvalTargetsTyping_ty_le_of_members htA
+      (fun target htarget memberTy memberLifetime htyping =>
+        let ⟨otherTy, otherLifetime, hotherTyping, hotherLe⟩ :=
+          lvalTargetsTyping_member_strengthens htB target (hAB htarget)
+        have heqv : Ty.eqv memberTy otherTy :=
+          hdet target (List.mem_append_left _ htarget)
+            memberTy otherTy memberLifetime otherLifetime htyping hotherTyping
+        partialTyStrengthens_trans (partialTyStrengthens_ty_of_eqv heqv) hotherLe)
+  have hBAStrength : PartialTyStrengthens (.ty tyB) (.ty tyA) :=
+    lvalTargetsTyping_ty_le_of_members htB
+      (fun target htarget memberTy memberLifetime htyping =>
+        let ⟨otherTy, otherLifetime, hotherTyping, hotherLe⟩ :=
+          lvalTargetsTyping_member_strengthens htA target (hBA htarget)
+        have heqv : Ty.eqv memberTy otherTy :=
+          Ty.eqv_symm (hdet target (List.mem_append_right _ htarget)
+            otherTy memberTy otherLifetime memberLifetime hotherTyping htyping)
+        partialTyStrengthens_trans (partialTyStrengthens_ty_of_eqv heqv) hotherLe)
+  exact Ty.eqv_of_strengthens_both hABStrength hBAStrength
 
 /-- Single-lval type determinism (`eqv` form): in a linearizable environment,
 any two typings of the same lval have `eqv` types (same shape, and borrow target
@@ -2575,9 +2998,9 @@ inclusion `tgts ⊆ tgts'` of borrow targets jointly typed in two environments
 (`hmem`: each shared member's `e`-type is `sameShape` and strengthens to its
 `e'`-type), the joint types are `sameShape` and `pTy` strengthens to `jTy`.
 
-The borrow case threads the subset through `lvalTargetsTyping_borrowTargets_mem`;
-the box case closes by `Ty.box` rigidity (the only strengthening into `.ty (.box
-_)` is reflexivity, so the contents must coincide). -/
+  The proof uses the target-list union as a LUB: each member type in `tgts`
+  strengthens to the corresponding member type in `tgts'`, and that member type
+  strengthens to `jTy`; therefore `jTy` is an upper bound for the original list. -/
 theorem lvalTargetsTyping_subset_strengthen {e e' : Env}
     {tgts tgts' : List LVal} {pTy jTy : Ty} {lf jLf : Lifetime}
     (hsub : tgts ⊆ tgts')
@@ -2600,35 +3023,14 @@ theorem lvalTargetsTyping_subset_strengthen {e e' : Env}
     have h2 : Ty.sameShape hE' jTy := ty_sameShape_of_strengthens hE'le
     exact Ty.sameShape_trans (Ty.sameShape_trans (Ty.sameShape_symm h1) hmemShape) h2
   refine ⟨hsameShape, ?_⟩
-  cases pTy with
-  | unit =>
-      have : jTy = .unit := by cases jTy <;> simp_all [Ty.sameShape]
-      subst this; exact PartialTyStrengthens.reflex
-  | int =>
-      have : jTy = .int := by cases jTy <;> simp_all [Ty.sameShape]
-      subst this; exact PartialTyStrengthens.reflex
-  | box cA =>
-      have hjeq : jTy = .box cA := by
-        have hEbox : hE = .box cA := PartialTyStrengthens.to_box_ty_inv hEle
-        subst hEbox
-        have hE'box : hE' = .box cA := PartialTyStrengthens.from_box_ty_inv hmemStr
-        subst hE'box
-        exact PartialTyStrengthens.from_box_ty_inv hE'le
-      subst hjeq; exact PartialTyStrengthens.reflex
-  | borrow m UA =>
-      obtain ⟨UB, hjeq⟩ : ∃ UB, jTy = .borrow m UB := by
-        cases jTy <;> simp_all [Ty.sameShape]
-      subst hjeq
-      refine PartialTyStrengthens.borrow ?_
-      intro x hx
-      obtain ⟨t, htmem, tt, lt, httty, hxtt⟩ :=
-        lvalTargetsTyping_borrowTargets_mem htgts x hx
-      obtain ⟨tE', tlt', tE'ty, tE'le⟩ :=
-        lvalTargetsTyping_member_strengthens htgts' t (hsub htmem)
-      rcases PartialTyStrengthens.to_borrow_inv tE'le with ⟨tt2, htE'eq, htt2_UB⟩
-      subst htE'eq
-      obtain ⟨_, htstr⟩ := hmem t htmem _ _ _ _ httty tE'ty
-      exact htt2_UB (PartialTyStrengthens.borrow_subset htstr hxtt)
+  exact lvalTargetsTyping_ty_le_of_members htgts
+    (fun target htarget memberTy memberLifetime htyping =>
+      let ⟨otherTy, otherLifetime, hotherTyping, hotherLe⟩ :=
+        lvalTargetsTyping_member_strengthens htgts' target (hsub htarget)
+      have hmemberStr : PartialTyStrengthens (.ty memberTy) (.ty otherTy) :=
+        (hmem target htarget memberTy otherTy memberLifetime otherLifetime
+          htyping hotherTyping).2
+      partialTyStrengthens_trans hmemberStr hotherLe)
 
 
 end Paper

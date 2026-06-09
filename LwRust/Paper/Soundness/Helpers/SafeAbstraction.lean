@@ -310,10 +310,14 @@ theorem validPartialValue_strengthen_sameShape {store : ProgramStore}
             (ih hinnerStrength (by simpa [PartialTy.sameShape] using hshape))
       | boxIntoUndef _ =>
           simp [PartialTy.sameShape] at hshape
-  | boxFull hslot hinner =>
+  | boxFull hslot hinner ih =>
       intro hstrength hshape
       cases hstrength with
       | reflex => exact ValidPartialValue.boxFull hslot hinner
+      | tyBox hinnerStrength =>
+          exact ValidPartialValue.boxFull hslot
+            (ih hinnerStrength
+              (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape))
       | intoUndef _ => simp [PartialTy.sameShape] at hshape
 
 /--
@@ -536,24 +540,59 @@ theorem ShapeCompatible.ty_ty_left_of_strengthens {env : Env}
     ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
     ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
   intro hstrength hshape
-  cases hshape with
-  | unit =>
-      cases hstrength
-      exact ShapeCompatible.unit
-  | int =>
-      cases hstrength
-      exact ShapeCompatible.int
-  | tyBox =>
-      cases hstrength
-      exact ShapeCompatible.tyBox
-  | borrow hleft hright hinner =>
-      cases hstrength with
-      | reflex =>
-          exact ShapeCompatible.borrow hleft hright hinner
-      | borrow hsubset =>
-          exact ShapeCompatible.borrow
-            (fun target hmem => hleft target (hsubset hmem))
-            hright hinner
+  have aux :
+      ∀ {left right : PartialTy},
+        ShapeCompatible env left right →
+        ∀ {selectedTy oldTy rhsTy : Ty},
+          left = .ty oldTy →
+          right = .ty rhsTy →
+          PartialTyStrengthens (.ty selectedTy) (.ty oldTy) →
+          ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
+    intro left right h
+    induction h with
+    | unit =>
+        intro selectedTy oldTy rhsTy hleft hright hstrength
+        cases hleft
+        cases hright
+        cases hstrength
+        exact ShapeCompatible.unit
+    | int =>
+        intro selectedTy oldTy rhsTy hleft hright hstrength
+        cases hleft
+        cases hright
+        cases hstrength
+        exact ShapeCompatible.int
+    | tyBox hinner ih =>
+        intro selectedTy oldTy rhsTy hleft hright hstrength
+        cases hleft
+        cases hright
+        cases hstrength with
+        | reflex =>
+            exact ShapeCompatible.tyBox hinner
+        | tyBox hselectedInner =>
+            exact ShapeCompatible.tyBox
+              (ih rfl rfl hselectedInner)
+    | box _hinner _ih =>
+        intro _selectedTy _oldTy _rhsTy hleft _hright _hstrength
+        cases hleft
+    | borrow hleft hright hinner =>
+        intro selectedTy oldTy rhsTy hleftEq hrightEq hstrength
+        cases hleftEq
+        cases hrightEq
+        cases hstrength with
+        | reflex =>
+            exact ShapeCompatible.borrow hleft hright hinner
+        | borrow hsubset =>
+            exact ShapeCompatible.borrow
+              (fun target hmem => hleft target (hsubset hmem))
+              hright hinner
+    | undefLeft _hinner _ih =>
+        intro _selectedTy _oldTy _rhsTy hleft _hright _hstrength
+        cases hleft
+    | undefRight _hinner _ih =>
+        intro _selectedTy _oldTy _rhsTy _hleft hright _hstrength
+        cases hright
+  exact aux hshape rfl rfl hstrength
 
 theorem ShapeCompatible.ty_left_of_strengthens {env : Env}
     {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
@@ -570,6 +609,11 @@ theorem ShapeCompatible.ty_left_of_strengthens {env : Env}
           exact ShapeCompatible.borrow
             (fun target hmem => hleft target (hsubset hmem))
             hright hinner
+  | tyBox hinnerStrength =>
+      cases hshape with
+      | tyBox hinnerShape =>
+          exact ShapeCompatible.tyBox
+            (ShapeCompatible.ty_ty_left_of_strengthens hinnerStrength hinnerShape)
   | intoUndef hinnerStrength =>
       cases hshape with
       | undefLeft hinnerShape =>

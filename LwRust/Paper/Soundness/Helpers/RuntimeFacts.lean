@@ -676,6 +676,10 @@ theorem partialTy_vars_mono {a b : PartialTy} (hstr : PartialTyStrengthens a b) 
       intro hshape v hv
       simp only [PartialTy.vars] at hv ⊢
       exact ih (by simpa [PartialTy.sameShape] using hshape) v hv
+  | @tyBox aT bT _hsub ih =>
+      intro hshape v hv
+      simp only [PartialTy.vars, Ty.vars] at hv ⊢
+      exact ih (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape) v hv
   | @borrow m L R hsub =>
       intro _ v hv
       simp only [PartialTy.vars, Ty.vars, List.mem_map] at hv ⊢
@@ -2654,13 +2658,8 @@ theorem safeStrengthening {store : ProgramStore} {env : Env}
     ValidValue store value left →
     ValidValue store value right := by
   intro _hwellFormed _hsafe hstrength hvalid
-  cases hstrength with
-  | reflex =>
-      exact hvalid
-  | borrow hsubset =>
-      cases hvalid with
-      | borrow hmem hloc =>
-          exact ValidPartialValue.borrow (hsubset hmem) hloc
+  exact validPartialValue_strengthen_sameShape hvalid hstrength
+    (by simpa [PartialTy.sameShape] using ty_sameShape_of_strengthens hstrength)
 
 /--
 Lemma 9.7, Value Typing.

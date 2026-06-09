@@ -122,6 +122,10 @@ inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
   | box {left right : PartialTy} :
       PartialTyStrengthens left right →
       PartialTyStrengthens (.box left) (.box right)
+  /-- W-Box for fully initialized owner types. -/
+  | tyBox {left right : Ty} :
+      PartialTyStrengthens (.ty left) (.ty right) →
+      PartialTyStrengthens (.ty (.box left)) (.ty (.box right))
   /-- W-Bor. -/
   | borrow {mutable : Bool} {leftTargets rightTargets : List LVal} :
       leftTargets.Subset rightTargets →
@@ -405,9 +409,7 @@ def Linearizable (env : Env) : Prop :=
   ∃ φ : Name → Nat, LinearizedBy φ env
 
 /-- Structural shape equality of full types, ignoring borrow *target lists* (but
-keeping the `mutable` flag).  Box types are rigid in the strengthening order, so
-two box shapes count as equal only when their contents are literally equal —
-which is all that arises, because box-typed lvals have a unique type. -/
+keeping the `mutable` flag). -/
 def Ty.sameShape : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
@@ -730,8 +732,9 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
   | int {env : Env} :
       ShapeCompatible env (.ty .int) (.ty .int)
   /-- S-Box for fully initialized owner types. -/
-  | tyBox {env : Env} {inner : Ty} :
-      ShapeCompatible env (.ty (.box inner)) (.ty (.box inner))
+  | tyBox {env : Env} {left right : Ty} :
+      ShapeCompatible env (.ty left) (.ty right) →
+      ShapeCompatible env (.ty (.box left)) (.ty (.box right))
   /-- S-Box. -/
   | box {env : Env} {left right : PartialTy} :
       ShapeCompatible env left right →

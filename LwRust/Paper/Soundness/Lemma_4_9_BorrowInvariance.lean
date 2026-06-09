@@ -6216,13 +6216,13 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
               exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
                 (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                 hvalueHeap hborrows hreach)
-      | tyBox =>
-          rename_i postWriteStore oldSlot inner
+      | tyBox hinnerShape =>
+          rename_i postWriteStore oldStoreSlot leftInner rightInner
           cases hvalidValue with
           | @boxFull location slot _ hnewRootSlot hnewInnerValid =>
-              have hstoreX : store.slotAt (VariableProjection x) = some oldSlot := by
+              have hstoreX : store.slotAt (VariableProjection x) = some oldStoreSlot := by
                 simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
-              have hslotLifetime : oldSlot.lifetime = envSlot.lifetime := by
+              have hslotLifetime : oldStoreSlot.lifetime = envSlot.lifetime := by
                 rcases hsafe.2 x envSlot henvSlot with
                   ⟨safeValue, hsafeSlot, _hvalidSafe⟩
                 rw [hstoreX] at hsafeSlot
@@ -6230,7 +6230,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                 exact congrArg StoreSlot.lifetime hslotEq
               set writtenStore : ProgramStore :=
                 store.update (VariableProjection x)
-                  { oldSlot with
+                  { oldStoreSlot with
                     value := .value
                       (.ref { location := location, owner := true }) } with hwrittenStore
               have hstoreAfterWrite : postWriteStore = writtenStore := by
@@ -6244,7 +6244,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                 rw [← hstoreAfterWrite]
                 exact hwriteStoreWritten
               have henv' :
-                  env' = env.update x { envSlot with ty := .ty (.box inner) } :=
+                  env' = env.update x { envSlot with ty := .ty (.box rightInner) } :=
                 envWrite_zero_var_eq henvSlot hwrite
               have hnewValueHeap :
                   ValueOwnerTargetsHeap
@@ -6267,16 +6267,16 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
               have hslotXWriteRuntime :
                   writtenStore.slotAt (VariableProjection x) =
                     some
-                      { oldSlot with
+                      { oldStoreSlot with
                         value := .value
                           (.ref { location := location, owner := true }) } := by
                 rw [hwrittenStore]
                 simp [ProgramStore.update]
-              have hwellInner : WellFormedTy env inner rhsWellLifetime := by
+              have hwellInner : WellFormedTy env rightInner rhsWellLifetime := by
                 cases hwellTy with
                 | box hinner => exact hinner
               have hnewInnerValidWrite :
-                  ValidPartialValue writtenStore slot.value (.ty inner) := by
+                  ValidPartialValue writtenStore slot.value (.ty rightInner) := by
                 rw [hwrittenStore]
                 exact RuntimeFrame.validPartialValue_update_of_not_reaches
                   hnewInnerValid
@@ -6294,14 +6294,14 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
               have hnewValidWrite :
                   ValidPartialValue writtenStore
                     (.value (.ref { location := location, owner := true }))
-                    (.ty (.box inner)) :=
+                    (.ty (.box rightInner)) :=
                 ValidPartialValue.boxFull hnewRootSlotWrite hnewInnerValidWrite
               have hwriteValidStore : ValidStore writtenStore := by
                 rw [hwrittenStore]
                 exact validStore_update_disjoint
                   (updatedLocation := VariableProjection x)
                   (slot :=
-                    { oldSlot with
+                    { oldStoreSlot with
                       value := .value
                         (.ref { location := location, owner := true }) })
                   (ValidRuntimeState.validStore hvalidRuntime)
@@ -6321,39 +6321,39 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                   (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                   (ValueOwnerTargetsHeap.partial hnewValueHeap) hwriteStoreConcrete
               have hdropValuesHeap :
-                  ∀ dropValue, dropValue ∈ [oldSlot.value] →
+                  ∀ dropValue, dropValue ∈ [oldStoreSlot.value] →
                     PartialValueOwnerTargetsHeap dropValue := by
                 intro dropValue hmem
                 simp at hmem
                 subst hmem
-                have holdHeap : PartialValueOwnerTargetsHeap oldSlot.value :=
+                have holdHeap : PartialValueOwnerTargetsHeap oldStoreSlot.value :=
                   partialValueOwnerTargetsHeap_of_slot
                     (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                     hstoreX
                 exact holdHeap
               have havoidVarX :
-                  DropsAvoids writtenStore [oldSlot.value] (VariableProjection x) :=
+                  DropsAvoids writtenStore [oldStoreSlot.value] (VariableProjection x) :=
                 dropsAvoids_var_of_ownerTargetsHeap hdrops hwriteOwnerHeap hdropValuesHeap
               have hnewBorrows :
                   PartialTyBorrowsWellFormedInSlot env rhsWellLifetime
-                    (.ty (.box inner)) :=
+                    (.ty (.box rightInner)) :=
                 PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellTy
               have hnewGraphDisjoint :
                   ∀ reached,
                     RuntimeFrame.Reaches writtenStore
                       (.value (.ref { location := location, owner := true }))
-                      (.ty (.box inner)) reached →
-                    ∀ dropValue, dropValue ∈ [oldSlot.value] →
+                      (.ty (.box rightInner)) reached →
+                    ∀ dropValue, dropValue ∈ [oldStoreSlot.value] →
                       reached ∉ partialValueOwningLocations dropValue := by
                 intro reached hreach dropValue hmem howned
                 simp at hmem
                 subst hmem
                 have holdOwns : ProgramStore.OwnsAt store reached (VariableProjection x) := by
                   have holdValue :
-                      oldSlot.value = .value (owningRef reached) :=
+                      oldStoreSlot.value = .value (owningRef reached) :=
                     eq_owningRef_of_mem_partialValueOwningLocations howned
-                  exact ⟨oldSlot.lifetime, by
-                    cases oldSlot with
+                  exact ⟨oldStoreSlot.lifetime, by
+                    cases oldStoreSlot with
                     | mk oldValue oldLifetime =>
                         cases holdValue
                         simpa [owningRef] using hstoreX⟩
@@ -6399,7 +6399,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
               have hnewValidFinal :
                   ValidPartialValue store'
                     (.value (.ref { location := location, owner := true }))
-                    (.ty (.box inner)) :=
+                    (.ty (.box rightInner)) :=
                 RuntimeFrame.validPartialValue_drops_of_avoids_reaches
                   hdrops hnewValidWrite
                   (by
@@ -6419,16 +6419,16 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                   hwriteStoreConcrete
               have hdropDisjoint :
                   ∀ owned,
-                    owned ∈ partialValuesOwningLocations [oldSlot.value] →
+                    owned ∈ partialValuesOwningLocations [oldStoreSlot.value] →
                       ¬ ProgramStore.Owns writtenStore owned := by
                 intro owned hmem howns
                 simp [partialValuesOwningLocations] at hmem
                 have holdValue :
-                    oldSlot.value = .value (owningRef owned) :=
+                    oldStoreSlot.value = .value (owningRef owned) :=
                   eq_owningRef_of_mem_partialValueOwningLocations hmem
                 have holdOwnsStore : ProgramStore.OwnsAt store owned (VariableProjection x) :=
-                  ⟨oldSlot.lifetime, by
-                    cases oldSlot with
+                  ⟨oldStoreSlot.lifetime, by
+                    cases oldStoreSlot with
                     | mk oldValue oldLifetime =>
                         cases holdValue
                         simpa [owningRef] using hstoreX⟩
@@ -6440,7 +6440,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                       partialValueOwningLocations
                         (.value (.ref { location := location, owner := true })) := by
                     have hslotNew :
-                        { oldSlot with
+                        { oldStoreSlot with
                           value := .value
                             (.ref { location := location, owner := true }) } =
                           StoreSlot.mk (.value (owningRef owned))
@@ -6459,7 +6459,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                       valueOwnedLocation?] using hnewOwnsOld
                   exact hnewGraphDisjoint location
                     (RuntimeFrame.Reaches.boxFullHere hnewRootSlotWrite)
-                    oldSlot.value (by simp) (by simpa [hownedEq] using hmem)
+                    oldStoreSlot.value (by simp) (by simpa [hownedEq] using hmem)
                 · have hownerOld :
                       ProgramStore.OwnsAt store owned storage := by
                     exact ⟨ownerLifetime, by
@@ -6514,7 +6514,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                       rw [hwrittenStore]
                       simpa [ProgramStore.update, VariableProjection, hyx] using hslotY
                     have havoidY :
-                        DropsAvoids writtenStore [oldSlot.value]
+                        DropsAvoids writtenStore [oldStoreSlot.value]
                           (VariableProjection y) :=
                       dropsAvoids_var_of_ownerTargetsHeap hdrops hwriteOwnerHeap
                         hdropValuesHeap
@@ -6529,7 +6529,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                     rw [hwrittenStore]
                     simpa [ProgramStore.update, VariableProjection, hyx] using hslotY
                   have havoidY :
-                      DropsAvoids writtenStore [oldSlot.value]
+                      DropsAvoids writtenStore [oldStoreSlot.value]
                         (VariableProjection y) :=
                     dropsAvoids_var_of_ownerTargetsHeap hdrops hwriteOwnerHeap
                       hdropValuesHeap
@@ -6557,7 +6557,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                       ∀ reached,
                         RuntimeFrame.Reaches writtenStore oldValue
                           otherEnvSlot.ty reached →
-                        ∀ dropValue, dropValue ∈ [oldSlot.value] →
+                        ∀ dropValue, dropValue ∈ [oldStoreSlot.value] →
                           reached ∉ partialValueOwningLocations dropValue := by
                     intro reached hreach dropValue hmem howned
                     simp at hmem
@@ -6565,10 +6565,10 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                     have holdOwnsX :
                         ProgramStore.OwnsAt store reached (VariableProjection x) := by
                       have holdValue :
-                          oldSlot.value = .value (owningRef reached) :=
+                          oldStoreSlot.value = .value (owningRef reached) :=
                         eq_owningRef_of_mem_partialValueOwningLocations howned
-                      exact ⟨oldSlot.lifetime, by
-                        cases oldSlot with
+                      exact ⟨oldStoreSlot.lifetime, by
+                        cases oldStoreSlot with
                         | mk oldValueX oldLifetimeX =>
                             cases holdValue
                             simpa [owningRef] using hstoreX⟩
