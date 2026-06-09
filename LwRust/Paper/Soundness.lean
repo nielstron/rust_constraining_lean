@@ -27,8 +27,9 @@ Section 4 is mechanized for the strengthened calculus documented in the README.
 The README separates shortcuts to eliminate from intentional repairs and
 strengthenings to keep.  In brief:
 
-* shortcuts: move/borrow source redexes and stored borrow targets are still
-  variable-restricted;
+* shortcuts: preservation still uses a variable-specialized `R-Move`
+  store-preservation fragment; the typing rules for move/borrow sources and
+  stored borrow targets are lvalue-general;
 * theorem interface: Theorem 4.12 exposes `TerminatesAsValue` instead of
   proving terminal existence.  The nontermination-friendly local safety
   statement is `progress_runtime_step`;

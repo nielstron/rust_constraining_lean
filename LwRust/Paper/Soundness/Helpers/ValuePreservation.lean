@@ -779,14 +779,14 @@ theorem storePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
         (.borrow mutable [lv]) := by
   intro hsafe htyping hstep
   cases htyping with
-  | mutBorrow hLv hvar hmutable hnotWrite =>
+  | mutBorrow hLv hmutable hnotWrite =>
       exact ⟨hsafe,
         valuePreservation_borrow_step (typing := typing)
-          (TermTyping.mutBorrow (typing := typing) hLv hvar hmutable hnotWrite) hstep⟩
-  | immBorrow hLv hvar hnotRead =>
+          (TermTyping.mutBorrow (typing := typing) hLv hmutable hnotWrite) hstep⟩
+  | immBorrow hLv hnotRead =>
       exact ⟨hsafe,
         valuePreservation_borrow_step (typing := typing)
-          (TermTyping.immBorrow (typing := typing) hLv hvar hnotRead) hstep⟩
+          (TermTyping.immBorrow (typing := typing) hLv hnotRead) hstep⟩
 
 /--
 Lemma 4.11, `R-Copy` one-step preservation fragment.

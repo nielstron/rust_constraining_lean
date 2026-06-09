@@ -148,9 +148,9 @@ theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
     BorrowTargetsWellFormedInSlot (env.update x slot) slotLifetime targets := by
   intro hfresh htargets target hmem
   rcases htargets target hmem with
-    ⟨targetTy, targetLifetime, htyping, houtlives, hbase, hvar⟩
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
   refine ⟨targetTy, targetLifetime,
-    LValTyping.update_fresh_one (slot := slot) hfresh htyping, houtlives, ?_, hvar⟩
+    LValTyping.update_fresh_one (slot := slot) hfresh htyping, houtlives, ?_⟩
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
   have hbaseSlot' :
       (env.update x slot).slotAt (LVal.base target) = some baseSlot := by
@@ -176,14 +176,13 @@ theorem BorrowTargetsWellFormed.singleton {env : Env} {target : LVal}
     LValTyping env target (.ty targetTy) targetLifetime →
     targetLifetime ≤ lifetime →
     LValBaseOutlives env target lifetime →
-    LValIsVar target →
     BorrowTargetsWellFormed env [target] lifetime := by
-  intro htarget houtlives hbase hvar
+  intro htarget houtlives hbase
   refine BorrowTargetsWellFormed.intro (by
     intro selected hselected
     simp at hselected
     subst hselected
-    exact ⟨targetTy, targetLifetime, htarget, houtlives, hbase, hvar⟩)
+    exact ⟨targetTy, targetLifetime, htarget, houtlives, hbase⟩)
 
 theorem LifetimeOutlives.trans {first second third : Lifetime} :
     first ≤ second →
@@ -323,11 +322,11 @@ theorem BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed {env : Env}
   refine BorrowTargetsWellFormed.intro ?_
   intro target hmem
   rcases htargets target hmem with
-    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlivesSlot, hbase, hvar⟩
+    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlivesSlot, hbase⟩
   refine ⟨targetTy, targetLifetime, htargetTyping,
     LifetimeOutlives.trans htargetOutlivesSlot houtlives, ?_⟩
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-  exact ⟨⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩, hvar⟩
+  exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
 
 theorem EnvContains.borrowTargetsWellFormed {env : Env} {x : Name}
     {mutable : Bool} {targets : List LVal} {lifetime : Lifetime} :
@@ -348,8 +347,7 @@ theorem BorrowTargetsWellFormed.member {env : Env} {targets : List LVal}
       ∃ targetTy targetLifetime,
         LValTyping env target (.ty targetTy) targetLifetime ∧
         targetLifetime ≤ lifetime ∧
-        LValBaseOutlives env target lifetime ∧
-        LValIsVar target := by
+        LValBaseOutlives env target lifetime := by
   intro htargets target hmem
   cases htargets with
   | intro hmembers => exact hmembers target hmem
@@ -365,12 +363,12 @@ theorem BorrowTargetsWellFormed.weaken {env : Env} {targets : List LVal}
         refine BorrowTargetsWellFormed.intro ?_
         intro target htarget
         rcases hmembers target htarget with
-          ⟨targetTy, targetLifetime, htyping, htOutlives, hbase, hvar⟩
+          ⟨targetTy, targetLifetime, htyping, htOutlives, hbase⟩
         refine ⟨targetTy, targetLifetime, htyping,
           LifetimeOutlives.trans htOutlives houterInner, ?_⟩
         rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-        exact ⟨⟨baseSlot, hbaseSlot,
-          LifetimeOutlives.trans hbaseOutlives houterInner⟩, hvar⟩
+        exact ⟨baseSlot, hbaseSlot,
+          LifetimeOutlives.trans hbaseOutlives houterInner⟩
 
 theorem BorrowTargetsWellFormedInSlot.weaken {env : Env} {targets : List LVal}
     {outer inner : Lifetime} :
@@ -379,11 +377,11 @@ theorem BorrowTargetsWellFormedInSlot.weaken {env : Env} {targets : List LVal}
     BorrowTargetsWellFormedInSlot env inner targets := by
   intro htargets houtlives target htarget
   rcases htargets target htarget with
-    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives, hbase, hvar⟩
+    ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives, hbase⟩
   refine ⟨targetTy, targetLifetime, htargetTyping,
     LifetimeOutlives.trans htargetOutlives houtlives, ?_⟩
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
-  exact ⟨⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩, hvar⟩
+  exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
 
 theorem PartialTyBorrowsWellFormedInSlot.weaken {env : Env}
     {partialTy : PartialTy} {outer inner : Lifetime} :
@@ -1313,14 +1311,14 @@ theorem TermTyping.slot_lifetime_survives :
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hvar _hnotWrite hmove x sourceSlot _houtlives hslot
+          _hLv _hnotWrite hmove x sourceSlot _houtlives hslot
         exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hmutable _hnotWrite
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hnotRead
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hnotRead
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
@@ -1403,14 +1401,14 @@ theorem TermTyping.slot_lifetime_survives :
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hvar _hnotWrite hmove x sourceSlot _houtlives hslot
+          _hLv _hnotWrite hmove x sourceSlot _houtlives hslot
         exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hmutable _hnotWrite
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hvar _hnotRead
+        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hnotRead
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by

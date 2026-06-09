@@ -2249,12 +2249,12 @@ theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_left
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro target htarget
   rcases hleft target htarget with
-    ⟨leftTy, leftLifetime, hleftTyping, _hleftOutlives, hleftBase, hleftVar⟩
+    ⟨leftTy, leftLifetime, hleftTyping, _hleftOutlives, hleftBase⟩
   have hjoinBase := LValBaseOutlives.join_left hjoin hleftBase
   rcases fullJoinTransport_viaInvariants hstr hφJoin hcohJoin hcontN
       (hrankTargets target htarget) hleftTyping hjoinBase
     with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase, hleftVar⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase⟩
 
 /-- Right-branch mirror of `BorrowTargetsWellFormedInSlot.join_viaInvariants_left`. -/
 theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_right
@@ -2274,12 +2274,12 @@ theorem BorrowTargetsWellFormedInSlot.join_viaInvariants_right
     BorrowTargetsWellFormedInSlot join slotLifetime targets := by
   intro target htarget
   rcases hright target htarget with
-    ⟨rightTy, rightLifetime, hrightTyping, _hrightOutlives, hrightBase, hrightVar⟩
+    ⟨rightTy, rightLifetime, hrightTyping, _hrightOutlives, hrightBase⟩
   have hjoinBase := LValBaseOutlives.join_right hjoin hrightBase
   rcases fullJoinTransport_viaInvariants hstr hφJoin hcohJoin hcontN
       (hrankTargets target htarget) hrightTyping hjoinBase
     with ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives⟩
-  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase, hrightVar⟩
+  exact ⟨joinTy, joinLifetime, hjoinTyping, hjoinOutlives, hjoinBase⟩
 
 /-- The slot shape-map `env → result` for a single `EnvWrite`, assembled from
 `EnvWrite.envStrengthens` (existence + strengthening) and `EnvWrite.shapePreserved`

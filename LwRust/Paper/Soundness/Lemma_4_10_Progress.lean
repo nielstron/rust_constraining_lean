@@ -606,18 +606,18 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         hwellFormed hsafe _hstore =>
       progress_copy_typing (typing := _typing) (hwellFormed lifetime) hsafe
         (TermTyping.copy (typing := _typing) hLv hcopy hreadProhibited))
-    (fun {_env₁ _env₂ _typing lifetime _valueLifetime _lv _ty} hLv hvar hwriteProhibited hmove
+    (fun {_env₁ _env₂ _typing lifetime _valueLifetime _lv _ty} hLv hwriteProhibited hmove
         hwellFormed hsafe _hstore =>
       progress_move_typing (typing := _typing) (hwellFormed lifetime) hsafe
-        (TermTyping.move (typing := _typing) hLv hvar hwriteProhibited hmove))
-    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hvar hmutable hwriteProhibited
+        (TermTyping.move (typing := _typing) hLv hwriteProhibited hmove))
+    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hmutable hwriteProhibited
         hwellFormed hsafe _hstore =>
       progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
-        (TermTyping.mutBorrow (typing := _typing) hLv hvar hmutable hwriteProhibited))
-    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hvar hreadProhibited
+        (TermTyping.mutBorrow (typing := _typing) hLv hmutable hwriteProhibited))
+    (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hreadProhibited
         hwellFormed hsafe _hstore =>
       progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
-        (TermTyping.immBorrow (typing := _typing) hLv hvar hreadProhibited))
+        (TermTyping.immBorrow (typing := _typing) hLv hreadProhibited))
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} hterm ih
         hwellFormed hsafe hstore =>
       progress_box_typing hstore (TermTyping.box hterm)

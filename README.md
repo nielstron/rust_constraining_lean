@@ -7,24 +7,19 @@ Lean mechanisation of the core FR/lw-rust calculus from the paper.
 This section records shortcuts taken during mechanization.
 The goal is to reduce these to 0.
 
-### Type and Borrow System
-
-- **Variable-only move/borrow sources and borrow targets.**  The paper writes
-  `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, and borrow types over lvalues, not
-  only variables.  For moves, `move(Γ, w)` is partial and has no borrow case, so
-  the paper permits non-variable owner-path moves such as `*x` for boxed `x`,
-  but not moves out of borrows.  The mechanisation still adds `LValIsVar` to
-  `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, and the borrow-target invariant.
-  Assignment lhs lvalues are not variable-restricted: `T-Assign` uses
-  `EnvWrite` and can write through mutable references.  See
-  `LwRust/Paper/Typing.lean`.
-
 ### Theorem Interface Notes
 
 - **Corollary 4.14 uses the core strengthening.**  The mechanised core result
   exposes the stronger equality-shaped output environment rather than the
   paper's more future-proof `Gamma2 >= Gamma3` shape.  That weakening relation
   should be reintroduced for control flow, loops, and recursive calls.
+
+- **Preservation still has variable-source proof fragments.**  The typing rules
+  now state `T-Move`, `T-MutBorrow`, `T-ImmBorrow`, and stored borrow-target
+  well-formedness over lvalues, matching the paper.  The remaining shortcut is
+  in the preservation proof infrastructure: the `R-Move` store-preservation
+  fragment is still specialized to direct variables and must be generalized to
+  owner paths such as `*x`.
 
 
 ## Improvements

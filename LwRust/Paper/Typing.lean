@@ -544,12 +544,7 @@ def WriteProhibited (env : Env) (lv : LVal) : Prop :=
     target ∈ targets ∧
     target ⋈ lv
 
-/--
-Mechanized strengthening: source-level move and borrow redexes, and stored
-borrow targets, are restricted to variable lvalues.  Assignment lhs lvalues are
-not restricted here: safe assignment through mutable references is one of the
-core Rust behaviours captured by `EnvWrite`.
--/
+/-- Syntactic predicate for variable lvalues, retained for helper lemmas. -/
 def LValIsVar : LVal → Prop
   | .var _ => True
   | .deref _ => False
@@ -621,8 +616,7 @@ inductive BorrowTargetsWellFormed : Env → List LVal → Lifetime → Prop wher
         ∃ targetTy targetLifetime,
           LValTyping env target (.ty targetTy) targetLifetime ∧
           LifetimeOutlives targetLifetime lifetime ∧
-          LValBaseOutlives env target lifetime ∧
-          LValIsVar target) →
+          LValBaseOutlives env target lifetime) →
       BorrowTargetsWellFormed env targets lifetime
 
 /--
@@ -635,8 +629,7 @@ def BorrowTargetsWellFormedInSlot
     ∃ targetTy targetLifetime,
       LValTyping env target (.ty targetTy) targetLifetime ∧
         targetLifetime ≤ slotLifetime ∧
-        LValBaseOutlives env target slotLifetime ∧
-        LValIsVar target
+        LValBaseOutlives env target slotLifetime
 
 /-- Slot-local borrow invariant for a partial type. -/
 def PartialTyBorrowsWellFormedInSlot
@@ -830,7 +823,6 @@ mutual
     | move {env₁ env₂ : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
         LValTyping env₁ lv (.ty ty) valueLifetime →
-        LValIsVar lv →
         ¬ WriteProhibited env₁ lv →
         EnvMove env₁ lv env₂ →
         TermTyping env₁ typing lifetime (.move lv) ty env₂
@@ -838,7 +830,6 @@ mutual
     | mutBorrow {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
         LValTyping env lv (.ty ty) valueLifetime →
-        LValIsVar lv →
         Mutable env lv →
         ¬ WriteProhibited env lv →
         TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv]) env
@@ -846,7 +837,6 @@ mutual
     | immBorrow {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
         LValTyping env lv (.ty ty) valueLifetime →
-        LValIsVar lv →
         ¬ ReadProhibited env lv →
         TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv]) env
     /-- T-Box. -/
