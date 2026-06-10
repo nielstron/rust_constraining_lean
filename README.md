@@ -26,6 +26,48 @@ stated; the deviation then documents the corrected claim).
   extra obligations are derivable for paper-typable core programs would
   restore full coverage.
 
+  Provenance assessment (which obligations are derivable from the paper rules
+  vs. genuinely additional):
+
+  - *Rank witness* (`∃ φ, LinearizedBy φ ∧ EnvWriteRhsBorrowTargetsBelow`) —
+    **derivable in principle**: `Linearizable` is Definition 11 of
+    `lw_rust_followup.pdf`, whose Section 6 ("Semantical Invariant",
+    Lemmas 1–4) proves in prose that the typing rules preserve
+    linearizability from any linearizable start; the mechanised premise is
+    the rule-carried form of Lemma 4's (hand-wavy) assignment case.  The
+    second conjunct (fan-out mutable-conflict locality) goes beyond the
+    follow-up but is vacuous for the core, where multi-target borrows cannot
+    arise (paper Section 3.4).
+  - *Coherence obligations* (`EnvWriteCoherenceObligations`,
+    `ContainedBorrowsWellFormed`, `FreshUpdateCoherenceObligations`) —
+    **derivable for core programs**: coherence concerns joint target-list
+    typing, and core target lists are singletons typed in the same
+    environment; the incoherent-`&[]` pathology cannot be produced by core
+    source programs from the empty environment.  For *arbitrary* well-formed
+    starting environments these are likely genuinely necessary, since such
+    environments admit pathologies the core never creates.
+  - *`EnvWrite` internals* (fan-out initialized-typing witnesses, weak-update
+    `ShapeCompatible`) — **formalised paper prose**: the paper asserts
+    "borrowed locations cannot have partial types"; for pipeline
+    environments this follows from `WellFormedEnv`, but the Lean relations
+    range over arbitrary environments, so the assertion must be a premise.
+  - *Lhs re-typing after the rhs* — **genuinely stricter, printed rule
+    dubious where they diverge**: the paper types `w` only in `Γ₁`; if the
+    rhs retypes the lhs path (e.g. `*p = { p = &mut w; … }`), the printed
+    rule's shape check compares against a stale type — arguably a paper bug.
+  - *`env₂.fresh x` on `T-Declare`* — **genuinely stricter**: rejects
+    initializer shadowing (`let mut x = (let mut x = e)`), which the printed
+    rule accepts; harmless modulo alpha-renaming, and the follow-up's
+    Lemma 3 implicitly assumes post-initialiser freshness as well.
+  - *`LifetimeChild`* — **not a restriction**: it formalises the paper's
+    Section 3.1 ambient assumption that block lifetimes reflect nesting,
+    with immediate-child paths as the canonical labelling.
+
+  In summary, none of the obligations is a new semantic requirement for the
+  soundness of core programs; the residue of this deviation is the missing
+  formalised admissibility proof (essentially follow-up Section 6 plus
+  coherence propagation) and the two benign tightenings above.
+
 ## Improvements
 
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
