@@ -43,6 +43,8 @@ mutual
   inductive Ty where
     | unit
     | int
+    /-- Section 6.1 control-flow extension (Figure 5): Boolean type. -/
+    | bool
     | borrow (mutable : Bool) (targets : List LVal)
     | box (element : Ty)
     deriving BEq, Repr
@@ -68,6 +70,8 @@ def Reference.borrowed (ref : Reference) : Reference :=
 inductive Value where
   | unit
   | int (value : Int)
+  /-- Section 6.1 control-flow extension (Figure 5): `true` / `false`. -/
+  | bool (value : Bool)
   | ref (location : Reference)
   deriving BEq, DecidableEq, Repr
 
@@ -95,6 +99,18 @@ inductive Term where
   | move (operand : LVal)
   | copy (operand : LVal)
   | val (value : Value)
+  /-- Section 6.1 control-flow extension (Figure 5): equality comparator
+  `t == t`. -/
+  | eq (lhs rhs : Term)
+  /-- Section 6.1 control-flow extension (Figure 5): conditional
+  `if t {t}m else {s}n`.
+
+  The branches are arbitrary terms; the paper's syntax, where each branch is
+  a block with its own lifetime, is the instance with `.block` branches.
+  Keeping the branches general only widens the typing relation: `T-If` types
+  each branch as an ordinary term, so block branches go through `T-Block`
+  exactly as in the paper. -/
+  | ite (condition trueBranch falseBranch : Term)
   deriving BEq, Repr
 
 mutual
@@ -109,6 +125,9 @@ mutual
     | .move _ => 2
     | .copy _ => 2
     | .val _ => 1
+    | .eq lhs rhs => 1 + lhs.size + rhs.size
+    | .ite condition trueBranch falseBranch =>
+        1 + condition.size + trueBranch.size + falseBranch.size
 
   def Term.sizeList : List Term → Nat
     | [] => 0

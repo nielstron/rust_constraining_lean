@@ -23,6 +23,9 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
   /-- V-Int. -/
   | int {store : ProgramStore} {value : Int} :
       ValidPartialValue store (.value (.int value)) (.ty .int)
+  /-- V-Bool, Section 6.1. -/
+  | bool {store : ProgramStore} {value : Bool} :
+      ValidPartialValue store (.value (.bool value)) (.ty .bool)
   /-- V-Undef. -/
   | undef {store : ProgramStore} {ty : Ty} :
       ValidPartialValue store .undef (.undef ty)
@@ -80,6 +83,10 @@ theorem ValidPartialValue.no_owned_path_to_storage {store : ProgramStore}
       simp [partialValueOwningLocations, valueOwningLocations,
         valueOwnedLocation?] at hmem
   | int =>
+      intro storage slot owned _hslot _hvalue hmem hpath
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | bool =>
       intro storage slot owned _hslot _hvalue hmem hpath
       simp [partialValueOwningLocations, valueOwningLocations,
         valueOwnedLocation?] at hmem
@@ -266,6 +273,11 @@ theorem validPartialValue_strengthen_sameShape {store : ProgramStore}
       cases hstrength with
       | reflex => exact ValidPartialValue.int
       | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | bool =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.bool
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | undef =>
       intro hstrength _hshape
       cases hstrength with
@@ -364,6 +376,9 @@ theorem validStoreTyping_sourceTerm_of_validStoreTyping
   | int _ =>
       cases hvalueTyping
       exact ValidPartialValue.int
+  | bool _ =>
+      cases hvalueTyping
+      exact ValidPartialValue.bool
   | ref _ =>
       cases hsourceValue
 
@@ -399,6 +414,8 @@ theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | int =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
+  | bool =>
+      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | undef =>
       simp [partialValueOwningLocations] at hmem
   | borrow =>
@@ -419,7 +436,8 @@ theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
 theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
     {value : PartialValue} {ty : PartialTy} :
     ValidPartialValue store value ty →
-    (ty = .ty .unit ∨ ty = .ty .int ∨ (∃ inner, ty = .undef inner) ∨
+    (ty = .ty .unit ∨ ty = .ty .int ∨ ty = .ty .bool ∨
+      (∃ inner, ty = .undef inner) ∨
       ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner value := by
   intro hvalid hshape
@@ -428,22 +446,26 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
       exact partialValueNonOwner_unit
   | int =>
       exact partialValueNonOwner_int _
+  | bool =>
+      exact partialValueNonOwner_bool _
   | undef =>
       exact partialValueNonOwner_undef
   | borrow =>
       exact partialValueNonOwner_borrowed _
   | box =>
-      rcases hshape with hunit | hint | hundef | hborrow
+      rcases hshape with hunit | hint | hbool | hundef | hborrow
       · cases hunit
       · cases hint
+      · cases hbool
       · rcases hundef with ⟨_inner, hundef⟩
         cases hundef
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | boxFull =>
-      rcases hshape with hunit | hint | hundef | hborrow
+      rcases hshape with hunit | hint | hbool | hundef | hborrow
       · cases hunit
       · cases hint
+      · cases hbool
       · rcases hundef with ⟨_inner, hundef⟩
         cases hundef
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
@@ -453,7 +475,7 @@ theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
     {oldTy : PartialTy} {rhsTy : Ty} :
     NonOwnerTy rhsTy →
     ShapeCompatible env oldTy (.ty rhsTy) →
-    oldTy = .ty .unit ∨ oldTy = .ty .int ∨
+    oldTy = .ty .unit ∨ oldTy = .ty .int ∨ oldTy = .ty .bool ∨
       (∃ inner, oldTy = .undef inner) ∨
       ∃ mutable targets, oldTy = .ty (.borrow mutable targets) := by
   intro hnonOwner hshape
@@ -462,19 +484,21 @@ theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
       exact Or.inl rfl
   | int =>
       exact Or.inr (Or.inl rfl)
+  | bool =>
+      exact Or.inr (Or.inr (Or.inl rfl))
   | tyBox =>
       cases hnonOwner
   | borrow =>
-      exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
+      exact Or.inr (Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩)))
   | undefLeft _hinner =>
-      exact Or.inr (Or.inr (Or.inl ⟨_, rfl⟩))
+      exact Or.inr (Or.inr (Or.inr (Or.inl ⟨_, rfl⟩)))
 
 theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
     {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
     NonOwnerTy rhsTy →
     PartialTyStrengthens (.ty selectedTy) oldTy →
     ShapeCompatible env oldTy (.ty rhsTy) →
-    selectedTy = .unit ∨ selectedTy = .int ∨
+    selectedTy = .unit ∨ selectedTy = .int ∨ selectedTy = .bool ∨
       ∃ mutable targets, selectedTy = .borrow mutable targets := by
   intro hnonOwner hstrength hshape
   cases hshape with
@@ -484,14 +508,17 @@ theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
   | int =>
       cases hstrength
       exact Or.inr (Or.inl rfl)
+  | bool =>
+      cases hstrength
+      exact Or.inr (Or.inr (Or.inl rfl))
   | tyBox =>
       cases hnonOwner
   | borrow =>
       cases hstrength with
       | reflex =>
-          exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+          exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
       | borrow _hsubset =>
-          exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+          exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
   | undefLeft hinner =>
       cases hstrength with
       | intoUndef hinnerStrength =>
@@ -502,14 +529,17 @@ theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
           | int =>
               cases hinnerStrength
               exact Or.inr (Or.inl rfl)
+          | bool =>
+              cases hinnerStrength
+              exact Or.inr (Or.inr (Or.inl rfl))
           | tyBox =>
               cases hnonOwner
           | borrow =>
               cases hinnerStrength with
               | reflex =>
-                  exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+                  exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
               | borrow _hsubset =>
-                  exact Or.inr (Or.inr ⟨_, _, rfl⟩)
+                  exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
 
 theorem ShapeCompatible.ty_ty_left_of_strengthens {env : Env}
     {selectedTy oldTy rhsTy : Ty} :
@@ -539,6 +569,12 @@ theorem ShapeCompatible.ty_ty_left_of_strengthens {env : Env}
         cases hright
         cases hstrength
         exact ShapeCompatible.int
+    | bool =>
+        intro selectedTy oldTy rhsTy hleft hright hstrength
+        cases hleft
+        cases hright
+        cases hstrength
+        exact ShapeCompatible.bool
     | tyBox hinner ih =>
         intro selectedTy oldTy rhsTy hleft hright hstrength
         cases hleft
@@ -1296,7 +1332,7 @@ theorem safeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
     store ∼ₛ env →
     env.slotAt x = some envSlot →
     store.read (.var x) = some oldSlot →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
+    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
       (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner oldSlot.value := by
@@ -1580,7 +1616,7 @@ theorem storePreservation_assign_var_envShape_of_preserved
     store ∼ₛ env →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
+    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
       (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     store.read (.var x) = some oldSlot →
@@ -1629,6 +1665,8 @@ theorem loc_update_of_loc {store : ProgramStore} {updatedLocation : Location}
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | int n =>
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
+                  | bool b =>
+                      simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | ref ref =>
                     simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                     have hupdatedSource :
@@ -1674,6 +1712,8 @@ theorem validPartialValue_update_of_fresh {store : ProgramStore}
       exact ValidPartialValue.unit
   | int =>
       exact ValidPartialValue.int
+  | bool =>
+      exact ValidPartialValue.bool
   | undef =>
       exact ValidPartialValue.undef
   | borrow hmem hloc =>
@@ -1710,6 +1750,8 @@ theorem loc_declare_of_loc {store : ProgramStore} {x : Name}
                   | unit =>
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | int n =>
+                      simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
+                  | bool b =>
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | ref ref =>
                     simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
@@ -1756,6 +1798,8 @@ theorem validPartialValue_declare {store : ProgramStore} {x : Name}
       exact ValidPartialValue.unit
   | int =>
       exact ValidPartialValue.int
+  | bool =>
+      exact ValidPartialValue.bool
   | undef =>
       exact ValidPartialValue.undef
   | borrow hmem hloc =>
@@ -2004,13 +2048,8 @@ theorem storePreservation_declare_step_valid {store store' : ProgramStore}
       · intro ty hvalueTyping
         rcases hvalidStoreTyping value (by simp [termValues]) with
           ⟨storedTy, hstoredTyping, hvalidValue⟩
-        have hty : storedTy = ty := by
-          cases hstoredTyping <;> cases hvalueTyping
-          · rfl
-          · rfl
-          · rename_i hstoredLookup hvalueLookup
-            rw [hstoredLookup] at hvalueLookup
-            injection hvalueLookup
+        have hty : storedTy = ty :=
+          ValueTyping.deterministic hstoredTyping hvalueTyping
         subst hty
         exact validPartialValue_declare hfreshStore hvalidValue
       · intro y envSlot oldValue _hyx henv hstoreSlot
@@ -2119,13 +2158,8 @@ theorem storePreservation_box_step {store store' : ProgramStore}
       | const hvalueTyping =>
           rcases hvalidStoreTyping value (by simp [termValues]) with
             ⟨storedTy, hstoredTyping, hvalidValue⟩
-          have hty : storedTy = ty := by
-            cases hstoredTyping <;> cases hvalueTyping
-            · rfl
-            · rfl
-            · rename_i hstoredLookup hvalueLookup
-              rw [hstoredLookup] at hvalueLookup
-              injection hvalueLookup
+          have hty : storedTy = ty :=
+            ValueTyping.deterministic hstoredTyping hvalueTyping
           subst hty
           exact storePreservation_box_step_of_validValue hsafe hvalidValue
             (TermTyping.box (typing := typing) (TermTyping.const hvalueTyping))

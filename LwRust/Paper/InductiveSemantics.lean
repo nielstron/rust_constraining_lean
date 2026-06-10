@@ -93,6 +93,52 @@ inductive Step : ProgramStore → Lifetime → Term → ProgramStore → Term �
       Step store₁ lifetime rhs store₂ rhs' →
       Step store₁ lifetime (.assign lhs rhs) store₂ (.assign lhs rhs')
 
+  /-- R-EqalT, Section 6.1.1. -/
+  | eqTrue {store : ProgramStore} {lifetime : Lifetime} {value : Value} :
+      Step store lifetime (.eq (.val value) (.val value)) store
+        (.val (.bool true))
+
+  /-- R-EqalF, Section 6.1.1. -/
+  | eqFalse {store : ProgramStore} {lifetime : Lifetime} {left right : Value} :
+      left ≠ right →
+      Step store lifetime (.eq (.val left) (.val right)) store
+        (.val (.bool false))
+
+  /-- R-IfT, Section 6.1.1. -/
+  | iteTrue {store : ProgramStore} {lifetime : Lifetime}
+      {trueBranch falseBranch : Term} :
+      Step store lifetime (.ite (.val (.bool true)) trueBranch falseBranch)
+        store trueBranch
+
+  /-- R-IfF, Section 6.1.1. -/
+  | iteFalse {store : ProgramStore} {lifetime : Lifetime}
+      {trueBranch falseBranch : Term} :
+      Step store lifetime (.ite (.val (.bool false)) trueBranch falseBranch)
+        store falseBranch
+
+  /-- R-Sub, `E == t` evaluation-context instance (Definition 6.1). -/
+  | subEqLeft {store₁ store₂ : ProgramStore} {lifetime : Lifetime}
+      {lhs lhs' rhs : Term} :
+      Step store₁ lifetime lhs store₂ lhs' →
+      Step store₁ lifetime (.eq lhs rhs) store₂ (.eq lhs' rhs)
+
+  /-- R-Sub, `v == E` evaluation-context instance (Definition 6.1). -/
+  | subEqRight {store₁ store₂ : ProgramStore} {lifetime : Lifetime}
+      {value : Value} {rhs rhs' : Term} :
+      Step store₁ lifetime rhs store₂ rhs' →
+      Step store₁ lifetime (.eq (.val value) rhs) store₂
+        (.eq (.val value) rhs')
+
+  /-- R-Sub, `if E {t}m else {s}n` evaluation-context instance
+  (Definition 6.1).  The branches are deliberately *not* evaluation contexts,
+  so a conditional reduces only through `R-IfT`/`R-IfF` once the condition is
+  a value; erroneous conditions (e.g. an integer) are stuck. -/
+  | subIte {store₁ store₂ : ProgramStore} {lifetime : Lifetime}
+      {condition condition' trueBranch falseBranch : Term} :
+      Step store₁ lifetime condition store₂ condition' →
+      Step store₁ lifetime (.ite condition trueBranch falseBranch) store₂
+        (.ite condition' trueBranch falseBranch)
+
 /--
 Paper Lemma 4.11 uses the reflexive-transitive closure of the reduction
 relation; this is that multi-step relation.
@@ -347,6 +393,27 @@ theorem step_size_lt {store store' : ProgramStore} {lifetime : Lifetime}
   | subAssign _ ih =>
       simp only [Term.size]
       omega
+  | eqTrue => simp [Term.size]
+  | eqFalse _ => simp [Term.size]
+  | iteTrue =>
+      rename_i trueBranch falseBranch
+      have := Term.size_pos falseBranch
+      simp only [Term.size]
+      omega
+  | iteFalse =>
+      rename_i trueBranch falseBranch
+      have := Term.size_pos trueBranch
+      simp only [Term.size]
+      omega
+  | subEqLeft _ ih =>
+      simp only [Term.size]
+      omega
+  | subEqRight _ ih =>
+      simp only [Term.size]
+      omega
+  | subIte _ ih =>
+      simp only [Term.size]
+      omega
 
 /--
 Prefix inversion for `box` runs: an arbitrary partial execution is either
@@ -556,6 +623,189 @@ theorem multistep_block_head_to_value_inv {store finalStore : ProgramStore}
       | blockB hdrops =>
           exact ⟨_, _, MultiStep.refl,
             MultiStep.trans (Step.blockB hdrops) htail⟩
+
+theorem multistep_eq_left_context {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {lhs finalLhs rhs : Term} :
+    MultiStep store lifetime lhs finalStore finalLhs →
+    MultiStep store lifetime (.eq lhs rhs) finalStore (.eq finalLhs rhs) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subEqLeft hstep) ih
+
+theorem multistep_eq_right_context {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {value : Value} {rhs finalRhs : Term} :
+    MultiStep store lifetime rhs finalStore finalRhs →
+    MultiStep store lifetime (.eq (.val value) rhs) finalStore
+      (.eq (.val value) finalRhs) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subEqRight hstep) ih
+
+theorem multistep_ite_context {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {condition finalCondition trueBranch falseBranch : Term} :
+    MultiStep store lifetime condition finalStore finalCondition →
+    MultiStep store lifetime (.ite condition trueBranch falseBranch) finalStore
+      (.ite finalCondition trueBranch falseBranch) := by
+  intro h
+  induction h with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subIte hstep) ih
+
+/--
+Prefix inversion for equality runs: an arbitrary partial execution is still
+inside the left operand, or the left operand finished and the run is still
+inside the right operand, or both operands finished and the comparison redex
+fired (after which the term is a value and the run is over).
+-/
+theorem multistep_eq_prefix_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {lhs rhs finalTerm : Term} :
+    MultiStep store lifetime (.eq lhs rhs) finalStore finalTerm →
+    (∃ lhs', finalTerm = .eq lhs' rhs ∧
+      MultiStep store lifetime lhs finalStore lhs') ∨
+    (∃ midStore leftValue,
+      MultiStep store lifetime lhs midStore (.val leftValue) ∧
+      ((∃ rhs', finalTerm = .eq (.val leftValue) rhs' ∧
+          MultiStep midStore lifetime rhs finalStore rhs') ∨
+       (∃ rightStore rightValue,
+          MultiStep midStore lifetime rhs rightStore (.val rightValue) ∧
+          Step rightStore lifetime (.eq (.val leftValue) (.val rightValue))
+            finalStore finalTerm))) := by
+  intro hmulti
+  generalize hstart : Term.eq lhs rhs = start at hmulti
+  induction hmulti generalizing lhs rhs with
+  | refl =>
+      cases hstart
+      exact Or.inl ⟨lhs, rfl, MultiStep.refl⟩
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | eqTrue =>
+          rcases multistep_value_inv hrest with ⟨hstoreEq, hterm⟩
+          subst hstoreEq
+          subst hterm
+          exact Or.inr ⟨_, _, MultiStep.refl,
+            Or.inr ⟨_, _, MultiStep.refl, Step.eqTrue⟩⟩
+      | eqFalse hne =>
+          rcases multistep_value_inv hrest with ⟨hstoreEq, hterm⟩
+          subst hstoreEq
+          subst hterm
+          exact Or.inr ⟨_, _, MultiStep.refl,
+            Or.inr ⟨_, _, MultiStep.refl, Step.eqFalse hne⟩⟩
+      | subEqLeft hinner =>
+          rcases ih rfl with ⟨lhs', hfinal, hms⟩ |
+            ⟨midStore, leftValue, hleft, hcase⟩
+          · exact Or.inl ⟨lhs', hfinal, MultiStep.trans hinner hms⟩
+          · exact Or.inr ⟨midStore, leftValue,
+              MultiStep.trans hinner hleft, hcase⟩
+      | subEqRight hinner =>
+          rcases ih rfl with ⟨lhs', hfinal, hms⟩ |
+            ⟨midStore, leftValue, hleft, hcase⟩
+          · -- The left operand is already a value, so the "still in the left
+            -- operand" disjunct of the tail run collapses by value inversion.
+            rcases multistep_value_inv hms with ⟨hstoreEq, hterm⟩
+            subst hstoreEq
+            subst hterm
+            exact Or.inr ⟨_, _, MultiStep.refl,
+              Or.inl ⟨_, hfinal, MultiStep.trans hinner MultiStep.refl⟩⟩
+          · rcases multistep_value_inv hleft with ⟨hstoreEq, hterm⟩
+            subst hstoreEq
+            injection hterm with hvalueEq
+            subst hvalueEq
+            rcases hcase with ⟨rhs', hfinal, hms⟩ |
+              ⟨rightStore, rightValue, hms, hredex⟩
+            · exact Or.inr ⟨_, _, MultiStep.refl,
+                Or.inl ⟨rhs', hfinal, MultiStep.trans hinner hms⟩⟩
+            · exact Or.inr ⟨_, _, MultiStep.refl,
+                Or.inr ⟨rightStore, rightValue,
+                  MultiStep.trans hinner hms, hredex⟩⟩
+
+/--
+Prefix inversion for conditional runs: an arbitrary partial execution is
+still inside the condition, or the condition finished with a Boolean and the
+run continued inside the chosen branch.
+-/
+theorem multistep_ite_prefix_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {condition trueBranch falseBranch finalTerm : Term} :
+    MultiStep store lifetime (.ite condition trueBranch falseBranch)
+      finalStore finalTerm →
+    (∃ condition', finalTerm = .ite condition' trueBranch falseBranch ∧
+      MultiStep store lifetime condition finalStore condition') ∨
+    (∃ midStore,
+      MultiStep store lifetime condition midStore (.val (.bool true)) ∧
+      MultiStep midStore lifetime trueBranch finalStore finalTerm) ∨
+    (∃ midStore,
+      MultiStep store lifetime condition midStore (.val (.bool false)) ∧
+      MultiStep midStore lifetime falseBranch finalStore finalTerm) := by
+  intro hmulti
+  generalize hstart : Term.ite condition trueBranch falseBranch = start at hmulti
+  induction hmulti generalizing condition with
+  | refl =>
+      cases hstart
+      exact Or.inl ⟨condition, rfl, MultiStep.refl⟩
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | iteTrue =>
+          exact Or.inr (Or.inl ⟨_, MultiStep.refl, hrest⟩)
+      | iteFalse =>
+          exact Or.inr (Or.inr ⟨_, MultiStep.refl, hrest⟩)
+      | subIte hinner =>
+          rcases ih rfl with ⟨condition', hfinal, hms⟩ |
+            ⟨midStore, hcond, hbranch⟩ | ⟨midStore, hcond, hbranch⟩
+          · exact Or.inl ⟨condition', hfinal, MultiStep.trans hinner hms⟩
+          · exact Or.inr (Or.inl ⟨midStore, MultiStep.trans hinner hcond, hbranch⟩)
+          · exact Or.inr (Or.inr ⟨midStore, MultiStep.trans hinner hcond, hbranch⟩)
+
+/--
+Operational decomposition of a complete equality run: both operands reach
+values, then the comparison redex fires.
+-/
+theorem multistep_eq_to_value_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {lhs rhs : Term} {finalValue : Value} :
+    MultiStep store lifetime (.eq lhs rhs) finalStore (.val finalValue) →
+    ∃ midStore leftValue rightStore rightValue,
+      MultiStep store lifetime lhs midStore (.val leftValue) ∧
+      MultiStep midStore lifetime rhs rightStore (.val rightValue) ∧
+      Step rightStore lifetime (.eq (.val leftValue) (.val rightValue))
+        finalStore (.val finalValue) := by
+  intro hmulti
+  rcases multistep_eq_prefix_inv hmulti with
+    ⟨lhs', hfinal, _⟩ | ⟨midStore, leftValue, hleft, hcase⟩
+  · simp at hfinal
+  · rcases hcase with ⟨rhs', hfinal, _⟩ |
+      ⟨rightStore, rightValue, hright, hredex⟩
+    · simp at hfinal
+    · exact ⟨midStore, leftValue, rightStore, rightValue, hleft, hright, hredex⟩
+
+/--
+Operational decomposition of a complete conditional run: the condition
+reaches a Boolean, then the chosen branch runs to the final value.
+-/
+theorem multistep_ite_to_value_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+    {finalValue : Value} :
+    MultiStep store lifetime (.ite condition trueBranch falseBranch)
+      finalStore (.val finalValue) →
+    ∃ midStore,
+      (MultiStep store lifetime condition midStore (.val (.bool true)) ∧
+        MultiStep midStore lifetime trueBranch finalStore (.val finalValue)) ∨
+      (MultiStep store lifetime condition midStore (.val (.bool false)) ∧
+        MultiStep midStore lifetime falseBranch finalStore (.val finalValue)) := by
+  intro hmulti
+  rcases multistep_ite_prefix_inv hmulti with
+    ⟨condition', hfinal, _⟩ | ⟨midStore, hcond, hbranch⟩ |
+    ⟨midStore, hcond, hbranch⟩
+  · simp at hfinal
+  · exact ⟨midStore, Or.inl ⟨hcond, hbranch⟩⟩
+  · exact ⟨midStore, Or.inr ⟨hcond, hbranch⟩⟩
 
 namespace WorkedExample
 

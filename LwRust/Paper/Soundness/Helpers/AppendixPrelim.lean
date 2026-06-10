@@ -145,6 +145,13 @@ theorem PartialTyStrengthens.to_int_inv {sourceTy : Ty} :
   cases hstrength
   · rfl
 
+theorem PartialTyStrengthens.to_bool_inv {sourceTy : Ty} :
+    PartialTyStrengthens (.ty sourceTy) (.ty .bool) →
+    sourceTy = .bool := by
+  intro hstrength
+  cases hstrength
+  · rfl
+
 theorem PartialTyStrengthens.to_box_ty_inv {sourceTy inner : Ty} :
     PartialTyStrengthens (.ty sourceTy) (.ty (.box inner)) →
     ∃ sourceInner,
@@ -167,6 +174,13 @@ theorem PartialTyStrengthens.from_unit_inv {targetTy : Ty} :
 theorem PartialTyStrengthens.from_int_inv {targetTy : Ty} :
     PartialTyStrengthens (.ty .int) (.ty targetTy) →
     targetTy = .int := by
+  intro hstrength
+  cases hstrength
+  · rfl
+
+theorem PartialTyStrengthens.from_bool_inv {targetTy : Ty} :
+    PartialTyStrengthens (.ty .bool) (.ty targetTy) →
+    targetTy = .bool := by
   intro hstrength
   cases hstrength
   · rfl
@@ -738,7 +752,7 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
         ∃ unionTy,
           PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) ∧
             PartialTyStrengthens (.ty unionTy) (.ty boundTy))
-      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
     · intro leftTy rightTy hleft hright
       have hl : leftTy = .unit := PartialTyStrengthens.to_unit_inv hleft
       have hr : rightTy = .unit := PartialTyStrengthens.to_unit_inv hright
@@ -749,6 +763,11 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
       have hr : rightTy = .int := PartialTyStrengthens.to_int_inv hright
       subst hl; subst hr
       exact ⟨.int, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
+    · intro leftTy rightTy hleft hright
+      have hl : leftTy = .bool := PartialTyStrengthens.to_bool_inv hleft
+      have hr : rightTy = .bool := PartialTyStrengthens.to_bool_inv hright
+      subst hl; subst hr
+      exact ⟨.bool, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
     · intro mutable boundTargets leftTy rightTy hleft hright
       rcases PartialTyStrengthens.to_borrow_inv hleft with
         ⟨leftTargets, hleftEq, hleftSubset⟩
@@ -828,7 +847,7 @@ theorem PartialTyUnion.full_connected_union_exists
           PartialTyUnion (.ty leftHeadTy) (.ty rightHeadTy) (.ty joinHeadTy) →
           PartialTyUnion (.ty leftRestTy) (.ty rightRestTy) (.ty joinRestTy) →
           ∃ joinTy, PartialTyUnion (.ty joinHeadTy) (.ty joinRestTy) (.ty joinTy))
-      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
     · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
         hleftUnion hheadUnion hrestUnion
       have hleftHeadUnit : leftHeadTy = .unit :=
@@ -873,6 +892,28 @@ theorem PartialTyUnion.full_connected_union_exists
           (PartialTyUnion.left_strengthens hrestUnion)
       subst hjoinRestInt
       exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
+    · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
+        hleftUnion hheadUnion hrestUnion
+      have hleftHeadBool : leftHeadTy = .bool :=
+        PartialTyStrengthens.to_bool_inv
+          (PartialTyUnion.left_strengthens hheadUnion)
+      have hrightHeadBool : rightHeadTy = .bool :=
+        PartialTyStrengthens.to_bool_inv
+          (PartialTyUnion.right_strengthens hheadUnion)
+      subst hleftHeadBool
+      have hleftTyBool : leftTy = .bool :=
+        PartialTyStrengthens.from_bool_inv
+          (PartialTyUnion.left_strengthens hleftUnion)
+      subst hleftTyBool
+      have hleftRestBool : leftRestTy = .bool :=
+        PartialTyStrengthens.to_bool_inv
+          (PartialTyUnion.right_strengthens hleftUnion)
+      subst hleftRestBool
+      have hjoinRestBool : joinRestTy = .bool :=
+        PartialTyStrengthens.from_bool_inv
+          (PartialTyUnion.left_strengthens hrestUnion)
+      subst hjoinRestBool
+      exact ⟨.bool, PartialTyUnion.self (.ty .bool)⟩
     · intro mutable joinHeadTargets leftHeadTy leftRestTy rightHeadTy rightRestTy
         leftTy joinRestTy hleftUnion hheadUnion hrestUnion
       rcases PartialTyStrengthens.to_borrow_inv
@@ -959,6 +1000,10 @@ theorem ShapeCompatible.full_partialTyUnion_exists {env : Env}
         intro left right hleft hright
         cases hleft; cases hright
         exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
+    | bool =>
+        intro left right hleft hright
+        cases hleft; cases hright
+        exact ⟨.bool, PartialTyUnion.self (.ty .bool)⟩
     | tyBox _hinner ih =>
         intro left right hleft hright
         cases hleft; cases hright
@@ -987,6 +1032,7 @@ theorem ShapeCompatible.symm {env : Env} {left right : PartialTy} :
   induction h with
   | unit => exact ShapeCompatible.unit
   | int => exact ShapeCompatible.int
+  | bool => exact ShapeCompatible.bool
   | tyBox _hinner ih => exact ShapeCompatible.tyBox ih
   | box _hinner ih => exact ShapeCompatible.box ih
   | borrow hleft hright _hcompat ih => exact ShapeCompatible.borrow hright hleft ih
@@ -1082,6 +1128,8 @@ theorem ShapeCompatible.right_full_partialTyUnion_exists {env : Env}
       exact ⟨.ty .unit, PartialTyUnion.self (.ty .unit)⟩
   | int =>
       exact ⟨.ty .int, PartialTyUnion.self (.ty .int)⟩
+  | bool =>
+      exact ⟨.ty .bool, PartialTyUnion.self (.ty .bool)⟩
   | tyBox hinner =>
       rcases ShapeCompatible.full_partialTyUnion_exists hinner with
         ⟨unionInner, hunionInner⟩
@@ -1273,8 +1321,10 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
         (∃ rightTargets,
           PartialTyContains right (.borrow mutable rightTargets) ∧
             target ∈ rightTargets))
-    ?unit ?int ?borrow ?boxTy ?ty ?boxPartial ?undef union
+    ?unit ?int ?bool ?borrow ?boxTy ?ty ?boxPartial ?undef union
     left right mutable targets target
+  · intro left right mutable targets target _hunion hcontains _htarget
+    cases hcontains
   · intro left right mutable targets target _hunion hcontains _htarget
     cases hcontains
   · intro left right mutable targets target _hunion hcontains _htarget
@@ -1365,7 +1415,10 @@ theorem mem_partialTy_vars_iff {pt : PartialTy} {v : Name} :
       ∃ mutable targets target,
         PartialTyContains pt (.borrow mutable targets) ∧
           target ∈ targets ∧ LVal.base target = v)
-    ?unit ?int ?borrow ?boxTy ?ty ?boxPartial ?undef pt
+    ?unit ?int ?bool ?borrow ?boxTy ?ty ?boxPartial ?undef pt
+  · constructor
+    · intro h; simp [Ty.vars] at h
+    · rintro ⟨_, _, _, hc, _, _⟩; cases hc
   · constructor
     · intro h; simp [Ty.vars] at h
     · rintro ⟨_, _, _, hc, _, _⟩; cases hc
@@ -2106,7 +2159,7 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
         PartialTyUnion (.ty headA) (.ty restA) (.ty tyA) →
         PartialTyUnion (.ty headB) (.ty restB) (.ty tyB) →
         Ty.eqv tyA tyB)
-      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
     · intro restA tyA headB restB tyB hhead hrest hunionA hunionB
       have hb : headB = .unit := by cases headB <;> simp_all [Ty.eqv]
       subst hb
@@ -2591,7 +2644,7 @@ theorem partialTyStrengthens_ty_of_eqv {left right : Ty} :
     refine Ty.rec
       (motive_1 := fun left => ∀ right : Ty, Ty.eqv left right →
         PartialTyStrengthens (.ty left) (.ty right))
-      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
     · intro right heqv
       cases right <;> simp_all [Ty.eqv]
     · intro right heqv
@@ -2650,7 +2703,7 @@ theorem Ty.eqv_of_strengthens_both {left right : Ty} :
         PartialTyStrengthens (.ty left) (.ty right) →
         PartialTyStrengthens (.ty right) (.ty left) →
         Ty.eqv left right)
-      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
     · intro right hlr _hrl
       have hright : right = .unit := PartialTyStrengthens.from_unit_inv hlr
       subst hright

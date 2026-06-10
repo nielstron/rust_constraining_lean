@@ -69,12 +69,14 @@ def update (typing : StoreTyping) (location : Location) (ty : Ty) : StoreTyping 
 
 end StoreTyping
 
-/-- Definition 3.6, `copy(T)`. -/
+/-- Definition 3.6, `copy(T)`, extended with `bool` (Section 6.1). -/
 inductive CopyTy : Ty → Prop where
   | unit :
       CopyTy .unit
   | int :
       CopyTy .int
+  | bool :
+      CopyTy .bool
   | immBorrow {targets : List LVal} :
       CopyTy (.borrow false targets)
 
@@ -84,6 +86,8 @@ inductive NonOwnerTy : Ty → Prop where
       NonOwnerTy .unit
   | int :
       NonOwnerTy .int
+  | bool :
+      NonOwnerTy .bool
   | borrow {mutable : Bool} {targets : List LVal} :
       NonOwnerTy (.borrow mutable targets)
 
@@ -353,6 +357,7 @@ def LVal.derefCount : LVal → Nat
 def Ty.vars : Ty → List Name
   | .unit => []
   | .int => []
+  | .bool => []
   | .borrow _ targets => targets.map LVal.base
   | .box inner => Ty.vars inner
 
@@ -387,6 +392,7 @@ keeping the `mutable` flag). -/
 def Ty.sameShape : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
+  | .bool, .bool => True
   | .borrow m₁ _, .borrow m₂ _ => m₁ = m₂
   | .box t₁, .box t₂ => Ty.sameShape t₁ t₂
   | _, _ => False
@@ -405,6 +411,7 @@ extra subset-equivalence is what lets reborrow chains be related. -/
 def Ty.eqv : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
+  | .bool, .bool => True
   | .borrow m₁ t₁, .borrow m₂ t₂ => m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
   | .box t₁, .box t₂ => Ty.eqv t₁ t₂
   | _, _ => False
@@ -672,6 +679,100 @@ def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
   ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
     Coherent env ∧ Linearizable env
 
+/--
+Definition 4.13, borrow-safe environment.
+
+The paper phrases this over variables in `dom(Γ)` and borrowed lvalues inside
+contained borrow types.  The containment premises already imply the relevant
+variables are present in the environment.
+
+This lives here (rather than with the Section 4.3 helpers) because the
+control-flow extension's `T-If` rule carries it as an obligation for the
+joined result environment; see `TermTyping.ite`.
+-/
+def BorrowSafeEnv (env : Env) : Prop :=
+  ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
+    env ⊢ x ↝ (&mut targetsMutable) →
+    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    x = y
+
+/--
+Per-slot shape agreement between a branch environment and a join result.
+
+Used by `T-If`: it restricts the mechanised conditional to branches that
+leave every variable in the same initialisation state (no move/initialise
+asymmetry between the branches), in which case the join only merges borrow
+target lists.  The paper's join is more liberal — it can collapse a
+fully-initialised branch slot with a moved-out one into an `undef` shadow —
+but the paper's own Definition 4.4 has no rule validating a still-present
+runtime value against an `undef` type, so safe abstraction (Definition 4.7)
+is not preserved across such joins as printed.  See the README deviation
+entry for the control-flow extension.
+-/
+def EnvJoinSameShape (branch join : Env) : Prop :=
+  ∀ x branchSlot joinSlot,
+    branch.slotAt x = some branchSlot →
+    join.slotAt x = some joinSlot →
+    PartialTy.sameShape branchSlot.ty joinSlot.ty
+
+/-- A join is an upper bound of its left component. -/
+theorem EnvJoin.left_le {left right join : Env} :
+    EnvJoin left right join →
+    EnvStrengthens left join := by
+  intro hjoin
+  exact hjoin.1 (by simp)
+
+/-- A join is an upper bound of its right component. -/
+theorem EnvJoin.right_le {left right join : Env} :
+    EnvJoin left right join →
+    EnvStrengthens right join := by
+  intro hjoin
+  exact hjoin.1 (by simp)
+
+/-- `EnvStrengthens` componentwise view: slots of the weaker environment are
+matched by slots of the stronger one with equal lifetimes. -/
+theorem EnvStrengthens.slot_forward {left right : Env} {x : Name}
+    {leftSlot : EnvSlot} :
+    EnvStrengthens left right →
+    left.slotAt x = some leftSlot →
+    ∃ rightSlot,
+      right.slotAt x = some rightSlot ∧
+      leftSlot.lifetime = rightSlot.lifetime ∧
+      PartialTyStrengthens leftSlot.ty rightSlot.ty := by
+  intro hstrengthens hleft
+  have h := hstrengthens x
+  rw [hleft] at h
+  cases hright : right.slotAt x with
+  | none =>
+      rw [hright] at h
+      exact False.elim h
+  | some rightSlot =>
+      rw [hright] at h
+      exact ⟨rightSlot, rfl, h.1, h.2⟩
+
+/-- `EnvStrengthens` componentwise view, from the stronger side. -/
+theorem EnvStrengthens.slot_backward {left right : Env} {x : Name}
+    {rightSlot : EnvSlot} :
+    EnvStrengthens left right →
+    right.slotAt x = some rightSlot →
+    ∃ leftSlot,
+      left.slotAt x = some leftSlot ∧
+      leftSlot.lifetime = rightSlot.lifetime ∧
+      PartialTyStrengthens leftSlot.ty rightSlot.ty := by
+  intro hstrengthens hright
+  have h := hstrengthens x
+  rw [hright] at h
+  cases hleft : left.slotAt x with
+  | none =>
+      rw [hleft] at h
+      exact False.elim h
+  | some leftSlot =>
+      rw [hleft] at h
+      exact ⟨leftSlot, rfl, h.1, h.2⟩
+
 /-- Definition 3.21, well-formed type `Γ ⊢ T ≽ l`. -/
 inductive WellFormedTy : Env → Ty → Lifetime → Prop where
   /-- L-Unit, the unit case implicit in the paper's use of `ϵ`. -/
@@ -680,6 +781,9 @@ inductive WellFormedTy : Env → Ty → Lifetime → Prop where
   /-- L-Int. -/
   | int {env : Env} {lifetime : Lifetime} :
       WellFormedTy env .int lifetime
+  /-- L-Bool, Section 6.1. -/
+  | bool {env : Env} {lifetime : Lifetime} :
+      WellFormedTy env .bool lifetime
   /-- L-Borrow. -/
   | borrow {env : Env} {mutable : Bool} {targets : List LVal}
       {lifetime : Lifetime} :
@@ -698,6 +802,9 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
   /-- S-Int. -/
   | int {env : Env} :
       ShapeCompatible env (.ty .int) (.ty .int)
+  /-- S-Bool, Section 6.1. -/
+  | bool {env : Env} :
+      ShapeCompatible env (.ty .bool) (.ty .bool)
   /-- S-Box for fully initialized owner types. -/
   | tyBox {env : Env} {left right : Ty} :
       ShapeCompatible env (.ty left) (.ty right) →
@@ -802,9 +909,25 @@ inductive ValueTyping : StoreTyping → Value → Ty → Prop where
       ValueTyping typing .unit .unit
   | int {typing : StoreTyping} {value : Int} :
       ValueTyping typing (.int value) .int
+  | bool {typing : StoreTyping} {value : Bool} :
+      ValueTyping typing (.bool value) .bool
   | ref {typing : StoreTyping} {ref : Reference} {ty : Ty} :
       typing.tyOf ref.location = some ty →
       ValueTyping typing (.ref ref) ty
+
+theorem ValueTyping.deterministic {typing : StoreTyping} {value : Value}
+    {left right : Ty} :
+    ValueTyping typing value left →
+    ValueTyping typing value right →
+    left = right := by
+  intro hleft hright
+  cases hleft <;> cases hright
+  · rfl
+  · rfl
+  · rfl
+  · rename_i hleftLookup hrightLookup
+    rw [hleftLookup] at hrightLookup
+    exact Option.some.inj hrightLookup
 
 mutual
   /-- Section 3.4 term typing `Γ₁ ⊢ ⟨t : T⟩^l_σ ⊣ Γ₂`. -/
@@ -878,6 +1001,69 @@ mutual
         ContainedBorrowsWellFormed env₃ →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
+    /-- T-Eqal, Section 6.1.2.
+
+    Deviation from the printed rule: the paper types the right operand in
+    `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and erases `γ` afterwards, so
+    that borrows inside `T₁` keep prohibiting conflicting uses while the right
+    operand is typed.  The mechanisation types the right operand in `Γ₂`
+    directly.  The anonymous slot exists only during typing — it has no
+    runtime counterpart — so carrying it would break the safe-abstraction
+    invariant (`S ∼ Γ`) threaded through preservation; eliminating it needs a
+    thinning metatheorem the paper does not provide.  Dropping it only widens
+    the accepted programs (the γ slot can only add read/write prohibitions),
+    and it is not load-bearing for soundness: the comparison redex inspects
+    the operand values without reading the store, and both operands are
+    discarded by the result.  See the README. -/
+    | eq {env₁ env₂ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {lhs rhs : Term} {lhsTy rhsTy : Ty} :
+        TermTyping env₁ typing lifetime lhs lhsTy env₂ →
+        TermTyping env₂ typing lifetime rhs rhsTy env₃ →
+        CopyTy lhsTy →
+        CopyTy rhsTy →
+        ShapeCompatible env₃ (.ty lhsTy) (.ty rhsTy) →
+        TermTyping env₁ typing lifetime (.eq lhs rhs) .bool env₃
+    /-- T-If, Section 6.1.2.
+
+    The condition types as `bool`, both branches are typed in the
+    post-condition environment, and the resulting type/environment are the
+    joins (Definitions 3.8 and 3.10) of the branch results.
+
+    Mechanisation obligations on the joined result, following the repo
+    convention of rule-carried obligations (cf. `T-Assign`):
+
+    * `EnvJoinSameShape` for both branches — branches must agree on each
+      variable's initialisation state (see that definition for why the
+      paper's more liberal join is unsound against Definition 4.4 as
+      printed);
+    * `ContainedBorrowsWellFormed`, `Coherent`, `Linearizable` — the
+      well-formed-environment invariants for the join.  Joins merge borrow
+      target lists, so these do not follow from the branch invariants by a
+      local argument; they are carried, as the corresponding `T-Assign`
+      obligations are;
+    * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
+      variables into one target list, in which case the joined environment
+      is genuinely not borrow safe even though each branch is (the paper
+      concedes the corresponding weakening of Corollary 4.14 for this
+      extension in Section 4.5.1).  The preservation architecture threads
+      borrow safety through sequencing, so the mechanised rule only accepts
+      conditionals whose join remains borrow safe. -/
+    | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
+        {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+        {trueTy falseTy joinTy : Ty} :
+        TermTyping env₁ typing lifetime condition .bool env₂ →
+        TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
+        TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
+        PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
+        EnvJoin env₃ env₄ env₅ →
+        EnvJoinSameShape env₃ env₅ →
+        EnvJoinSameShape env₄ env₅ →
+        ContainedBorrowsWellFormed env₅ →
+        Coherent env₅ →
+        Linearizable env₅ →
+        BorrowSafeEnv env₅ →
+        TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
+          joinTy env₅
 
   inductive TermListTyping : Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
     /-- T-Seq, singleton sequence. -/
