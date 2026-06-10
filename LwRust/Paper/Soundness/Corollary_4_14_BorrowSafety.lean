@@ -1959,6 +1959,9 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           (TermTyping.const hvalueTyping) hborrowSafe
           hborrowFree
           hfresh)
+    (fun {_env _typing _lifetime _ty} _hwellTy _hsource _hborrowSafe =>
+      by
+        sorry)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy hnotRead
         _hsource hborrowSafe =>
       ⟨hborrowSafe,

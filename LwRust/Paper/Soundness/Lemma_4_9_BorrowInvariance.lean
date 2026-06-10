@@ -1476,6 +1476,8 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
       | int => exact TermTyping.const ValueTyping.int
       | bool => exact TermTyping.const ValueTyping.bool
       | ref _hlookup => exact absurd hsourceValue (by simp [SourceValue]))
+    (fun hwellTy _hsource =>
+      TermTyping.missing hwellTy)
     (fun hLv hcopy hread _hsource =>
       TermTyping.copy hLv hcopy hread)
     (fun hLv hwrite hmove _hsource =>
@@ -5317,6 +5319,8 @@ theorem typingPreservesWellFormed_of_landmarks
         subst htypingEq
         exact ⟨hwellFormed,
           valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping⟩)
+    (fun {_env _typing _lifetime _ty} hwellTy _htypingEq hwellFormed =>
+      ⟨hwellFormed, hwellTy⟩)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
         _htypingEq hwellFormed =>
       ⟨hwellFormed,
@@ -5422,6 +5426,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         subst htypingEq
         exact ⟨hwellFormed,
           valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping⟩)
+    (fun {_env _typing _lifetime _ty} hwellTy _htypingEq hwellFormed =>
+      ⟨hwellFormed, hwellTy⟩)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
         _htypingEq hwellFormed =>
       ⟨hwellFormed, copyTy_result_wellFormed hwellFormed hLv hcopy⟩)

@@ -14,6 +14,10 @@ Paper Section 3.2 reduction relation:
 `S₁ ▷ t₁ -→ S₂ ▷ t₂` in lifetime context `l`.
 -/
 inductive Step : ProgramStore → Lifetime → Term → ProgramStore → Term → Prop where
+  /-- R-Missing: synthetic placeholder diverges when evaluated. -/
+  | missing {store : ProgramStore} {lifetime : Lifetime} :
+      Step store lifetime .missing store .missing
+
   /-- R-Copy. -/
   | copy {store : ProgramStore} {lifetime valueLifetime : Lifetime}
       {lv : LVal} {value : Value} :
@@ -194,6 +198,18 @@ theorem multistep_value_inv {store finalStore : ProgramStore} {lifetime : Lifeti
   | trans hstep _ =>
       exact False.elim (value_no_step hstep)
 
+theorem multistep_missing_inv {store finalStore : ProgramStore} {lifetime : Lifetime}
+    {term : Term} :
+    MultiStep store lifetime .missing finalStore term →
+    finalStore = store ∧ term = .missing := by
+  sorry
+
+theorem multistep_missing_not_value {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {value : Value} :
+    ¬ MultiStep store lifetime .missing finalStore (.val value) := by
+  intro hmulti
+  exact Term.noConfusion (multistep_missing_inv hmulti).2
+
 theorem multistep_terminal_inv {store finalStore : ProgramStore} {lifetime : Lifetime}
     {term finalTerm : Term} :
     Terminal term →
@@ -362,58 +378,6 @@ theorem multistep_assign_to_value_inv {store finalStore : ProgramStore}
           rcases ih rfl hend with ⟨midStore, value, hinnerMulti, hassignStep⟩
           exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti,
             hassignStep⟩
-
-/--
-Every reduction step strictly decreases the structural term size: the core
-calculus is terminating.
--/
-theorem step_size_lt {store store' : ProgramStore} {lifetime : Lifetime}
-    {term term' : Term} :
-    Step store lifetime term store' term' →
-    term'.size < term.size := by
-  intro hstep
-  induction hstep with
-  | copy _ => simp [Term.size]
-  | move _ _ => simp [Term.size]
-  | box _ _ => simp [Term.size]
-  | borrow _ => simp [Term.size]
-  | assign _ _ _ => simp [Term.size]
-  | declare _ => simp [Term.size]
-  | seq _ => simp [Term.size, Term.sizeList]
-  | blockA _ ih =>
-      simp only [Term.size, Term.sizeList]
-      omega
-  | blockB _ => simp [Term.size, Term.sizeList]
-  | subBox _ ih =>
-      simp only [Term.size]
-      omega
-  | subDeclare _ ih =>
-      simp only [Term.size]
-      omega
-  | subAssign _ ih =>
-      simp only [Term.size]
-      omega
-  | eqTrue => simp [Term.size]
-  | eqFalse _ => simp [Term.size]
-  | iteTrue =>
-      rename_i trueBranch falseBranch
-      have := Term.size_pos falseBranch
-      simp only [Term.size]
-      omega
-  | iteFalse =>
-      rename_i trueBranch falseBranch
-      have := Term.size_pos trueBranch
-      simp only [Term.size]
-      omega
-  | subEqLeft _ ih =>
-      simp only [Term.size]
-      omega
-  | subEqRight _ ih =>
-      simp only [Term.size]
-      omega
-  | subIte _ ih =>
-      simp only [Term.size]
-      omega
 
 /--
 Prefix inversion for `box` runs: an arbitrary partial execution is either

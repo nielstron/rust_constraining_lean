@@ -1442,6 +1442,9 @@ theorem TermTyping.slot_lifetime_survives :
           _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
+        intro _env _typing _lifetime _ty _hwellTy x sourceSlot _houtlives hslot
+        exact ⟨sourceSlot, hslot, rfl⟩)
+      (by
         intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
           x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
@@ -1556,6 +1559,9 @@ theorem TermTyping.slot_lifetime_survives :
       (by
         intro _env _typing _lifetime _value _ty _hvalue x sourceSlot
           _houtlives hslot
+        exact ⟨sourceSlot, hslot, rfl⟩)
+      (by
+        intro _env _typing _lifetime _ty _hwellTy x sourceSlot _houtlives hslot
         exact ⟨sourceSlot, hslot, rfl⟩)
       (by
         intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead

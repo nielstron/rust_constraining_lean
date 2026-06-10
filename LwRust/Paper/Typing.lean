@@ -955,6 +955,11 @@ mutual
         {value : Value} {ty : Ty} :
         ValueTyping typing value ty →
         TermTyping env typing lifetime (.val value) ty env
+    /-- T-Missing: synthetic extractor placeholder. -/
+    | missing {env : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {ty : Ty} :
+        WellFormedTy env ty lifetime →
+        TermTyping env typing lifetime .missing ty env
     /-- T-Copy. -/
     | copy {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
