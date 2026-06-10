@@ -219,6 +219,62 @@ theorem multistep_missing_not_value {store finalStore : ProgramStore}
   intro hmulti
   exact Term.noConfusion (multistep_missing_inv hmulti).2
 
+/-- Values do not diverge. -/
+theorem _root_.LwRust.Core.Term.Diverges.no_value {value : Value} :
+    ¬ Term.Diverges (.val value) := by
+  intro hdiv
+  cases hdiv
+
+/-- Syntactic divergence is stable under reduction: the diverging member of a
+block is never popped (it is not a value) and steps to a diverging term. -/
+theorem _root_.LwRust.Core.Term.Diverges.step {store store' : ProgramStore} {lifetime : Lifetime}
+    {term term' : Term} :
+    Term.Diverges term →
+    Step store lifetime term store' term' →
+    Term.Diverges term' := by
+  intro hdiv
+  induction hdiv generalizing store store' lifetime term' with
+  | missing =>
+      intro hstep
+      cases hstep
+      exact .missing
+  | block hmem hinner ih =>
+      intro hstep
+      cases hstep with
+      | seq _hdrops =>
+          rcases List.mem_cons.mp hmem with heq | hmem'
+          · exact absurd (heq ▸ hinner) Term.Diverges.no_value
+          · exact .block hmem' hinner
+      | blockA hstepHead =>
+          rcases List.mem_cons.mp hmem with heq | hmem'
+          · subst heq
+            exact .block List.mem_cons_self (ih hstepHead)
+          · exact .block (List.mem_cons.mpr (Or.inr hmem')) hinner
+      | blockB _hdrops =>
+          rcases List.mem_singleton.mp hmem with heq
+          exact absurd (heq ▸ hinner) Term.Diverges.no_value
+
+/-- Syntactic divergence is stable under arbitrary execution. -/
+theorem _root_.LwRust.Core.Term.Diverges.multiStep {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {term finalTerm : Term} :
+    MultiStep store lifetime term finalStore finalTerm →
+    Term.Diverges term →
+    Term.Diverges finalTerm := by
+  intro hmulti
+  induction hmulti with
+  | refl => exact id
+  | trans hstep _hrest ih => exact fun hdiv => ih (hdiv.step hstep)
+
+/-- A diverging term never reduces to a value.  This is what discharges the
+dead-branch path of `T-IfDiv` in preservation: an execution that selects the
+diverging branch never terminates, so terminal-state obligations are
+vacuous. -/
+theorem diverges_multistep_not_value {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {term : Term} {value : Value} :
+    Term.Diverges term →
+    ¬ MultiStep store lifetime term finalStore (.val value) :=
+  fun hdiv hmulti => Term.Diverges.no_value (hdiv.multiStep hmulti)
+
 theorem multistep_terminal_inv {store finalStore : ProgramStore} {lifetime : Lifetime}
     {term finalTerm : Term} :
     Terminal term →

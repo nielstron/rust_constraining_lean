@@ -1507,6 +1507,12 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihFalse (SourceTerm.ite_falseBranch hsource))
         hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear hborrowSafe
         hresultSafe)
+    (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
+        hsource =>
+      TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
+        (ihTrue (SourceTerm.ite_trueBranch hsource))
+        (ihFalse (SourceTerm.ite_falseBranch hsource))
+        hdiverges)
     (fun _hterm ih hsource =>
       TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
     (fun _hterm _hrest ihHead ihRest hsource =>
@@ -5386,6 +5392,12 @@ theorem typingPreservesWellFormed_of_landmarks
           exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
             (EnvJoin.lifetimesPreserved_left _henvJoin),
         hcoherent, hlinear⟩, hwellJoin⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy}
+        _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
+        htypingEq hwellFormed =>
+      let conditionResult := ihCondition htypingEq hwellFormed
+      ihTrue htypingEq conditionResult.1)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -5502,6 +5514,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
           exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
             (EnvJoin.lifetimesPreserved_left _henvJoin),
         hcoherent, hlinear⟩, hwellJoin⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy}
+        _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
+        htypingEq hwellFormed =>
+      let conditionResult := ihCondition htypingEq hwellFormed
+      ihTrue htypingEq conditionResult.1)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)

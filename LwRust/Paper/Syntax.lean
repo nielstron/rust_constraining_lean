@@ -101,7 +101,8 @@ inductive Term where
   | val (value : Value)
   /-- Synthetic extractor placeholder, analogous to `ast_copier`'s polymorphic
   `__missing__<T>() -> T`. It is source-like generated syntax and diverges at
-  runtime. -/
+  runtime, so it also plays the role of Rust's `panic!()`: a diverging
+  expression usable at any (loan-free) type. -/
   | missing
   /-- Section 6.1 control-flow extension (Figure 5): equality comparator and conditional -/
   | eq (lhs rhs : Term)
@@ -134,6 +135,23 @@ end
 theorem Term.size_pos : ∀ term : Term, 0 < term.size := by
   intro term
   cases term <;> simp [Term.size] <;> omega
+
+/--
+Syntactic divergence: a conservative approximation of "never evaluates to a
+value", modelling rustc's never-type (`!`) propagation.  `Term.missing` plays
+the role of `panic!()` (it self-loops at runtime), and a block diverges when
+one of its statements does — control cannot reach the block's end.
+
+This powers the divergence-aware conditional rule `T-IfDiv`
+(`TermTyping.iteDiverging`), the analogue of rustc treating a
+`panic!()`-terminated branch as unreachable at the merge point.
+-/
+inductive Term.Diverges : Term → Prop where
+  | missing : Term.Diverges .missing
+  | block {lifetime : Lifetime} {terms : List Term} {term : Term} :
+      term ∈ terms →
+      Term.Diverges term →
+      Term.Diverges (.block lifetime terms)
 
 
 end Core

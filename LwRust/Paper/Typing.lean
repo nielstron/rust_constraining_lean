@@ -1121,6 +1121,30 @@ mutual
         TyBorrowSafeAgainstEnv env₅ joinTy →
         TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
           joinTy env₅
+    /-- T-IfDiv: divergence-aware conditional merge.
+
+    Rust accepts `if c { t } else { …; panic!() }` even when the truncated
+    else-branch and the live branch disagree on moves or types: the
+    `panic!()`-terminated branch has the never type `!`, so control never
+    flows from it to the merge point and it contributes nothing to the
+    borrow-state join.  `Term.Diverges` is the syntactic counterpart of that
+    `!`-propagation.
+
+    The diverging branch is still fully type- and borrow-checked (premise
+    three) — this is what lets the extractor keep a truncated branch's
+    constraints — but the result type and environment are exactly the live
+    branch's, and none of `T-If`'s join obligations are needed because no
+    join happens.  The mirror-image rule (diverging *true* branch) is
+    omitted: place the diverging branch in `else` position. -/
+    | iteDiverging {env₁ env₂ env₃ env₄ : Env} {typing : StoreTyping}
+        {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+        {trueTy falseTy : Ty} :
+        TermTyping env₁ typing lifetime condition .bool env₂ →
+        TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
+        TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
+        falseBranch.Diverges →
+        TermTyping env₁ typing lifetime
+          (.ite condition trueBranch falseBranch) trueTy env₃
 
   inductive TermListTyping : Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
     /-- T-Seq, singleton sequence. -/

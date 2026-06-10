@@ -2171,6 +2171,14 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
         have _hfalseSafe := ihFalse (SourceTerm.ite_falseBranch hsource) hconditionSafe.1
         exact ⟨hborrowSafeJoin, hresultSafe, fun _gamma _hfresh =>
           borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hborrowSafeJoin hresultSafe⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy}
+        _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
+        hsource hborrowSafe =>
+      by
+        have hconditionSafe :=
+          ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
+        exact ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih hsource hborrowSafe =>
       let h := _ih (SourceTerm.block_head hsource) hborrowSafe
       ⟨h.1, h.2.1⟩)

@@ -79,6 +79,21 @@ stated; the deviation then documents the corrected claim).
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
 
+- **Divergence-aware conditionals (`T-IfDiv`), modelling real Rust.**  The
+  paper's `T-If` always joins both branch environments; rustc instead lets a
+  `panic!()`-terminated branch type at `!` and contribute nothing to the
+  borrow-state merge.  `TermTyping.iteDiverging` adds exactly this rule: if
+  the else-branch is fully type-checked *and* syntactically diverges
+  (`Term.Diverges`, the counterpart of `!`-propagation; `Term.missing` plays
+  the role of `panic!()`), the conditional's result type and environment are
+  the live branch's.  No new terms and no semantics changes are involved;
+  in preservation the dead-branch path is discharged by
+  `diverges_multistep_not_value` (a diverging branch never reaches a value),
+  and all other metatheory cases defer to the premise IHs.  This is what lets
+  the conservative extractor rebuild `if c { … } else { …; panic!() }` around
+  a truncated branch the way `ast_copier` does
+  (`LwRust/Extractor/Extractors/NestedBlocks.lean`).
+
 - **Lemma 4.11 (Preservation) carries a premises the paper does not
   have.**
    `BorrowSafeEnv Γ₁` — *likely paper bug:* the printed lemma appears false

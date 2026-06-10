@@ -1526,6 +1526,18 @@ theorem TermTyping.slot_lifetime_survives :
         exact ⟨joinSlot, hjoinSlot, by
           rw [hcondLifetime, htrueLifetime, hjoinLifetime]⟩)
       (by
+        intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _hcond _htrue _hfalse _hdiv
+          ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
+        rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
+        have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
+          rw [← hcondLifetime]
+          exact houtlives
+        rcases ihTrue hcondOutlives hcondSlot with
+          ⟨resultSlot, hresultSlot, hresultLifetime⟩
+        exact ⟨resultSlot, hresultSlot, by
+          rw [hcondLifetime, hresultLifetime]⟩)
+      (by
         intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
           x sourceSlot houtlives hslot
         exact ih houtlives hslot)
@@ -1645,6 +1657,18 @@ theorem TermTyping.slot_lifetime_survives :
           ⟨joinSlot, hjoinSlot, hjoinLifetime, _⟩
         exact ⟨joinSlot, hjoinSlot, by
           rw [hcondLifetime, htrueLifetime, hjoinLifetime]⟩)
+      (by
+        intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _hcond _htrue _hfalse _hdiv
+          ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
+        rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
+        have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
+          rw [← hcondLifetime]
+          exact houtlives
+        rcases ihTrue hcondOutlives hcondSlot with
+          ⟨resultSlot, hresultSlot, hresultLifetime⟩
+        exact ⟨resultSlot, hresultSlot, by
+          rw [hcondLifetime, hresultLifetime]⟩)
       (by
         intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
           x sourceSlot houtlives hslot

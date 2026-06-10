@@ -915,7 +915,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
-    ?singleton ?cons htyping
+    ?iteDiverging ?singleton ?cons htyping
   · intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
   · intro _env _typing lifetime _ty _hwellTy _hloanFree _hvst _hwf _hsafe _hstore
@@ -983,6 +983,27 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
       _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe
       _hresultSafe ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
+    rcases ihCondition
+        (by
+          intro value hmem
+          exact hvst value (by
+            simp [termValues] at hmem ⊢
+            exact Or.inl hmem))
+        hwf hsafe hstore with hterminalCondition | hstepCondition
+    · rcases (terminal_iff_value condition).mp hterminalCondition with
+        ⟨conditionValue, hconditionValue⟩
+      subst hconditionValue
+      cases hcondition with
+      | const hvalueTyping =>
+          exact progress_ite_value hvalueTyping (by
+            intro value hmem
+            exact hvst value (by
+              simp [termValues] at hmem ⊢
+              exact Or.inl hmem))
+    · exact progress_subIte hstepCondition
+  · intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
+      falseBranch trueTy falseTy hcondition _htrue _hfalse _hdiverges
+      ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
     rcases ihCondition
         (by
           intro value hmem

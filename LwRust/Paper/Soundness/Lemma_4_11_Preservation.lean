@@ -4113,6 +4113,48 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             safeStrengthening hwellJoinEnv hsafeJoin
               (PartialTyUnion.right_strengthens hjoin) hterminalFalse.2.2
           exact ⟨hwellJoinEnv, ⟨hterminalFalse.1, hsafeJoin, hvalidJoin⟩⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy}
+        _hcondition _htrue _hfalse hdiverges ihCondition ihTrue _ihFalse
+        (htypingEq : _typing = typing)
+        (hsource : SourceTerm (.ite _condition _trueBranch _falseBranch))
+        store finalStore finalValue hvalidRuntime
+        hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti =>
+      by
+        cases htypingEq
+        rcases multistep_ite_to_value_inv hmulti with
+          ⟨midStore, hchosen⟩
+        have hsourceCondition : SourceTerm _condition :=
+          SourceTerm.ite_condition hsource
+        have hvalidCondition : ValidRuntimeState store _condition :=
+          validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
+        have hstoreTypingCondition : ValidStoreTyping store _condition typing := by
+          intro value hmem
+          exact hvalidStoreTyping value (by simp [termValues, hmem])
+        have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
+          (typingPreservesBorrowSafeResult_global hsourceCondition hborrowSafe
+            _hcondition).1
+        rcases hchosen with htrueChosen | hfalseChosen
+        · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
+          rcases ihCondition rfl hsourceCondition store midStore (.bool true)
+              hvalidCondition hstoreTypingCondition hwellFormed hborrowSafe hsafe
+              _hconditionMulti with
+            ⟨hwellCondition, hterminalCondition⟩
+          have hsourceTrue : SourceTerm _trueBranch :=
+            SourceTerm.ite_trueBranch hsource
+          have hvalidTrue : ValidRuntimeState midStore _trueBranch :=
+            validRuntimeState_of_sourceTerm hsourceTrue hterminalCondition.1
+          have hstoreTypingTrueSource : ValidStoreTyping store _trueBranch typing := by
+            intro value hmem
+            exact hvalidStoreTyping value (by simp [termValues, hmem])
+          have hstoreTypingTrue : ValidStoreTyping midStore _trueBranch typing :=
+            validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
+              hstoreTypingTrueSource
+          exact ihTrue rfl hsourceTrue midStore finalStore finalValue hvalidTrue
+            hstoreTypingTrue hwellCondition hborrowSafeCondition
+            hterminalCondition.2.1 htrueMulti
+        · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
+          exact absurd hfalseMulti (diverges_multistep_not_value hdiverges))
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih
         htypingEq hsource outerLifetime store finalStore finalValue hchild hvalidRuntime
         hvalidStoreTyping hwellFormed hborrowSafe hsafe hwellTy hmulti =>
