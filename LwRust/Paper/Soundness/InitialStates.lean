@@ -869,6 +869,28 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     htyping
 
 /--
+**Theorem 4.12, total empty-initial form (the paper's statement).**  Any term
+typed from the empty initial environment and store typing reduces from the
+empty store to a terminal value, and that terminal state is safe.  Both the
+runtime invariants and termination are derived from typability alone.
+-/
+theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
+    {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    ∃ finalStore finalValue,
+      MultiStep ProgramStore.empty lifetime term finalStore
+        (.val finalValue) ∧
+      TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro htyping
+  rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
+      _hstoreProgress, _hrefs⟩
+  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+  exact (typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
+    (hwellFormed lifetime) hborrowSafe hsafe
+    ProgramStore.finiteSupport_empty htyping).2
+
+/--
 **Unstuckness.**  No state reachable from an empty-initial well-typed program
 is stuck: it is terminal or can take a further step.  All invariants are
 derived from typability against the empty environment and store typing.

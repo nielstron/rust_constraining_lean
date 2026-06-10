@@ -97,6 +97,28 @@ inductive Term where
   | val (value : Value)
   deriving BEq, Repr
 
+mutual
+  /-- Structural size of a term.  Every reduction step strictly decreases it
+  (`step_size_lt`), which is the termination measure for the core calculus. -/
+  def Term.size : Term → Nat
+    | .block _ terms => 1 + Term.sizeList terms
+    | .letMut _ initialiser => 1 + initialiser.size
+    | .assign _ rhs => 1 + rhs.size
+    | .box operand => 1 + operand.size
+    | .borrow _ _ => 2
+    | .move _ => 2
+    | .copy _ => 2
+    | .val _ => 1
+
+  def Term.sizeList : List Term → Nat
+    | [] => 0
+    | term :: rest => term.size + Term.sizeList rest
+end
+
+theorem Term.size_pos : ∀ term : Term, 0 < term.size := by
+  intro term
+  cases term <;> simp [Term.size] <;> omega
+
 
 end Core
 end LwRust

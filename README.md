@@ -10,27 +10,6 @@ these to 0.  Each entry notes whether the deviation is mechanisation debt
 (closable) or a likely paper bug (the printed claim appears unprovable as
 stated; the deviation then documents the corrected claim).
 
-- **Theorem 4.12: termination is assumed.**  The paper concludes
-  `⟨S₁ ▷ t ⟶* S₂ ▷ v⟩` for some terminal state; the mechanised
-  `typeAndBorrowSafety` instead takes a `TerminatesAsValue` witness and proves
-  safety facts about that run.  Stuck-freedom is now established
-  independently of termination: `SoundState` is the step-stable invariant
-  (re-established by the traditional step theorem `SoundState.step`), and
-  `no_stuck_states` / `theorem_4_12_no_stuck_states` /
-  `emptyInitial_no_stuck_states` prove that every reachable state is terminal
-  or can step, with progress (`SoundState.progress`) and terminal preservation
-  (`SoundState.preservation`) available at each of them.  What remains of the
-  deviation is only the termination claim itself.  *Mechanisation debt:* the
-  core calculus terminates (every step strictly decreases term size), so a
-  termination measure would close this.
-
-  (Note: `SoundState` carries the originating typed run rather than a
-  re-typing of the intermediate continuation.  A literal continuation
-  re-typing is unavailable in this calculus: a declaration whose initialiser
-  block declares the same variable reaches safe intermediate states whose
-  continuation is not typeable, since the runtime store already holds the
-  inner variable's slot while `T-Declare` requires the outer binder fresh.)
-
 - **Lemma 4.11 (Preservation) carries two premises the paper does not
   have.**
   1. `SourceTerm t` — no reference literals anywhere in `t`.  The paper
@@ -125,7 +104,26 @@ These deviations from the paper should be kept.
   `OperationalStoreProgress` packages the paper's finite-store totality facts
   — fresh heap addresses exist and drops are total — as an explicit premise of
   Lemma 4.10.  This is the intended interface for the abstract partial-map
-  store model and is discharged for concrete/empty stores.
+  store model and is discharged for concrete/empty stores.  Its step-stable
+  form is `ProgramStore.FiniteSupport` (finitely many allocated locations),
+  which implies it (`OperationalStoreProgress.of_finiteSupport`), is preserved
+  by reduction (`FiniteSupport.step`), and powers the reachable-state results.
+
+- **Theorem 4.12 is proven in the paper's total form.**  `SoundState` is the
+  step-stable soundness invariant (re-established by the step theorem
+  `SoundState.step`), giving progress and terminal preservation at every
+  reachable state (`no_stuck_states`: no reachable state is stuck) and
+  termination (`SoundState.terminatesAsValue`, via the step-decreasing size
+  measure `step_size_lt`).  `theorem_4_12_typeAndBorrowSafety_total` and
+  `emptyInitial_typeAndBorrowSafety_total` conclude the paper's claim —
+  execution reaches a terminal value and that state is safe — with
+  termination proven rather than assumed.  `SoundState` carries the
+  originating typed run rather than a re-typing of the intermediate
+  continuation; a literal continuation re-typing is unavailable in this
+  calculus, since a declaration whose initialiser block declares the same
+  variable reaches safe intermediate states whose continuation is not
+  typeable (the runtime store already holds the inner variable's slot while
+  `T-Declare` requires the outer binder fresh).
 
 - **Write fan-out requires initialized typed leaves.**  `WriteBorrowTargets`
   carries an initialized full-lvalue typing witness for each concrete fan-out

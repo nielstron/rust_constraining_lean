@@ -318,6 +318,37 @@ theorem multistep_assign_to_value_inv {store finalStore : ProgramStore}
             hassignStep⟩
 
 /--
+Every reduction step strictly decreases the structural term size: the core
+calculus is terminating.
+-/
+theorem step_size_lt {store store' : ProgramStore} {lifetime : Lifetime}
+    {term term' : Term} :
+    Step store lifetime term store' term' →
+    term'.size < term.size := by
+  intro hstep
+  induction hstep with
+  | copy _ => simp [Term.size]
+  | move _ _ => simp [Term.size]
+  | box _ _ => simp [Term.size]
+  | borrow _ => simp [Term.size]
+  | assign _ _ _ => simp [Term.size]
+  | declare _ => simp [Term.size]
+  | seq _ => simp [Term.size, Term.sizeList]
+  | blockA _ ih =>
+      simp only [Term.size, Term.sizeList]
+      omega
+  | blockB _ => simp [Term.size, Term.sizeList]
+  | subBox _ ih =>
+      simp only [Term.size]
+      omega
+  | subDeclare _ ih =>
+      simp only [Term.size]
+      omega
+  | subAssign _ ih =>
+      simp only [Term.size]
+      omega
+
+/--
 Prefix inversion for `box` runs: an arbitrary partial execution is either
 still inside the operand, or the operand finished and the box redex fired,
 after which the term is a value and the run is over.

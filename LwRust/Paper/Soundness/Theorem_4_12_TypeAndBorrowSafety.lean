@@ -553,6 +553,65 @@ theorem SoundState.preservation {store finalStore : ProgramStore}
     _root_.LwRust.Paper.preservation hsource hvalid hvst hwf hbs hsafe htyping
       (multistep_append hreached hmulti)⟩
 
+private theorem soundState_terminates_aux (lifetime : Lifetime) :
+    ∀ (n : Nat) (store : ProgramStore) (term : Term),
+      term.size ≤ n →
+      SoundState store lifetime term →
+      TerminatesAsValue store lifetime term := by
+  intro n
+  induction n with
+  | zero =>
+      intro store term hsize _hsound
+      exact absurd hsize (by have := Term.size_pos term; omega)
+  | succ n ih =>
+      intro store term hsize hsound
+      rcases hsound.progress with hterminal | ⟨store', term', hstep⟩
+      · rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
+        subst hterm
+        exact ⟨store, value, MultiStep.refl⟩
+      · have hlt : term'.size < term.size := step_size_lt hstep
+        rcases ih store' term' (by omega) (hsound.step hstep) with
+          ⟨finalStore, finalValue, hmulti⟩
+        exact ⟨finalStore, finalValue, MultiStep.trans hstep hmulti⟩
+
+/--
+**Termination.**  Every state satisfying the soundness invariant reaches a
+terminal value: progress supplies a step whenever the term is not yet a
+value, the step theorem re-establishes the invariant, and every step strictly
+decreases the term size (`step_size_lt`).
+-/
+theorem SoundState.terminatesAsValue {store : ProgramStore}
+    {lifetime : Lifetime} {term : Term} :
+    SoundState store lifetime term →
+    TerminatesAsValue store lifetime term :=
+  fun hsound =>
+    soundState_terminates_aux lifetime term.size store term Nat.le.refl hsound
+
+/--
+Theorem 4.12, total form (the paper's statement): a well-typed, well-formed,
+borrow-safe source state over a finite-support store reduces to a terminal
+value, and that terminal state is safe.  Termination is proven, not assumed.
+-/
+theorem typeAndBorrowSafety_total {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    SourceTerm term →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    store.FiniteSupport →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep store lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro hsource hvalid hvst hwf hbs hsafe hfinite htyping
+  exact typeAndBorrowSafety hsource hvalid hvst hwf hbs hsafe
+    (OperationalStoreProgress.of_finiteSupport hfinite) htyping
+    ((SoundState.initial hsource hvalid hvst hwf hbs hsafe hfinite
+      htyping).terminatesAsValue)
+
 /--
 No reachable state is stuck: from a well-typed, well-formed, borrow-safe
 source state over a finite-support store, every state reachable by the
@@ -708,5 +767,30 @@ theorem theorem_4_12_no_stuck_states
       ∃ store'' term'', Step store' lifetime term' store'' term'' :=
   no_stuck_states hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
     hfinite htyping hreach
+
+/--
+Theorem 4.12, Type and Borrow Safety, total form (the paper's statement):
+execution from a well-set-up source state is guaranteed to reach a terminal
+value, and that terminal state is safe.  Unlike
+`theorem_4_12_typeAndBorrowSafety`, termination is proven rather than
+assumed.
+-/
+theorem theorem_4_12_typeAndBorrowSafety_total
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty}
+    (hsource : SourceTerm term)
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hborrowSafe : BorrowSafeEnv env₁)
+    (hsafe : store ∼ₛ env₁)
+    (hfinite : store.FiniteSupport)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂) :
+    ProgressResult store lifetime term ∧
+      ∃ finalStore finalValue,
+        MultiStep store lifetime term finalStore (.val finalValue) ∧
+        TerminalStateSafe finalStore finalValue env₂ ty :=
+  typeAndBorrowSafety_total hsource hvalid hstoreTyping hwellFormed
+    hborrowSafe hsafe hfinite htyping
 
 end LwRust.Paper.Soundness
