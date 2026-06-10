@@ -1,4 +1,4 @@
-import LwRust.Extractor.Extractors.Empty
+import LwRust.Extractor.Checkers
 
 /-!
 A syntax-directed LwRust frontier extractor.
@@ -10,15 +10,48 @@ the LwRust constructor and fills unavailable siblings with `unit`.
 
 namespace ConservativeExtractor
 
+def defaultName : Name := "_"
+
+def defaultLVal : LVal :=
+  SyntaxCtor.clvalVar_ctor defaultName
+
+def defaultTerm : Term :=
+  SyntaxCtor.ctermUnit_ctor
+
+def defaultTy : Ty :=
+  SyntaxCtor.ctyUnit_ctor
+
 mutual
 
+def extractTy : PartialTy → Ty
+  | Generated.PartialTy.cutoff => defaultTy
+  | Generated.PartialTy.done ty => ty
+  | Generated.PartialTy.borrowSharedTargets targets =>
+      SyntaxCtor.ctyBorrowShared_ctor (extractLVals targets)
+  | Generated.PartialTy.borrowMutTargets targets =>
+      SyntaxCtor.ctyBorrowMut_ctor (extractLVals targets)
+  | Generated.PartialTy.boxElement element =>
+      SyntaxCtor.ctyBox_ctor (extractTy element)
+  | Generated.PartialTy.tokenAmpStart =>
+      SyntaxCtor.ctyBorrowShared_ctor []
+  | Generated.PartialTy.borrowMutStart =>
+      SyntaxCtor.ctyBorrowMut_ctor []
+  | Generated.PartialTy.boxStart =>
+      SyntaxCtor.ctyBox_ctor defaultTy
+
 def extractLVal : PartialLVal → LVal
-  | Generated.PartialLVal.cutoff => .var "_"
+  | Generated.PartialLVal.cutoff => defaultLVal
   | Generated.PartialLVal.done lv => lv
-  | Generated.PartialLVal.varName (Generated.PartialName.done x) => .var x
-  | Generated.PartialLVal.varName (Generated.PartialName.prefix x) => .var x
-  | Generated.PartialLVal.varName Generated.PartialName.cutoff => .var "_"
-  | Generated.PartialLVal.derefOperand operand => .deref (extractLVal operand)
+  | Generated.PartialLVal.varX (Generated.PartialName.done x) =>
+      SyntaxCtor.clvalVar_ctor x
+  | Generated.PartialLVal.varX (Generated.PartialName.prefix x) =>
+      SyntaxCtor.clvalVar_ctor x
+  | Generated.PartialLVal.varX Generated.PartialName.cutoff =>
+      defaultLVal
+  | Generated.PartialLVal.derefStart =>
+      SyntaxCtor.clvalDeref_ctor defaultLVal
+  | Generated.PartialLVal.derefOperand operand =>
+      SyntaxCtor.clvalDeref_ctor (extractLVal operand)
 
 def extractLVals : PartialLVals → List LVal
   | Generated.PartialLVals.cutoff => []
@@ -26,49 +59,60 @@ def extractLVals : PartialLVals → List LVal
   | Generated.PartialLVals.elems pre none => pre
   | Generated.PartialLVals.elems pre (some tail) => pre ++ [extractLVal tail]
 
-def extractValue : PartialValue → Value
-  | Generated.PartialValue.cutoff => .unit
-  | Generated.PartialValue.done value => value
-  | Generated.PartialValue.intValue n => .int n
-  | Generated.PartialValue.boolValue b => .bool b
-
 def extractTerm : PartialTerm → Term
-  | Generated.PartialTerm.cutoff => .val .unit
+  | Generated.PartialTerm.cutoff => defaultTerm
   | Generated.PartialTerm.done term => term
+  | Generated.PartialTerm.intN n => SyntaxCtor.ctermInt_ctor n
+  | Generated.PartialTerm.blockStart =>
+      SyntaxCtor.ctermBlock_ctor LwRust.Core.Lifetime.root []
   | Generated.PartialTerm.blockTerms lifetime terms =>
-      .block lifetime (extractTerms terms)
+      SyntaxCtor.ctermBlock_ctor lifetime (extractTerms terms)
+  | Generated.PartialTerm.letMutStart =>
+      SyntaxCtor.ctermLetMut_ctor defaultName defaultTerm
   | Generated.PartialTerm.letMutName (Generated.PartialName.done x) =>
-      .letMut x (.val .unit)
+      SyntaxCtor.ctermLetMut_ctor x defaultTerm
   | Generated.PartialTerm.letMutName (Generated.PartialName.prefix x) =>
-      .letMut x (.val .unit)
+      SyntaxCtor.ctermLetMut_ctor x defaultTerm
   | Generated.PartialTerm.letMutName Generated.PartialName.cutoff =>
-      .letMut "_" (.val .unit)
+      SyntaxCtor.ctermLetMut_ctor defaultName defaultTerm
   | Generated.PartialTerm.letMutInitialiser name initialiser =>
-      .letMut name (extractTerm initialiser)
+      SyntaxCtor.ctermLetMut_ctor name (extractTerm initialiser)
   | Generated.PartialTerm.assignLhs lhs =>
-      .assign (extractLVal lhs) (.val .unit)
+      SyntaxCtor.ctermAssign_ctor (extractLVal lhs) defaultTerm
   | Generated.PartialTerm.assignRhs lhs rhs =>
-      .assign lhs (extractTerm rhs)
+      SyntaxCtor.ctermAssign_ctor lhs (extractTerm rhs)
+  | Generated.PartialTerm.boxStart =>
+      SyntaxCtor.ctermBox_ctor defaultTerm
   | Generated.PartialTerm.boxOperand operand =>
-      .box (extractTerm operand)
-  | Generated.PartialTerm.borrowOperand mutable operand =>
-      .borrow mutable (extractLVal operand)
+      SyntaxCtor.ctermBox_ctor (extractTerm operand)
+  | Generated.PartialTerm.tokenAmpStart =>
+      SyntaxCtor.ctermBorrowShared_ctor defaultLVal
+  | Generated.PartialTerm.borrowSharedOperand operand =>
+      SyntaxCtor.ctermBorrowShared_ctor (extractLVal operand)
+  | Generated.PartialTerm.borrowMutStart =>
+      SyntaxCtor.ctermBorrowMut_ctor defaultLVal
+  | Generated.PartialTerm.borrowMutOperand operand =>
+      SyntaxCtor.ctermBorrowMut_ctor (extractLVal operand)
+  | Generated.PartialTerm.moveStart =>
+      SyntaxCtor.ctermMove_ctor defaultLVal
   | Generated.PartialTerm.moveOperand operand =>
-      .move (extractLVal operand)
+      SyntaxCtor.ctermMove_ctor (extractLVal operand)
+  | Generated.PartialTerm.copyStart =>
+      SyntaxCtor.ctermCopy_ctor defaultLVal
   | Generated.PartialTerm.copyOperand operand =>
-      .copy (extractLVal operand)
-  | Generated.PartialTerm.valValue value =>
-      .val (extractValue value)
-  | Generated.PartialTerm.eqLhs lhs =>
-      .eq (extractTerm lhs) (.val .unit)
+      SyntaxCtor.ctermCopy_ctor (extractLVal operand)
+  | Generated.PartialTerm.termPrefix lhs =>
+      SyntaxCtor.ctermEq_ctor (extractTerm lhs) defaultTerm
   | Generated.PartialTerm.eqRhs lhs rhs =>
-      .eq lhs (extractTerm rhs)
+      SyntaxCtor.ctermEq_ctor lhs (extractTerm rhs)
+  | Generated.PartialTerm.iteStart =>
+      SyntaxCtor.ctermIte_ctor (SyntaxCtor.ctermTrue_ctor) defaultTerm defaultTerm
   | Generated.PartialTerm.iteCondition condition =>
-      .ite (extractTerm condition) (.val .unit) (.val .unit)
+      SyntaxCtor.ctermIte_ctor (extractTerm condition) defaultTerm defaultTerm
   | Generated.PartialTerm.iteTrueBranch condition trueBranch =>
-      .ite condition (extractTerm trueBranch) (.val .unit)
+      SyntaxCtor.ctermIte_ctor condition (extractTerm trueBranch) defaultTerm
   | Generated.PartialTerm.iteFalseBranch condition trueBranch falseBranch =>
-      .ite condition trueBranch (extractTerm falseBranch)
+      SyntaxCtor.ctermIte_ctor condition trueBranch (extractTerm falseBranch)
 
 def extractTerms : PartialTerms → List Term
   | Generated.PartialTerms.cutoff => []
@@ -95,49 +139,9 @@ theorem extractor_wellTyped_conservative :
 
 theorem extractor_wellTyped_prefixChecker_complete :
     PrefixCheckerComplete ProgramWellTyped CompletesProgram
-      (ExtractorPrefixChecker exactProgramChecker extractProgram) := by
+      (ExtractorPrefixChecker programWellTyped extractProgram) := by
   exact conservative_extractors_give_complete_prefix_checkers
     extractor_wellTyped_conservative
-    exactProgramChecker_complete
-
-theorem extractProgram_borrow_of_completion
-    {p : PartialProgram} {full : Program}
-    (_hCompletion : CompletesProgram p full)
-    (_hFull : ProgramBorrowOk full) :
-    ProgramBorrowOk (extractProgram p) := by
-  trivial
-
-theorem extractor_borrow_conservative :
-    Conservative ProgramBorrowOk CompletesProgram extractProgram := by
-  intro p hInvalid full hCompletion hFull
-  exact hInvalid (extractProgram_borrow_of_completion hCompletion hFull)
-
-theorem extractor_borrow_prefixChecker_complete :
-    PrefixCheckerComplete ProgramBorrowOk CompletesProgram
-      (ExtractorPrefixChecker exactBorrowChecker extractProgram) := by
-  exact conservative_extractors_give_complete_prefix_checkers
-    extractor_borrow_conservative
-    exactBorrowChecker_complete
-
-theorem extractProgram_lifetimeBorrow_of_completion
-    {p : PartialProgram} {full : Program}
-    (hCompletion : CompletesProgram p full)
-    (hFull : ProgramLifetimeBorrowOk full) :
-    ProgramLifetimeBorrowOk (extractProgram p) := by
-  sorry
-
-theorem extractor_lifetimeBorrow_conservative :
-    Conservative ProgramLifetimeBorrowOk CompletesProgram
-      extractProgram := by
-  intro p hInvalid full hCompletion hFull
-  exact hInvalid
-    (extractProgram_lifetimeBorrow_of_completion hCompletion hFull)
-
-theorem extractor_lifetimeBorrow_prefixChecker_complete :
-    PrefixCheckerComplete ProgramLifetimeBorrowOk CompletesProgram
-      (ExtractorPrefixChecker exactLifetimeBorrowChecker extractProgram) := by
-  exact conservative_extractors_give_complete_prefix_checkers
-    extractor_lifetimeBorrow_conservative
-    exactLifetimeBorrowChecker_complete
+    programWellTyped_complete
 
 end ConservativeExtractor

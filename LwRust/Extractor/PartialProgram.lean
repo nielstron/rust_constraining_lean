@@ -12,7 +12,6 @@ export Generated (
   PartialTerms
   PartialTy
   PartialLVal
-  PartialValue
   PartialTerm
   PartialProgram
   CompletesName
@@ -20,7 +19,6 @@ export Generated (
   CompletesTerms
   CompletesTy
   CompletesLVal
-  CompletesValue
   CompletesTerm
 )
 

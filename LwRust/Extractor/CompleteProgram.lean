@@ -3,9 +3,8 @@ import LwRust.Paper.Syntax
 /-!
 Complete LwRust programs for the extractor development.
 
-The copied extractor used a richer toy language with statements, functions,
-products, sums, and loops.  LwRust's complete syntax is the core syntax from
-`LwRust.Paper.Syntax`: complete programs are `Core.Term`s.
+This mainly defines a syntax for complete LwRust programs
+so that we can derive partial programs from them.
 -/
 
 namespace ConservativeExtractor
@@ -85,5 +84,84 @@ syntax (name := ctermMove) "move" clval : cterm
 syntax (name := ctermCopy) "copy" clval : cterm
 syntax (name := ctermEq) cterm "==" cterm : cterm
 syntax (name := ctermIte) "if" cterm cterm "else" cterm : cterm
+
+/-!
+Checked constructor annotations for the generator.
+
+The generator derives partial syntax from the `syntax` declarations above and
+reads these `_ctor` abbreviations for the corresponding complete AST shape.
+Keeping this information in Lean, instead of in the Python script, makes stale
+constructor references fail during the Lean build.
+-/
+
+namespace SyntaxCtor
+
+abbrev ctyUnit_ctor : Ty :=
+  show Ty from .unit
+
+abbrev ctyInt_ctor : Ty :=
+  show Ty from .int
+
+abbrev ctyBool_ctor : Ty :=
+  show Ty from .bool
+
+abbrev ctyBorrowShared_ctor (targets : List LVal) : Ty :=
+  LwRust.Core.Ty.borrow Bool.false targets
+
+abbrev ctyBorrowMut_ctor (targets : List LVal) : Ty :=
+  LwRust.Core.Ty.borrow Bool.true targets
+
+abbrev ctyBox_ctor (element : Ty) : Ty :=
+  show Ty from (.box element)
+
+abbrev clvalVar_ctor (x : Name) : LVal :=
+  show LVal from (.var x)
+
+abbrev clvalDeref_ctor (operand : LVal) : LVal :=
+  show LVal from (.deref operand)
+
+abbrev ctermUnit_ctor : Term :=
+  show Term from .val .unit
+
+abbrev ctermInt_ctor (n : Int) : Term :=
+  show Term from (.val (.int n))
+
+abbrev ctermTrue_ctor : Term :=
+  LwRust.Core.Term.val (LwRust.Core.Value.bool Bool.true)
+
+abbrev ctermFalse_ctor : Term :=
+  LwRust.Core.Term.val (LwRust.Core.Value.bool Bool.false)
+
+abbrev ctermBlock_ctor (lifetime : Lifetime) (terms : List Term) : Term :=
+  show Term from (.block lifetime terms)
+
+abbrev ctermLetMut_ctor (name : Name) (initialiser : Term) : Term :=
+  show Term from (.letMut name initialiser)
+
+abbrev ctermAssign_ctor (lhs : LVal) (rhs : Term) : Term :=
+  show Term from (.assign lhs rhs)
+
+abbrev ctermBox_ctor (operand : Term) : Term :=
+  show Term from (.box operand)
+
+abbrev ctermBorrowShared_ctor (operand : LVal) : Term :=
+  LwRust.Core.Term.borrow Bool.false operand
+
+abbrev ctermBorrowMut_ctor (operand : LVal) : Term :=
+  LwRust.Core.Term.borrow Bool.true operand
+
+abbrev ctermMove_ctor (operand : LVal) : Term :=
+  show Term from (.move operand)
+
+abbrev ctermCopy_ctor (operand : LVal) : Term :=
+  show Term from (.copy operand)
+
+abbrev ctermEq_ctor (lhs rhs : Term) : Term :=
+  show Term from (.eq lhs rhs)
+
+abbrev ctermIte_ctor (condition trueBranch falseBranch : Term) : Term :=
+  show Term from (.ite condition trueBranch falseBranch)
+
+end SyntaxCtor
 
 end ConservativeExtractor
