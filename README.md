@@ -15,31 +15,16 @@ stated; the deviation then documents the corrected claim).
   state; the mechanised `typeAndBorrowSafety` instead takes a
   `TerminatesAsValue` witness and proves safety facts about that run.  The gap
   is wider than just termination: preservation is only proven for terminal
-  multisteps (there is no single-step preservation theorem), and progress
-  cannot be re-applied at intermediate states (next bullet), so the standard
-  composed soundness — no reachable state is stuck — is not established in any
-  form.  What is proven: the initial state can step, and any terminal run ends
-  safely.  *Mechanisation debt:* the core calculus terminates (every step
+  multisteps (there is no single-step preservation theorem re-establishing
+  typing and safe abstraction for the continuation), so progress cannot be
+  iterated and the standard composed soundness — no reachable state is
+  stuck — is not established in any form.  What is proven: the initial state
+  can step, and any terminal run ends safely.  *Mechanisation debt:* the core calculus terminates (every step
   strictly decreases term size), so the paper's claim is provable; a
   termination measure plus either single-step preservation or a
   progress-through-the-terminal-run argument would close this.
 
-- **Lemma 4.10 (Progress) only covers root-lifetime environments.**
-  `lemma_4_10_progress` requires `∀ lifetime, WellFormedEnv env₁ lifetime`.
-  Because `WellFormedEnv` contains `EnvSlotsOutlive env₁ lifetime`,
-  instantiating at `Lifetime.root` forces every slot of `env₁` to the root
-  lifetime.  The paper's lemma assumes well-formedness at the single ambient
-  `l` only and therefore also covers mid-execution environments with
-  block-local variables; the mechanised lemma is discharged in practice only
-  by `wellFormedEnv_empty_all` (the empty environment).  *Mechanisation debt:*
-  well-formedness is downward-monotone along `LifetimeChild`, so the premise
-  can likely be weakened to the ambient lifetime by tightening the statement
-  and proof.  (Separately, `OperationalStoreProgress` packages the paper's
-  finite-store totality facts — fresh heap addresses exist and drops are
-  total — as an explicit premise; this is the intended interface for the
-  abstract partial-map store and is discharged for concrete/empty stores.)
-
-- **Lemma 4.11 (Preservation) carries three premises the paper does not
+- **Lemma 4.11 (Preservation) carries two premises the paper does not
   have.**
   1. `SourceTerm t` — no reference literals anywhere in `t`.  The paper
      quantifies over arbitrary valid runtime states; arbitrary runtime
@@ -54,14 +39,13 @@ stated; the deviation then documents the corrected claim).
      based at `x`, not `p`, so it does not write-prohibit `*p`) yet leaves
      `q`'s stored reference dangling into the dropped old box, breaking
      `S₂ ∼ Γ₂`.
-  3. `∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime` — this
-     quantification effectively requires the store typing `σ` to contain no
-     borrow types (a borrow type cannot be well-formed in *every*
-     environment).  It is vacuous for `σ = ∅`, so source-initial results are
-     unaffected, but the general-`σ` preservation claim is much narrower than
-     the paper's.  *Mechanisation debt:* a per-state (rather than
-     universally quantified) reference-well-formedness invariant should
-     recover borrow-typed store typings.
+
+  The general (non-source) borrow-invariance route, `lemma_4_9_borrowInvariance`,
+  still carries `∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime`,
+  which effectively requires `σ` to contain no borrow types; for source-scoped
+  theorems (preservation, Theorem 4.12, Corollary 4.14) this premise has been
+  eliminated via `TermTyping.retype_of_sourceTerm` (source typings never
+  consult `σ`).
 
 - **The mechanised typing relation is strictly stronger than the paper's, and
   no admissibility theorem bridges the gap.**  `T-Assign` carries extra
@@ -129,6 +113,12 @@ These deviations from the paper should be kept.
   target-list typing for contained borrows when reborrowing needs it.
   `Linearizable` comes from the follow-up material and gives a rank function
   forbidding cyclic borrow references.
+
+- **Progress exposes the finite-store operational assumption.**
+  `OperationalStoreProgress` packages the paper's finite-store totality facts
+  — fresh heap addresses exist and drops are total — as an explicit premise of
+  Lemma 4.10.  This is the intended interface for the abstract partial-map
+  store model and is discharged for concrete/empty stores.
 
 - **Write fan-out requires initialized typed leaves.**  `WriteBorrowTargets`
   carries an initialized full-lvalue typing witness for each concrete fan-out

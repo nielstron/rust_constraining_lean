@@ -3589,7 +3589,6 @@ invariant needed by our concrete store model.
 theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {finalValue : Value} :
-    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
@@ -3599,7 +3598,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
     htyping hmulti
   exact (TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
@@ -3802,9 +3801,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             hwellFormed hborrowSafe hsafeInner hmultiInner).2)
         hvalidRuntime hvalidStoreTyping hsafe htermTyping hmulti
       have hwellOut : WellFormedEnv _env₂ _lifetime :=
-        (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
+        (typingPreservesWellFormed_of_sourceTerm hsource
           (ValidRuntimeState.validState hvalidRuntime)
-          hvalidStoreTyping hwellFormed hsafe htermTyping).1
+          hwellFormed hsafe htermTyping).1
       exact And.intro hwellOut hterminal)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
         (hblockChild : LifetimeChild _lifetime _blockLifetime)
@@ -3843,9 +3842,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
           TermTyping _env₁ typing _lifetime (.block _blockLifetime _terms) _ty _env₃ :=
         TermTyping.block hblockChild hterms hwellTy hdrop
       have hwellOut : WellFormedEnv _env₃ _lifetime :=
-        (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
+        (typingPreservesWellFormed_of_sourceTerm hsource
           (ValidRuntimeState.validState hvalidRuntime)
-          hvalidStoreTyping hwellFormed hsafe htermTyping).1
+          hwellFormed hsafe htermTyping).1
       have hterminal : TerminalStateSafe finalStore finalValue _env₃ _ty :=
         by
           subst hdrop
@@ -3875,9 +3874,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         | declare hstore =>
             have htermTyping := TermTyping.declare hfresh hterm hfreshOut _hcoh henv₃
             have hwellOut :=
-              (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
+              (typingPreservesWellFormed_of_sourceTerm hsource
                 (ValidRuntimeState.validState hvalidRuntime)
-                hvalidStoreTyping hwellFormed hsafe htermTyping).1
+                hwellFormed hsafe htermTyping).1
             have hpreserved :=
               preservation_declare_redex_runtime_of_validValue hsafeInner
                 hfreshOut
@@ -3909,9 +3908,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
           TermTyping.assign hLhs hRhs hLhsPost hshape hwellTy hwrite
             hranked hcoh hcontained hnotWrite
         have hwellOut :=
-          (typingPreservesWellFormed_of_ruleCarriedObligations hrefs
+          (typingPreservesWellFormed_of_sourceTerm hsource
             (ValidRuntimeState.validState hvalidRuntime)
-            hvalidStoreTyping hwellFormed hsafe htermTyping).1
+            hwellFormed hsafe htermTyping).1
         have hborrowSafeInner : BorrowSafeEnv _env₂ :=
           (typingPreservesBorrowSafeResult_global
             (SourceTerm.assign_inner hsource) hborrowSafe hRhs).1
@@ -4018,7 +4017,6 @@ open LwRust.Paper LwRust.Core
 theorem lemma_4_11_preservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
-    (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hsource : SourceTerm term)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
@@ -4028,7 +4026,7 @@ theorem lemma_4_11_preservation
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     TerminalStateSafe finalStore finalValue env₂ ty :=
-  preservation hrefs hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
+  preservation hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
     htyping hmulti
 
 end LwRust.Paper.Soundness

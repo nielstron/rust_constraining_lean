@@ -572,17 +572,28 @@ theorem progress_block_of_head_progress {store : ProgramStore}
         exact progress_seq_value hstore
   · exact progress_block_head hstep
 
+/-- Well-formedness is downward monotone along the lifetime order: only the
+slot-outliving component mentions the lifetime, and outliving an outer
+lifetime implies outliving anything inside it. -/
+theorem WellFormedEnv.of_outlives {env : Env} {outer inner : Lifetime} :
+    WellFormedEnv env outer →
+    outer ≤ inner →
+    WellFormedEnv env inner := by
+  intro hwf houtlives
+  exact ⟨hwf.1,
+    fun x slot hslot => LifetimeOutlives.trans (hwf.2.1 x slot hslot) houtlives,
+    hwf.2.2.1, hwf.2.2.2⟩
+
 /--
 Lemma 4.10, Progress.
 
-The paper states well-formedness for the current lifetime.  Because blocks step
-their body under the block lifetime while the block itself steps under the
-enclosing lifetime, this mechanised statement takes the well-formedness premise
-for every lifetime needed by nested blocks.
+The paper states well-formedness for the current lifetime; blocks step their
+body under the block lifetime, where well-formedness follows from the
+enclosing lifetime by downward monotonicity (`WellFormedEnv.of_outlives`).
 -/
 theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -590,13 +601,13 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
   intro hwellFormed hsafe hstore htyping
   exact TermTyping.rec
     (motive_1 := fun env typing lifetime term ty env₂ _ =>
-      (∀ lifetime, WellFormedEnv env lifetime) →
+      WellFormedEnv env lifetime →
       store ∼ₛ env →
       OperationalStoreProgress store →
       ProgressResult store lifetime term)
     (motive_2 := fun env typing blockLifetime terms ty env₂ _ =>
       ∀ lifetime,
-        (∀ lifetime, WellFormedEnv env lifetime) →
+        WellFormedEnv env blockLifetime →
         store ∼ₛ env →
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
@@ -604,27 +615,29 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       progress_value store lifetime value)
     (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hcopy hreadProhibited
         hwellFormed hsafe _hstore =>
-      progress_copy_typing (typing := _typing) (hwellFormed lifetime) hsafe
+      progress_copy_typing (typing := _typing) hwellFormed hsafe
         (TermTyping.copy (typing := _typing) hLv hcopy hreadProhibited))
     (fun {_env₁ _env₂ _typing lifetime _valueLifetime _lv _ty} hLv hwriteProhibited hmove
         hwellFormed hsafe _hstore =>
-      progress_move_typing (typing := _typing) (hwellFormed lifetime) hsafe
+      progress_move_typing (typing := _typing) hwellFormed hsafe
         (TermTyping.move (typing := _typing) hLv hwriteProhibited hmove))
     (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hmutable hwriteProhibited
         hwellFormed hsafe _hstore =>
-      progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
+      progress_borrow_typing (typing := _typing) hwellFormed hsafe
         (TermTyping.mutBorrow (typing := _typing) hLv hmutable hwriteProhibited))
     (fun {_env _typing lifetime _valueLifetime _lv _ty} hLv hreadProhibited
         hwellFormed hsafe _hstore =>
-      progress_borrow_typing (typing := _typing) (hwellFormed lifetime) hsafe
+      progress_borrow_typing (typing := _typing) hwellFormed hsafe
         (TermTyping.immBorrow (typing := _typing) hLv hreadProhibited))
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} hterm ih
         hwellFormed hsafe hstore =>
       progress_box_typing hstore (TermTyping.box hterm)
         (ih hwellFormed hsafe hstore))
     (fun {_env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty}
-        _hblockChild _hterms _hwellTy _hdrop ih hwellFormed hsafe hstore =>
-      ih lifetime hwellFormed hsafe hstore)
+        hblockChild _hterms _hwellTy _hdrop ih hwellFormed hsafe hstore =>
+      ih lifetime
+        (WellFormedEnv.of_outlives hwellFormed (LifetimeChild.outlives hblockChild))
+        hsafe hstore)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
         hfresh hterm hfreshOut hcoh henv ih
         hwellFormed hsafe hstore =>
@@ -634,7 +647,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         hLhs hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
         hnotWriteProhibited ih
         hwellFormed hsafe hstore =>
-      progress_assign_typing (hwellFormed lifetime) hsafe hstore
+      progress_assign_typing hwellFormed hsafe hstore
         (TermTyping.assign hLhs hRhs hLhsPost hshape hwf hwrite hranked hcoh
           hcontained hnotWriteProhibited)
         (ih hwellFormed hsafe hstore))
@@ -652,7 +665,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
 theorem progress_termList_typing {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
     {terms : List Term} {ty : Ty} :
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ blockLifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermListTyping env₁ typing blockLifetime terms ty env₂ →
@@ -677,7 +690,7 @@ theorem progress {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidState store term →
     ValidStoreTyping store term typing →
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -690,7 +703,7 @@ theorem progress_runtime {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -703,7 +716,7 @@ theorem OperationalProgramStore.progressResult {store : OperationalProgramStore}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidState (store : ProgramStore) term →
     ValidStoreTyping (store : ProgramStore) term typing →
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     (store : ProgramStore) ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult (store : ProgramStore) lifetime term := by
@@ -718,7 +731,7 @@ theorem OperationalProgramStore.progress_runtime {store : OperationalProgramStor
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidRuntimeState (store : ProgramStore) term →
     ValidStoreTyping (store : ProgramStore) term typing →
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     (store : ProgramStore) ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult (store : ProgramStore) lifetime term := by
@@ -736,7 +749,7 @@ theorem progress_step {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidState store term →
     ValidStoreTyping store term typing →
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -751,7 +764,7 @@ theorem progress_runtime_step {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
-    (∀ lifetime, WellFormedEnv env₁ lifetime) →
+    WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -817,7 +830,7 @@ theorem lemma_4_10_progress
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hvalid : ValidState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
-    (hwellFormed : ∀ lifetime, WellFormedEnv env₁ lifetime)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
     (hsafe : store ∼ₛ env₁)
     (hstore : OperationalStoreProgress store)
     (htyping : TermTyping env₁ typing lifetime term ty env₂) :

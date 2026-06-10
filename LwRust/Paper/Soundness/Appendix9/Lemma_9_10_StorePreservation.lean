@@ -36,7 +36,6 @@ Lemma 4.11.
 theorem lemma_9_10_storePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
-    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     SourceTerm term →
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
@@ -46,8 +45,8 @@ theorem lemma_9_10_storePreservation
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     finalStore ∼ₛ env₂ := by
-    intro hrefs hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
-    exact (preservation hrefs hsource hvalid hstoreTyping
+    intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
+    exact (preservation hsource hvalid hstoreTyping
       hwellFormed hborrowSafe hsafe htyping hmulti).2.1
 
 /--

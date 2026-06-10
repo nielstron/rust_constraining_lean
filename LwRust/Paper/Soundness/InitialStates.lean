@@ -390,7 +390,7 @@ theorem sourceInitial_progress {term : Term} {lifetime : Lifetime}
   exact progress
     (sourceInitialState_valid hsource)
     (sourceTerm_validStoreTyping_empty hsource)
-    wellFormedEnv_empty_all
+    (wellFormedEnv_empty _)
     safeAbstraction_empty
     operationalStoreProgress_empty
     htyping
@@ -408,7 +408,7 @@ theorem sourceInitial_runtime_progress {term : Term} {lifetime : Lifetime}
   exact progress_runtime
     hvalidRuntime
     hvalidStoreTyping
-    wellFormedEnv_empty_all
+    (wellFormedEnv_empty _)
     hsafe
     hstoreProgress
     htyping
@@ -422,7 +422,7 @@ theorem emptyInitial_progress {term : Term} {lifetime : Lifetime}
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hborrowSafe,
       hstoreProgress, _hrefs⟩
-  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping hwellFormed
+  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _)
     hsafe hstoreProgress htyping
 
 /--
@@ -437,9 +437,9 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
   intro htyping hmulti
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, hborrowSafe,
-      _hstoreProgress, hrefs⟩
+      _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact preservation hrefs hsource hvalidRuntime hvalidStoreTyping
+  exact preservation hsource hvalidRuntime hvalidStoreTyping
     (wellFormedEnv_empty lifetime) hborrowSafe hsafe htyping hmulti
 
 /--
@@ -471,9 +471,9 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
   intro htyping hterminates
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
-      hstoreProgress, hrefs⟩
+      hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact typeAndBorrowSafety hrefs hsource hvalidRuntime hvalidStoreTyping hwellFormed
+  exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping (hwellFormed _)
     hborrowSafe hsafe hstoreProgress htyping hterminates
 
 /--
@@ -666,7 +666,7 @@ theorem sourceInitial_typeAndBorrowSafety_of_preservation
   exact typeAndBorrowSafety_of_preservation
     (sourceInitialRuntimeState_valid hsource)
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    wellFormedEnv_empty_all
+    (wellFormedEnv_empty _)
     safeAbstraction_empty
     operationalStoreProgress_empty
     htyping
@@ -877,9 +877,6 @@ theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
   intro hsource htyping
   exact borrowSafety_of_ruleCarriedObligations
     hsource
-    (by
-      intro env lifetime
-      exact storeTypingRefsWellFormed_empty env lifetime)
     (sourceInitialRuntimeState_valid hsource).1
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty lifetime)

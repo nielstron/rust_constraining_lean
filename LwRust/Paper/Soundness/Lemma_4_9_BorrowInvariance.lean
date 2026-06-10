@@ -1449,6 +1449,56 @@ theorem valueTyping_result_wellFormed_of_refs {env : Env} {typing : StoreTyping}
   intro ref ty hlookup
   simp [StoreTyping.empty] at hlookup
 
+/--
+Source terms contain no reference values, so their typing derivations never
+consult the store typing: any store typing types them identically.
+-/
+theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
+    {typing typing' : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} :
+    SourceTerm term →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    TermTyping env₁ typing' lifetime term ty env₂ := by
+  intro hsource htyping
+  exact TermTyping.rec
+    (motive_1 := fun env _t l term ty env₂ _ =>
+      SourceTerm term → TermTyping env typing' l term ty env₂)
+    (motive_2 := fun env _t blockLifetime terms ty env₂ _ =>
+      SourceTerm (.block blockLifetime terms) →
+      TermListTyping env typing' blockLifetime terms ty env₂)
+    (fun {_env _typing _lifetime value _ty} hvalueTyping hsource => by
+      have hsourceValue : SourceValue value :=
+        hsource value (by simp [termValues])
+      cases hvalueTyping with
+      | unit => exact TermTyping.const ValueTyping.unit
+      | int => exact TermTyping.const ValueTyping.int
+      | ref _hlookup => exact absurd hsourceValue (by simp [SourceValue]))
+    (fun hLv hcopy hread _hsource =>
+      TermTyping.copy hLv hcopy hread)
+    (fun hLv hwrite hmove _hsource =>
+      TermTyping.move hLv hwrite hmove)
+    (fun hLv hmutable hwrite _hsource =>
+      TermTyping.mutBorrow hLv hmutable hwrite)
+    (fun hLv hread _hsource =>
+      TermTyping.immBorrow hLv hread)
+    (fun _hterm ih hsource =>
+      TermTyping.box (ih (SourceTerm.box_inner hsource)))
+    (fun hchild _hterms hwellTy hdrop ih hsource =>
+      TermTyping.block hchild (ih hsource) hwellTy hdrop)
+    (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
+      TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
+        hfreshOut hcoh henv)
+    (fun hLhs _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
+        hnotWrite ih hsource =>
+      TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hLhsPost
+        hshape hwf hwrite hranked hcoh hcontained hnotWrite)
+    (fun _hterm ih hsource =>
+      TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
+    (fun _hterm _hrest ihHead ihRest hsource =>
+      TermListTyping.cons (ihHead (SourceTerm.block_head hsource))
+        (ihRest (SourceTerm.block_tail hsource)))
+    htyping hsource
+
 theorem LValTyping.containedBorrowTargetsWellFormed {env : Env} {lv : LVal}
     {partialTy : PartialTy} {mutable : Bool} {targets : List LVal}
     {valueLifetime lifetime : Lifetime} :
@@ -5437,6 +5487,59 @@ theorem borrowInvariance_of_ruleCarriedObligations
       hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
     ⟨hwellFormedOutput, hwellFormedTy⟩
   exact hwellFormedOutput
+
+/-- Source terms have a valid empty store typing in any store: their values
+are units and integers. -/
+theorem sourceTerm_validStoreTyping_empty_any {store : ProgramStore}
+    {term : Term} :
+    SourceTerm term →
+    ValidStoreTyping store term StoreTyping.empty := by
+  intro hsource value hmem
+  have hsourceValue := hsource value hmem
+  cases value with
+  | unit => exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
+  | int n => exact ⟨.int, ValueTyping.int, ValidPartialValue.int⟩
+  | ref r => exact absurd hsourceValue (by simp [SourceValue])
+
+/--
+Lemma 4.9 well-formedness induction for source terms.
+
+Source terms contain no reference values, so the store-typing
+reference-well-formedness premise of
+`typingPreservesWellFormed_of_ruleCarriedObligations` is not needed: the
+typing derivation factors through the empty store typing
+(`TermTyping.retype_of_sourceTerm`), whose reference invariant is trivial.
+-/
+theorem typingPreservesWellFormed_of_sourceTerm
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
+    {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
+    SourceTerm term →
+    ValidState store term →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  intro hsource hvalidState hwellFormed hsafe htyping
+  exact typingPreservesWellFormed_of_ruleCarriedObligations
+    (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
+    hvalidState (sourceTerm_validStoreTyping_empty_any hsource) hwellFormed
+    hsafe (TermTyping.retype_of_sourceTerm hsource htyping)
+
+/-- Lemma 4.9, Borrow Invariance, for source terms (no store-typing premise). -/
+theorem borrowInvariance_of_sourceTerm
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
+    {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
+    SourceTerm term →
+    ValidState store term →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime := by
+  intro hsource hvalidState hwellFormed hsafe htyping
+  exact (typingPreservesWellFormed_of_sourceTerm hsource hvalidState
+    hwellFormed hsafe htyping).1
 
 /-- Variable lvalues read no store location while being resolved. -/
 theorem RuntimeFrame.locReads_varTarget_false {store : ProgramStore}

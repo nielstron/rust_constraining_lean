@@ -2148,7 +2148,6 @@ theorem borrowSafety_of_ruleCarriedObligations
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
     SourceTerm term →
-    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
@@ -2156,11 +2155,10 @@ theorem borrowSafety_of_ruleCarriedObligations
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
-  intro hsource hrefs hvalidState hvalidStoreTyping
+  intro hsource hvalidState _hvalidStoreTyping
     hwellFormed hborrowSafe hsafe htyping
   exact ⟨
-    borrowInvariance_of_ruleCarriedObligations
-      hrefs hvalidState hvalidStoreTyping hwellFormed hsafe
+    borrowInvariance_of_sourceTerm hsource hvalidState hwellFormed hsafe
       htyping,
     (typingPreservesBorrowSafeResult_global hsource hborrowSafe htyping).1⟩
 
@@ -2175,7 +2173,6 @@ open LwRust.Paper LwRust.Core
 theorem corollary_4_14_borrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
-    (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
     (hvalidState : ValidState store term)
     (hvalidStoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
@@ -2185,6 +2182,6 @@ theorem corollary_4_14_borrowSafety
     (htyping : TermTyping env₁ typing lifetime term ty env₂) :
     WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ :=
   borrowSafety_of_ruleCarriedObligations
-    hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
+    hsource hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
 
 end LwRust.Paper.Soundness
