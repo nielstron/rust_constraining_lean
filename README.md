@@ -56,6 +56,13 @@ These deviations from the paper should be kept.
   branch.  The paper's schematic fan-out rule does not spell this out; without
   it, fan-out can reinitialize `undef` leaves and break shape preservation.
 
+- **Positive-rank weak updates make leaf shape compatibility explicit.**
+  `UpdateAtPath.weak` carries the local `ShapeCompatible` premise needed for
+  shape preservation.  The paper's `update_k` weak leaf case is written over a
+  full old type and relies on `T-Assign`'s shape premise; the Lean relation is
+  over `PartialTy`, so the full-type/compatible-leaf assumption is stated
+  directly.
+
 - **Terminal preservation/safety is source-continuation scoped.**  Lemma 4.11
   and the terminal-safety half of Theorem 4.12 assume `SourceTerm`.  Arbitrary
   runtime constants can already contain references in unevaluated continuations;
@@ -74,3 +81,20 @@ These deviations from the paper should be kept.
   Premises such as `StoreTypingRefsWellFormed` relate runtime value typing and
   store typing to environment/lifetime well-formedness.  They are proof
   interface obligations, not extra source typing rules.
+
+- **Theorem 4.12 assumes terminal execution.**  The paper states existence of a
+  terminal run, relying on termination of the core calculus.  The mechanisation
+  keeps this separate: `typeAndBorrowSafety` takes an explicit
+  `TerminatesAsValue` witness and proves safety for that terminal run.  The
+  nontermination-friendly component is exposed as progress.
+
+- **Progress exposes the finite-store operational assumption.**
+  `OperationalStoreProgress` packages fresh-allocation, drop, assignment, and
+  lifetime-drop totality facts.  This is not intended as a theorem weakening:
+  it is the Lean interface for the paper's finite/well-behaved store model, and
+  is discharged by concrete finite stores.
+
+- **General runtime safety exposes an initial borrow-safety premise.**  For
+  arbitrary nonempty runtime store typings, the terminal-safety wrappers carry
+  `BorrowSafeEnv` for the input environment.  Source-initial empty-store
+  wrappers discharge this premise from the empty environment.
