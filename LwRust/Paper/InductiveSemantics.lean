@@ -317,6 +317,137 @@ theorem multistep_assign_to_value_inv {store finalStore : ProgramStore}
           exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti,
             hassignStep⟩
 
+/--
+Prefix inversion for `box` runs: an arbitrary partial execution is either
+still inside the operand, or the operand finished and the box redex fired,
+after which the term is a value and the run is over.
+-/
+theorem multistep_box_prefix_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {term finalTerm : Term} :
+    MultiStep store lifetime (.box term) finalStore finalTerm →
+    (∃ term', finalTerm = .box term' ∧
+      MultiStep store lifetime term finalStore term') ∨
+    (∃ midStore value, MultiStep store lifetime term midStore (.val value) ∧
+      Step midStore lifetime (.box (.val value)) finalStore finalTerm) := by
+  intro hmulti
+  generalize hstart : Term.box term = start at hmulti
+  induction hmulti generalizing term with
+  | refl =>
+      cases hstart
+      exact Or.inl ⟨term, rfl, MultiStep.refl⟩
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | box hfresh hbox =>
+          rcases multistep_value_inv hrest with ⟨hstore, hterm⟩
+          subst hstore
+          subst hterm
+          exact Or.inr ⟨_, _, MultiStep.refl, Step.box hfresh hbox⟩
+      | subBox hinner =>
+          rcases ih rfl with ⟨term', hfinal, hms⟩ | ⟨midStore, value, hms, hredex⟩
+          · exact Or.inl ⟨term', hfinal, MultiStep.trans hinner hms⟩
+          · exact Or.inr ⟨midStore, value, MultiStep.trans hinner hms, hredex⟩
+
+/-- Prefix inversion for `let mut` runs. -/
+theorem multistep_declare_prefix_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {x : Name} {term finalTerm : Term} :
+    MultiStep store lifetime (.letMut x term) finalStore finalTerm →
+    (∃ term', finalTerm = .letMut x term' ∧
+      MultiStep store lifetime term finalStore term') ∨
+    (∃ midStore value, MultiStep store lifetime term midStore (.val value) ∧
+      Step midStore lifetime (.letMut x (.val value)) finalStore finalTerm) := by
+  intro hmulti
+  generalize hstart : Term.letMut x term = start at hmulti
+  induction hmulti generalizing term with
+  | refl =>
+      cases hstart
+      exact Or.inl ⟨term, rfl, MultiStep.refl⟩
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | declare hstore =>
+          rcases multistep_value_inv hrest with ⟨hstoreEq, hterm⟩
+          subst hstoreEq
+          subst hterm
+          exact Or.inr ⟨_, _, MultiStep.refl, Step.declare hstore⟩
+      | subDeclare hinner =>
+          rcases ih rfl with ⟨term', hfinal, hms⟩ | ⟨midStore, value, hms, hredex⟩
+          · exact Or.inl ⟨term', hfinal, MultiStep.trans hinner hms⟩
+          · exact Or.inr ⟨midStore, value, MultiStep.trans hinner hms, hredex⟩
+
+/-- Prefix inversion for assignment runs. -/
+theorem multistep_assign_prefix_inv {store finalStore : ProgramStore}
+    {lifetime : Lifetime} {lhs : LVal} {rhs finalTerm : Term} :
+    MultiStep store lifetime (.assign lhs rhs) finalStore finalTerm →
+    (∃ rhs', finalTerm = .assign lhs rhs' ∧
+      MultiStep store lifetime rhs finalStore rhs') ∨
+    (∃ midStore value, MultiStep store lifetime rhs midStore (.val value) ∧
+      Step midStore lifetime (.assign lhs (.val value)) finalStore finalTerm) := by
+  intro hmulti
+  generalize hstart : Term.assign lhs rhs = start at hmulti
+  induction hmulti generalizing rhs with
+  | refl =>
+      cases hstart
+      exact Or.inl ⟨rhs, rfl, MultiStep.refl⟩
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | assign hread hwrite hdrops =>
+          rcases multistep_value_inv hrest with ⟨hstoreEq, hterm⟩
+          subst hstoreEq
+          subst hterm
+          exact Or.inr ⟨_, _, MultiStep.refl, Step.assign hread hwrite hdrops⟩
+      | subAssign hinner =>
+          rcases ih rfl with ⟨rhs', hfinal, hms⟩ | ⟨midStore, value, hms, hredex⟩
+          · exact Or.inl ⟨rhs', hfinal, MultiStep.trans hinner hms⟩
+          · exact Or.inr ⟨midStore, value, MultiStep.trans hinner hms, hredex⟩
+
+/--
+Prefix inversion for block runs: an arbitrary partial execution is either
+still inside the head term, or the head finished and the block continued
+through a sequence drop (more terms remain) or the block-exit lifetime drop
+(last term).
+-/
+theorem multistep_block_prefix_inv {store finalStore : ProgramStore}
+    {lifetime blockLifetime : Lifetime} {term finalTerm : Term}
+    {rest : List Term} :
+    MultiStep store lifetime (.block blockLifetime (term :: rest))
+      finalStore finalTerm →
+    (∃ term', finalTerm = .block blockLifetime (term' :: rest) ∧
+      MultiStep store blockLifetime term finalStore term') ∨
+    (∃ midStore value,
+      MultiStep store blockLifetime term midStore (.val value) ∧
+      ((∃ next rest' dropStore, rest = next :: rest' ∧
+          Drops midStore [.value value] dropStore ∧
+          MultiStep dropStore lifetime (.block blockLifetime (next :: rest'))
+            finalStore finalTerm) ∨
+       (rest = [] ∧ ∃ dropStore,
+          DropsLifetime midStore blockLifetime dropStore ∧
+          finalStore = dropStore ∧ finalTerm = .val value))) := by
+  intro hmulti
+  generalize hstart : Term.block blockLifetime (term :: rest) = start at hmulti
+  induction hmulti generalizing term with
+  | refl =>
+      cases hstart
+      exact Or.inl ⟨term, rfl, MultiStep.refl⟩
+  | trans hstep hrest ih =>
+      cases hstart
+      cases hstep with
+      | seq hdrops =>
+          exact Or.inr ⟨_, _, MultiStep.refl,
+            Or.inl ⟨_, _, _, rfl, hdrops, hrest⟩⟩
+      | blockA hhead =>
+          rcases ih rfl with ⟨term', hfinal, hms⟩ |
+            ⟨midStore, value, hms, hcont⟩
+          · exact Or.inl ⟨term', hfinal, MultiStep.trans hhead hms⟩
+          · exact Or.inr ⟨midStore, value, MultiStep.trans hhead hms, hcont⟩
+      | blockB hdropsL =>
+          rcases multistep_value_inv hrest with ⟨hstoreEq, hterm⟩
+          subst hstoreEq
+          subst hterm
+          exact Or.inr ⟨_, _, MultiStep.refl,
+            Or.inr ⟨rfl, _, hdropsL, rfl, rfl⟩⟩
+
 theorem multistep_block_context {store finalStore : ProgramStore}
     {lifetime blockLifetime : Lifetime} {term finalTerm : Term} {rest : List Term} :
     MultiStep store blockLifetime term finalStore finalTerm →

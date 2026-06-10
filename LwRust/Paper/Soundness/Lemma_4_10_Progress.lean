@@ -184,6 +184,231 @@ theorem drops_empty_lifetime (lifetime : Lifetime) :
         simp [ProgramStore.empty] at hslot)
     ProgramStore.Drops.nil⟩
 
+/-! ### Finite-support stores -/
+
+/--
+A program store with finitely many allocated locations.
+
+This is the step-stable form of the paper's finite-store model: every
+operational totality fact in `OperationalStoreProgress` follows from it
+(`OperationalStoreProgress.of_finiteSupport`), and, unlike
+`OperationalStoreProgress` itself, it is preserved by reduction steps
+(`ProgramStore.FiniteSupport.step`).
+-/
+def ProgramStore.FiniteSupport (store : ProgramStore) : Prop :=
+  ∃ support : Finset Location,
+    ∀ location slot, store.slotAt location = some slot → location ∈ support
+
+theorem ProgramStore.finiteSupport_empty : ProgramStore.empty.FiniteSupport :=
+  ⟨∅, by intro location slot h; simp [ProgramStore.empty] at h⟩
+
+theorem ProgramStore.FiniteSupport.update {store : ProgramStore}
+    {location : Location} {slot : StoreSlot} :
+    store.FiniteSupport → (store.update location slot).FiniteSupport := by
+  rintro ⟨support, hsupport⟩
+  refine ⟨insert location support, ?_⟩
+  intro candidate slot' hslot'
+  by_cases hsame : candidate = location
+  · subst hsame
+    exact Finset.mem_insert_self _ _
+  · rw [ProgramStore.update_slotAt_ne _ _ hsame] at hslot'
+    exact Finset.mem_insert_of_mem (hsupport candidate slot' hslot')
+
+theorem ProgramStore.FiniteSupport.erase {store : ProgramStore}
+    {location : Location} :
+    store.FiniteSupport → (store.erase location).FiniteSupport := by
+  rintro ⟨support, hsupport⟩
+  refine ⟨support, ?_⟩
+  intro candidate slot' hslot'
+  by_cases hsame : candidate = location
+  · subst hsame
+    simp at hslot'
+  · rw [ProgramStore.erase_slotAt_ne _ hsame] at hslot'
+    exact hsupport candidate slot' hslot'
+
+theorem ProgramStore.FiniteSupport.write {store store' : ProgramStore}
+    {lv : LVal} {value : PartialValue} :
+    store.write lv value = some store' →
+    store.FiniteSupport →
+    store'.FiniteSupport := by
+  intro hwrite hfs
+  simp only [ProgramStore.write, Option.bind_eq_bind, Option.bind_eq_some_iff] at hwrite
+  rcases hwrite with ⟨location, _hloc, slot, _hslot, hstore'⟩
+  cases hstore'
+  exact hfs.update
+
+theorem ProgramStore.FiniteSupport.declare {store : ProgramStore}
+    {x : Name} {lifetime : Lifetime} {value : Value} :
+    store.FiniteSupport → (store.declare x lifetime value).FiniteSupport :=
+  ProgramStore.FiniteSupport.update
+
+theorem ProgramStore.FiniteSupport.boxAt {store store' : ProgramStore}
+    {address : Nat} {value : Value} {ref : Reference} :
+    store.boxAt address value = (store', ref) →
+    store.FiniteSupport →
+    store'.FiniteSupport := by
+  intro hbox hfs
+  have hstore' : store' = store.update (.heap address)
+      { value := .value value, lifetime := Lifetime.root } :=
+    (congrArg Prod.fst hbox).symm
+  subst hstore'
+  exact hfs.update
+
+theorem ProgramStore.FiniteSupport.drops {store store' : ProgramStore}
+    {values : List PartialValue} :
+    Drops store values store' →
+    store.FiniteSupport →
+    store'.FiniteSupport := by
+  intro hdrops
+  induction hdrops with
+  | nil => exact id
+  | nonOwner _ _ ih => exact ih
+  | ownerMissing _ _ _ ih => exact ih
+  | ownerPresent _ _ _ ih => exact fun hfs => ih hfs.erase
+
+theorem ProgramStore.FiniteSupport.dropsLifetime {store store' : ProgramStore}
+    {lifetime : Lifetime} :
+    DropsLifetime store lifetime store' →
+    store.FiniteSupport →
+    store'.FiniteSupport := by
+  rintro ⟨_, hdrops⟩
+  exact ProgramStore.FiniteSupport.drops hdrops
+
+/-- Finite support is preserved by every reduction step. -/
+theorem ProgramStore.FiniteSupport.step {store store' : ProgramStore}
+    {lifetime : Lifetime} {term term' : Term} :
+    Step store lifetime term store' term' →
+    store.FiniteSupport →
+    store'.FiniteSupport := by
+  intro hstep
+  induction hstep with
+  | copy _ => exact id
+  | move _ hwrite => exact ProgramStore.FiniteSupport.write hwrite
+  | box _ hbox => exact ProgramStore.FiniteSupport.boxAt hbox
+  | borrow _ => exact id
+  | assign _ hwrite hdrops =>
+      exact fun hfs =>
+        ProgramStore.FiniteSupport.drops hdrops
+          (ProgramStore.FiniteSupport.write hwrite hfs)
+  | declare hstore =>
+      exact fun hfs => hstore ▸ hfs.declare
+  | seq hdrops => exact ProgramStore.FiniteSupport.drops hdrops
+  | blockA _ ih => exact ih
+  | blockB hdrops => exact ProgramStore.FiniteSupport.dropsLifetime hdrops
+  | subBox _ ih => exact ih
+  | subDeclare _ ih => exact ih
+  | subAssign _ ih => exact ih
+
+/-- Finite support is preserved along any execution. -/
+theorem ProgramStore.FiniteSupport.multiStep {store store' : ProgramStore}
+    {lifetime : Lifetime} {term term' : Term} :
+    MultiStep store lifetime term store' term' →
+    store.FiniteSupport →
+    store'.FiniteSupport := by
+  intro hmulti
+  induction hmulti with
+  | refl => exact id
+  | trans hstep _ ih => exact fun hfs => ih (hfs.step hstep)
+
+private theorem le_foldr_max {l : List Nat} {x : Nat} (h : x ∈ l) :
+    x ≤ l.foldr max 0 := by
+  induction l with
+  | nil => cases h
+  | cons head tail ih =>
+      rcases List.mem_cons.mp h with hhead | htail
+      · subst hhead
+        exact Nat.le_max_left _ _
+      · exact Nat.le_trans (ih htail) (Nat.le_max_right _ _)
+
+/--
+Every operational totality fact needed by Progress holds for finite-support
+stores.  This discharges `OperationalStoreProgress` at every reachable state
+via `ProgramStore.FiniteSupport.multiStep`.
+-/
+theorem OperationalStoreProgress.of_finiteSupport {store : ProgramStore} :
+    store.FiniteSupport →
+    OperationalStoreProgress store := by
+  rintro ⟨support, hsupport⟩
+  constructor
+  · -- a fresh heap address exists beyond the finitely many allocated ones
+    classical
+    refine ⟨(support.toList.filterMap fun location =>
+        match location with
+        | .heap address => some address
+        | .var _ => none).foldr max 0 + 1, ?_⟩
+    cases hslot : store.slotAt
+        (.heap ((support.toList.filterMap fun location =>
+          match location with
+          | .heap address => some address
+          | .var _ => none).foldr max 0 + 1)) with
+    | none => exact hslot
+    | some slot =>
+        exfalso
+        have hmem := hsupport _ _ hslot
+        have haddr : ((support.toList.filterMap fun location =>
+            match location with
+            | .heap address => some address
+            | .var _ => none).foldr max 0 + 1) ∈
+            (support.toList.filterMap fun location =>
+              match location with
+              | .heap address => some address
+              | .var _ => none) :=
+          List.mem_filterMap.mpr ⟨_, Finset.mem_toList.mpr hmem, rfl⟩
+        exact Nat.not_succ_le_self _ (le_foldr_max haddr)
+  · intro value
+    exact drops_exists_of_supported support store [.value value] hsupport
+  · intro value
+    exact drops_exists_of_supported support store [value] hsupport
+  · -- writes to readable lvals succeed, and the old value can be dropped
+    intro lhs oldSlot value hread
+    cases hloc : store.loc lhs with
+    | none => simp [ProgramStore.read, hloc] at hread
+    | some location =>
+    have hslot : store.slotAt location = some oldSlot := by
+      simpa [ProgramStore.read, hloc] using hread
+    have hsupportAfter : ∀ candidate slot',
+        (store.update location
+          { oldSlot with value := .value value }).slotAt candidate =
+            some slot' →
+        candidate ∈ support := by
+      intro candidate slot' hslot'
+      by_cases hsame : candidate = location
+      · subst hsame
+        exact hsupport candidate oldSlot hslot
+      · rw [ProgramStore.update_slotAt_ne _ _ hsame] at hslot'
+        exact hsupport candidate slot' hslot'
+    rcases drops_exists_of_supported support _ [oldSlot.value] hsupportAfter
+      with ⟨storeAfterDrop, hdrops⟩
+    exact ⟨store.update location { oldSlot with value := .value value },
+      storeAfterDrop, by simp [ProgramStore.write, hloc, hslot], hdrops⟩
+  · -- the slots of any lifetime form a finite drop set
+    intro lifetime
+    classical
+    have hpred :
+        DecidablePred fun location : Location =>
+          ∃ slot, store.slotAt location = some slot ∧
+            slot.lifetime = lifetime :=
+      fun _ => Classical.propDecidable _
+    rcases drops_exists_of_supported support store
+        (((support.filter fun location =>
+            ∃ slot, store.slotAt location = some slot ∧
+              slot.lifetime = lifetime).toList.map
+          fun location => PartialValue.value (.ref { location := location, owner := true })))
+        hsupport with ⟨store', hdrops⟩
+    refine ⟨store', ProgramStore.DropsLifetime.intro ?_ hdrops⟩
+    intro value
+    constructor
+    · intro hmem
+      rcases List.mem_map.mp hmem with ⟨location, hmemFilter, hvalue⟩
+      rcases Finset.mem_filter.mp (Finset.mem_toList.mp hmemFilter) with
+        ⟨_hmemSupport, slot, hslot, hlifetime⟩
+      exact ⟨location, slot, hslot, hlifetime, hvalue.symm⟩
+    · rintro ⟨location, slot, hslot, hlifetime, hvalue⟩
+      subst hvalue
+      exact List.mem_map.mpr ⟨location,
+        Finset.mem_toList.mpr (Finset.mem_filter.mpr
+          ⟨hsupport location slot hslot, slot, hslot, hlifetime⟩), rfl⟩
+
 @[simp] theorem operationalStoreProgress_empty :
     OperationalStoreProgress ProgramStore.empty := by
   constructor

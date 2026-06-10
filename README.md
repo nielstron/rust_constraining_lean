@@ -10,19 +10,26 @@ these to 0.  Each entry notes whether the deviation is mechanisation debt
 (closable) or a likely paper bug (the printed claim appears unprovable as
 stated; the deviation then documents the corrected claim).
 
-- **Theorem 4.12: termination is assumed, and stuck-freedom along a run is not
-  established.**  The paper concludes `⟨S₁ ▷ t ⟶* S₂ ▷ v⟩` for some terminal
-  state; the mechanised `typeAndBorrowSafety` instead takes a
-  `TerminatesAsValue` witness and proves safety facts about that run.  The gap
-  is wider than just termination: preservation is only proven for terminal
-  multisteps (there is no single-step preservation theorem re-establishing
-  typing and safe abstraction for the continuation), so progress cannot be
-  iterated and the standard composed soundness — no reachable state is
-  stuck — is not established in any form.  What is proven: the initial state
-  can step, and any terminal run ends safely.  *Mechanisation debt:* the core calculus terminates (every step
-  strictly decreases term size), so the paper's claim is provable; a
-  termination measure plus either single-step preservation or a
-  progress-through-the-terminal-run argument would close this.
+- **Theorem 4.12: termination is assumed.**  The paper concludes
+  `⟨S₁ ▷ t ⟶* S₂ ▷ v⟩` for some terminal state; the mechanised
+  `typeAndBorrowSafety` instead takes a `TerminatesAsValue` witness and proves
+  safety facts about that run.  Stuck-freedom is now established
+  independently of termination: `SoundState` is the step-stable invariant
+  (re-established by the traditional step theorem `SoundState.step`), and
+  `no_stuck_states` / `theorem_4_12_no_stuck_states` /
+  `emptyInitial_no_stuck_states` prove that every reachable state is terminal
+  or can step, with progress (`SoundState.progress`) and terminal preservation
+  (`SoundState.preservation`) available at each of them.  What remains of the
+  deviation is only the termination claim itself.  *Mechanisation debt:* the
+  core calculus terminates (every step strictly decreases term size), so a
+  termination measure would close this.
+
+  (Note: `SoundState` carries the originating typed run rather than a
+  re-typing of the intermediate continuation.  A literal continuation
+  re-typing is unavailable in this calculus: a declaration whose initialiser
+  block declares the same variable reaches safe intermediate states whose
+  continuation is not typeable, since the runtime store already holds the
+  inner variable's slot while `T-Declare` requires the outer binder fresh.)
 
 - **Lemma 4.11 (Preservation) carries two premises the paper does not
   have.**

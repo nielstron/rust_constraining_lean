@@ -868,6 +868,26 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     safeAbstraction_empty
     htyping
 
+/--
+**Unstuckness.**  No state reachable from an empty-initial well-typed program
+is stuck: it is terminal or can take a further step.  All invariants are
+derived from typability against the empty environment and store typing.
+-/
+theorem emptyInitial_no_stuck_states {term term' : Term} {lifetime : Lifetime}
+    {ty : Ty} {env₂ : Env} {store' : ProgramStore} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    MultiStep ProgramStore.empty lifetime term store' term' →
+    Terminal term' ∨
+      ∃ store'' term'', Step store' lifetime term' store'' term'' := by
+  intro htyping hreach
+  rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
+      _hstoreProgress, _hrefs⟩
+  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+  exact no_stuck_states hsource hvalidRuntime hvalidStoreTyping
+    (hwellFormed lifetime) hborrowSafe hsafe ProgramStore.finiteSupport_empty
+    htyping hreach
+
 /-- **Corollary 4.14.** Source-initial borrow safety through the rule-carried obligation route. -/
 theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
