@@ -4,52 +4,38 @@ import LwRust.Extractor.Checkers
 A syntax-directed LwRust frontier extractor.
 
 For list frontiers, the extractor keeps the complete prefix and recursively
-extracts the single partial tail.  For expression/term frontiers, it reconstructs
-the LwRust constructor and fills unavailable siblings with `unit`.
+extracts the single partial tail.  For incomplete expression/term frontiers, it
+follows `ast_copier`'s `visit_expr`/`visit_expr_stmt` split: extract useful child
+expressions as statements, but do not rebuild a constraining parent expression
+such as assignment with a placeholder operand.
 -/
 
 namespace ConservativeExtractor
 
-def defaultName : Name := "_"
+def missingName : Name := "_"
 
-def defaultLVal : LVal :=
-  SyntaxCtor.clvalVar_ctor defaultName
+def missingLVal : LVal :=
+  SyntaxCtor.clvalVar_ctor missingName
 
-def defaultTerm : Term :=
-  SyntaxCtor.ctermUnit_ctor
+def missingTerm : Term :=
+  .missing
 
-def defaultTy : Ty :=
-  SyntaxCtor.ctyUnit_ctor
+def childLifetime (lifetime : Lifetime) : Lifetime :=
+  { path := lifetime.path ++ [0] }
 
 mutual
 
-def extractTy : PartialTy → Ty
-  | Generated.PartialTy.cutoff => defaultTy
-  | Generated.PartialTy.done ty => ty
-  | Generated.PartialTy.borrowSharedTargets targets =>
-      SyntaxCtor.ctyBorrowShared_ctor (extractLVals targets)
-  | Generated.PartialTy.borrowMutTargets targets =>
-      SyntaxCtor.ctyBorrowMut_ctor (extractLVals targets)
-  | Generated.PartialTy.boxElement element =>
-      SyntaxCtor.ctyBox_ctor (extractTy element)
-  | Generated.PartialTy.tokenAmpStart =>
-      SyntaxCtor.ctyBorrowShared_ctor []
-  | Generated.PartialTy.borrowMutStart =>
-      SyntaxCtor.ctyBorrowMut_ctor []
-  | Generated.PartialTy.boxStart =>
-      SyntaxCtor.ctyBox_ctor defaultTy
-
 def extractLVal : PartialLVal → LVal
-  | Generated.PartialLVal.cutoff => defaultLVal
+  | Generated.PartialLVal.cutoff => missingLVal
   | Generated.PartialLVal.done lv => lv
   | Generated.PartialLVal.varX (Generated.PartialName.done x) =>
       SyntaxCtor.clvalVar_ctor x
   | Generated.PartialLVal.varX (Generated.PartialName.prefix x) =>
       SyntaxCtor.clvalVar_ctor x
   | Generated.PartialLVal.varX Generated.PartialName.cutoff =>
-      defaultLVal
+      missingLVal
   | Generated.PartialLVal.derefStart =>
-      SyntaxCtor.clvalDeref_ctor defaultLVal
+      SyntaxCtor.clvalDeref_ctor missingLVal
   | Generated.PartialLVal.derefOperand operand =>
       SyntaxCtor.clvalDeref_ctor (extractLVal operand)
 
@@ -59,71 +45,79 @@ def extractLVals : PartialLVals → List LVal
   | Generated.PartialLVals.elems pre none => pre
   | Generated.PartialLVals.elems pre (some tail) => pre ++ [extractLVal tail]
 
-def extractTerm : PartialTerm → Term
-  | Generated.PartialTerm.cutoff => defaultTerm
+/-- Extract a partial expression in value position.
+
+For an incomplete non-block expression, this mirrors `ast_copier.visit_expr`:
+emit the statement-oriented extraction of the partial expression and finish with
+`missingTerm`, rather than rebuilding the partial parent constructor.
+-/
+def extractTerm (currentLifetime : Lifetime) : PartialTerm → Term
+  | Generated.PartialTerm.cutoff => missingTerm
   | Generated.PartialTerm.done term => term
   | Generated.PartialTerm.intN n => SyntaxCtor.ctermInt_ctor n
   | Generated.PartialTerm.blockStart =>
-      SyntaxCtor.ctermBlock_ctor LwRust.Core.Lifetime.root []
+      SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime) [missingTerm]
   | Generated.PartialTerm.blockTerms lifetime terms =>
-      SyntaxCtor.ctermBlock_ctor lifetime (extractTerms terms)
-  | Generated.PartialTerm.letMutStart =>
-      SyntaxCtor.ctermLetMut_ctor defaultName defaultTerm
-  | Generated.PartialTerm.letMutName (Generated.PartialName.done x) =>
-      SyntaxCtor.ctermLetMut_ctor x defaultTerm
-  | Generated.PartialTerm.letMutName (Generated.PartialName.prefix x) =>
-      SyntaxCtor.ctermLetMut_ctor x defaultTerm
-  | Generated.PartialTerm.letMutName Generated.PartialName.cutoff =>
-      SyntaxCtor.ctermLetMut_ctor defaultName defaultTerm
-  | Generated.PartialTerm.letMutInitialiser name initialiser =>
-      SyntaxCtor.ctermLetMut_ctor name (extractTerm initialiser)
-  | Generated.PartialTerm.assignLhs lhs =>
-      SyntaxCtor.ctermAssign_ctor (extractLVal lhs) defaultTerm
-  | Generated.PartialTerm.assignRhs lhs rhs =>
-      SyntaxCtor.ctermAssign_ctor lhs (extractTerm rhs)
-  | Generated.PartialTerm.boxStart =>
-      SyntaxCtor.ctermBox_ctor defaultTerm
-  | Generated.PartialTerm.boxOperand operand =>
-      SyntaxCtor.ctermBox_ctor (extractTerm operand)
-  | Generated.PartialTerm.tokenAmpStart =>
-      SyntaxCtor.ctermBorrowShared_ctor defaultLVal
-  | Generated.PartialTerm.borrowSharedOperand operand =>
-      SyntaxCtor.ctermBorrowShared_ctor (extractLVal operand)
-  | Generated.PartialTerm.borrowMutStart =>
-      SyntaxCtor.ctermBorrowMut_ctor defaultLVal
-  | Generated.PartialTerm.borrowMutOperand operand =>
-      SyntaxCtor.ctermBorrowMut_ctor (extractLVal operand)
-  | Generated.PartialTerm.moveStart =>
-      SyntaxCtor.ctermMove_ctor defaultLVal
-  | Generated.PartialTerm.moveOperand operand =>
-      SyntaxCtor.ctermMove_ctor (extractLVal operand)
-  | Generated.PartialTerm.copyStart =>
-      SyntaxCtor.ctermCopy_ctor defaultLVal
-  | Generated.PartialTerm.copyOperand operand =>
-      SyntaxCtor.ctermCopy_ctor (extractLVal operand)
-  | Generated.PartialTerm.termPrefix lhs =>
-      SyntaxCtor.ctermEq_ctor (extractTerm lhs) defaultTerm
-  | Generated.PartialTerm.eqRhs lhs rhs =>
-      SyntaxCtor.ctermEq_ctor lhs (extractTerm rhs)
-  | Generated.PartialTerm.iteStart =>
-      SyntaxCtor.ctermIte_ctor (SyntaxCtor.ctermTrue_ctor) defaultTerm defaultTerm
-  | Generated.PartialTerm.iteCondition condition =>
-      SyntaxCtor.ctermIte_ctor (extractTerm condition) defaultTerm defaultTerm
-  | Generated.PartialTerm.iteTrueBranch condition trueBranch =>
-      SyntaxCtor.ctermIte_ctor condition (extractTerm trueBranch) defaultTerm
-  | Generated.PartialTerm.iteFalseBranch condition trueBranch falseBranch =>
-      SyntaxCtor.ctermIte_ctor condition trueBranch (extractTerm falseBranch)
+      SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)
+  | frontier =>
+      SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime)
+        (extractTermStmts currentLifetime frontier ++ [missingTerm])
 
-def extractTerms : PartialTerms → List Term
+/-- Extract a partial expression in statement position.
+
+This is intentionally conservative: rebuilding `lhs := missingTerm` can mask
+the actual frontier that `ast_copier.visit_expr_stmt` would inspect.  We
+therefore only keep child expressions that the copier recursively visits.
+-/
+def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
+  | Generated.PartialTerm.cutoff => []
+  | Generated.PartialTerm.done term => [term]
+  | Generated.PartialTerm.intN _ => []
+  | Generated.PartialTerm.blockStart =>
+      [SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime) [missingTerm]]
+  | Generated.PartialTerm.blockTerms lifetime terms =>
+      [SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)]
+  | Generated.PartialTerm.letMutStart => []
+  | Generated.PartialTerm.letMutName _ => []
+  | Generated.PartialTerm.letMutInitialiser _ initialiser =>
+      extractTermStmts currentLifetime initialiser
+  | Generated.PartialTerm.assignLhs _ => []
+  | Generated.PartialTerm.assignRhs _ rhs =>
+      extractTermStmts currentLifetime rhs
+  | Generated.PartialTerm.boxStart => []
+  | Generated.PartialTerm.boxOperand operand =>
+      extractTermStmts currentLifetime operand
+  | Generated.PartialTerm.tokenAmpStart => []
+  | Generated.PartialTerm.borrowSharedOperand _ => []
+  | Generated.PartialTerm.borrowMutStart => []
+  | Generated.PartialTerm.borrowMutOperand _ => []
+  | Generated.PartialTerm.moveStart => []
+  | Generated.PartialTerm.moveOperand _ => []
+  | Generated.PartialTerm.copyStart => []
+  | Generated.PartialTerm.copyOperand _ => []
+  | Generated.PartialTerm.termPrefix lhs =>
+      extractTermStmts currentLifetime lhs
+  | Generated.PartialTerm.eqRhs lhs rhs =>
+      lhs :: extractTermStmts currentLifetime rhs
+  | Generated.PartialTerm.iteStart => []
+  | Generated.PartialTerm.iteCondition condition =>
+      extractTermStmts currentLifetime condition
+  | Generated.PartialTerm.iteTrueBranch condition trueBranch =>
+      condition :: extractTermStmts currentLifetime trueBranch
+  | Generated.PartialTerm.iteFalseBranch condition trueBranch falseBranch =>
+      condition :: trueBranch :: extractTermStmts currentLifetime falseBranch
+
+def extractTerms (currentLifetime : Lifetime) : PartialTerms → List Term
   | Generated.PartialTerms.cutoff => []
   | Generated.PartialTerms.done xs => xs
   | Generated.PartialTerms.elems pre none => pre
-  | Generated.PartialTerms.elems pre (some tail) => pre ++ [extractTerm tail]
+  | Generated.PartialTerms.elems pre (some tail) =>
+      pre ++ extractTermStmts currentLifetime tail ++ [missingTerm]
 
 end
 
 def extractProgram : PartialProgram → Program :=
-  extractTerm
+  extractTerm LwRust.Core.Lifetime.root
 
 theorem extractProgram_wellTyped_of_completion
     {p : PartialProgram} {full : Program}
