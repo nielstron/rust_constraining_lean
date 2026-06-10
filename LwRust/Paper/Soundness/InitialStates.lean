@@ -314,6 +314,22 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
         · exact ihTrue htypingEq candidate htrueMem
         · exact ihFalse htypingEq candidate hfalseMem)
     (by
+      intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+        _body _bodyTy _hchild _hcond _hbody _hwellTyBody _hdropEq
+        ihCondition ihBody htypingEq candidate hmem
+      simp [termValues] at hmem
+      rcases hmem with hconditionMem | hbodyMem
+      · exact ihCondition htypingEq candidate hconditionMem
+      · exact ihBody htypingEq candidate hbodyMem)
+    (by
+      intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+        _body _bodyTy _hchild _hcond _hbody _hdiverges
+        ihCondition ihBody htypingEq candidate hmem
+      simp [termValues] at hmem
+      rcases hmem with hconditionMem | hbodyMem
+      · exact ihCondition htypingEq candidate hconditionMem
+      · exact ihBody htypingEq candidate hbodyMem)
+    (by
       intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
         candidate hmem
       simp [termValues] at hmem

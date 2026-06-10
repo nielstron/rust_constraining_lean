@@ -1538,6 +1538,16 @@ theorem TermTyping.slot_lifetime_survives :
         exact ⟨resultSlot, hresultSlot, by
           rw [hcondLifetime, hresultLifetime]⟩)
       (by
+        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+          _body _bodyTy _hchild _hcond _hbody _hwellTy _hdrop
+          ihCond _ihBody x sourceSlot houtlives hslot
+        exact ihCond houtlives hslot)
+      (by
+        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+          _body _bodyTy _hchild _hcond _hbody _hdiverges
+          ihCond _ihBody x sourceSlot houtlives hslot
+        exact ihCond houtlives hslot)
+      (by
         intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
           x sourceSlot houtlives hslot
         exact ih houtlives hslot)
@@ -1669,6 +1679,16 @@ theorem TermTyping.slot_lifetime_survives :
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
         exact ⟨resultSlot, hresultSlot, by
           rw [hcondLifetime, hresultLifetime]⟩)
+      (by
+        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+          _body _bodyTy _hchild _hcond _hbody _hwellTy _hdrop
+          ihCond _ihBody x sourceSlot houtlives hslot
+        exact ihCond houtlives hslot)
+      (by
+        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+          _body _bodyTy _hchild _hcond _hbody _hdiverges
+          ihCond _ihBody x sourceSlot houtlives hslot
+        exact ihCond houtlives hslot)
       (by
         intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
           x sourceSlot houtlives hslot

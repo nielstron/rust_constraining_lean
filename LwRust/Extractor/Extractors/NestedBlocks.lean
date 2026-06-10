@@ -142,6 +142,15 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
           (extractTerm currentLifetime falseBranch)]
       else
         condition :: extractTermStmts currentLifetime falseBranch
+  | Generated.PartialTerm.whileStart => []
+  | Generated.PartialTerm.whileCondition _bodyLifetime condition =>
+      extractTermStmts currentLifetime condition
+  | Generated.PartialTerm.whileBody bodyLifetime condition body =>
+      if branchRebuildable body then
+        [SyntaxCtor.ctermWhile_ctor bodyLifetime condition
+          (extractTerm bodyLifetime body)]
+      else
+        [SyntaxCtor.ctermWhile_ctor bodyLifetime condition missingTerm]
 termination_by p => (sizeOf p, 0)
 
 /-- Extract a block body frontier (`ast_copier.visit_stmts`): keep the
@@ -474,6 +483,72 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
         obtain ⟨env', hstmts⟩ := extractTermStmts_typed hfalse hfalse'
         simp only [extractTermStmts, branchRebuildable, reduceIte] at hstmts ⊢
         exact ⟨env', .cons hcondition' hstmts⟩
+  case ctermWhile_whileCondition hcondition =>
+      simp only [extractTermStmts]
+      cases htyped with
+      | whileLoop hchild hcondition' hbody hwellTy hdropEq =>
+          exact extractTermStmts_typed hcondition hcondition'
+      | whileLoopDiverging hchild hcondition' hbody hdiverges =>
+          exact extractTermStmts_typed hcondition hcondition'
+  case ctermWhile_whileBody bodyLifetime condition body bodyCompletion
+      hbody =>
+      obtain ⟨envMid, hchild', hcondition', tyBody, envBody, hbody'⟩ :
+          ∃ envMid,
+            LifetimeChild currentLifetime bodyLifetime ∧
+            TermTyping env typing currentLifetime condition .bool envMid ∧
+            ∃ tyBody envBody,
+              TermTyping envMid typing bodyLifetime bodyCompletion tyBody
+                envBody := by
+        cases htyped with
+        | whileLoop hchild hcondition' hbody' _ _ =>
+            exact ⟨_, hchild, hcondition', _, _, hbody'⟩
+        | whileLoopDiverging hchild hcondition' hbody' _ =>
+            exact ⟨_, hchild, hcondition', _, _, hbody'⟩
+      simp only [extractTermStmts]
+      cases body
+      case done bodyTerm =>
+          cases hbody
+          simp [branchRebuildable, extractTerm]
+          exact ⟨env₂, .cons htyped .nil⟩
+      case cutoff =>
+          simp [branchRebuildable, extractTerm]
+          exact ⟨envMid, .cons
+            (TermTyping.whileLoopDiverging hchild' hcondition'
+              (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
+              .missing) .nil⟩
+      case blockStart =>
+          simp [branchRebuildable, extractTerm]
+          exact ⟨envMid, .cons
+            (TermTyping.whileLoopDiverging hchild' hcondition'
+              missingBlock_typed (.block (by simp) .missing)) .nil⟩
+      case blockTerms blockLifetime terms =>
+          cases hbody with
+          | ctermBlock_blockTerms hterms =>
+              cases terms
+              case done xs =>
+                  cases hterms
+                  simp [branchRebuildable, extractTerm, extractTerms]
+                  exact ⟨env₂, .cons htyped .nil⟩
+              all_goals
+                cases hbody' with
+                | «block» hchild₂ hlist hwf _heq =>
+                    obtain ⟨tyBlock, envBlock, hlist', hdisj⟩ :=
+                      extractTerms_typed hterms hlist
+                    simp [branchRebuildable, extractTerm]
+                    refine ⟨envMid, .cons
+                      (TermTyping.whileLoopDiverging hchild' hcondition'
+                        (TermTyping.block hchild₂ hlist' ?_ rfl)
+                        (.block (extractTerms_diverging nofun) .missing))
+                      .nil⟩
+                    rcases hdisj with rfl | ⟨rfl, rfl⟩
+                    · exact WellFormedTy.unit
+                    · exact hwf
+      all_goals
+        simp only [extractTermStmts, branchRebuildable, reduceIte]
+        exact ⟨envMid, .cons
+          (TermTyping.whileLoopDiverging hchild' hcondition'
+            (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
+            .missing) .nil⟩
   all_goals
     simp only [extractTermStmts]
     exact ⟨env, .nil⟩

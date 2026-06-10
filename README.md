@@ -79,6 +79,24 @@ stated; the deviation then documents the corrected claim).
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
 
+- **While loops (`T-While`, `T-WhileDiv`), beyond the paper.**  The paper's
+  calculus is loop-free (its original termination argument depended on it).
+  `Term.whileLoop` adds `while cond { body }` with two in-flight runtime
+  forms (`whileCond`, `whileBody`) instead of syntactic unfolding — unfolding
+  is unsound here: the copied continuation would nest inside the iteration
+  block, so body locals would leak across iterations and the copied loop
+  would sit at lifetimes violating the lexical `LifetimeChild` discipline.
+  `T-While` uses a *strict* loop invariant: the body must restore the
+  loop-entry environment exactly (`Γ₃.dropLifetime = Γ₁`), so the back edge
+  re-enters the same derivation verbatim and terminal-run preservation is an
+  induction over the iteration structure (`WhileRunEnds`,
+  `WhileRunReaches`).  This under-approximates rustc's NLL fixpoint (loops
+  that widen borrow sets across iterations are rejected).  `T-WhileDiv`
+  types a loop whose body is checked but diverges (`…; panic!()`) with no
+  back-edge obligation — what `ast_copier` relies on when rebuilding a
+  truncated loop body — and the extractor rebuilds partial loop bodies this
+  way (`while c { …stmts…; missing }`).
+
 - **Divergence-aware conditionals (`T-IfDiv`), modelling real Rust.**  The
   paper's `T-If` always joins both branch environments; rustc instead lets a
   `panic!()`-terminated branch type at `!` and contribute nothing to the

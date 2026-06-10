@@ -107,6 +107,19 @@ inductive Term where
   /-- Section 6.1 control-flow extension (Figure 5): equality comparator and conditional -/
   | eq (lhs rhs : Term)
   | ite (condition trueBranch falseBranch : Term)
+  /-- While loop (beyond the paper, which is loop-free): `while condition
+  { body }`.  The body is scoped like a block under `bodyLifetime`.  The
+  loop does not reduce by syntactic unfolding — copying the body under a
+  fresh block would detach its lexical block lifetimes from the ambient
+  chain — but through the two in-flight runtime forms below. -/
+  | whileLoop (bodyLifetime : Lifetime) (condition body : Term)
+  /-- Runtime form: the condition copy in the first slot is being evaluated;
+  the original condition and body are retained for later iterations. -/
+  | whileCond (bodyLifetime : Lifetime) (conditionInFlight condition body : Term)
+  /-- Runtime form: the body (wrapped in a block, so block reduction manages
+  the body scope) is being evaluated; once it yields a value the iteration's
+  result is dropped and the loop re-enters `whileCond`. -/
+  | whileBody (bodyLifetime : Lifetime) (bodyInFlight condition body : Term)
   deriving BEq, Repr
 
 mutual
@@ -126,6 +139,11 @@ mutual
     | .eq lhs rhs => 1 + lhs.size + rhs.size
     | .ite condition trueBranch falseBranch =>
         1 + condition.size + trueBranch.size + falseBranch.size
+    | .whileLoop _ condition body => 1 + condition.size + body.size
+    | .whileCond _ conditionInFlight condition body =>
+        1 + conditionInFlight.size + condition.size + body.size
+    | .whileBody _ bodyInFlight condition body =>
+        1 + bodyInFlight.size + condition.size + body.size
 
   def Term.sizeList : List Term → Nat
     | [] => 0
