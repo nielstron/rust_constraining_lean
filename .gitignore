@@ -1,3 +1,4 @@
 /.lake
 FeatherweightRust
 .DS_Store
+__pycache__
