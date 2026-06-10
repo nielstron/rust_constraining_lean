@@ -1069,6 +1069,577 @@ theorem pointerWriteBranch_typing :
     (by simpa [pointerIfWriteEnv_eq] using pointerIfEnv_contained)
     pointerIf_not_writeProhibited_deref_p
 
+/-- Two borrow types strengthening into the same partial type can be merged:
+the appended target list still strengthens into it.  This is the least-upper-
+bound argument for the `p` slot of the branch join. -/
+theorem partialTyStrengthens_borrow_append {leftTargets rightTargets : List LVal}
+    {joined : PartialTy}
+    (hleft : PartialTyStrengthens (.ty (.borrow true leftTargets)) joined)
+    (hright : PartialTyStrengthens (.ty (.borrow true rightTargets)) joined) :
+    PartialTyStrengthens (.ty (.borrow true (leftTargets ++ rightTargets)))
+      joined := by
+  cases hleft with
+  | reflex =>
+      have hsubRight := PartialTyStrengthens.borrow_subset hright
+      exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        rcases List.mem_append.mp htarget with hmem | hmem
+        · exact hmem
+        · exact hsubRight hmem)
+  | borrow hsubLeft =>
+      have hsubRight := PartialTyStrengthens.borrow_subset hright
+      exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        rcases List.mem_append.mp htarget with hmem | hmem
+        · exact hsubLeft hmem
+        · exact hsubRight hmem)
+  | intoUndef hinner =>
+      rcases PartialTyStrengthens.from_borrow_inv hinner with
+        ⟨targetTargets, rfl, hsubLeft⟩
+      have hsubRight : rightTargets ⊆ targetTargets := by
+        cases hright with
+        | intoUndef hinner' => exact PartialTyStrengthens.borrow_subset hinner'
+      exact PartialTyStrengthens.intoUndef (PartialTyStrengthens.borrow (by
+        intro target htarget
+        rcases List.mem_append.mp htarget with hmem | hmem
+        · exact hsubLeft hmem
+        · exact hsubRight hmem))
+
+theorem pointerIfJoin_x_typing :
+    LValTyping pointerIfJoinEnv (.var "x") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var pointerIfJoinEnv "x" pointerIfXSlot (by
+    simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot, pointerIfJoinPSlot,
+      Env.update])
+
+theorem pointerIfJoin_y_typing :
+    LValTyping pointerIfJoinEnv (.var "y") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var pointerIfJoinEnv "y" pointerIfYSlot (by
+    simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot, Env.update])
+
+theorem pointerIfJoin_old_root_int : ∀ {lv partialTy lifetime},
+    LVal.base lv ≠ "p" →
+    LValTyping pointerIfJoinEnv lv partialTy lifetime →
+    (lv = .var "x" ∨ lv = .var "y") ∧
+      partialTy = .ty .int ∧ lifetime = Lifetime.root := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro partialTy lifetime hbase htyping
+      cases htyping with
+      | var hslot =>
+          rename_i slot
+          by_cases hx : x = "x"
+          · subst hx
+            have hslotExpected :
+                pointerIfJoinEnv.slotAt "x" = some pointerIfXSlot := by
+              simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+                pointerIfJoinPSlot, Env.update]
+            have hslotEq : slot = pointerIfXSlot :=
+              Option.some.inj (hslot.symm.trans hslotExpected)
+            subst slot
+            simp [pointerIfXSlot]
+          · by_cases hy : x = "y"
+            · subst hy
+              have hslotExpected :
+                  pointerIfJoinEnv.slotAt "y" = some pointerIfYSlot := by
+                simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+                  Env.update]
+              have hslotEq : slot = pointerIfYSlot :=
+                Option.some.inj (hslot.symm.trans hslotExpected)
+              subst slot
+              simp [pointerIfYSlot]
+            · by_cases hp : x = "p"
+              · subst hp
+                simp [LVal.base] at hbase
+              · have hnone : pointerIfJoinEnv.slotAt x = none := by
+                  simp [pointerIfJoinEnv, Env.update, Env.empty, hx, hy, hp]
+                rw [hslot] at hnone
+                cases hnone
+  | deref lv ih =>
+      intro partialTy lifetime hbase htyping
+      cases htyping with
+      | box hinner =>
+          rcases ih (by simpa [LVal.base] using hbase) hinner with
+            ⟨_, hpartialTy, _⟩
+          cases hpartialTy
+      | borrow hinner _htargets =>
+          rcases ih (by simpa [LVal.base] using hbase) hinner with
+            ⟨_, hpartialTy, _⟩
+          cases hpartialTy
+
+theorem pointerIfJoin_no_targets_borrow {mutable targets lifetime} :
+    ¬ LValTargetsTyping pointerIfJoinEnv [.var "y", .var "x"]
+      (.ty (.borrow mutable targets)) lifetime := by
+  intro htyping
+  generalize hpartialTy :
+      (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
+  cases htyping with
+  | cons hhead _hrest hunion _hlifetime =>
+      rcases pointerIfJoin_old_root_int (by simp [LVal.base]) hhead with
+        ⟨_, hheadTy, _⟩
+      injection hheadTy with hheadTy
+      subst hheadTy
+      have hupper : PartialTyStrengthens (.ty .int) partialTy :=
+        hunion.1 (by simp)
+      rw [← hpartialTy] at hupper
+      cases PartialTyStrengthens.from_int_inv hupper
+
+theorem pointerIfJoin_no_targets_box {inner lifetime} :
+    ¬ LValTargetsTyping pointerIfJoinEnv [.var "y", .var "x"] (.box inner)
+      lifetime := by
+  intro htyping
+  generalize hpartialTy : (PartialTy.box inner) = partialTy at htyping
+  cases htyping with
+  | cons hhead _hrest hunion _hlifetime =>
+      rcases pointerIfJoin_old_root_int (by simp [LVal.base]) hhead with
+        ⟨_, hheadTy, _⟩
+      injection hheadTy with hheadTy
+      subst hheadTy
+      have hupper : PartialTyStrengthens (.ty .int) partialTy :=
+        hunion.1 (by simp)
+      rw [← hpartialTy] at hupper
+      cases hupper
+
+theorem pointerIfJoin_p_root_facts : ∀ {lv},
+    LVal.base lv = "p" →
+    (∀ {inner lifetime},
+      ¬ LValTyping pointerIfJoinEnv lv (.box inner) lifetime) ∧
+    (∀ {mutable targets lifetime},
+      LValTyping pointerIfJoinEnv lv
+        (.ty (.borrow mutable targets)) lifetime →
+      lv = .var "p" ∧ mutable = true ∧ targets = [.var "y", .var "x"] ∧
+        lifetime = Lifetime.root) := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro hbase
+      constructor
+      · intro inner lifetime htyping
+        generalize hpartialTy : (PartialTy.box inner) = partialTy at htyping
+        cases htyping with
+        | var hslot =>
+            rename_i slot
+            have hx : x = "p" := by simpa [LVal.base] using hbase
+            subst hx
+            have hslotExpected :
+                pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot := by
+              simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]
+            have hslotEq : slot = pointerIfJoinPSlot :=
+              Option.some.inj (hslot.symm.trans hslotExpected)
+            subst slot
+            simp [pointerIfJoinPSlot] at hpartialTy
+      · intro mutable targets lifetime htyping
+        generalize hpartialTy :
+            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
+        cases htyping with
+        | var hslot =>
+            rename_i slot
+            have hx : x = "p" := by simpa [LVal.base] using hbase
+            subst hx
+            have hslotExpected :
+                pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot := by
+              simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]
+            have hslotEq : slot = pointerIfJoinPSlot :=
+              Option.some.inj (hslot.symm.trans hslotExpected)
+            subst slot
+            simp [pointerIfJoinPSlot] at hpartialTy
+            rcases hpartialTy with ⟨rfl, rfl⟩
+            simp [pointerIfJoinPSlot]
+  | deref lv ih =>
+      intro hbase
+      have ihp := ih (by simpa [LVal.base] using hbase)
+      constructor
+      · intro inner lifetime htyping
+        cases htyping with
+        | box hinner =>
+            exact ihp.1 hinner
+        | borrow hinner htargets =>
+            rcases ihp.2 hinner with ⟨rfl, rfl, rfl, rfl⟩
+            exact pointerIfJoin_no_targets_box htargets
+      · intro mutable targets lifetime htyping
+        cases htyping with
+        | box hinner =>
+            exact False.elim (ihp.1 hinner)
+        | borrow hinner htargets =>
+            rcases ihp.2 hinner with ⟨rfl, rfl, rfl, rfl⟩
+            exact False.elim (pointerIfJoin_no_targets_borrow htargets)
+
+theorem pointerIfJoin_coherent : Coherent pointerIfJoinEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  by_cases hbase : LVal.base lv = "p"
+  · rcases (pointerIfJoin_p_root_facts hbase).2 htyping with
+      ⟨rfl, rfl, rfl, rfl⟩
+    exact ⟨.int, Lifetime.root,
+      LValTargetsTyping.cons pointerIfJoin_y_typing
+        (LValTargetsTyping.singleton pointerIfJoin_x_typing)
+        (PartialTyUnion.self (.ty .int))
+        (LifetimeIntersection.self Lifetime.root)⟩
+  · rcases pointerIfJoin_old_root_int hbase htyping with ⟨_, hpartialTy, _⟩
+    cases hpartialTy
+
+theorem pointerIfJoin_contained :
+    ContainedBorrowsWellFormed pointerIfJoinEnv := by
+  intro root slot mutable targets hslot hcontains
+  rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+  by_cases hp : root = "p"
+  · subst hp
+    have hslotExpected :
+        pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot := by
+      simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]
+    have hslotEq : slot = pointerIfJoinPSlot :=
+      Option.some.inj (hslot.symm.trans hslotExpected)
+    subst slot
+    have hcontainedTy :
+        containedSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
+      simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+          hcontainedSlot).symm
+    rw [hcontainedTy] at hcontainsTy
+    cases hcontainsTy with
+    | here =>
+        intro target htarget
+        simp at htarget
+        rcases htarget with rfl | rfl
+        · exact ⟨.int, Lifetime.root, pointerIfJoin_y_typing,
+            LifetimeOutlives.refl Lifetime.root,
+            ⟨pointerIfYSlot, by
+              simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+                Env.update, LVal.base],
+              LifetimeOutlives.refl Lifetime.root⟩⟩
+        · exact ⟨.int, Lifetime.root, pointerIfJoin_x_typing,
+            LifetimeOutlives.refl Lifetime.root,
+            ⟨pointerIfXSlot, by
+              simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+                pointerIfJoinPSlot, Env.update, LVal.base],
+              LifetimeOutlives.refl Lifetime.root⟩⟩
+  · by_cases hy : root = "y"
+    · subst hy
+      have hcontainedTy : containedSlot.ty = .ty .int := by
+        simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+          Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+            hcontainedSlot).symm
+      rw [hcontainedTy] at hcontainsTy
+      cases hcontainsTy
+    · by_cases hx : root = "x"
+      · subst hx
+        have hcontainedTy : containedSlot.ty = .ty .int := by
+          simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+            pointerIfJoinPSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+              hcontainedSlot).symm
+        rw [hcontainedTy] at hcontainsTy
+        cases hcontainsTy
+      · have hnone : pointerIfJoinEnv.slotAt root = none := by
+          simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem pointerIfJoin_linearizable : Linearizable pointerIfJoinEnv := by
+  refine ⟨fun name => if name = "p" then 1 else 0, ?_⟩
+  intro root slot hslot v hv
+  by_cases hp : root = "p"
+  · subst hp
+    have hslotTy : slot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
+      simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hv
+    simp [PartialTy.vars, Ty.vars, LVal.base] at hv
+    rcases hv with rfl | rfl <;> simp
+  · by_cases hy : root = "y"
+    · subst hy
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+          Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+    · by_cases hx : root = "x"
+      · subst hx
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+            pointerIfJoinPSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hv
+        simp [PartialTy.vars, Ty.vars] at hv
+      · have hnone : pointerIfJoinEnv.slotAt root = none := by
+          simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem pointerIfJoin_borrowSafe : BorrowSafeEnv pointerIfJoinEnv := by
+  have hroot : ∀ root mutable targets,
+      (pointerIfJoinEnv ⊢ root ↝ (Ty.borrow mutable targets)) →
+      root = "p" := by
+    intro root mutable targets hcontains
+    rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+    by_cases hp : root = "p"
+    · exact hp
+    · exfalso
+      by_cases hy : root = "y"
+      · subst hy
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+            Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hcontainsTy
+        cases hcontainsTy
+      · by_cases hx : root = "x"
+        · subst hx
+          have hslotTy : slot.ty = .ty .int := by
+            simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+              pointerIfJoinPSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+                hslot).symm
+          rw [hslotTy] at hcontainsTy
+          cases hcontainsTy
+        · have hnone : pointerIfJoinEnv.slotAt root = none := by
+            simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]
+          rw [hslot] at hnone
+          cases hnone
+  intro x y mutable targetsMutable targetsOther targetMutable targetOther
+    hcontainsMutable hcontainsOther _htargetMutable _htargetOther _hconflict
+  rw [hroot x true targetsMutable hcontainsMutable,
+    hroot y mutable targetsOther hcontainsOther]
+
+theorem pointerIfRetarget_le_join :
+    EnvStrengthens pointerIfRetargetEnv pointerIfJoinEnv := by
+  intro name
+  by_cases hp : name = "p"
+  · subst hp
+    rw [show pointerIfRetargetEnv.slotAt "p" = some pointerIfPYSlot by
+        simp [pointerIfRetargetEnv, pointerIfPYSlot, Env.update],
+      show pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot by
+        simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]]
+    have hsub : List.Subset [LVal.var "y"] [LVal.var "y", LVal.var "x"] := by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
+  · by_cases hy : name = "y"
+    · subst hy
+      rw [show pointerIfRetargetEnv.slotAt "y" = some pointerIfYSlot by
+          simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
+            pointerIfPYSlot, Env.update],
+        show pointerIfJoinEnv.slotAt "y" = some pointerIfYSlot by
+          simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+            Env.update]]
+      exact ⟨rfl, PartialTyStrengthens.reflex⟩
+    · by_cases hx : name = "x"
+      · subst hx
+        rw [show pointerIfRetargetEnv.slotAt "x" = some pointerIfXSlot by
+            simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
+              pointerIfYSlot, pointerIfPYSlot, Env.update],
+          show pointerIfJoinEnv.slotAt "x" = some pointerIfXSlot by
+            simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+              pointerIfJoinPSlot, Env.update]]
+        exact ⟨rfl, PartialTyStrengthens.reflex⟩
+      · rw [show pointerIfRetargetEnv.slotAt name = none by
+            simp [pointerIfRetargetEnv, pointerIfEnv, Env.update, Env.empty,
+              hp, hy, hx],
+          show pointerIfJoinEnv.slotAt name = none by
+            simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]]
+        trivial
+
+theorem pointerIfWrite_le_join :
+    EnvStrengthens pointerIfWriteEnv pointerIfJoinEnv := by
+  rw [pointerIfWriteEnv_eq]
+  intro name
+  by_cases hp : name = "p"
+  · subst hp
+    rw [show pointerIfEnv.slotAt "p" = some pointerIfPXSlot by
+        simp [pointerIfEnv, pointerIfPXSlot, Env.update],
+      show pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot by
+        simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]]
+    have hsub : List.Subset [LVal.var "x"] [LVal.var "y", LVal.var "x"] := by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
+  · by_cases hy : name = "y"
+    · subst hy
+      rw [show pointerIfEnv.slotAt "y" = some pointerIfYSlot by
+          simp [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update],
+        show pointerIfJoinEnv.slotAt "y" = some pointerIfYSlot by
+          simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+            Env.update]]
+      exact ⟨rfl, PartialTyStrengthens.reflex⟩
+    · by_cases hx : name = "x"
+      · subst hx
+        rw [show pointerIfEnv.slotAt "x" = some pointerIfXSlot by
+            simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
+              pointerIfPXSlot, Env.update],
+          show pointerIfJoinEnv.slotAt "x" = some pointerIfXSlot by
+            simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+              pointerIfJoinPSlot, Env.update]]
+        exact ⟨rfl, PartialTyStrengthens.reflex⟩
+      · rw [show pointerIfEnv.slotAt name = none by
+            simp [pointerIfEnv, Env.update, Env.empty, hp, hy, hx],
+          show pointerIfJoinEnv.slotAt name = none by
+            simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]]
+        trivial
+
+theorem pointerIfJoin_least {env' : Env}
+    (hret : EnvStrengthens pointerIfRetargetEnv env')
+    (hwrite : EnvStrengthens pointerIfWriteEnv env') :
+    EnvStrengthens pointerIfJoinEnv env' := by
+  rw [pointerIfWriteEnv_eq] at hwrite
+  intro name
+  by_cases hp : name = "p"
+  · subst hp
+    rcases EnvStrengthens.slot_forward hret (show
+        pointerIfRetargetEnv.slotAt "p" = some pointerIfPYSlot by
+          simp [pointerIfRetargetEnv, pointerIfPYSlot, Env.update]) with
+      ⟨slotY, hslotY, hlife, hstrY⟩
+    rcases EnvStrengthens.slot_forward hwrite (show
+        pointerIfEnv.slotAt "p" = some pointerIfPXSlot by
+          simp [pointerIfEnv, pointerIfPXSlot, Env.update]) with
+      ⟨slotX, hslotX, _hlifeX, hstrX⟩
+    have hslotEq : slotX = slotY := Option.some.inj (hslotX.symm.trans hslotY)
+    subst hslotEq
+    rw [show pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot by
+        simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update], hslotX]
+    have hY : PartialTyStrengthens (.ty (.borrow true [.var "y"])) slotX.ty :=
+      hstrY
+    have hX : PartialTyStrengthens (.ty (.borrow true [.var "x"])) slotX.ty :=
+      hstrX
+    have hYX : PartialTyStrengthens
+        (.ty (.borrow true ([.var "y"] ++ [.var "x"]))) slotX.ty :=
+      partialTyStrengthens_borrow_append hY hX
+    exact ⟨hlife, by simpa [pointerIfJoinPSlot] using hYX⟩
+  · by_cases hy : name = "y"
+    · subst hy
+      rcases EnvStrengthens.slot_forward hret (show
+          pointerIfRetargetEnv.slotAt "y" = some pointerIfYSlot by
+            simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
+              pointerIfPYSlot, Env.update]) with
+        ⟨slot', hslot', hlife, hstr⟩
+      rw [show pointerIfJoinEnv.slotAt "y" = some pointerIfYSlot by
+          simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+            Env.update], hslot']
+      exact ⟨hlife, hstr⟩
+    · by_cases hx : name = "x"
+      · subst hx
+        rcases EnvStrengthens.slot_forward hret (show
+            pointerIfRetargetEnv.slotAt "x" = some pointerIfXSlot by
+              simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
+                pointerIfYSlot, pointerIfPYSlot, Env.update]) with
+          ⟨slot', hslot', hlife, hstr⟩
+        rw [show pointerIfJoinEnv.slotAt "x" = some pointerIfXSlot by
+            simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+              pointerIfJoinPSlot, Env.update], hslot']
+        exact ⟨hlife, hstr⟩
+      · have hretNone : pointerIfRetargetEnv.slotAt name = none := by
+          simp [pointerIfRetargetEnv, pointerIfEnv, Env.update, Env.empty,
+            hp, hy, hx]
+        have hjoinNone : pointerIfJoinEnv.slotAt name = none := by
+          simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]
+        have h := hret name
+        rw [hretNone] at h
+        rw [hjoinNone]
+        cases henvSlot : env'.slotAt name with
+        | none =>
+            trivial
+        | some envSlot =>
+            rw [henvSlot] at h
+            cases h
+
+theorem pointerIf_envJoin :
+    EnvJoin pointerIfRetargetEnv pointerIfWriteEnv pointerIfJoinEnv := by
+  constructor
+  · intro env henv
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at henv
+    rcases henv with rfl | rfl
+    · exact pointerIfRetarget_le_join
+    · exact pointerIfWrite_le_join
+  · intro env' henv'
+    exact pointerIfJoin_least (henv' (by simp)) (henv' (by simp))
+
+theorem pointerIfRetarget_join_sameShape :
+    EnvJoinSameShape pointerIfRetargetEnv pointerIfJoinEnv := by
+  intro name branchSlot joinSlot hbranch hjoin
+  by_cases hp : name = "p"
+  · subst hp
+    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "y"]) := by
+      simpa [pointerIfRetargetEnv, pointerIfPYSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
+      simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+    simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+  · by_cases hy : name = "y"
+    · subst hy
+      have hbranchTy : branchSlot.ty = .ty .int := by
+        simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
+          pointerIfPYSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+      have hjoinTy : joinSlot.ty = .ty .int := by
+        simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+          Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+      simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+    · by_cases hx : name = "x"
+      · subst hx
+        have hbranchTy : branchSlot.ty = .ty .int := by
+          simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
+            pointerIfYSlot, pointerIfPYSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+              hbranch).symm
+        have hjoinTy : joinSlot.ty = .ty .int := by
+          simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+            pointerIfJoinPSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+              hjoin).symm
+        simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+      · have hnone : pointerIfRetargetEnv.slotAt name = none := by
+          simp [pointerIfRetargetEnv, pointerIfEnv, Env.update, Env.empty,
+            hp, hy, hx]
+        rw [hbranch] at hnone
+        cases hnone
+
+theorem pointerIfWrite_join_sameShape :
+    EnvJoinSameShape pointerIfWriteEnv pointerIfJoinEnv := by
+  intro name branchSlot joinSlot hbranch hjoin
+  rw [pointerIfWriteEnv_eq] at hbranch
+  by_cases hp : name = "p"
+  · subst hp
+    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "x"]) := by
+      simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
+      simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+    simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+  · by_cases hy : name = "y"
+    · subst hy
+      have hbranchTy : branchSlot.ty = .ty .int := by
+        simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+      have hjoinTy : joinSlot.ty = .ty .int := by
+        simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
+          Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+      simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+    · by_cases hx : name = "x"
+      · subst hx
+        have hbranchTy : branchSlot.ty = .ty .int := by
+          simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+            Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+              hbranch).symm
+        have hjoinTy : joinSlot.ty = .ty .int := by
+          simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
+            pointerIfJoinPSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+              hjoin).symm
+        simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+      · have hnone : pointerIfEnv.slotAt name = none := by
+          simp [pointerIfEnv, Env.update, Env.empty, hp, hy, hx]
+        rw [hbranch] at hnone
+        cases hnone
+
 theorem ifPointerAssignment_join_obligations :
     EnvJoin pointerIfRetargetEnv pointerIfWriteEnv pointerIfJoinEnv ∧
     EnvJoinSameShape pointerIfRetargetEnv pointerIfJoinEnv ∧
@@ -1076,8 +1647,11 @@ theorem ifPointerAssignment_join_obligations :
     ContainedBorrowsWellFormed pointerIfJoinEnv ∧
     Coherent pointerIfJoinEnv ∧
     Linearizable pointerIfJoinEnv ∧
-    BorrowSafeEnv pointerIfJoinEnv := by
-  sorry
+    BorrowSafeEnv pointerIfJoinEnv :=
+  ⟨pointerIf_envJoin, pointerIfRetarget_join_sameShape,
+    pointerIfWrite_join_sameShape, pointerIfJoin_contained,
+    pointerIfJoin_coherent, pointerIfJoin_linearizable,
+    pointerIfJoin_borrowSafe⟩
 
 theorem ifPointerAssignment_typing :
     TermTyping pointerIfEnv StoreTyping.empty Lifetime.root
