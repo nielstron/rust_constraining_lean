@@ -289,6 +289,7 @@ theorem ProgramStore.FiniteSupport.step {store store' : ProgramStore}
     store'.FiniteSupport := by
   intro hstep
   induction hstep with
+  | missing => exact id
   | copy _ => exact id
   | move _ hwrite => exact ProgramStore.FiniteSupport.write hwrite
   | box _ hbox => exact ProgramStore.FiniteSupport.boxAt hbox
@@ -913,10 +914,12 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         store ∼ₛ env →
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
-    ?const ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
+    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
     ?singleton ?cons htyping
   · intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
+  · intro _env _typing lifetime _ty _hwellTy _hvst _hwf _hsafe _hstore
+    exact Or.inr ⟨store, .missing, Step.missing⟩
   · intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy hreadProhibited
       _hvst hwf hsafe _hstore
     exact progress_copy_typing (typing := _typing) hwf hsafe

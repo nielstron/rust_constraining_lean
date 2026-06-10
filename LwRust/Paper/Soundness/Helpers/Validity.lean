@@ -161,6 +161,7 @@ def termValues : Term → List Value
   | .move _ => []
   | .copy _ => []
   | .val value => [value]
+  | .missing => []
   | .eq lhs rhs => termValues lhs ++ termValues rhs
   | .ite condition trueBranch falseBranch =>
       termValues condition ++ termValues trueBranch ++ termValues falseBranch

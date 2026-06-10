@@ -99,14 +99,19 @@ inductive Term where
   | move (operand : LVal)
   | copy (operand : LVal)
   | val (value : Value)
+  /-- Synthetic extractor placeholder, analogous to `ast_copier`'s polymorphic
+  `__missing__<T>() -> T`. It is source-like generated syntax and diverges at
+  runtime. -/
+  | missing
   /-- Section 6.1 control-flow extension (Figure 5): equality comparator and conditional -/
   | eq (lhs rhs : Term)
   | ite (condition trueBranch falseBranch : Term)
   deriving BEq, Repr
 
 mutual
-  /-- Structural size of a term.  Every reduction step strictly decreases it
-  (`step_size_lt`), which is the termination measure for the core calculus. -/
+  /-- Structural size of a term.  This is still useful for the original core
+  calculus, but generated `.missing` terms self-loop and therefore do not
+  strictly decrease. -/
   def Term.size : Term → Nat
     | .block _ terms => 1 + Term.sizeList terms
     | .letMut _ initialiser => 1 + initialiser.size
@@ -116,6 +121,7 @@ mutual
     | .move _ => 2
     | .copy _ => 2
     | .val _ => 1
+    | .missing => 1
     | .eq lhs rhs => 1 + lhs.size + rhs.size
     | .ite condition trueBranch falseBranch =>
         1 + condition.size + trueBranch.size + falseBranch.size

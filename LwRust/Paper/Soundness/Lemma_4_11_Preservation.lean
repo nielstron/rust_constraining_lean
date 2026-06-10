@@ -3674,6 +3674,18 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         preservation_multistep_runtime_value hvalidRuntime hvalidStoreTyping hsafe
           htermTyping hmulti
       exact And.intro hwellFormed hterminal)
+    (fun {_env _typing _lifetime _ty}
+        (_hwellTy : WellFormedTy _env _ty _lifetime)
+        (_htypingEq : _typing = typing) (hsource : SourceTerm .missing)
+        (_store _finalStore : ProgramStore)
+        (_finalValue : Value)
+        (_hvalidRuntime : ValidRuntimeState _store .missing)
+        (_hvalidStoreTyping : ValidStoreTyping _store .missing _typing)
+        (_hwellFormed : WellFormedEnv _env _lifetime)
+        (_hborrowSafe : BorrowSafeEnv _env)
+        (_hsafe : _store ∼ₛ _env)
+        (hmulti : MultiStep _store _lifetime .missing _finalStore (.val _finalValue)) =>
+      False.elim (multistep_missing_not_value hmulti))
     (fun {_env _typing _lifetime _valueLifetime _lv _ty}
         (hLv : LValTyping _env _lv (.ty _ty) _valueLifetime)
         (hcopy : CopyTy _ty) (hnotRead : ¬ ReadProhibited _env _lv)

@@ -709,9 +709,7 @@ theorem linearizable_rankFn_of_le_shape {e e' : Env} {φ : Name → Nat}
 (`borrow_borrow`).  Given the runtime invariants on the join environment (a rank
 function for `left` and `join`, the shape-preserving slot map `left → join`,
 `Coherent join`, and `WellFormedEnv join current`), a borrow typing of `source`
-in `left` yields a typing of the reborrow `*source` in `join`.  Sorry-free: this
-is the keystone applied to `*source`.  The explicit invariant parameters are
-exactly what the write-fan-out driver supplies (via the preservation facts). -/
+in `left` yields a typing of the reborrow `*source` in `join`.  -/
 theorem borrowBorrowJoin_viaTransport
     {left join : Env} {source : LVal}
     {leftMutable : Bool} {leftTargets : List LVal} {leftTy : Ty}

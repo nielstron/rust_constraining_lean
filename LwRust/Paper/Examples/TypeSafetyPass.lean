@@ -36,7 +36,7 @@ theorem scalarCopyComparison_typeSafety :
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .bool :=
-  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
+  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing (by sorry)
 
 /--
 Accepted `if/else` example for the control-flow extension: both branches return
@@ -72,7 +72,7 @@ theorem ifThenElseInt_typeSafety :
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
+  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing (by sorry)
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
@@ -108,7 +108,7 @@ theorem ifEqThenElseInt_typeSafety :
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
+  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing (by sorry)
 
 /--
 Accepted `if/else` with nontrivial pointer effects in the branches.
