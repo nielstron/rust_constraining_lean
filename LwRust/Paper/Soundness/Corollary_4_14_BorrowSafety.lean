@@ -34,12 +34,6 @@ open Core
 
 /-! ## Section 4.5.1: Borrow Safety -/
 
-def TyBorrowFree (ty : Ty) : Prop :=
-  ∀ mutable targets, ¬ PartialTyContains (.ty ty) (.borrow mutable targets)
-
-def PartialTyBorrowFree (ty : PartialTy) : Prop :=
-  ∀ mutable targets, ¬ PartialTyContains ty (.borrow mutable targets)
-
 theorem partialTyContains_borrow_iff_eq {mutable : Bool} {targets : List LVal}
     {needle : Ty} :
     PartialTyContains (.ty (.borrow mutable targets)) needle ↔
@@ -353,6 +347,81 @@ theorem borrowSafeEnv_update_fresh_borrowFree {env : Env} {x : Name}
   intro hsafe hborrowFree
   exact borrowSafeEnv_update_partialBorrowFree hsafe
     (partialTyBorrowFree_ty hborrowFree)
+
+theorem partialTyLoanFree_ty {ty : Ty} (hfree : TyLoanFree ty) :
+    PartialTyLoanFree (.ty ty) :=
+  hfree
+
+/-- Loan-free analogue of `borrowSafeEnv_update_partialBorrowFree`: a slot
+whose contained borrows claim no targets cannot participate in a conflict. -/
+theorem borrowSafeEnv_update_partialLoanFree {env : Env} {x : Name}
+    {slot : EnvSlot} :
+    BorrowSafeEnv env →
+    PartialTyLoanFree slot.ty →
+    BorrowSafeEnv (env.update x slot) := by
+  intro hsafe hloanFree y z mutable targetsMutable targetsOther targetMutable
+    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  by_cases hy : y = x
+  · have hcontainsMutableAtX :
+        (env.update x slot) ⊢ x ↝ Ty.borrow true targetsMutable := by
+      simpa [hy] using hcontainsMutable
+    exact False.elim
+      (by
+        rcases hcontainsMutableAtX with ⟨containedSlot, hslot, hcontainsTy⟩
+        have hslotEq : containedSlot = slot := by
+          have h : slot = containedSlot := by
+            simpa [Env.update] using hslot
+          exact h.symm
+        subst hslotEq
+        have hempty : targetsMutable = [] :=
+          hloanFree true targetsMutable hcontainsTy
+        subst hempty
+        simp at htargetMutable)
+  · by_cases hz : z = x
+    · have hcontainsOtherAtX :
+          (env.update x slot) ⊢ x ↝ Ty.borrow mutable targetsOther := by
+        simpa [hz] using hcontainsOther
+      exact False.elim
+        (by
+          rcases hcontainsOtherAtX with ⟨containedSlot, hslot, hcontainsTy⟩
+          have hslotEq : containedSlot = slot := by
+            have h : slot = containedSlot := by
+              simpa [Env.update] using hslot
+            exact h.symm
+          subst hslotEq
+          have hempty : targetsOther = [] :=
+            hloanFree mutable targetsOther hcontainsTy
+          subst hempty
+          simp at htargetOther)
+    · exact hsafe y z mutable targetsMutable targetsOther targetMutable targetOther
+        (EnvContains.update_fresh_ne hy hcontainsMutable)
+        (EnvContains.update_fresh_ne hz hcontainsOther)
+        htargetMutable htargetOther hconflict
+
+theorem borrowSafeEnv_update_fresh_loanFree {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    BorrowSafeEnv env →
+    TyLoanFree ty →
+    BorrowSafeEnv (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe hloanFree
+  exact borrowSafeEnv_update_partialLoanFree hsafe
+    (partialTyLoanFree_ty hloanFree)
+
+theorem tyBorrowSafeAgainstEnv_loanFree {env : Env} {ty : Ty} :
+    TyLoanFree ty →
+    TyBorrowSafeAgainstEnv env ty := by
+  intro hfree
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
+      _hother htargetMutable _htargetOther _hconflict
+    have hempty : targetsMutable = [] := hfree true targetsMutable hcontains
+    subst hempty
+    simp at htargetMutable
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther
+      _hcontainsMutable hcontains _htargetMutable htargetOther _hconflict
+    have hempty : targetsOther = [] := hfree mutable targetsOther hcontains
+    subst hempty
+    simp at htargetOther
 
 theorem tyBorrowSafeAgainstEnv_borrowFree {env : Env} {ty : Ty} :
     TyBorrowFree ty →
@@ -1959,9 +2028,10 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           (TermTyping.const hvalueTyping) hborrowSafe
           hborrowFree
           hfresh)
-    (fun {_env _typing _lifetime _ty} _hwellTy _hsource _hborrowSafe =>
-      by
-        sorry)
+    (fun {_env _typing _lifetime _ty} _hwellTy hloanFree _hsource hborrowSafe =>
+      ⟨hborrowSafe, tyBorrowSafeAgainstEnv_loanFree hloanFree,
+        fun _gamma _hfresh =>
+          borrowSafeEnv_update_fresh_loanFree hborrowSafe hloanFree⟩)
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy hnotRead
         _hsource hborrowSafe =>
       ⟨hborrowSafe,

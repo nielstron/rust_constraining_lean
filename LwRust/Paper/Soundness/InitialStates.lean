@@ -247,6 +247,10 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       subst hmem
       exact valueTyping_empty_sourceValue hvalueTyping)
     (by
+      intro _env _typing _lifetime _ty _hwellTy _hloanFree _htypingEq
+        candidate hmem
+      simp [termValues] at hmem)
+    (by
       intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
         _htypingEq candidate hmem
       simp [termValues] at hmem)
@@ -917,7 +921,7 @@ theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
       _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact (theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
+  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
     (hwellFormed lifetime) hborrowSafe hsafe
     ProgramStore.finiteSupport_empty htyping hterminates).2
 

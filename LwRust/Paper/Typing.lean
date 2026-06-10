@@ -717,6 +717,30 @@ def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
     targetMutable ⋈ targetOther →
     False)
 
+/-- A type that contains no borrow type anywhere. -/
+def TyBorrowFree (ty : Ty) : Prop :=
+  ∀ mutable targets, ¬ PartialTyContains (.ty ty) (.borrow mutable targets)
+
+def PartialTyBorrowFree (ty : PartialTy) : Prop :=
+  ∀ mutable targets, ¬ PartialTyContains ty (.borrow mutable targets)
+
+/-- A type whose contained borrows all have empty target lists.  Carried by
+`T-Missing`: a placeholder typed at `&mut []` claims no loan on any existing
+place, so installing it cannot create a borrow conflict.  This is the static
+analogue of `ast_copier`'s `__missing__<T>() -> T` returning a reference with
+a fresh region and no outstanding loans. -/
+def TyLoanFree (ty : Ty) : Prop :=
+  ∀ mutable targets,
+    PartialTyContains (.ty ty) (.borrow mutable targets) → targets = []
+
+def PartialTyLoanFree (ty : PartialTy) : Prop :=
+  ∀ mutable targets,
+    PartialTyContains ty (.borrow mutable targets) → targets = []
+
+theorem TyBorrowFree.loanFree {ty : Ty} (hfree : TyBorrowFree ty) :
+    TyLoanFree ty :=
+  fun mutable targets hcontains => absurd hcontains (hfree mutable targets)
+
 /--
 Per-slot shape agreement between a branch environment and a join result.
 
@@ -955,10 +979,14 @@ mutual
         {value : Value} {ty : Ty} :
         ValueTyping typing value ty →
         TermTyping env typing lifetime (.val value) ty env
-    /-- T-Missing: synthetic extractor placeholder. -/
+    /-- T-Missing: synthetic extractor placeholder.  The loan-freedom premise
+    keeps the placeholder from claiming a borrow of an existing place, which
+    would break borrow safety of the result environment (Corollary 4.14);
+    borrow shapes themselves are allowed via empty target lists. -/
     | missing {env : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {ty : Ty} :
         WellFormedTy env ty lifetime →
+        TyLoanFree ty →
         TermTyping env typing lifetime .missing ty env
     /-- T-Copy. -/
     | copy {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}

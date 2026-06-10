@@ -202,7 +202,16 @@ theorem multistep_missing_inv {store finalStore : ProgramStore} {lifetime : Life
     {term : Term} :
     MultiStep store lifetime .missing finalStore term →
     finalStore = store ∧ term = .missing := by
-  sorry
+  intro hmulti
+  generalize hstart : Term.missing = start at hmulti
+  induction hmulti with
+  | refl =>
+      cases hstart
+      exact ⟨rfl, rfl⟩
+  | trans hstep _hrest ih =>
+      cases hstart
+      cases hstep
+      exact ih rfl
 
 theorem multistep_missing_not_value {store finalStore : ProgramStore}
     {lifetime : Lifetime} {value : Value} :

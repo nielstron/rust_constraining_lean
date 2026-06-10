@@ -3676,6 +3676,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
       exact And.intro hwellFormed hterminal)
     (fun {_env _typing _lifetime _ty}
         (_hwellTy : WellFormedTy _env _ty _lifetime)
+        (_hloanFree : TyLoanFree _ty)
         (_htypingEq : _typing = typing) (hsource : SourceTerm .missing)
         (_store _finalStore : ProgramStore)
         (_finalValue : Value)

@@ -918,7 +918,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     ?singleton ?cons htyping
   · intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
-  · intro _env _typing lifetime _ty _hwellTy _hvst _hwf _hsafe _hstore
+  · intro _env _typing lifetime _ty _hwellTy _hloanFree _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, .missing, Step.missing⟩
   · intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy hreadProhibited
       _hvst hwf hsafe _hstore

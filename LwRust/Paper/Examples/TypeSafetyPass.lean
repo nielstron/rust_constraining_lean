@@ -31,12 +31,19 @@ theorem scalarCopyComparison_typing :
     CopyTy.int
     ShapeCompatible.int
 
+theorem scalarCopyComparison_terminates :
+    TerminatesAsValue ProgramStore.empty Lifetime.root scalarCopyComparison := by
+  unfold scalarCopyComparison
+  exact ⟨ProgramStore.empty, .bool true,
+    MultiStep.trans Step.eqTrue MultiStep.refl⟩
+
 theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .bool :=
-  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing (by sorry)
+  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
+    scalarCopyComparison_terminates
 
 /--
 Accepted `if/else` example for the control-flow extension: both branches return
@@ -67,12 +74,19 @@ theorem ifThenElseInt_typing :
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
 
+theorem ifThenElseInt_terminates :
+    TerminatesAsValue ProgramStore.empty Lifetime.root ifThenElseInt := by
+  unfold ifThenElseInt
+  exact ⟨ProgramStore.empty, .int 1,
+    MultiStep.trans Step.iteTrue MultiStep.refl⟩
+
 theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing (by sorry)
+  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
+    ifThenElseInt_terminates
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
@@ -103,12 +117,20 @@ theorem ifEqThenElseInt_typing :
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
 
+theorem ifEqThenElseInt_terminates :
+    TerminatesAsValue ProgramStore.empty Lifetime.root ifEqThenElseInt := by
+  unfold ifEqThenElseInt scalarCopyComparison
+  exact ⟨ProgramStore.empty, .int 1,
+    MultiStep.trans (Step.subIte Step.eqTrue)
+      (MultiStep.trans Step.iteTrue MultiStep.refl)⟩
+
 theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing (by sorry)
+  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
+    ifEqThenElseInt_terminates
 
 /--
 Accepted `if/else` with nontrivial pointer effects in the branches.

@@ -210,12 +210,12 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       subst hstore
       subst hterm
       exact Or.inl (value_terminal _))
-    (fun {_env _typing _lifetime _ty} _hwellTy _htypingEq _hsource
+    (fun {_env _typing _lifetime _ty} _hwellTy _hloanFree _htypingEq _hsource
         store store' term' _hvalid _hvst _hwf _hbs _hsafe _hfs hmulti => by
       rcases multistep_missing_inv hmulti with ⟨hstore, hterm⟩
       subst hstore
       subst hterm
-      exact Or.inr ⟨store, .missing, Step.missing⟩)
+      exact Or.inr ⟨_, .missing, Step.missing⟩)
     -- T-Copy: a single redex; afterwards the term is a value.
     (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy hnotRead
         htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs hsafe
