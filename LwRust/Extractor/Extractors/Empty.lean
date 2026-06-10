@@ -3,8 +3,11 @@ import LwRust.Extractor.Checkers
 /-!
 The trivial LwRust extractor.
 
-The conservativeness proofs are deliberately left as `sorry` placeholders,
-matching the current state of the copied extractor work.
+It discards the partial program and returns `()`, which is always well typed,
+so it is (vacuously) conservative — and correspondingly useless as a prefix
+checker: it accepts every prefix.  It exists to demonstrate that
+conservativity alone is cheap; the value of an extractor is its precision
+(see `NestedBlocks`).
 -/
 
 namespace ConservativeExtractor
@@ -17,7 +20,9 @@ def emptyProgramExtractor (_ : PartialProgram) : Program :=
 
 theorem emptyProgramExtractor_wellTyped_conservative :
     Conservative ProgramWellTyped CompletesProgram emptyProgramExtractor := by
-  sorry
+  intro p hInvalid full _hCompletion hFull
+  exact hInvalid ⟨.unit, LwRust.Paper.Env.empty,
+    LwRust.Paper.TermTyping.const LwRust.Paper.ValueTyping.unit⟩
 
 theorem emptyProgramExtractor_prefixChecker_complete :
     PrefixCheckerComplete ProgramWellTyped CompletesProgram
