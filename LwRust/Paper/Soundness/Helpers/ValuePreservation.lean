@@ -152,6 +152,9 @@ theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
     valueOwnedLocation? value = none := by
   intro hcopy hvalid
   cases hcopy with
+  | unit =>
+      cases hvalid
+      rfl
   | int =>
       cases hvalid
       rfl

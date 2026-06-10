@@ -1718,6 +1718,8 @@ theorem typingPreservesBorrowSafeResult_copy_case {env env₂ : Env}
   cases htyping with
   | copy hLv hcopy _hnotRead =>
       cases hcopy with
+      | unit =>
+          exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe tyBorrowFree_unit
       | int =>
           exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe tyBorrowFree_int
       | immBorrow =>
@@ -1973,6 +1975,8 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
       ⟨hborrowSafe,
         (by
           cases hcopy with
+          | unit =>
+              exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit
           | int =>
               exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int
           | immBorrow =>

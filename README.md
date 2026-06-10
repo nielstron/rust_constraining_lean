@@ -24,9 +24,7 @@ stated; the deviation then documents the corrected claim).
   results cover a (potentially proper) subset of the programs the paper's
   rules accept.  *Mechanisation debt:* an admissibility lemma showing the
   extra obligations are derivable for paper-typable core programs would
-  restore full coverage.  (A small instance of the same kind: `CopyTy` omits
-  `unit`, so `copy w` of a unit-typed lval is paper-typeable but rejected
-  here.)
+  restore full coverage.
 
 ## Improvements
 

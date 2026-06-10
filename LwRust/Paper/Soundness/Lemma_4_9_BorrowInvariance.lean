@@ -1840,6 +1840,8 @@ theorem copyTy_result_wellFormed {env : Env} {lv : LVal}
     WellFormedTy env ty lifetime := by
   intro hwellFormed hLv hcopy
   cases hcopy with
+  | unit =>
+      exact WellFormedTy.unit
   | int =>
       exact WellFormedTy.int
   | immBorrow =>

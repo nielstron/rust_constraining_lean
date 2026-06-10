@@ -71,6 +71,8 @@ end StoreTyping
 
 /-- Definition 3.6, `copy(T)`. -/
 inductive CopyTy : Ty → Prop where
+  | unit :
+      CopyTy .unit
   | int :
       CopyTy .int
   | immBorrow {targets : List LVal} :
