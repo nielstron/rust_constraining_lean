@@ -10,29 +10,6 @@ these to 0.  Each entry notes whether the deviation is mechanisation debt
 (closable) or a likely paper bug (the printed claim appears unprovable as
 stated; the deviation then documents the corrected claim).
 
-- **Lemma 4.11 (Preservation) carries two premises the paper does not
-  have.**
-  1. `SourceTerm t` — no reference literals anywhere in `t`.  The paper
-     quantifies over arbitrary valid runtime states; arbitrary runtime
-     constants can carry references inside unevaluated continuations that
-     typability alone does not control.  Source-initial wrappers
-     (`lemma_4_11_preservation_emptyInitial`) derive this premise from
-     typability, so the paper-facing empty-initial form is unaffected.
-  2. `BorrowSafeEnv Γ₁` — *likely paper bug:* the printed lemma appears false
-     without it.  Counterexample sketch: `x : Box(Box int)`,
-     `p ↦ &mut [*x]`, `q ↦ &mut [**x]` is well-formed with `S ∼ Γ` but not
-     borrow safe (`*x ⋈ **x`); `*p = box 5` is typeable (`q`'s target is
-     based at `x`, not `p`, so it does not write-prohibit `*p`) yet leaves
-     `q`'s stored reference dangling into the dropped old box, breaking
-     `S₂ ∼ Γ₂`.
-
-  The general (non-source) borrow-invariance route, `lemma_4_9_borrowInvariance`,
-  still carries `∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime`,
-  which effectively requires `σ` to contain no borrow types; for source-scoped
-  theorems (preservation, Theorem 4.12, Corollary 4.14) this premise has been
-  eliminated via `TermTyping.retype_of_sourceTerm` (source typings never
-  consult `σ`).
-
 - **The mechanised typing relation is strictly stronger than the paper's, and
   no admissibility theorem bridges the gap.**  `T-Assign` carries extra
   obligations (the lhs re-typeable after the rhs, a linearization/rank witness
@@ -55,6 +32,16 @@ stated; the deviation then documents the corrected claim).
 
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
+
+- **Lemma 4.11 (Preservation) carries a premises the paper does not
+  have.**
+   `BorrowSafeEnv Γ₁` — *likely paper bug:* the printed lemma appears false
+     without it.  Counterexample sketch: `x : Box(Box int)`,
+     `p ↦ &mut [*x]`, `q ↦ &mut [**x]` is well-formed with `S ∼ Γ` but not
+     borrow safe (`*x ⋈ **x`); `*p = box 5` is typeable (`q`'s target is
+     based at `x`, not `p`, so it does not write-prohibit `*p`) yet leaves
+     `q`'s stored reference dangling into the dropped old box, breaking
+     `S₂ ∼ Γ₂`.
 
 - **Runtime validity is stronger than Definition 4.3.**  `ValidRuntimeState`
   contains the paper's `ValidState`, plus explicit invariants for the abstract
