@@ -2,18 +2,6 @@
 
 Lean mechanisation of the core FR/lw-rust calculus from the paper.
 
-## Deviations from the Paper
-
-This section records shortcuts taken during mechanization.
-The goal is to reduce these to 0.
-
-### Theorem Interface Notes
-
-- **Corollary 4.14 uses the core strengthening.**  The mechanised core result
-  exposes the stronger equality-shaped output environment rather than the
-  paper's more future-proof `Gamma2 >= Gamma3` shape.  That weakening relation
-  should be reintroduced for control flow, loops, and recursive calls.
-
 ## Improvements
 
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.

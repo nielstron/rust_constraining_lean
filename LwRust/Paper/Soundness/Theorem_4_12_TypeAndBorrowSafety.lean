@@ -189,4 +189,71 @@ theorem theorem_4_12_typeAndBorrowSafety
     typeAndBorrowSafety hrefs hsource hvalid
       hstoreTyping hwellFormed hborrowSafe hsafe hstore htyping hterminates
 
+/--
+Corollary 4.14, Borrow Safety (paper interface).
+
+Paper statement (Section 4.5):
+
+> Let `S₁ ▷ t₁` and `S₂ ▷ t₂` be valid states; let `σ` be a store typing where
+> `S₁ ▷ t₁ ⊢ σ`; let `Γ₁` be a well-formed borrow safe typing environment with
+> respect to a lifetime `l` where `S₁ ∼ Γ₁`; let `Γ₂` be a typing environment;
+> and, let `T₁, T₂` be types.  If `Γ₁ ⊢ ⟨t₁ : T₁⟩^l_σ ⊣ Γ₂` where
+> `⟨S₁ ▷ t₁ ⟶ S₂ ▷ t₂⟩^l`, then, for arbitrary `γ ∈ fresh`, a well-formed and
+> borrow safe typing environment `Γ₃[γ ↦ ⟨T₂⟩^l] ⊑ Γ₂[γ ↦ ⟨T₁⟩^l]` exists
+> where `S₂ ∼ Γ₃`.
+
+The output environment is existential and only `⊑`-related (Definition 3.9) to
+the static output, which is the future-proof interface for extensions whose
+static output conservatively abstracts several execution paths (control flow,
+loops, recursive calls).  The calculus core witnesses the statement with
+`Γ₃ = Γ₂` and `T₂ = T₁` (the strengthened appendix form is
+`corollary_4_14_borrowSafety`); runs are taken to their terminal state, as in
+Theorem 4.12.
+
+The fresh-slot coherence obligations (`WellFormedTy` and
+`FreshUpdateCoherenceObligations` for the result binding) are carried
+explicitly, in line with the mechanisation's rule-carried coherence
+obligations for fresh declarations.
+-/
+theorem corollary_4_14_borrowSafety_weakening
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty}
+    {finalValue : Value}
+    (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
+    (hsource : SourceTerm term)
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hborrowSafe : BorrowSafeEnv env₁)
+    (hsafe : store ∼ₛ env₁)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂)
+    (hmulti : MultiStep store lifetime term finalStore (.val finalValue))
+    (hwellTy : WellFormedTy env₂ ty lifetime)
+    (gamma : Name)
+    (hfresh : env₂.fresh gamma)
+    (hfreshCoherence :
+      FreshUpdateCoherenceObligations env₂ gamma ty lifetime) :
+    ∃ env₃ resultTy,
+      EnvStrengthens
+        (env₃.update gamma { ty := .ty resultTy, lifetime := lifetime })
+        (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) ∧
+      WellFormedEnv
+        (env₃.update gamma { ty := .ty resultTy, lifetime := lifetime })
+        lifetime ∧
+      BorrowSafeEnv
+        (env₃.update gamma { ty := .ty resultTy, lifetime := lifetime }) ∧
+      finalStore ∼ₛ env₃ ∧
+      ValidValue finalStore finalValue resultTy := by
+  have hterminal :=
+    lemma_4_11_preservation hrefs hsource hvalid hstoreTyping hwellFormed
+      hborrowSafe hsafe htyping hmulti
+  have hwf₂ : WellFormedEnv env₂ lifetime :=
+    borrowInvariance_of_ruleCarriedObligations hrefs hvalid.validState
+      hstoreTyping hwellFormed hsafe htyping
+  have hbs :=
+    typingPreservesBorrowSafeResult_global hsource hborrowSafe htyping
+  exact ⟨env₂, ty, EnvStrengthens.refl _,
+    borrowInvariance_result_extension hwf₂ hwellTy hfresh hfreshCoherence,
+    hbs.2.2 gamma hfresh, hterminal.2.1, hterminal.2.2⟩
+
 end LwRust.Paper.Soundness
