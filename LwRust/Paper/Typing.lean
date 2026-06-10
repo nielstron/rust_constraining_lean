@@ -699,6 +699,24 @@ def BorrowSafeEnv (env : Env) : Prop :=
     targetMutable ⋈ targetOther →
     x = y
 
+/-- A result type is borrow-safe against an environment when installing it as a
+new root would introduce no borrow-target conflict with any existing root. -/
+def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
+  (∀ targetsMutable mutable targetsOther x targetMutable targetOther,
+    PartialTyContains (.ty ty) (.borrow true targetsMutable) →
+    env ⊢ x ↝ Ty.borrow mutable targetsOther →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    False) ∧
+  (∀ x targetsMutable mutable targetsOther targetMutable targetOther,
+    env ⊢ x ↝ Ty.borrow true targetsMutable →
+    PartialTyContains (.ty ty) (.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    False)
+
 /--
 Per-slot shape agreement between a branch environment and a join result.
 
@@ -1047,7 +1065,11 @@ mutual
       concedes the corresponding weakening of Corollary 4.14 for this
       extension in Section 4.5.1).  The preservation architecture threads
       borrow safety through sequencing, so the mechanised rule only accepts
-      conditionals whose join remains borrow safe. -/
+      conditionals whose join remains borrow safe;
+    * `TyBorrowSafeAgainstEnv` for the result type — this is the
+      root-independent result-extension invariant used by Corollary 4.14.
+      It does not follow from branch-local result safety because the joined
+      result can be installed in the joined environment. -/
     | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy joinTy : Ty} :
@@ -1058,10 +1080,12 @@ mutual
         EnvJoin env₃ env₄ env₅ →
         EnvJoinSameShape env₃ env₅ →
         EnvJoinSameShape env₄ env₅ →
+        WellFormedTy env₅ joinTy lifetime →
         ContainedBorrowsWellFormed env₅ →
         Coherent env₅ →
         Linearizable env₅ →
         BorrowSafeEnv env₅ →
+        TyBorrowSafeAgainstEnv env₅ joinTy →
         TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
           joinTy env₅
 

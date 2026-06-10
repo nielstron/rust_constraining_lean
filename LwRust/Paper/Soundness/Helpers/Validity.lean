@@ -255,6 +255,46 @@ theorem SourceTerm.assign_inner {lhs : LVal} {rhs : Term} :
   intro hsource value hmem
   exact hsource value (by simpa [termValues] using hmem)
 
+theorem SourceTerm.eq_lhs {lhs rhs : Term} :
+    SourceTerm (.eq lhs rhs) →
+    SourceTerm lhs := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inl hmem)
+
+theorem SourceTerm.eq_rhs {lhs rhs : Term} :
+    SourceTerm (.eq lhs rhs) →
+    SourceTerm rhs := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr hmem)
+
+theorem SourceTerm.ite_condition {condition trueBranch falseBranch : Term} :
+    SourceTerm (.ite condition trueBranch falseBranch) →
+    SourceTerm condition := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inl hmem)
+
+theorem SourceTerm.ite_trueBranch {condition trueBranch falseBranch : Term} :
+    SourceTerm (.ite condition trueBranch falseBranch) →
+    SourceTerm trueBranch := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr (Or.inl hmem))
+
+theorem SourceTerm.ite_falseBranch {condition trueBranch falseBranch : Term} :
+    SourceTerm (.ite condition trueBranch falseBranch) →
+    SourceTerm falseBranch := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr (Or.inr hmem))
+
 namespace ProgramStore
 
 /--

@@ -214,6 +214,7 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
   induction hvalid with
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
+  | bool => intro _; exact ValidPartialValue.bool
   | undef => intro _; exact ValidPartialValue.undef
   | borrow hmem hloc =>
       intro hreach
@@ -248,6 +249,7 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
   induction hvalid with
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
+  | bool => intro _; exact ValidPartialValue.bool
   | undef => intro _; exact ValidPartialValue.undef
   | borrow hmem hloc =>
       intro hreach
@@ -484,6 +486,26 @@ theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
     TerminalStateSafe store .unit env .unit := by
   intro hvalidRuntime hsafe
   exact ⟨hvalidRuntime, hsafe, ValidPartialValue.unit⟩
+
+theorem validRuntimeState_of_sourceTerm {store : ProgramStore} {context term : Term} :
+    SourceTerm term →
+    ValidRuntimeState store context →
+    ValidRuntimeState store term := by
+  intro hsource hvalid
+  exact ⟨⟨hvalid.1.1, sourceTerm_validTerm hsource, by
+      intro owned hmem
+      have hnone := sourceTerm_no_owningLocations hsource
+      rw [hnone] at hmem
+      cases hmem⟩,
+    hvalid.2.1, hvalid.2.2.1, hvalid.2.2.2.1,
+    sourceTerm_ownerTargetsHeap hsource⟩
+
+theorem sourceTerm_bool_value (value : Bool) :
+    SourceTerm (.val (.bool value)) := by
+  intro candidate hmem
+  simp [termValues] at hmem
+  subst hmem
+  trivial
 
 /--
 Direct variable writes transport from the environment where the variable has
@@ -967,6 +989,9 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_selected_dependency_f
   | int =>
       intro _howners _hdeps
       exact ValidPartialValue.int
+  | bool =>
+      intro _howners _hdeps
+      exact ValidPartialValue.bool
   | undef =>
       intro _howners _hdeps
       exact ValidPartialValue.undef
@@ -3921,6 +3946,160 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             hLhsPost hshape hwellTy hwrite hranked hnotWrite hwellOut
             hvalidValue hassignStep
         exact ⟨hwellOut, hterminal⟩)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
+        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR
+        (htypingEq : _typing = typing) (hsource : SourceTerm (.eq _lhs _rhs))
+        store finalStore finalValue hvalidRuntime
+        hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti =>
+      by
+        cases htypingEq
+        rcases multistep_eq_to_value_inv hmulti with
+          ⟨midStore, leftValue, rightStore, rightValue, hleftMulti, hrightMulti,
+            hredex⟩
+        have hsourceLeft : SourceTerm _lhs :=
+          SourceTerm.eq_lhs hsource
+        have hsourceRight : SourceTerm _rhs :=
+          SourceTerm.eq_rhs hsource
+        have hvalidLeft : ValidRuntimeState store _lhs :=
+          validRuntimeState_of_sourceTerm hsourceLeft hvalidRuntime
+        have hstoreTypingLeft : ValidStoreTyping store _lhs typing := by
+          intro value hmem
+          exact hvalidStoreTyping value (by simp [termValues, hmem])
+        rcases ihL rfl hsourceLeft store midStore leftValue hvalidLeft
+            hstoreTypingLeft hwellFormed hborrowSafe hsafe hleftMulti with
+          ⟨hwellLeft, hterminalLeft⟩
+        have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
+          (typingPreservesBorrowSafeResult_global hsourceLeft hborrowSafe _hLhs).1
+        have hvalidRight : ValidRuntimeState midStore _rhs :=
+          validRuntimeState_of_sourceTerm hsourceRight hterminalLeft.1
+        have hstoreTypingRightSource : ValidStoreTyping store _rhs typing := by
+          intro value hmem
+          exact hvalidStoreTyping value (by simp [termValues, hmem])
+        have hstoreTypingRight : ValidStoreTyping midStore _rhs typing :=
+          validStoreTyping_sourceTerm_of_validStoreTyping hsourceRight
+            hstoreTypingRightSource
+        rcases ihR rfl hsourceRight midStore rightStore rightValue hvalidRight
+            hstoreTypingRight hwellLeft hborrowSafeLeft hterminalLeft.2.1
+            hrightMulti with
+          ⟨hwellRight, hterminalRight⟩
+        cases hredex with
+        | eqTrue =>
+            exact ⟨hwellRight,
+              ⟨validRuntimeState_of_sourceTerm (sourceTerm_bool_value true)
+                  hterminalRight.1,
+                hterminalRight.2.1,
+                ValidPartialValue.bool⟩⟩
+        | eqFalse _hne =>
+            exact ⟨hwellRight,
+              ⟨validRuntimeState_of_sourceTerm (sourceTerm_bool_value false)
+                  hterminalRight.1,
+                hterminalRight.2.1,
+                ValidPartialValue.bool⟩⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin
+        hcontained hcoherent hlinear _hborrowSafeJoin _hresultSafe ihCondition
+        ihTrue ihFalse
+        (htypingEq : _typing = typing)
+        (hsource : SourceTerm (.ite _condition _trueBranch _falseBranch))
+        store finalStore finalValue hvalidRuntime
+        hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti =>
+      by
+        cases htypingEq
+        rcases multistep_ite_to_value_inv hmulti with
+          ⟨midStore, hchosen⟩
+        have hsourceCondition : SourceTerm _condition :=
+          SourceTerm.ite_condition hsource
+        have hvalidCondition : ValidRuntimeState store _condition :=
+          validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
+        have hstoreTypingCondition : ValidStoreTyping store _condition typing := by
+          intro value hmem
+          exact hvalidStoreTyping value (by simp [termValues, hmem])
+        have hbranchShape :
+            ∀ x leftSlot rightSlot,
+              _env₃.slotAt x = some leftSlot →
+              _env₄.slotAt x = some rightSlot →
+              PartialTy.sameShape leftSlot.ty rightSlot.ty := by
+          intro x leftSlot rightSlot hleft hright
+          have hle := EnvJoin.le_left henvJoin x
+          rw [hleft] at hle
+          cases hjoinSlot : _env₅.slotAt x with
+          | none =>
+              rw [hjoinSlot] at hle
+              exact False.elim hle
+          | some joinSlot =>
+              exact PartialTy.sameShape_trans
+                (hsameLeft x leftSlot joinSlot hleft hjoinSlot)
+                (PartialTy.sameShape_symm
+                  (hsameRight x rightSlot joinSlot hright hjoinSlot))
+        have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
+          (typingPreservesBorrowSafeResult_global hsourceCondition hborrowSafe
+            _hcondition).1
+        rcases hchosen with htrueChosen | hfalseChosen
+        · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
+          rcases ihCondition rfl hsourceCondition store midStore (.bool true)
+              hvalidCondition hstoreTypingCondition hwellFormed hborrowSafe hsafe
+              _hconditionMulti with
+            ⟨hwellCondition, hterminalCondition⟩
+          have hsourceTrue : SourceTerm _trueBranch :=
+            SourceTerm.ite_trueBranch hsource
+          have hvalidTrue : ValidRuntimeState midStore _trueBranch :=
+            validRuntimeState_of_sourceTerm hsourceTrue hterminalCondition.1
+          have hstoreTypingTrueSource : ValidStoreTyping store _trueBranch typing := by
+            intro value hmem
+            exact hvalidStoreTyping value (by simp [termValues, hmem])
+          have hstoreTypingTrue : ValidStoreTyping midStore _trueBranch typing :=
+            validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
+              hstoreTypingTrueSource
+          rcases ihTrue rfl hsourceTrue midStore finalStore finalValue hvalidTrue
+              hstoreTypingTrue hwellCondition hborrowSafeCondition
+              hterminalCondition.2.1 htrueMulti with
+            ⟨hwellTrue, hterminalTrue⟩
+          have hwellJoinEnv : WellFormedEnv _env₅ _lifetime :=
+            ⟨hcontained,
+              EnvSlotsOutlive.of_lifetimesPreserved hwellTrue.2.1
+                (EnvJoin.lifetimesPreserved_left henvJoin),
+              hcoherent, hlinear⟩
+          have henvMap : EnvSameShapeStrengthening _env₃ _env₅ :=
+            EnvJoin.left_sameShapeStrengthening henvJoin hbranchShape
+          have hsafeJoin : finalStore ∼ₛ _env₅ :=
+            henvMap.safe hterminalTrue.2.1
+          have hvalidJoin : ValidValue finalStore finalValue _joinTy :=
+            safeStrengthening hwellJoinEnv hsafeJoin
+              (PartialTyUnion.left_strengthens hjoin) hterminalTrue.2.2
+          exact ⟨hwellJoinEnv, ⟨hterminalTrue.1, hsafeJoin, hvalidJoin⟩⟩
+        · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
+          rcases ihCondition rfl hsourceCondition store midStore (.bool false)
+              hvalidCondition hstoreTypingCondition hwellFormed hborrowSafe hsafe
+              _hconditionMulti with
+            ⟨hwellCondition, hterminalCondition⟩
+          have hsourceFalse : SourceTerm _falseBranch :=
+            SourceTerm.ite_falseBranch hsource
+          have hvalidFalse : ValidRuntimeState midStore _falseBranch :=
+            validRuntimeState_of_sourceTerm hsourceFalse hterminalCondition.1
+          have hstoreTypingFalseSource : ValidStoreTyping store _falseBranch typing := by
+            intro value hmem
+            exact hvalidStoreTyping value (by simp [termValues, hmem])
+          have hstoreTypingFalse : ValidStoreTyping midStore _falseBranch typing :=
+            validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
+              hstoreTypingFalseSource
+          rcases ihFalse rfl hsourceFalse midStore finalStore finalValue hvalidFalse
+              hstoreTypingFalse hwellCondition hborrowSafeCondition
+              hterminalCondition.2.1 hfalseMulti with
+            ⟨hwellFalse, hterminalFalse⟩
+          have hwellJoinEnv : WellFormedEnv _env₅ _lifetime :=
+            ⟨hcontained,
+              EnvSlotsOutlive.of_lifetimesPreserved hwellFalse.2.1
+                (EnvJoin.lifetimesPreserved_right henvJoin),
+              hcoherent, hlinear⟩
+          have henvMap : EnvSameShapeStrengthening _env₄ _env₅ :=
+            EnvJoin.right_sameShapeStrengthening henvJoin hbranchShape
+          have hsafeJoin : finalStore ∼ₛ _env₅ :=
+            henvMap.safe hterminalFalse.2.1
+          have hvalidJoin : ValidValue finalStore finalValue _joinTy :=
+            safeStrengthening hwellJoinEnv hsafeJoin
+              (PartialTyUnion.right_strengthens hjoin) hterminalFalse.2.2
+          exact ⟨hwellJoinEnv, ⟨hterminalFalse.1, hsafeJoin, hvalidJoin⟩⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih
         htypingEq hsource outerLifetime store finalStore finalValue hchild hvalidRuntime
         hvalidStoreTyping hwellFormed hborrowSafe hsafe hwellTy hmulti =>

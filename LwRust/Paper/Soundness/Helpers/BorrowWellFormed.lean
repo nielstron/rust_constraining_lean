@@ -519,7 +519,6 @@ theorem partialTy_vars_mem_contains {pt : PartialTy} :
         ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v)
     (by intro v hv; simp [Ty.vars] at hv)
     (by intro v hv; simp [Ty.vars] at hv)
-    (by intro v hv; simp [Ty.vars] at hv)
     (by
       intro m tgts v hv
       simp only [Ty.vars, List.mem_map] at hv
@@ -530,6 +529,7 @@ theorem partialTy_vars_mem_contains {pt : PartialTy} :
       simp only [Ty.vars] at hv
       obtain ⟨m, tgts, hcontains, tgt, htgt, hbase⟩ := ih v hv
       exact ⟨m, tgts, PartialTyContains.tyBox hcontains, tgt, htgt, hbase⟩)
+    (by intro v hv; simp [Ty.vars] at hv)
     (by intro t ih v hv; exact ih v (by simpa [PartialTy.vars] using hv))
     (by
       intro p ih v hv
@@ -1509,8 +1509,8 @@ theorem TermTyping.slot_lifetime_survives :
       (by
         intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
           _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcond _htrue _hfalse
-          _htyJoin hjoin _hshapeTrue _hshapeFalse _hcontained _hcoherent _hlin
-          _hborrowSafe ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
+          _htyJoin hjoin _hshapeTrue _hshapeFalse _hwellJoin _hcontained _hcoherent _hlin
+          _hborrowSafe _hresultSafe ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
         rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
         have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
           rw [← hcondLifetime]
@@ -1625,8 +1625,8 @@ theorem TermTyping.slot_lifetime_survives :
       (by
         intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
           _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcond _htrue _hfalse
-          _htyJoin hjoin _hshapeTrue _hshapeFalse _hcontained _hcoherent _hlin
-          _hborrowSafe ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
+          _htyJoin hjoin _hshapeTrue _hshapeFalse _hwellJoin _hcontained _hcoherent _hlin
+          _hborrowSafe _hresultSafe ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
         rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
         have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
           rw [← hcondLifetime]

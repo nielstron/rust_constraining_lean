@@ -24,6 +24,7 @@ stated here: target-list joins may reorder borrow-target lists under boxes, so
 def Ty.eqvX : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
+  | .bool, .bool => True
   | .borrow m₁ t₁, .borrow m₂ t₂ => m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
   | .box t₁, .box t₂ => t₁ = t₂
   | _, _ => False
@@ -46,19 +47,28 @@ def PartialTy.eqvX : PartialTy → PartialTy → Prop
 theorem Ty.eqv_of_eqvX : {a b : Ty} → Ty.eqvX a b → Ty.eqv a b
   | .unit, .unit, _ => trivial
   | .int, .int, _ => trivial
+  | .bool, .bool, _ => trivial
   | .borrow _ _, .borrow _ _, h => h
   | .box _, .box _, h => by simp only [Ty.eqvX] at h; subst h; exact Ty.eqv_refl _
   | .unit, .int, h => by simp only [Ty.eqvX] at h
+  | .unit, .bool, h => by simp only [Ty.eqvX] at h
   | .unit, .borrow _ _, h => by simp only [Ty.eqvX] at h
   | .unit, .box _, h => by simp only [Ty.eqvX] at h
   | .int, .unit, h => by simp only [Ty.eqvX] at h
+  | .int, .bool, h => by simp only [Ty.eqvX] at h
   | .int, .borrow _ _, h => by simp only [Ty.eqvX] at h
   | .int, .box _, h => by simp only [Ty.eqvX] at h
+  | .bool, .unit, h => by simp only [Ty.eqvX] at h
+  | .bool, .int, h => by simp only [Ty.eqvX] at h
+  | .bool, .borrow _ _, h => by simp only [Ty.eqvX] at h
+  | .bool, .box _, h => by simp only [Ty.eqvX] at h
   | .borrow _ _, .unit, h => by simp only [Ty.eqvX] at h
   | .borrow _ _, .int, h => by simp only [Ty.eqvX] at h
+  | .borrow _ _, .bool, h => by simp only [Ty.eqvX] at h
   | .borrow _ _, .box _, h => by simp only [Ty.eqvX] at h
   | .box _, .unit, h => by simp only [Ty.eqvX] at h
   | .box _, .int, h => by simp only [Ty.eqvX] at h
+  | .box _, .bool, h => by simp only [Ty.eqvX] at h
   | .box _, .borrow _ _, h => by simp only [Ty.eqvX] at h
 
 theorem PartialTy.eqv_of_eqvX : {a b : PartialTy} → PartialTy.eqvX a b → PartialTy.eqv a b
@@ -123,6 +133,7 @@ theorem partialTyStrengthens_eqvX_right {c a b : PartialTy}
           | unit => simp [PartialTy.eqvX, Ty.eqvX] at hab
           | int => simp [PartialTy.eqvX, Ty.eqvX] at hab
           | borrow _ _ => simp [PartialTy.eqvX, Ty.eqvX] at hab
+          | bool => simp [PartialTy.eqvX, Ty.eqvX] at hab
       | box _ => simp [PartialTy.eqvX] at hab
       | undef _ => simp [PartialTy.eqvX] at hab
   | @borrow m cL aL hsub =>
@@ -136,6 +147,7 @@ theorem partialTyStrengthens_eqvX_right {c a b : PartialTy}
           | unit => simp [PartialTy.eqvX, Ty.eqvX] at hab
           | int => simp [PartialTy.eqvX, Ty.eqvX] at hab
           | box _ => simp [PartialTy.eqvX, Ty.eqvX] at hab
+          | bool => simp [PartialTy.eqvX, Ty.eqvX] at hab
       | box _ => simp [PartialTy.eqvX] at hab
       | undef _ => simp [PartialTy.eqvX] at hab
   | @undefLeft cT aT _h ih =>

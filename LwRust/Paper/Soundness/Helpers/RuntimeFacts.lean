@@ -1228,6 +1228,7 @@ theorem writeLeafTy_mono {env : Env} {q : List Unit} {a : PartialTy} {rhsTy : Ty
           | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
       | box _ => simp [PartialTy.sameShape] at hshape
       | undef _ => simp [PartialTy.sameShape] at hshape
 
@@ -2682,12 +2683,7 @@ theorem valueTyping_deterministic {typing : StoreTyping} {value : Value}
     ValueTyping typing value right →
     left = right := by
   intro hleft hright
-  cases hleft <;> cases hright
-  · rfl
-  · rfl
-  · rename_i _ref hleftLookup hrightLookup
-    rw [hleftLookup] at hrightLookup
-    injection hrightLookup
+  exact ValueTyping.deterministic hleft hright
 
 /-- Lemma 9.7 lifted to singleton term lists. -/
 theorem termListTyping_singleton_value_environment_eq {env₁ env₂ : Env}
@@ -3014,6 +3010,8 @@ theorem validPartialValue_full_value {store : ProgramStore}
       exact ⟨.unit, rfl, ValidPartialValue.unit⟩
   | int =>
       exact ⟨.int _, rfl, ValidPartialValue.int⟩
+  | bool =>
+      exact ⟨.bool _, rfl, ValidPartialValue.bool⟩
   | borrow hmem hloc =>
       exact ⟨.ref { location := _, owner := false }, rfl,
         ValidPartialValue.borrow hmem hloc⟩
@@ -3205,17 +3203,20 @@ theorem lvalTyping_read_nonOwner_of_shapeCompatible {store : ProgramStore} {env 
       cases hslotEq
       have hselectedShape :
           selectedTy = .unit ∨ selectedTy = .int ∨
+            selectedTy = .bool ∨
             ∃ mutable targets, selectedTy = .borrow mutable targets :=
         ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty hnonOwner hstrength hshape
-      rcases hselectedShape with hunit | hint | hborrowShape
+      rcases hselectedShape with hunit | hint | hbool | hborrowShape
       · subst hunit
         exact validPartialValue_nonOwner_of_envShape hvalid (Or.inl rfl)
       · subst hint
         exact validPartialValue_nonOwner_of_envShape hvalid (Or.inr (Or.inl rfl))
+      · subst hbool
+        exact validPartialValue_nonOwner_of_envShape hvalid (Or.inr (Or.inr (Or.inl rfl)))
       · rcases hborrowShape with ⟨mutable, targets, hborrowTy⟩
         subst hborrowTy
         exact validPartialValue_nonOwner_of_envShape hvalid
-          (Or.inr (Or.inr (Or.inr ⟨mutable, targets, rfl⟩)))
+          (Or.inr (Or.inr (Or.inr (Or.inr ⟨mutable, targets, rfl⟩))))
 
 /-- Lemma 9.3 operational corollary: locating an lval makes `read` defined. -/
 theorem read_defined_of_location {store : ProgramStore} {lv : LVal} {ty : PartialTy} :

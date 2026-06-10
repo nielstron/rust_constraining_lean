@@ -68,6 +68,12 @@ stated; the deviation then documents the corrected claim).
   formalised admissibility proof (essentially follow-up Section 6 plus
   coherence propagation) and the two benign tightenings above.
 
+ - For ITE, we enforce BorrowSafeEnv for the resulting merged environment, and that inserting the merged type of the returned value
+   into the merged environment remains borrow safe (TyBorrowSafeAgainstEnv, e.g. relevant if a borrow type is returned)..
+   This removes the edge case outlined in the paper that merging type- and borrow-safe
+   branches can result in an unsafe environment explicitly.
+   The type system thus rejects a few more programs.
+
 ## Improvements
 
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.

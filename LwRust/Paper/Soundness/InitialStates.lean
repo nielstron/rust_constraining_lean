@@ -23,6 +23,8 @@ theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
       exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
   | int value =>
       exact ⟨.int, ValueTyping.int, ValidPartialValue.int⟩
+  | bool value =>
+      exact ⟨.bool, ValueTyping.bool, ValidPartialValue.bool⟩
   | ref ref =>
       cases hsource
 
@@ -51,6 +53,9 @@ theorem sourceValue_empty_valueTyping_borrowFree {value : Value} {ty : Ty} :
   | int _ =>
       cases htyping
       exact tyBorrowFree_int
+  | bool _ =>
+      cases htyping
+      exact tyBorrowFree_bool
   | ref _ =>
       cases hsource
 
@@ -110,6 +115,8 @@ theorem sourceInitial_box_value_borrowSafety_result_extension
                 exact WellFormedTy.unit
             | int =>
                 exact WellFormedTy.int
+            | bool =>
+                exact WellFormedTy.bool
             | ref hlookup =>
                 simp [StoreTyping.empty] at hlookup
           have hinnerSafe :
@@ -146,6 +153,8 @@ theorem sourceInitial_declare_value_borrowSafety_result_extension
                 exact WellFormedTy.unit
             | int =>
                 exact WellFormedTy.int
+            | bool =>
+                exact WellFormedTy.bool
             | ref hlookup =>
                 simp [StoreTyping.empty] at hlookup
           have hdeclared :
@@ -213,6 +222,8 @@ theorem valueTyping_empty_sourceValue {value : Value} {ty : Ty} :
       trivial
   | int _ =>
       trivial
+  | bool _ =>
+      trivial
   | ref ref =>
       cases htyping with
       | ref hlookup =>
@@ -268,6 +279,25 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
         _rhs _rhsTy _hLhs _hRhs _hLhsPost _hshape _hwellTy _hwrite _hranked
         _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
       exact ih htypingEq candidate (by simpa [termValues] using hmem))
+    (by
+      intro _env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy
+        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq candidate hmem
+      simp [termValues] at hmem
+      rcases hmem with hleft | hright
+      · exact ihL htypingEq candidate hleft
+      · exact ihR htypingEq candidate hright)
+    (by
+      intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+        _trueBranch _falseBranch _trueTy _falseTy _joinTy
+        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
+        _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe _hresultSafe
+        ihCondition ihTrue ihFalse htypingEq candidate hmem
+      simp [termValues] at hmem
+      rcases hmem with hconditionMem | hbranchMem
+      · exact ihCondition htypingEq candidate hconditionMem
+      · rcases hbranchMem with htrueMem | hfalseMem
+        · exact ihTrue htypingEq candidate htrueMem
+        · exact ihFalse htypingEq candidate hfalseMem)
     (by
       intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
         candidate hmem

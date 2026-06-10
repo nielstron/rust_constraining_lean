@@ -374,6 +374,7 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
   induction hvalid with
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
+  | bool => intro _; exact ValidPartialValue.bool
   | undef => intro _; exact ValidPartialValue.undef
   | borrow hmem hloc =>
       intro hreach
@@ -458,6 +459,9 @@ theorem validPartialValue_drops_of_avoids_selected
   | int =>
       intro _howners _hdependencies
       exact ValidPartialValue.int
+  | bool =>
+      intro _howners _hdependencies
+      exact ValidPartialValue.bool
   | undef =>
       intro _howners _hdependencies
       exact ValidPartialValue.undef
@@ -517,6 +521,7 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
   induction hvalid with
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
+  | bool => intro _; exact ValidPartialValue.bool
   | undef => intro _; exact ValidPartialValue.undef
   | borrow hmem hloc =>
       intro hreach
@@ -693,6 +698,9 @@ theorem reaches_owning_or_store_owns_of_validPartialValue {env : Env}
   | int =>
       intro hreach
       cases hreach
+  | bool =>
+      intro hreach
+      cases hreach
   | undef =>
       intro hreach
       cases hreach
@@ -774,6 +782,9 @@ theorem reaches_owner_source_of_validPartialValue {env : Env}
       intro hreach
       cases hreach
   | int =>
+      intro hreach
+      cases hreach
+  | bool =>
       intro hreach
       cases hreach
   | undef =>
@@ -923,6 +934,8 @@ theorem dropsAvoids_of_ownerReaches_stored_validPartialValue
       cases hreach
   | int =>
       cases hreach
+  | bool =>
+      cases hreach
   | undef =>
       cases hreach
   | borrow _hmem _hloc =>
@@ -1038,6 +1051,8 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
   | unit =>
       cases hreach
   | int =>
+      cases hreach
+  | bool =>
       cases hreach
   | undef =>
       cases hreach
@@ -1169,6 +1184,8 @@ theorem dropsAvoids_of_reaches_validPartialValue
   | unit =>
       cases hreach
   | int =>
+      cases hreach
+  | bool =>
       cases hreach
   | undef =>
       cases hreach

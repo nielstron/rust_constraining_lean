@@ -158,6 +158,9 @@ theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
   | int =>
       cases hvalid
       rfl
+  | bool =>
+      cases hvalid
+      rfl
   | immBorrow =>
       cases hvalid with
       | borrow _hmem _hloc =>

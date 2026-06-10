@@ -43,10 +43,10 @@ mutual
   inductive Ty where
     | unit
     | int
-    /-- Section 6.1 control-flow extension (Figure 5): Boolean type. -/
-    | bool
     | borrow (mutable : Bool) (targets : List LVal)
     | box (element : Ty)
+    /-- Section 6.1 control-flow extension (Figure 5): Boolean type. -/
+    | bool
     deriving BEq, Repr
 
   inductive PartialTy where
@@ -70,9 +70,9 @@ def Reference.borrowed (ref : Reference) : Reference :=
 inductive Value where
   | unit
   | int (value : Int)
+  | ref (location : Reference)
   /-- Section 6.1 control-flow extension (Figure 5): `true` / `false`. -/
   | bool (value : Bool)
-  | ref (location : Reference)
   deriving BEq, DecidableEq, Repr
 
 inductive PartialValue where
@@ -99,17 +99,8 @@ inductive Term where
   | move (operand : LVal)
   | copy (operand : LVal)
   | val (value : Value)
-  /-- Section 6.1 control-flow extension (Figure 5): equality comparator
-  `t == t`. -/
+  /-- Section 6.1 control-flow extension (Figure 5): equality comparator and conditional -/
   | eq (lhs rhs : Term)
-  /-- Section 6.1 control-flow extension (Figure 5): conditional
-  `if t {t}m else {s}n`.
-
-  The branches are arbitrary terms; the paper's syntax, where each branch is
-  a block with its own lifetime, is the instance with `.block` branches.
-  Keeping the branches general only widens the typing relation: `T-If` types
-  each branch as an ordinary term, so block branches go through `T-Block`
-  exactly as in the paper. -/
   | ite (condition trueBranch falseBranch : Term)
   deriving BEq, Repr
 

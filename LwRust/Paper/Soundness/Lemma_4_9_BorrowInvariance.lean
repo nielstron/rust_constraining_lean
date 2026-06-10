@@ -1441,6 +1441,8 @@ theorem valueTyping_result_wellFormed_of_refs {env : Env} {typing : StoreTyping}
       exact WellFormedTy.unit
   | int =>
       exact WellFormedTy.int
+  | bool =>
+      exact WellFormedTy.bool
   | ref hlookup =>
       exact hrefs _ _ hlookup
 
@@ -1472,6 +1474,7 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
       cases hvalueTyping with
       | unit => exact TermTyping.const ValueTyping.unit
       | int => exact TermTyping.const ValueTyping.int
+      | bool => exact TermTyping.const ValueTyping.bool
       | ref _hlookup => exact absurd hsourceValue (by simp [SourceValue]))
     (fun hLv hcopy hread _hsource =>
       TermTyping.copy hLv hcopy hread)
@@ -1492,6 +1495,16 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         hnotWrite ih hsource =>
       TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hLhsPost
         hshape hwf hwrite hranked hcoh hcontained hnotWrite)
+    (fun _hLhs _hRhs hcopyL hcopyR hshape ihL ihR hsource =>
+      TermTyping.eq (ihL (SourceTerm.eq_lhs hsource))
+        (ihR (SourceTerm.eq_rhs hsource)) hcopyL hcopyR hshape)
+    (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
+        hcontained hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
+      TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
+        (ihTrue (SourceTerm.ite_trueBranch hsource))
+        (ihFalse (SourceTerm.ite_falseBranch hsource))
+        hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear hborrowSafe
+        hresultSafe)
     (fun _hterm ih hsource =>
       TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
     (fun _hterm _hrest ihHead ihRest hsource =>
@@ -1796,6 +1809,9 @@ theorem wellFormedTy_of_containedBorrowTargets {env : Env}
         intro mutable targets hcontains
         exact htargets mutable targets (PartialTyContains.tyBox hcontains))))
     (by
+      intro _htargets
+      exact WellFormedTy.bool)
+    (by
       intro _ty _ih
       trivial)
     (by
@@ -1844,6 +1860,8 @@ theorem copyTy_result_wellFormed {env : Env} {lv : LVal}
       exact WellFormedTy.unit
   | int =>
       exact WellFormedTy.int
+  | bool =>
+      exact WellFormedTy.bool
   | immBorrow =>
       exact WellFormedTy.borrow
         (copyBorrowTargetsWellFormed hwellFormed hLv)
@@ -2446,6 +2464,8 @@ theorem WellFormedTy.move_of_no_pathConflicts {env env' : Env}
       exact WellFormedTy.unit
   | int =>
       exact WellFormedTy.int
+  | bool =>
+      exact WellFormedTy.bool
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.move_of_no_pathConflicts
@@ -5087,6 +5107,8 @@ theorem WellFormedTy.dropLifetime_child_of_transport
       exact WellFormedTy.unit
   | int =>
       exact WellFormedTy.int
+  | bool =>
+      exact WellFormedTy.bool
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.dropLifetime_child_of_transport
@@ -5343,6 +5365,23 @@ theorem typingPreservesWellFormed_of_landmarks
           (LValTyping.lifetime_outlives_one hwellFormed hLhs)
           hRhs hshape hwellRhs hwrite hcontained hnotWrite,
         WellFormedTy.unit⟩)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
+        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq hwellFormed =>
+      let leftResult := ihL htypingEq hwellFormed
+      let rightResult := ihR htypingEq leftResult.1
+      ⟨rightResult.1, WellFormedTy.bool⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
+        hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        htypingEq hwellFormed =>
+      let conditionResult := ihCondition htypingEq hwellFormed
+      let trueResult := ihTrue htypingEq conditionResult.1
+      let falseResult := ihFalse htypingEq conditionResult.1
+      ⟨⟨hcontained, by
+          exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
+            (EnvJoin.lifetimesPreserved_left _henvJoin),
+        hcoherent, hlinear⟩, hwellJoin⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -5439,7 +5478,24 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
             EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
             hcoh3,
             Linearizable.of_linearizedBy hlin3By⟩,
-          WellFormedTy.unit⟩)
+            WellFormedTy.unit⟩)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
+        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq hwellFormed =>
+      let leftResult := ihL htypingEq hwellFormed
+      let rightResult := ihR htypingEq leftResult.1
+      ⟨rightResult.1, WellFormedTy.bool⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
+        hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        htypingEq hwellFormed =>
+      let conditionResult := ihCondition htypingEq hwellFormed
+      let trueResult := ihTrue htypingEq conditionResult.1
+      let falseResult := ihFalse htypingEq conditionResult.1
+      ⟨⟨hcontained, by
+          exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
+            (EnvJoin.lifetimesPreserved_left _henvJoin),
+        hcoherent, hlinear⟩, hwellJoin⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -5501,6 +5557,7 @@ theorem sourceTerm_validStoreTyping_empty_any {store : ProgramStore}
   cases value with
   | unit => exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
   | int n => exact ⟨.int, ValueTyping.int, ValidPartialValue.int⟩
+  | bool b => exact ⟨.bool, ValueTyping.bool, ValidPartialValue.bool⟩
   | ref r => exact absurd hsourceValue (by simp [SourceValue])
 
 /--
@@ -7112,6 +7169,9 @@ theorem ValidPartialValue.no_self_owning_ref {store : ProgramStore}
     | int =>
         intro location lifetime _hslot hvalue
         simp [owningRef] at hvalue
+    | bool =>
+        intro location lifetime _hslot hvalue
+        simp [owningRef] at hvalue
     | undef =>
         intro location lifetime _hslot hvalue
         simp at hvalue
@@ -7157,6 +7217,9 @@ theorem RuntimeFrame.reaches_of_mem_partialValueOwningLocations
       simp [partialValueOwningLocations, valueOwningLocations,
         valueOwnedLocation?] at hmem
   | int =>
+      simp [partialValueOwningLocations, valueOwningLocations,
+        valueOwnedLocation?] at hmem
+  | bool =>
       simp [partialValueOwningLocations, valueOwningLocations,
         valueOwnedLocation?] at hmem
   | undef =>
@@ -7274,6 +7337,8 @@ theorem RuntimeFrame.reachesSlot_of_ownerReaches {store : ProgramStore}
   | unit =>
       cases hreach
   | int =>
+      cases hreach
+  | bool =>
       cases hreach
   | undef =>
       cases hreach
@@ -8680,18 +8745,25 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
               (by right; left; exact htyEq)
               hvalidValue hread hwriteStoreWritten hdrops
               hvalueNoReach hotherNoReach
+      | bool =>
+          exact preservation_assign_var_envShape_step_runtime_of_frames
+            (lifetime := lifetime)
+            hsafe hvalidRuntime henvSlot hwrite
+              (by right; right; left; exact htyEq)
+              hvalidValue hread hwriteStoreWritten hdrops
+              hvalueNoReach hotherNoReach
       | borrow hleft hright hinner =>
           exact preservation_assign_var_envShape_step_runtime_of_frames
             (lifetime := lifetime)
             hsafe hvalidRuntime henvSlot hwrite
-              (by right; right; right; exact ⟨_, _, htyEq⟩)
+              (by right; right; right; right; exact ⟨_, _, htyEq⟩)
               hvalidValue hread hwriteStoreWritten hdrops
               hvalueNoReach hotherNoReach
       | undefLeft hinner =>
           exact preservation_assign_var_envShape_step_runtime_of_frames
             (lifetime := lifetime)
             hsafe hvalidRuntime henvSlot hwrite
-              (by right; right; left; exact ⟨_, htyEq⟩)
+              (by right; right; right; left; exact ⟨_, htyEq⟩)
               hvalidValue hread hwriteStoreWritten hdrops
               hvalueNoReach hotherNoReach
       | tyBox hinnerShape =>
@@ -9719,6 +9791,9 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_borrow_dependency_fra
   | int =>
       intro _howners _hdeps
       exact ValidPartialValue.int
+  | bool =>
+      intro _howners _hdeps
+      exact ValidPartialValue.bool
   | undef =>
       intro _howners _hdeps
       exact ValidPartialValue.undef
@@ -10482,6 +10557,8 @@ theorem RuntimeFrame.loc_deref_step_below {store : ProgramStore} {env : Env}
       simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
   | int =>
       simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
+  | bool =>
+      simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
   | undef =>
       simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
   | @borrow target₀Loc mutable' targets' witness hmemW hlocW =>
@@ -10659,6 +10736,8 @@ where
         | unit =>
             simp [ProgramStore.loc, hMloc, hslotM] at hloc
         | int =>
+            simp [ProgramStore.loc, hMloc, hslotM] at hloc
+        | bool =>
             simp [ProgramStore.loc, hMloc, hslotM] at hloc
         | undef =>
             simp [ProgramStore.loc, hMloc, hslotM] at hloc

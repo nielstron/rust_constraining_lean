@@ -752,7 +752,7 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
         ∃ unionTy,
           PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) ∧
             PartialTyStrengthens (.ty unionTy) (.ty boundTy))
-      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?bool ?ty ?partialBox ?undef
     · intro leftTy rightTy hleft hright
       have hl : leftTy = .unit := PartialTyStrengthens.to_unit_inv hleft
       have hr : rightTy = .unit := PartialTyStrengthens.to_unit_inv hright
@@ -763,11 +763,6 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
       have hr : rightTy = .int := PartialTyStrengthens.to_int_inv hright
       subst hl; subst hr
       exact ⟨.int, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
-    · intro leftTy rightTy hleft hright
-      have hl : leftTy = .bool := PartialTyStrengthens.to_bool_inv hleft
-      have hr : rightTy = .bool := PartialTyStrengthens.to_bool_inv hright
-      subst hl; subst hr
-      exact ⟨.bool, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
     · intro mutable boundTargets leftTy rightTy hleft hright
       rcases PartialTyStrengthens.to_borrow_inv hleft with
         ⟨leftTargets, hleftEq, hleftSubset⟩
@@ -791,6 +786,11 @@ theorem partialTyUnion_exists_of_le_bound {leftTy rightTy boundTy : Ty} :
         ⟨unionInner, hunionInner, hunionInnerLe⟩
       exact ⟨.box unionInner, PartialTyUnion.tyBox hunionInner,
         PartialTyStrengthens.tyBox hunionInnerLe⟩
+    · intro leftTy rightTy hleft hright
+      have hl : leftTy = .bool := PartialTyStrengthens.to_bool_inv hleft
+      have hr : rightTy = .bool := PartialTyStrengthens.to_bool_inv hright
+      subst hl; subst hr
+      exact ⟨.bool, PartialTyUnion.self _, PartialTyStrengthens.reflex⟩
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -847,7 +847,7 @@ theorem PartialTyUnion.full_connected_union_exists
           PartialTyUnion (.ty leftHeadTy) (.ty rightHeadTy) (.ty joinHeadTy) →
           PartialTyUnion (.ty leftRestTy) (.ty rightRestTy) (.ty joinRestTy) →
           ∃ joinTy, PartialTyUnion (.ty joinHeadTy) (.ty joinRestTy) (.ty joinTy))
-      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?bool ?ty ?partialBox ?undef
     · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
         hleftUnion hheadUnion hrestUnion
       have hleftHeadUnit : leftHeadTy = .unit :=
@@ -892,28 +892,6 @@ theorem PartialTyUnion.full_connected_union_exists
           (PartialTyUnion.left_strengthens hrestUnion)
       subst hjoinRestInt
       exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
-    · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
-        hleftUnion hheadUnion hrestUnion
-      have hleftHeadBool : leftHeadTy = .bool :=
-        PartialTyStrengthens.to_bool_inv
-          (PartialTyUnion.left_strengthens hheadUnion)
-      have hrightHeadBool : rightHeadTy = .bool :=
-        PartialTyStrengthens.to_bool_inv
-          (PartialTyUnion.right_strengthens hheadUnion)
-      subst hleftHeadBool
-      have hleftTyBool : leftTy = .bool :=
-        PartialTyStrengthens.from_bool_inv
-          (PartialTyUnion.left_strengthens hleftUnion)
-      subst hleftTyBool
-      have hleftRestBool : leftRestTy = .bool :=
-        PartialTyStrengthens.to_bool_inv
-          (PartialTyUnion.right_strengthens hleftUnion)
-      subst hleftRestBool
-      have hjoinRestBool : joinRestTy = .bool :=
-        PartialTyStrengthens.from_bool_inv
-          (PartialTyUnion.left_strengthens hrestUnion)
-      subst hjoinRestBool
-      exact ⟨.bool, PartialTyUnion.self (.ty .bool)⟩
     · intro mutable joinHeadTargets leftHeadTy leftRestTy rightHeadTy rightRestTy
         leftTy joinRestTy hleftUnion hheadUnion hrestUnion
       rcases PartialTyStrengthens.to_borrow_inv
@@ -975,6 +953,28 @@ theorem PartialTyUnion.full_connected_union_exists
           joinRestInner hleftInnerUnion hheadInnerUnion hrestInnerUnion with
         ⟨joinInner, hjoinInner⟩
       exact ⟨.box joinInner, PartialTyUnion.tyBox hjoinInner⟩
+    · intro leftHeadTy leftRestTy rightHeadTy rightRestTy leftTy joinRestTy
+        hleftUnion hheadUnion hrestUnion
+      have hleftHeadBool : leftHeadTy = .bool :=
+        PartialTyStrengthens.to_bool_inv
+          (PartialTyUnion.left_strengthens hheadUnion)
+      have hrightHeadBool : rightHeadTy = .bool :=
+        PartialTyStrengthens.to_bool_inv
+          (PartialTyUnion.right_strengthens hheadUnion)
+      subst hleftHeadBool
+      have hleftTyBool : leftTy = .bool :=
+        PartialTyStrengthens.from_bool_inv
+          (PartialTyUnion.left_strengthens hleftUnion)
+      subst hleftTyBool
+      have hleftRestBool : leftRestTy = .bool :=
+        PartialTyStrengthens.to_bool_inv
+          (PartialTyUnion.right_strengthens hleftUnion)
+      subst hleftRestBool
+      have hjoinRestBool : joinRestTy = .bool :=
+        PartialTyStrengthens.from_bool_inv
+          (PartialTyUnion.left_strengthens hrestUnion)
+      subst hjoinRestBool
+      exact ⟨.bool, PartialTyUnion.self (.ty .bool)⟩
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -1321,10 +1321,8 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
         (∃ rightTargets,
           PartialTyContains right (.borrow mutable rightTargets) ∧
             target ∈ rightTargets))
-    ?unit ?int ?bool ?borrow ?boxTy ?ty ?boxPartial ?undef union
+    ?unit ?int ?borrow ?boxTy ?bool ?ty ?boxPartial ?undef union
     left right mutable targets target
-  · intro left right mutable targets target _hunion hcontains _htarget
-    cases hcontains
   · intro left right mutable targets target _hunion hcontains _htarget
     cases hcontains
   · intro left right mutable targets target _hunion hcontains _htarget
@@ -1370,6 +1368,8 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
       · rcases hrightBorrow with ⟨rightTargets, hcontainsRight, hrightMem⟩
         exact Or.inr
           ⟨rightTargets, PartialTyContains.tyBox hcontainsRight, hrightMem⟩
+  · intro left right mutable targets target _hunion hcontains _htarget
+    cases hcontains
   · intro ty ih left right mutable targets target hunion hcontains htarget
     exact ih left right mutable targets target hunion hcontains htarget
   · intro inner ih left right mutable targets target hunion hcontains htarget
@@ -1415,10 +1415,7 @@ theorem mem_partialTy_vars_iff {pt : PartialTy} {v : Name} :
       ∃ mutable targets target,
         PartialTyContains pt (.borrow mutable targets) ∧
           target ∈ targets ∧ LVal.base target = v)
-    ?unit ?int ?bool ?borrow ?boxTy ?ty ?boxPartial ?undef pt
-  · constructor
-    · intro h; simp [Ty.vars] at h
-    · rintro ⟨_, _, _, hc, _, _⟩; cases hc
+    ?unit ?int ?borrow ?boxTy ?bool ?ty ?boxPartial ?undef pt
   · constructor
     · intro h; simp [Ty.vars] at h
     · rintro ⟨_, _, _, hc, _, _⟩; cases hc
@@ -1446,6 +1443,9 @@ theorem mem_partialTy_vars_iff {pt : PartialTy} {v : Name} :
       | tyBox hinner =>
           simp only [Ty.vars]
           exact ih.mpr ⟨m, targets, tgt, hinner, htgt, hbase⟩
+  · constructor
+    · intro h; simp [Ty.vars] at h
+    · rintro ⟨_, _, _, hc, _, _⟩; cases hc
   · intro t ih
     simpa [PartialTy.vars] using ih
   · intro inner ih
@@ -1799,11 +1799,12 @@ theorem lvalTyping_lifetime_le_base_bounded {e : Env} {φ : Name → Nat} (N : N
 
 @[refl] theorem Ty.sameShape_refl (t : Ty) : Ty.sameShape t t := by
   refine Ty.rec (motive_1 := fun t => Ty.sameShape t t)
-    (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
+    (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
   · trivial
   · trivial
   · intro _ _; rfl
   · intro _ ih; exact ih
+  · trivial
   · intro _ _; trivial
   · intro _ _; trivial
   · intro _ _; trivial
@@ -1811,11 +1812,12 @@ theorem lvalTyping_lifetime_le_base_bounded {e : Env} {φ : Name → Nat} (N : N
 @[refl] theorem PartialTy.sameShape_refl (pt : PartialTy) :
     PartialTy.sameShape pt pt := by
   refine PartialTy.rec (motive_1 := fun t => Ty.sameShape t t)
-    (motive_2 := fun pt => PartialTy.sameShape pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
+    (motive_2 := fun pt => PartialTy.sameShape pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
   · trivial
   · trivial
   · intro _ _; rfl
   · intro _ ih; exact ih
+  · trivial
   · intro _ ih; exact ih
   · intro _ ih; exact ih
   · intro _ ih; exact ih
@@ -1825,7 +1827,7 @@ theorem Ty.sameShape_symm {a b : Ty} (h : Ty.sameShape a b) :
   have key : ∀ a b, Ty.sameShape a b → Ty.sameShape b a := by
     intro a
     refine Ty.rec (motive_1 := fun a => ∀ b, Ty.sameShape a b → Ty.sameShape b a)
-      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
     · intro b h; cases b <;> simp_all [Ty.sameShape]
     · intro b h; cases b <;> simp_all [Ty.sameShape]
     · intro _ _ b h; cases b <;> simp_all [Ty.sameShape]
@@ -1835,6 +1837,8 @@ theorem Ty.sameShape_symm {a b : Ty} (h : Ty.sameShape a b) :
       | unit => simp [Ty.sameShape] at h
       | int => simp [Ty.sameShape] at h
       | borrow _ _ => simp [Ty.sameShape] at h
+      | bool => simp [Ty.sameShape] at h
+    · intro b h; cases b <;> simp_all [Ty.sameShape]
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -1855,7 +1859,7 @@ theorem Ty.sameShape_trans {a b c : Ty}
     refine Ty.rec
       (motive_1 := fun a => ∀ b c, Ty.sameShape a b → Ty.sameShape b c →
         Ty.sameShape a c)
-      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
     · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
     · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
     · intro _ _ b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
@@ -1867,9 +1871,12 @@ theorem Ty.sameShape_trans {a b c : Ty}
           | unit => simp [Ty.sameShape] at h2
           | int => simp [Ty.sameShape] at h2
           | borrow _ _ => simp [Ty.sameShape] at h2
+          | bool => simp [Ty.sameShape] at h2
       | unit => simp [Ty.sameShape] at h1
       | int => simp [Ty.sameShape] at h1
       | borrow _ _ => simp [Ty.sameShape] at h1
+      | bool => simp [Ty.sameShape] at h1
+    · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.sameShape]
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -1966,11 +1973,12 @@ inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop
 
 @[refl] theorem Ty.eqv_refl (t : Ty) : Ty.eqv t t := by
   refine Ty.rec (motive_1 := fun t => Ty.eqv t t)
-    (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
+    (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
   · trivial
   · trivial
   · intro _ _; exact ⟨rfl, fun _ h => h, fun _ h => h⟩
   · intro _ ih; exact ih
+  · trivial
   · intro _ _; trivial
   · intro _ _; trivial
   · intro _ _; trivial
@@ -1979,7 +1987,7 @@ theorem Ty.sameShape_of_eqv {a b : Ty} (h : Ty.eqv a b) : Ty.sameShape a b := by
   have key : ∀ a b, Ty.eqv a b → Ty.sameShape a b := by
     intro a
     refine Ty.rec (motive_1 := fun a => ∀ b, Ty.eqv a b → Ty.sameShape a b)
-      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
     · intro b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
     · intro b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
     · intro _ _ b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
@@ -1989,6 +1997,8 @@ theorem Ty.sameShape_of_eqv {a b : Ty} (h : Ty.eqv a b) : Ty.sameShape a b := by
       | unit => simp [Ty.eqv] at h
       | int => simp [Ty.eqv] at h
       | borrow _ _ => simp [Ty.eqv] at h
+      | bool => simp [Ty.eqv] at h
+    · intro b h; cases b <;> simp_all [Ty.eqv, Ty.sameShape]
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -1998,7 +2008,7 @@ theorem Ty.eqv_symm {a b : Ty} (h : Ty.eqv a b) : Ty.eqv b a := by
   have key : ∀ a b, Ty.eqv a b → Ty.eqv b a := by
     intro a
     refine Ty.rec (motive_1 := fun a => ∀ b, Ty.eqv a b → Ty.eqv b a)
-      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
     · intro b h; cases b <;> simp_all [Ty.eqv]
     · intro b h; cases b <;> simp_all [Ty.eqv]
     · intro ma ta b h
@@ -2009,12 +2019,15 @@ theorem Ty.eqv_symm {a b : Ty} (h : Ty.eqv a b) : Ty.eqv b a := by
       | unit => simp [Ty.eqv] at h
       | int => simp [Ty.eqv] at h
       | box _ => simp [Ty.eqv] at h
+      | bool => simp [Ty.eqv] at h
     · intro _ ih b h
       cases b with
       | box t' => exact ih t' h
       | unit => simp [Ty.eqv] at h
       | int => simp [Ty.eqv] at h
       | borrow _ _ => simp [Ty.eqv] at h
+      | bool => simp [Ty.eqv] at h
+    · intro b h; cases b <;> simp_all [Ty.eqv]
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -2026,7 +2039,7 @@ theorem Ty.eqv_trans {a b c : Ty} (h₁ : Ty.eqv a b) (h₂ : Ty.eqv b c) :
     intro a
     refine Ty.rec
       (motive_1 := fun a => ∀ b c, Ty.eqv a b → Ty.eqv b c → Ty.eqv a c)
-      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
+      (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ a
     · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.eqv]
     · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.eqv]
     · intro ma ta b c h1 h2
@@ -2040,9 +2053,11 @@ theorem Ty.eqv_trans {a b c : Ty} (h₁ : Ty.eqv a b) (h₂ : Ty.eqv b c) :
           | unit => simp [Ty.eqv] at h2
           | int => simp [Ty.eqv] at h2
           | box _ => simp [Ty.eqv] at h2
+          | bool => simp [Ty.eqv] at h2
       | unit => simp [Ty.eqv] at h1
       | int => simp [Ty.eqv] at h1
       | box _ => simp [Ty.eqv] at h1
+      | bool => simp [Ty.eqv] at h1
     · intro _ ih b c h1 h2
       cases b with
       | box tb =>
@@ -2051,9 +2066,12 @@ theorem Ty.eqv_trans {a b c : Ty} (h₁ : Ty.eqv a b) (h₂ : Ty.eqv b c) :
           | unit => simp [Ty.eqv] at h2
           | int => simp [Ty.eqv] at h2
           | borrow _ _ => simp [Ty.eqv] at h2
+          | bool => simp [Ty.eqv] at h2
       | unit => simp [Ty.eqv] at h1
       | int => simp [Ty.eqv] at h1
       | borrow _ _ => simp [Ty.eqv] at h1
+      | bool => simp [Ty.eqv] at h1
+    · intro b c h1 h2; cases b <;> cases c <;> simp_all [Ty.eqv]
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -2061,11 +2079,12 @@ theorem Ty.eqv_trans {a b c : Ty} (h₁ : Ty.eqv a b) (h₂ : Ty.eqv b c) :
 
 @[refl] theorem PartialTy.eqv_refl (pt : PartialTy) : PartialTy.eqv pt pt := by
   refine PartialTy.rec (motive_1 := fun t => Ty.eqv t t)
-    (motive_2 := fun pt => PartialTy.eqv pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
+    (motive_2 := fun pt => PartialTy.eqv pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
   · trivial
   · trivial
   · intro _ _; exact ⟨rfl, fun _ h => h, fun _ h => h⟩
   · intro _ ih; exact ih
+  · trivial
   · intro _ ih; exact ih
   · intro _ ih; exact ih
   · intro _ ih; exact ih
@@ -2095,6 +2114,10 @@ theorem PartialTy.sameShape_of_shapeCompatible {env : Env} {a b : Ty} :
         cases hleft; cases hright
         simp [PartialTy.sameShape, Ty.sameShape]
     | int =>
+        intro a b hleft hright
+        cases hleft; cases hright
+        simp [PartialTy.sameShape, Ty.sameShape]
+    | bool =>
         intro a b hleft hright
         cases hleft; cases hright
         simp [PartialTy.sameShape, Ty.sameShape]
@@ -2159,7 +2182,7 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
         PartialTyUnion (.ty headA) (.ty restA) (.ty tyA) →
         PartialTyUnion (.ty headB) (.ty restB) (.ty tyB) →
         Ty.eqv tyA tyB)
-      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?bool ?ty ?partialBox ?undef
     · intro restA tyA headB restB tyB hhead hrest hunionA hunionB
       have hb : headB = .unit := by cases headB <;> simp_all [Ty.eqv]
       subst hb
@@ -2210,6 +2233,7 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
       | unit => simp [Ty.eqv] at hhead
       | int => simp [Ty.eqv] at hhead
       | box _ => simp [Ty.eqv] at hhead
+      | bool => simp [Ty.eqv] at hhead
     · intro hA ih restA tyA headB restB tyB hhead hrest hunionA hunionB
       cases headB with
       | box hB =>
@@ -2240,6 +2264,15 @@ theorem partialTyUnion_eqv {headA restA tyA headB restB tyB : Ty}
       | unit => simp [Ty.eqv] at hhead
       | int => simp [Ty.eqv] at hhead
       | borrow _ _ => simp [Ty.eqv] at hhead
+      | bool => simp [Ty.eqv] at hhead
+    · intro restA tyA headB restB tyB hhead hrest hunionA hunionB
+      have hb : headB = .bool := by cases headB <;> simp_all [Ty.eqv]
+      subst hb
+      have htyA : tyA = .bool :=
+        PartialTyStrengthens.from_bool_inv (PartialTyUnion.left_strengthens hunionA)
+      have htyB : tyB = .bool :=
+        PartialTyStrengthens.from_bool_inv (PartialTyUnion.left_strengthens hunionB)
+      subst htyA; subst htyB; trivial
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -2308,6 +2341,14 @@ theorem partialTyJoin_sameShape {env : Env} {old joined : PartialTy} {ty : Ty}
       | ty u => have := PartialTyStrengthens.to_int_inv hbound; subst this; trivial
       | box _ => cases hbound
       | undef _ => cases hbound
+  | bool =>
+      have hbound : joined ≤ (PartialTy.ty .bool) :=
+        hjoin.2 (by intro p hp; simp only [Set.mem_insert_iff,
+          Set.mem_singleton_iff] at hp; rcases hp with rfl | rfl <;> rfl)
+      cases joined with
+      | ty u => have := PartialTyStrengthens.to_bool_inv hbound; subst this; trivial
+      | box _ => cases hbound
+      | undef _ => cases hbound
   | tyBox hinner =>
       rcases PartialTyUnion.ty_ty_full hjoin with ⟨joinedTy, hjoinedEq⟩
       subst hjoinedEq
@@ -2354,6 +2395,9 @@ theorem partialTyUnion_ty_left_sameShape {head rest union : Ty} :
       subst this; simp [Ty.sameShape]
   | int =>
       have : union = .int := PartialTyStrengthens.from_int_inv hstr
+      subst this; simp [Ty.sameShape]
+  | bool =>
+      have : union = .bool := PartialTyStrengthens.from_bool_inv hstr
       subst this; simp [Ty.sameShape]
   | borrow m tgts =>
       rcases PartialTyStrengthens.from_borrow_inv hstr with ⟨ut, hu, _⟩
@@ -2416,7 +2460,7 @@ theorem partialTyUnion_sameShape_of_sameShape {a b c : PartialTy}
       (motive_2 := fun a => ∀ b c, PartialTyUnion a b c →
         PartialTy.sameShape a b → PartialTy.sameShape a c)
       (by trivial) (by trivial) (by intro _ _; trivial) (by intro _ _; trivial)
-      ?tyCase ?boxCase ?undefCase a
+      (by trivial) ?tyCase ?boxCase ?undefCase a
     · intro au _ b c hunion hab
       cases b with
       | ty bu =>
@@ -2644,7 +2688,7 @@ theorem partialTyStrengthens_ty_of_eqv {left right : Ty} :
     refine Ty.rec
       (motive_1 := fun left => ∀ right : Ty, Ty.eqv left right →
         PartialTyStrengthens (.ty left) (.ty right))
-      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?bool ?ty ?partialBox ?undef
     · intro right heqv
       cases right <;> simp_all [Ty.eqv]
     · intro right heqv
@@ -2658,6 +2702,7 @@ theorem partialTyStrengthens_ty_of_eqv {left right : Ty} :
       | unit => simp [Ty.eqv] at heqv
       | int => simp [Ty.eqv] at heqv
       | box _ => simp [Ty.eqv] at heqv
+      | bool => simp [Ty.eqv] at heqv
     · intro leftInner ih right heqv
       cases right with
       | box rightInner =>
@@ -2665,6 +2710,9 @@ theorem partialTyStrengthens_ty_of_eqv {left right : Ty} :
       | unit => simp [Ty.eqv] at heqv
       | int => simp [Ty.eqv] at heqv
       | borrow _ _ => simp [Ty.eqv] at heqv
+      | bool => simp [Ty.eqv] at heqv
+    · intro right heqv
+      cases right <;> simp_all [Ty.eqv]
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial
@@ -2703,7 +2751,7 @@ theorem Ty.eqv_of_strengthens_both {left right : Ty} :
         PartialTyStrengthens (.ty left) (.ty right) →
         PartialTyStrengthens (.ty right) (.ty left) →
         Ty.eqv left right)
-      (motive_2 := fun _ => True) ?unit ?int ?bool ?borrow ?box ?ty ?partialBox ?undef
+      (motive_2 := fun _ => True) ?unit ?int ?borrow ?box ?bool ?ty ?partialBox ?undef
     · intro right hlr _hrl
       have hright : right = .unit := PartialTyStrengthens.from_unit_inv hlr
       subst hright
@@ -2727,6 +2775,10 @@ theorem Ty.eqv_of_strengthens_both {left right : Ty} :
         ⟨leftInner', hleftEq, hinnerRl⟩
       cases hleftEq
       exact ih rightInner hinnerLr hinnerRl
+    · intro right hlr _hrl
+      have hright : right = .bool := PartialTyStrengthens.from_bool_inv hlr
+      subst hright
+      trivial
     · intro _ _; trivial
     · intro _ _; trivial
     · intro _ _; trivial

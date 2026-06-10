@@ -81,6 +81,11 @@ theorem partialTyBorrowFree_ty {ty : Ty} :
   intro mutable targets hcontains
   cases hcontains
 
+@[simp] theorem tyBorrowFree_bool :
+    TyBorrowFree .bool := by
+  intro mutable targets hcontains
+  cases hcontains
+
 @[simp] theorem tyBorrowFree_box {ty : Ty} :
     TyBorrowFree ty →
     TyBorrowFree (.box ty) := by
@@ -246,7 +251,7 @@ theorem partialTyContains_borrow_injective {partialTy : PartialTy}
         PartialTyContains partialTy (.borrow mutable₁ targets₁) →
         PartialTyContains partialTy (.borrow mutable₂ targets₂) →
         mutable₁ = mutable₂ ∧ targets₁ = targets₂)
-    ?unit ?int ?borrow ?boxTy ?ty ?boxPartial ?undef partialTy
+    ?unit ?int ?borrow ?boxTy ?bool ?ty ?boxPartial ?undef partialTy
   · intro mutable₁ mutable₂ targets₁ targets₂ hleft
     cases hleft
   · intro mutable₁ mutable₂ targets₁ targets₂ hleft
@@ -263,6 +268,8 @@ theorem partialTyContains_borrow_injective {partialTy : PartialTy}
         cases hright with
         | tyBox hrightInner =>
             exact ih hleftInner hrightInner
+  · intro mutable₁ mutable₂ targets₁ targets₂ hleft
+    cases hleft
   · intro ty ih mutable₁ mutable₂ targets₁ targets₂ hleft hright
     exact ih hleft hright
   · intro inner ih mutable₁ mutable₂ targets₁ targets₂ hleft hright
@@ -346,29 +353,6 @@ theorem borrowSafeEnv_update_fresh_borrowFree {env : Env} {x : Name}
   intro hsafe hborrowFree
   exact borrowSafeEnv_update_partialBorrowFree hsafe
     (partialTyBorrowFree_ty hborrowFree)
-
-/-- A result type is borrow-safe against an environment when installing it as a
-new root would introduce no borrow-target conflict with any existing root.
-
-This is the root-independent part of result-extension.  It avoids relying on
-the existence of a globally fresh name, which is especially important for block
-results: a name can be fresh after `dropLifetime` precisely because a block-local
-slot with that name was removed. -/
-def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
-  (∀ targetsMutable mutable targetsOther x targetMutable targetOther,
-    PartialTyContains (.ty ty) (.borrow true targetsMutable) →
-    env ⊢ x ↝ Ty.borrow mutable targetsOther →
-    targetMutable ∈ targetsMutable →
-    targetOther ∈ targetsOther →
-    targetMutable ⋈ targetOther →
-    False) ∧
-  (∀ x targetsMutable mutable targetsOther targetMutable targetOther,
-    env ⊢ x ↝ Ty.borrow true targetsMutable →
-    PartialTyContains (.ty ty) (.borrow mutable targetsOther) →
-    targetMutable ∈ targetsMutable →
-    targetOther ∈ targetsOther →
-    targetMutable ⋈ targetOther →
-    False)
 
 theorem tyBorrowSafeAgainstEnv_borrowFree {env : Env} {ty : Ty} :
     TyBorrowFree ty →
@@ -1112,6 +1096,9 @@ theorem sourceValue_valueTyping_borrowFree {typing : StoreTyping} {value : Value
   | int _ =>
       cases htyping
       exact tyBorrowFree_int
+  | bool _ =>
+      cases htyping
+      exact tyBorrowFree_bool
   | ref _ =>
       cases hsource
 
@@ -1722,6 +1709,8 @@ theorem typingPreservesBorrowSafeResult_copy_case {env env₂ : Env}
           exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe tyBorrowFree_unit
       | int =>
           exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe tyBorrowFree_int
+      | bool =>
+          exact borrowSafeEnv_update_fresh_borrowFree hborrowSafe tyBorrowFree_bool
       | immBorrow =>
           rename_i targets
           exact borrowSafeEnv_update_fresh_immBorrowMany hborrowSafe hfresh
@@ -1979,6 +1968,8 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
               exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit
           | int =>
               exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int
+          | bool =>
+              exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_bool
           | immBorrow =>
               rename_i targets
               exact tyBorrowSafeAgainstEnv_immBorrowMany
@@ -2087,6 +2078,26 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit,
           fun _gamma _hfresh =>
           borrowSafeEnv_update_fresh_borrowFree hwriteSafe tyBorrowFree_unit⟩)
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
+        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR hsource hborrowSafe =>
+      by
+        have hleft := ihL (SourceTerm.eq_lhs hsource) hborrowSafe
+        have hright := ihR (SourceTerm.eq_rhs hsource) hleft.1
+        exact ⟨hright.1,
+          tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_bool,
+          fun _gamma _hfresh =>
+          borrowSafeEnv_update_fresh_borrowFree hright.1 tyBorrowFree_bool⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin
+        _hcontained _hcoherent _hlinear hborrowSafeJoin hresultSafe ihCondition ihTrue ihFalse
+        hsource hborrowSafe =>
+      by
+        have hconditionSafe := ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
+        have _htrueSafe := ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
+        have _hfalseSafe := ihFalse (SourceTerm.ite_falseBranch hsource) hconditionSafe.1
+        exact ⟨hborrowSafeJoin, hresultSafe, fun _gamma _hfresh =>
+          borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hborrowSafeJoin hresultSafe⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm _ih hsource hborrowSafe =>
       let h := _ih (SourceTerm.block_head hsource) hborrowSafe
       ⟨h.1, h.2.1⟩)

@@ -366,6 +366,173 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       · cases hredex with
         | assign _hread _hwrite _hdrops => exact Or.inl (value_terminal _)
         | subAssign hinner => exact False.elim (value_no_step hinner))
+    -- T-Eq.
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
+        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq hsource
+        store store' term' hvalid hvst hwf hbs hsafe hfs hmulti => by
+      cases htypingEq
+      have hsourceLeft : SourceTerm _lhs := SourceTerm.eq_lhs hsource
+      have hsourceRight : SourceTerm _rhs := SourceTerm.eq_rhs hsource
+      have hvstLeft : ValidStoreTyping store _lhs typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      have hvstRightSource : ValidStoreTyping store _rhs typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      rcases multistep_eq_prefix_inv hmulti with
+        ⟨lhs', hfinal, hmsLeft⟩ |
+        ⟨midStore, leftValue, hmsLeft, hcase⟩
+      · subst hfinal
+        have hprogressLeft :=
+          ihL rfl hsourceLeft store store' lhs'
+            (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
+            hvstLeft hwf hbs hsafe hfs hmsLeft
+        rcases hprogressLeft with hterminalLeft | hstepLeft
+        · rcases (terminal_iff_value lhs').mp hterminalLeft with
+            ⟨leftValue, hleftValue⟩
+          subst hleftValue
+          have hterminalLeftState :=
+            preservation hsourceLeft (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
+              hvstLeft hwf hbs hsafe _hLhs hmsLeft
+          have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
+            (typingPreservesBorrowSafeResult_global hsourceLeft hbs _hLhs).1
+          have hvalidRight : ValidRuntimeState store' _rhs :=
+            validRuntimeState_of_sourceTerm hsourceRight hterminalLeftState.1
+          have hvstRight : ValidStoreTyping store' _rhs typing :=
+            validStoreTyping_sourceTerm_of_validStoreTyping hsourceRight
+              hvstRightSource
+          have hprogressRight :=
+            ihR rfl hsourceRight store' store' _rhs hvalidRight hvstRight
+              (typingPreservesWellFormed_of_sourceTerm hsourceLeft
+                (ValidRuntimeState.validState
+                  (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
+                hwf hsafe _hLhs).1
+              hborrowSafeLeft hterminalLeftState.2.1 (hfs.multiStep hmsLeft)
+              MultiStep.refl
+          rcases hprogressRight with hterminalRight | hstepRight
+          · rcases (terminal_iff_value _rhs).mp hterminalRight with
+              ⟨rightValue, hrightValue⟩
+            subst hrightValue
+            exact progress_eq_values
+          · exact progress_subEqRight hstepRight
+        · exact progress_subEqLeft hstepLeft
+      · have hterminalLeftState :=
+          preservation hsourceLeft (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
+            hvstLeft hwf hbs hsafe _hLhs hmsLeft
+        have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
+          (typingPreservesBorrowSafeResult_global hsourceLeft hbs _hLhs).1
+        have hvalidRight : ValidRuntimeState midStore _rhs :=
+          validRuntimeState_of_sourceTerm hsourceRight hterminalLeftState.1
+        have hvstRight : ValidStoreTyping midStore _rhs typing :=
+          validStoreTyping_sourceTerm_of_validStoreTyping hsourceRight
+            hvstRightSource
+        rcases hcase with ⟨rhs', hfinal, hmsRight⟩ |
+          ⟨rightStore, rightValue, hmsRight, hredex⟩
+        · subst hfinal
+          have hprogressRight :=
+            ihR rfl hsourceRight midStore store' rhs' hvalidRight hvstRight
+              (typingPreservesWellFormed_of_sourceTerm hsourceLeft
+                (ValidRuntimeState.validState
+                  (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
+                hwf hsafe _hLhs).1
+              hborrowSafeLeft hterminalLeftState.2.1
+              (hfs.multiStep hmsLeft) hmsRight
+          rcases hprogressRight with hterminalRight | hstepRight
+          · rcases (terminal_iff_value rhs').mp hterminalRight with
+              ⟨rightValue, hrightValue⟩
+            subst hrightValue
+            exact progress_eq_values
+          · exact progress_subEqRight hstepRight
+        · cases hredex with
+          | eqTrue => exact Or.inl (value_terminal _)
+          | eqFalse _hne => exact Or.inl (value_terminal _)
+          | subEqLeft hinner => exact False.elim (value_no_step hinner)
+          | subEqRight hinner => exact False.elim (value_no_step hinner))
+    -- T-If.
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+          _trueBranch _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
+        _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafeJoin
+        _hresultSafe ihCondition ihTrue ihFalse htypingEq hsource
+        store store' term' hvalid hvst hwf hbs hsafe hfs hmulti => by
+      cases htypingEq
+      have hsourceCondition : SourceTerm _condition :=
+        SourceTerm.ite_condition hsource
+      have hsourceTrue : SourceTerm _trueBranch :=
+        SourceTerm.ite_trueBranch hsource
+      have hsourceFalse : SourceTerm _falseBranch :=
+        SourceTerm.ite_falseBranch hsource
+      have hvstCondition : ValidStoreTyping store _condition typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      have hvstTrueSource : ValidStoreTyping store _trueBranch typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      have hvstFalseSource : ValidStoreTyping store _falseBranch typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      rcases multistep_ite_prefix_inv hmulti with
+        ⟨condition', hfinal, hmsCondition⟩ |
+        ⟨midStore, hmsCondition, hmsTrue⟩ |
+        ⟨midStore, hmsCondition, hmsFalse⟩
+      · subst hfinal
+        have hprogressCondition :=
+          ihCondition rfl hsourceCondition store store' condition'
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+            hvstCondition hwf hbs hsafe hfs hmsCondition
+        rcases hprogressCondition with hterminalCondition | hstepCondition
+        · rcases (terminal_iff_value condition').mp hterminalCondition with
+            ⟨conditionValue, hconditionValue⟩
+          subst hconditionValue
+          have hterminalConditionState :=
+            preservation hsourceCondition
+              (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+              hvstCondition hwf hbs hsafe _hcondition hmsCondition
+          cases hterminalConditionState.2.2 with
+          | bool =>
+              rename_i b
+              cases b
+              · exact Or.inr ⟨store', _falseBranch, Step.iteFalse⟩
+              · exact Or.inr ⟨store', _trueBranch, Step.iteTrue⟩
+        · exact progress_subIte hstepCondition
+      · have hterminalConditionState :=
+          preservation hsourceCondition
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+            hvstCondition hwf hbs hsafe _hcondition hmsCondition
+        have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
+          (typingPreservesBorrowSafeResult_global hsourceCondition hbs
+            _hcondition).1
+        have hvalidTrue : ValidRuntimeState midStore _trueBranch :=
+          validRuntimeState_of_sourceTerm hsourceTrue hterminalConditionState.1
+        have hvstTrue : ValidStoreTyping midStore _trueBranch typing :=
+          validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
+            hvstTrueSource
+        exact ihTrue rfl hsourceTrue midStore store' term' hvalidTrue hvstTrue
+          (typingPreservesWellFormed_of_sourceTerm hsourceCondition
+            (ValidRuntimeState.validState
+              (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
+            hwf hsafe _hcondition).1
+          hborrowSafeCondition hterminalConditionState.2.1
+          (hfs.multiStep hmsCondition) hmsTrue
+      · have hterminalConditionState :=
+          preservation hsourceCondition
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+            hvstCondition hwf hbs hsafe _hcondition hmsCondition
+        have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
+          (typingPreservesBorrowSafeResult_global hsourceCondition hbs
+            _hcondition).1
+        have hvalidFalse : ValidRuntimeState midStore _falseBranch :=
+          validRuntimeState_of_sourceTerm hsourceFalse hterminalConditionState.1
+        have hvstFalse : ValidStoreTyping midStore _falseBranch typing :=
+          validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
+            hvstFalseSource
+        exact ihFalse rfl hsourceFalse midStore store' term' hvalidFalse hvstFalse
+          (typingPreservesWellFormed_of_sourceTerm hsourceCondition
+            (ValidRuntimeState.validState
+              (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
+            hwf hsafe _hcondition).1
+          hborrowSafeCondition hterminalConditionState.2.1
+          (hfs.multiStep hmsCondition) hmsFalse)
     -- T-Seq singleton: in-flight head, or the block-exit drop ended the run.
     (fun {_env₁ _env₂ _typing _blockLifetime _term _ty} hterm ih htypingEq
         hsource outerLifetime store store' term' _hchild hvalid hvst hwf hbs
