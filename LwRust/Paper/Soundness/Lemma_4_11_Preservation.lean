@@ -3959,8 +3959,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
             hLhsPost hshape hwellTy hwrite hranked hnotWrite hwellOut
             hvalidValue hassignStep
         exact ⟨hwellOut, hterminal⟩)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
-        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR
+    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs _lhsTy
+          _rhsTy _ghostRhsTy}
+        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape ihL _ihGhost ihR
         (htypingEq : _typing = typing) (hsource : SourceTerm (.eq _lhs _rhs))
         store finalStore finalValue hvalidRuntime
         hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti =>

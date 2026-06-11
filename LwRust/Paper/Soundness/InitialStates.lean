@@ -284,8 +284,10 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
         _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
       exact ih htypingEq candidate (by simpa [termValues] using hmem))
     (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy
-        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq candidate hmem
+      intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+        _lhsTy _rhsTy _ghostRhsTy
+        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
+        ihL _ihGhost ihR htypingEq candidate hmem
       simp [termValues] at hmem
       rcases hmem with hleft | hright
       · exact ihL htypingEq candidate hleft

@@ -373,8 +373,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         | assign _hread _hwrite _hdrops => exact Or.inl (value_terminal _)
         | subAssign hinner => exact False.elim (value_no_step hinner))
     -- T-Eq.
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
-        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq hsource
+    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs _lhsTy
+          _rhsTy _ghostRhsTy}
+        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape ihL _ihGhost ihR
+        htypingEq hsource
         store store' term' hvalid hvst hwf hbs hsafe hfs hmulti => by
       cases htypingEq
       have hsourceLeft : SourceTerm _lhs := SourceTerm.eq_lhs hsource

@@ -95,6 +95,25 @@ These deviations from the paper should be kept.
   exactly these entry-side derivations, which is what lets partial loop
   conditions keep their statement extraction with no precision loss.
 
+- **`T-Eq` keeps the paper's ghost-slot check, rule-carried.**  The paper
+  types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and
+  erases `γ` afterwards, so borrows inside the left operand's result type keep
+  prohibiting conflicting uses while the right operand is typed.  The
+  mechanised rule carries exactly that ghost derivation as a premise (the
+  paper's precision filter), *plus* the eliminated form — the right operand
+  typed in plain `Γ₂` — which is what the metatheory threads.  In the paper
+  the eliminated form is implied by the ghost form via fresh-slot thinning,
+  but that implication is unprovable here: the ghost slot has no runtime
+  counterpart, so its derivation cannot be threaded through preservation
+  (safe abstraction `S ∼ Γ` demands two-way domain agreement), and a general
+  thinning metatheorem is in the same family as the false environment
+  weakening of `Examples/ThinningFalse.lean` (target-list borrow types make
+  dereferences environment-sensitive).  Following the
+  rule-carried-obligation convention (cf. `T-WhileJoin`), the monotonicity
+  fact is carried as a premise rather than proven; no precision is lost
+  relative to the paper, and right operands conflicting with lhs-result
+  borrows are rejected as the paper intends.
+
 - **While loops (`T-While`, `T-WhileDiv`), beyond the paper.**  The paper's
   calculus is loop-free (its original termination argument depended on it).
   `Term.whileLoop` adds `while cond { body }` with two in-flight runtime

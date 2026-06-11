@@ -24,7 +24,9 @@ theorem scalarCopyComparison_typing :
     TermTyping Env.empty StoreTyping.empty Lifetime.root
       scalarCopyComparison .bool Env.empty := by
   unfold scalarCopyComparison
-  exact TermTyping.eq
+  exact TermTyping.eq (ghost := "γ")
+    (TermTyping.const ValueTyping.int)
+    (by simp [Env.fresh, Env.empty])
     (TermTyping.const ValueTyping.int)
     (TermTyping.const ValueTyping.int)
     CopyTy.int
@@ -242,9 +244,12 @@ theorem pointerIf_not_readProhibited_deref_p :
 theorem pointerIfCondition_typing :
     TermTyping pointerIfEnv StoreTyping.empty Lifetime.root
       (.eq (.copy (.deref (.var "p"))) (.val (.int 1))) .bool pointerIfEnv := by
-  exact TermTyping.eq
+  exact TermTyping.eq (ghost := "γ")
     (TermTyping.copy pointerIf_deref_p_typing CopyTy.int
       pointerIf_not_readProhibited_deref_p)
+    (by simp [Env.fresh, pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
+      pointerIfPXSlot, Env.update, Env.empty])
+    (TermTyping.const ValueTyping.int)
     (TermTyping.const ValueTyping.int)
     CopyTy.int
     CopyTy.int
