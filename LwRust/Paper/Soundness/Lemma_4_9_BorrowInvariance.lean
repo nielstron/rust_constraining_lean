@@ -1523,6 +1523,15 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
+    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv
+        hwellTy hdrop _hcondEntry _hbodyEntry
+        ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
+      TermTyping.whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
+        (ihCondInv (SourceTerm.while_condition hsource))
+        (ihBodyInv (SourceTerm.while_body hsource))
+        hwellTy hdrop
+        (ihCondEntry (SourceTerm.while_condition hsource))
+        (ihBodyEntry (SourceTerm.while_body hsource)))
     (fun _hterm ih hsource =>
       TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
     (fun _hterm _hrest ihHead ihRest hsource =>
@@ -5420,6 +5429,19 @@ theorem typingPreservesWellFormed_of_landmarks
         htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
+    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hcondInv _hbodyInv
+        _hwellTy _hdrop _hcondEntry _hbodyEntry
+        ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+        htypingEq hwellFormed =>
+      let invWellFormed : WellFormedEnv _envInv _lifetime :=
+        ⟨hcbwf,
+          EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
+            (EnvJoin.lifetimesPreserved_left hjoin),
+          hcoh, hlin⟩
+      let conditionResult := ihCondInv htypingEq invWellFormed
+      ⟨conditionResult.1, WellFormedTy.unit⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)
@@ -5553,6 +5575,19 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         _hchild _hcond _hbody _hdiverges ihCond _ihBody
         htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
+      ⟨conditionResult.1, WellFormedTy.unit⟩)
+    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hcondInv _hbodyInv
+        _hwellTy _hdrop _hcondEntry _hbodyEntry
+        ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+        htypingEq hwellFormed =>
+      let invWellFormed : WellFormedEnv _envInv _lifetime :=
+        ⟨hcbwf,
+          EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
+            (EnvJoin.lifetimesPreserved_left hjoin),
+          hcoh, hlin⟩
+      let conditionResult := ihCondInv htypingEq invWellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>

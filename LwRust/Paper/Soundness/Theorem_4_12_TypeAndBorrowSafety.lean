@@ -938,6 +938,224 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
                 cases heq
           exact hmain _ _ _ _ hreaches rfl hsafe
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid) hfs)
+    -- T-WhileJoin: reachable loop states progress; the package carries
+    -- `∼ₛ envInv`, with entry/back-edge transports via the same-shape maps.
+    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+        hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv
+        _hwellTyBody hdropEq _hcondEntry _hbodyEntry
+        ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry
+        htypingEq hsource store store' term' hvalid hvst hwf hbs hsafe hfs
+        hmulti => by
+      cases htypingEq
+      have hsourceCondition : SourceTerm _condition :=
+        SourceTerm.while_condition hsource
+      have hsourceBody : SourceTerm _body := SourceTerm.while_body hsource
+      have hsourceIterBlock :
+          SourceTerm (.block _bodyLifetime [_body, .val .unit]) := by
+        intro v hmem
+        simp [termValues] at hmem
+        rcases hmem with hbody | hunit
+        · exact hsourceBody v hbody
+        · subst hunit; trivial
+      have hvstCondition : ValidStoreTyping store _condition typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      have hvstBody : ValidStoreTyping store _body typing := by
+        intro value hmem
+        exact hvst value (by simp [termValues, hmem])
+      have hvstIterBlock :
+          ValidStoreTyping store (.block _bodyLifetime [_body, .val .unit])
+            typing := by
+        intro value hmem
+        simp [termValues] at hmem
+        rcases hmem with hbody | hunit
+        · exact hvst value (by simp [termValues]; exact Or.inr hbody)
+        · subst hunit
+          exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
+      have hbranchShape :
+          ∀ x leftSlot rightSlot,
+            _env₁.slotAt x = some leftSlot →
+            _envBack.slotAt x = some rightSlot →
+            PartialTy.sameShape leftSlot.ty rightSlot.ty := by
+        intro x leftSlot rightSlot hleft hright
+        have hle := EnvJoin.le_left hjoin x
+        rw [hleft] at hle
+        cases hjoinSlot : _envInv.slotAt x with
+        | none =>
+            rw [hjoinSlot] at hle
+            exact False.elim hle
+        | some joinSlot =>
+            exact PartialTy.sameShape_trans
+              (hss1 x leftSlot joinSlot hleft hjoinSlot)
+              (PartialTy.sameShape_symm
+                (hss2 x rightSlot joinSlot hright hjoinSlot))
+      have hentryMap : EnvSameShapeStrengthening _env₁ _envInv :=
+        EnvJoin.left_sameShapeStrengthening hjoin hbranchShape
+      have hbackMap : EnvSameShapeStrengthening _envBack _envInv :=
+        EnvJoin.right_sameShapeStrengthening hjoin hbranchShape
+      have hwfInv : WellFormedEnv _envInv _lifetime :=
+        ⟨hcbwf,
+          EnvSlotsOutlive.of_lifetimesPreserved hwf.2.1
+            (EnvJoin.lifetimesPreserved_left hjoin),
+          hcoh, hlin⟩
+      have hbseCondition : BorrowSafeEnv _env₂ :=
+        (typingPreservesBorrowSafeResult_global hsourceCondition hbse
+          _hcondInv).1
+      have hiterTyping :
+          TermTyping _env₂ typing _lifetime
+            (.block _bodyLifetime [_body, .val .unit]) .unit
+            (_env₃.dropLifetime _bodyLifetime) :=
+        TermTyping.block hchild
+          (TermListTyping.cons _hbodyInv
+            (TermListTyping.singleton (TermTyping.const ValueTyping.unit)))
+          WellFormedTy.unit rfl
+      cases hmulti with
+      | refl => exact Or.inr ⟨store, _, Step.whileStart⟩
+      | trans hstep hrest =>
+          cases hstep
+          have hreaches :=
+            multistep_while_form_prefix_inv hrest (WhileForm.cond _)
+          have hmain :
+              ∀ form startStore current currentStore,
+                WhileRunReaches _lifetime _bodyLifetime _condition _body form
+                  startStore current currentStore →
+                form = .whileCond _bodyLifetime _condition _condition _body →
+                startStore ∼ₛ _envInv →
+                ValidRuntimeState startStore _condition →
+                startStore.FiniteSupport →
+                ProgressResult currentStore _lifetime current := by
+            intro form startStore current currentStore hreach
+            induction hreach with
+            | condPhase =>
+                rename_i conditionInFlight conditionInFlight' s₀ s₁ hms
+                intro heq hsafe' hvalid' hfs'
+                cases heq
+                have hvst' : ValidStoreTyping s₀ _condition typing :=
+                  validStoreTyping_sourceTerm_of_validStoreTyping
+                    hsourceCondition hvstCondition
+                rcases ihCondInv rfl hsourceCondition s₀ s₁ _ hvalid' hvst'
+                    hwfInv hbse hsafe' hfs' hms with hterminal | hstepCond
+                · rcases (terminal_iff_value _).mp hterminal with ⟨v, hv⟩
+                  subst hv
+                  have hterminalState :=
+                    preservation hsourceCondition hvalid' hvst' hwfInv hbse
+                      hsafe' _hcondInv hms
+                  cases hterminalState.2.2 with
+                  | bool =>
+                      rename_i b
+                      cases b
+                      · exact Or.inr ⟨_, _, Step.whileCondFalse⟩
+                      · exact Or.inr ⟨_, _, Step.whileCondTrue⟩
+                · rcases hstepCond with ⟨s₂, c', hstepInner⟩
+                  exact Or.inr ⟨s₂, _, Step.subWhileCond hstepInner⟩
+            | exited =>
+                intro _heq _hsafe' _hvalid' _hfs'
+                exact Or.inl (value_terminal _)
+            | enterBody =>
+                rename_i conditionInFlight bodyInFlight' s₀ s₁ s₂ hcond
+                  hblockRun
+                intro heq hsafe' hvalid' hfs'
+                cases heq
+                have hvst' : ValidStoreTyping s₀ _condition typing :=
+                  validStoreTyping_sourceTerm_of_validStoreTyping
+                    hsourceCondition hvstCondition
+                have hterminalCondState :=
+                  preservation hsourceCondition hvalid' hvst' hwfInv hbse
+                    hsafe' _hcondInv hcond
+                have hfs₁ := hfs'.multiStep hcond
+                have hwfCondOut : WellFormedEnv _env₂ _lifetime :=
+                  (typingPreservesWellFormed_of_sourceTerm hsourceCondition
+                    (ValidRuntimeState.validState hvalid') hwfInv hsafe'
+                    _hcondInv).1
+                have hwfBody : WellFormedEnv _env₂ _bodyLifetime :=
+                  WellFormedEnv.of_outlives hwfCondOut
+                    (LifetimeChild.outlives hchild)
+                have hvalidBody :=
+                  validRuntimeState_of_sourceTerm hsourceBody
+                    hterminalCondState.1
+                have hvstBody' : ValidStoreTyping s₁ _body typing :=
+                  validStoreTyping_sourceTerm_of_validStoreTyping hsourceBody
+                    hvstBody
+                have hstoreOps :=
+                  OperationalStoreProgress.of_finiteSupport
+                    (hfs₁.multiStep hblockRun)
+                rcases multistep_block_prefix_inv hblockRun with
+                  ⟨head', hcurrent, hheadRun⟩ |
+                  ⟨midStore, value, hheadRun, hcont⟩
+                · subst hcurrent
+                  have hheadProgress :=
+                    ihBodyInv rfl hsourceBody s₁ s₂ head' hvalidBody hvstBody'
+                      hwfBody hbseCondition hterminalCondState.2.1 hfs₁
+                      hheadRun
+                  rcases progress_block_of_head_progress
+                      (lifetime := _lifetime) hstoreOps hheadProgress with
+                    hterminal | ⟨s₃, t₃, hstepBlock⟩
+                  · exact absurd hterminal (by simp [Terminal])
+                  · exact Or.inr ⟨s₃, _, Step.subWhileBody hstepBlock⟩
+                · rcases hcont with
+                    ⟨next, rest', dropStore, heqrest, _hdrops, hcontRun⟩ |
+                    ⟨heqnil, _⟩
+                  · cases heqrest
+                    rcases multistep_block_prefix_inv hcontRun with
+                      ⟨head₂, hcurrent₂, hrun₂⟩ | ⟨mid₂, v₂, hrun₂, hcont₂⟩
+                    · subst hcurrent₂
+                      obtain ⟨hmidEq, hheadEq⟩ := multistep_value_inv hrun₂
+                      subst hmidEq
+                      subst hheadEq
+                      rcases progress_block_value
+                          (lifetime := _lifetime)
+                          (blockLifetime := _bodyLifetime)
+                          (value := Value.unit) hstoreOps with
+                        hterminal | ⟨s₃, t₃, hstepBlock⟩
+                      · exact absurd hterminal (by simp [Terminal])
+                      · exact Or.inr ⟨s₃, _, Step.subWhileBody hstepBlock⟩
+                    · obtain ⟨hmidEq, hvalEq⟩ := multistep_value_inv hrun₂
+                      subst hmidEq
+                      rcases hcont₂ with
+                        ⟨_, _, _, heq', _⟩ | ⟨_, _, _, _, hcurrentVal⟩
+                      · cases heq'
+                      · subst hcurrentVal
+                        cases hvalEq
+                        exact Or.inr ⟨_, _, Step.whileBodyDone⟩
+                  · cases heqnil
+            | iterate =>
+                rename_i conditionInFlight current' s₀ s₁ s₂ s₃ blockValue
+                  hcond hblockRun _hrest ih
+                intro heq hsafe' hvalid' hfs'
+                cases heq
+                have hvst' : ValidStoreTyping s₀ _condition typing :=
+                  validStoreTyping_sourceTerm_of_validStoreTyping
+                    hsourceCondition hvstCondition
+                have hterminalCondState :=
+                  preservation hsourceCondition hvalid' hvst' hwfInv hbse
+                    hsafe' _hcondInv hcond
+                have hfs₁ := hfs'.multiStep hcond
+                have hwfCondOut : WellFormedEnv _env₂ _lifetime :=
+                  (typingPreservesWellFormed_of_sourceTerm hsourceCondition
+                    (ValidRuntimeState.validState hvalid') hwfInv hsafe'
+                    _hcondInv).1
+                have hterminalBlock :=
+                  preservation hsourceIterBlock
+                    (validRuntimeState_of_sourceTerm hsourceIterBlock
+                      hterminalCondState.1)
+                    (validStoreTyping_sourceTerm_of_validStoreTyping
+                      hsourceIterBlock hvstIterBlock)
+                    hwfCondOut hbseCondition hterminalCondState.2.1
+                    hiterTyping hblockRun
+                rw [hdropEq] at hterminalBlock
+                exact ih rfl (hbackMap.safe hterminalBlock.2.1)
+                  (validRuntimeState_of_sourceTerm hsourceCondition
+                    hterminalBlock.1)
+                  (hfs₁.multiStep hblockRun)
+            | bodyPhase =>
+                intro heq _hsafe' _hvalid' _hfs'
+                cases heq
+            | bodyDone =>
+                intro heq _hsafe' _hvalid' _hfs'
+                cases heq
+          exact hmain _ _ _ _ hreaches rfl (hentryMap.safe hsafe)
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid) hfs)
     -- T-Seq singleton: in-flight head, or the block-exit drop ended the run.
     (fun {_env₁ _env₂ _typing _blockLifetime _term _ty} hterm ih htypingEq
         hsource outerLifetime store store' term' _hchild hvalid hvst hwf hbs

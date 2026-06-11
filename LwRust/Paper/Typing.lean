@@ -1181,6 +1181,52 @@ mutual
         body.Diverges →
         TermTyping env₁ typing lifetime
           (.whileLoop bodyLifetime condition body) .unit env₂
+    /-- T-WhileJoin: NLL-style loop invariant.
+
+    The loop is checked against an invariant environment `envInv` solving the
+    fixpoint equation `envInv = env₁ ⊔ envBack`: the condition is typed from
+    the invariant, and the back edge (post-body, after the body-scope drop)
+    must be exactly the `envBack` that closes the join.  This accepts loops
+    that widen borrow target lists across iterations (e.g. re-pointing an
+    outer `&mut` inside the body), which the strict rule `T-While` rejects.
+
+    Obligations follow the `T-If` convention: joins merge borrow target
+    lists, so shape agreement and the well-formedness/borrow-safety kit for
+    the join are rule-carried.  Runtime entry/back-edge states transport
+    into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
+    the `T-If` preservation argument.
+
+    The final two premises re-type the condition and body from the
+    *entry-side* environments.  In real Rust this is implied: per-code
+    borrow checking is monotone under removing loans, so anything that
+    checks at the widened loop-head state also checks at the entry state.
+    In this calculus that implication is genuinely unprovable — borrow
+    types carry their pointee information in the target lists, so
+    shrinking a target list can make a dereference typeless rather than
+    merely less constrained (`Examples/ThinningFalse.lean`) — so the
+    monotonicity fact is carried as rule premises instead.  The
+    conservative extractor's transport relies on them: a truncated loop
+    re-rooted at the loop's position reuses the entry-side derivations
+    verbatim. -/
+    | whileLoopJoin {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy bodyEntryTy : Ty} :
+        LifetimeChild lifetime bodyLifetime →
+        EnvJoin env₁ envBack envInv →
+        EnvJoinSameShape env₁ envInv →
+        EnvJoinSameShape envBack envInv →
+        ContainedBorrowsWellFormed envInv →
+        Coherent envInv →
+        Linearizable envInv →
+        BorrowSafeEnv envInv →
+        TermTyping envInv typing lifetime condition .bool env₂ →
+        TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
+        WellFormedTy env₃ bodyTy lifetime →
+        env₃.dropLifetime bodyLifetime = envBack →
+        TermTyping env₁ typing lifetime condition .bool envEntry₂ →
+        TermTyping envEntry₂ typing bodyLifetime body bodyEntryTy envEntry₃ →
+        TermTyping env₁ typing lifetime
+          (.whileLoop bodyLifetime condition body) .unit env₂
 
   inductive TermListTyping : Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
     /-- T-Seq, singleton sequence. -/

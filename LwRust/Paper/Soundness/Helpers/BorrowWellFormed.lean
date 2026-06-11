@@ -1548,6 +1548,22 @@ theorem TermTyping.slot_lifetime_survives :
           ihCond _ihBody x sourceSlot houtlives hslot
         exact ihCond houtlives hslot)
       (by
+        intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃
+          _typing _lifetime _bodyLifetime _condition _body _bodyTy
+          _bodyEntryTy _hchild hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+          _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+          ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+          x sourceSlot houtlives hslot
+        rcases (EnvJoin.left_le hjoin).slot_forward hslot with
+          ⟨invSlot, hinvSlot, hinvLifetime, _⟩
+        have hinvOutlives : invSlot.lifetime ≤ _lifetime := by
+          rw [← hinvLifetime]
+          exact houtlives
+        rcases ihCondInv hinvOutlives hinvSlot with
+          ⟨resultSlot, hresultSlot, hresultLifetime⟩
+        exact ⟨resultSlot, hresultSlot, by
+          rw [hinvLifetime, hresultLifetime]⟩)
+      (by
         intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
           x sourceSlot houtlives hslot
         exact ih houtlives hslot)
@@ -1689,6 +1705,22 @@ theorem TermTyping.slot_lifetime_survives :
           _body _bodyTy _hchild _hcond _hbody _hdiverges
           ihCond _ihBody x sourceSlot houtlives hslot
         exact ihCond houtlives hslot)
+      (by
+        intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃
+          _typing _lifetime _bodyLifetime _condition _body _bodyTy
+          _bodyEntryTy _hchild hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+          _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+          ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+          x sourceSlot houtlives hslot
+        rcases (EnvJoin.left_le hjoin).slot_forward hslot with
+          ⟨invSlot, hinvSlot, hinvLifetime, _⟩
+        have hinvOutlives : invSlot.lifetime ≤ _lifetime := by
+          rw [← hinvLifetime]
+          exact houtlives
+        rcases ihCondInv hinvOutlives hinvSlot with
+          ⟨resultSlot, hresultSlot, hresultLifetime⟩
+        exact ⟨resultSlot, hresultSlot, by
+          rw [hinvLifetime, hresultLifetime]⟩)
       (by
         intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
           x sourceSlot houtlives hslot

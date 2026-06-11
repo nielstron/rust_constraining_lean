@@ -79,6 +79,22 @@ stated; the deviation then documents the corrected claim).
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
 
+- **Join-invariant loops (`T-WhileJoin`) with rule-carried monotonicity.**
+  Beyond the strict rule below, `TermTyping.whileLoopJoin` checks a loop
+  against an invariant environment solving `Γ_inv = Γ_entry ⊔ Γ_back`
+  (NLL-style: loops may widen borrow target lists across iterations, e.g.
+  re-point an outer `&mut` inside the body), with the `T-If` obligation kit
+  for the join.  Its final two premises re-type the condition and body from
+  the *entry-side* environments.  In rustc this is implied — per-code borrow
+  checking is monotone under removing loans — but in this calculus it is
+  unprovable (`Examples/ThinningFalse.lean`: borrow types carry pointee
+  information in their target lists, so shrinking a target list can make a
+  dereference typeless), so the monotonicity fact is carried as premises,
+  following the rule-carried-obligation convention.  The conservative
+  extractor's transport re-roots truncated loops at the loop position using
+  exactly these entry-side derivations, which is what lets partial loop
+  conditions keep their statement extraction with no precision loss.
+
 - **While loops (`T-While`, `T-WhileDiv`), beyond the paper.**  The paper's
   calculus is loop-free (its original termination argument depended on it).
   `Term.whileLoop` adds `while cond { body }` with two in-flight runtime

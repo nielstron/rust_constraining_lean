@@ -921,7 +921,8 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
-    ?iteDiverging ?whileLoop ?whileLoopDiverging ?singleton ?cons htyping
+    ?iteDiverging ?whileLoop ?whileLoopDiverging ?whileLoopJoin
+    ?singleton ?cons htyping
   · intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
   · intro _env _typing lifetime _ty _hwellTy _hloanFree _hvst _hwf _hsafe _hstore
@@ -1034,6 +1035,13 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     exact Or.inr ⟨store, _, Step.whileStart⟩
   · intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
       _bodyTy _hchild _hcond _hbody _hdiverges _ihCond _ihBody
+      _hvst _hwf _hsafe _hstore
+    exact Or.inr ⟨store, _, Step.whileStart⟩
+  · intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+      lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
+      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+      _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+      _ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
       _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
   · intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hvst outerLifetime
