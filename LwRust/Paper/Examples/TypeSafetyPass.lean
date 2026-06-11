@@ -1099,11 +1099,12 @@ theorem pointerWriteBranch_typing :
 /-- Two borrow types strengthening into the same partial type can be merged:
 the appended target list still strengthens into it.  This is the least-upper-
 bound argument for the `p` slot of the branch join. -/
-theorem partialTyStrengthens_borrow_append {leftTargets rightTargets : List LVal}
+theorem partialTyStrengthens_borrow_append {mutable : Bool}
+    {leftTargets rightTargets : List LVal}
     {joined : PartialTy}
-    (hleft : PartialTyStrengthens (.ty (.borrow true leftTargets)) joined)
-    (hright : PartialTyStrengthens (.ty (.borrow true rightTargets)) joined) :
-    PartialTyStrengthens (.ty (.borrow true (leftTargets ++ rightTargets)))
+    (hleft : PartialTyStrengthens (.ty (.borrow mutable leftTargets)) joined)
+    (hright : PartialTyStrengthens (.ty (.borrow mutable rightTargets)) joined) :
+    PartialTyStrengthens (.ty (.borrow mutable (leftTargets ++ rightTargets)))
       joined := by
   cases hleft with
   | reflex =>

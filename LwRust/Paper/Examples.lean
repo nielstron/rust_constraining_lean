@@ -1,5 +1,6 @@
 import LwRust.Paper.Examples.Operational
 import LwRust.Paper.Examples.TypeSafetyPass
+import LwRust.Paper.Examples.WhileJoinPass
 import LwRust.Paper.Examples.TypeSafetyReject
 import LwRust.Paper.Examples.ThinningFalse
 
