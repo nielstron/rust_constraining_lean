@@ -383,12 +383,12 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           exact extractTermStmts_typed hoperand hoperand'
   case ctermEq_termPrefix hlhs =>
       cases htyped with
-      | eq hlhs' _ _ _ _ =>
+      | eq hlhs' =>
           simp only [extractTermStmts]
           exact extractTermStmts_typed hlhs hlhs'
   case ctermEq_eqRhs hrhs =>
       cases htyped with
-      | eq hlhs' hrhs' _ _ _ =>
+      | eq hlhs' _ _ hrhs' =>
           obtain ⟨env', hstmts⟩ := extractTermStmts_typed hrhs hrhs'
           simp only [extractTermStmts]
           exact ⟨env', .cons hlhs' hstmts⟩

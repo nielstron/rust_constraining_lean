@@ -2151,8 +2151,10 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit,
           fun _gamma _hfresh =>
           borrowSafeEnv_update_fresh_borrowFree hwriteSafe tyBorrowFree_unit⟩)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
-        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR hsource hborrowSafe =>
+    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+          _lhsTy _rhsTy _ghostRhsTy}
+        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
+        ihL _ihGhost ihR hsource hborrowSafe =>
       by
         have hleft := ihL (SourceTerm.eq_lhs hsource) hborrowSafe
         have hright := ihR (SourceTerm.eq_rhs hsource) hleft.1

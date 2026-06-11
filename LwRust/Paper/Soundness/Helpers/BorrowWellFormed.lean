@@ -1500,8 +1500,10 @@ theorem TermTyping.slot_lifetime_survives :
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
         exact ⟨resultSlot, hresultSlot, by rw [hrhsLifetime, hresultLifetime]⟩)
       (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy
-          _hLhs _hRhs _hcopyLhs _hcopyRhs _hshape ihLhs ihRhs
+        intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+          _lhsTy _rhsTy _ghostRhsTy
+          _hLhs _hfresh _hghostRhs _hRhs _hcopyLhs _hcopyRhs _hshape
+          ihLhs _ihGhost ihRhs
           x sourceSlot houtlives hslot
         rcases ihLhs houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
         have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
@@ -1658,8 +1660,10 @@ theorem TermTyping.slot_lifetime_survives :
           ⟨resultSlot, hresultSlot, hresultLifetime⟩
         exact ⟨resultSlot, hresultSlot, by rw [hrhsLifetime, hresultLifetime]⟩)
       (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy
-          _hLhs _hRhs _hcopyLhs _hcopyRhs _hshape ihLhs ihRhs
+        intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+          _lhsTy _rhsTy _ghostRhsTy
+          _hLhs _hfresh _hghostRhs _hRhs _hcopyLhs _hcopyRhs _hshape
+          ihLhs _ihGhost ihRhs
           x sourceSlot houtlives hslot
         rcases ihLhs houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
         have hmidOutlives : midSlot.lifetime ≤ _lifetime := by

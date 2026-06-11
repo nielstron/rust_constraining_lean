@@ -961,8 +961,9 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       (TermTyping.assign hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
         hcontained hnotWrite)
       (ih (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
-  · intro _env₁ _env₂ _env₃ _typing lifetime lhs rhs lhsTy rhsTy hLhs hRhs _hcopyL
-      _hcopyR _hshape ihL ihR hvst hwf hsafe hstore
+  · intro _env₁ _env₂ _env₃ _envGhost _ghost _typing lifetime lhs rhs lhsTy
+      rhsTy _ghostRhsTy hLhs _hfresh _hghostRhs hRhs _hcopyL
+      _hcopyR _hshape ihL _ihGhost ihR hvst hwf hsafe hstore
     rcases ihL
         (by
           intro value hmem

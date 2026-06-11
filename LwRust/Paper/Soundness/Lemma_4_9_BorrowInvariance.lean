@@ -1497,8 +1497,10 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         hnotWrite ih hsource =>
       TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hLhsPost
         hshape hwf hwrite hranked hcoh hcontained hnotWrite)
-    (fun _hLhs _hRhs hcopyL hcopyR hshape ihL ihR hsource =>
-      TermTyping.eq (ihL (SourceTerm.eq_lhs hsource))
+    (fun _hLhs hfresh _hghostRhs _hRhs hcopyL hcopyR hshape ihL ihGhost ihR
+        hsource =>
+      TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
+        (ihGhost (SourceTerm.eq_rhs hsource))
         (ihR (SourceTerm.eq_rhs hsource)) hcopyL hcopyR hshape)
     (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
         hcontained hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
@@ -5394,8 +5396,10 @@ theorem typingPreservesWellFormed_of_landmarks
           (LValTyping.lifetime_outlives_one hwellFormed hLhs)
           hRhs hshape hwellRhs hwrite hcontained hnotWrite,
         WellFormedTy.unit⟩)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
-        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq hwellFormed =>
+    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+          _lhsTy _rhsTy _ghostRhsTy}
+        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
+        ihL _ihGhost ihR htypingEq hwellFormed =>
       let leftResult := ihL htypingEq hwellFormed
       let rightResult := ihR htypingEq leftResult.1
       ⟨rightResult.1, WellFormedTy.bool⟩)
@@ -5541,8 +5545,10 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
             hcoh3,
             Linearizable.of_linearizedBy hlin3By⟩,
             WellFormedTy.unit⟩)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _lhs _rhs _lhsTy _rhsTy}
-        _hLhs _hRhs _hcopyL _hcopyR _hshape ihL ihR htypingEq hwellFormed =>
+    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+          _lhsTy _rhsTy _ghostRhsTy}
+        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
+        ihL _ihGhost ihR htypingEq hwellFormed =>
       let leftResult := ihL htypingEq hwellFormed
       let rightResult := ihR htypingEq leftResult.1
       ⟨rightResult.1, WellFormedTy.bool⟩)

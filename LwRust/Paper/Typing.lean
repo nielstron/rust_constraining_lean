@@ -1052,23 +1052,30 @@ mutual
         ContainedBorrowsWellFormed env₃ →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
-    /-- T-Eqal, Section 6.1.2.
+    /-- T-Eqal, Section 6.1.2, with the paper's ghost-slot check.
 
-    Deviation from the printed rule: the paper types the right operand in
-    `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and erases `γ` afterwards, so
-    that borrows inside `T₁` keep prohibiting conflicting uses while the right
-    operand is typed.  The mechanisation types the right operand in `Γ₂`
-    directly.  The anonymous slot exists only during typing — it has no
-    runtime counterpart — so carrying it would break the safe-abstraction
-    invariant (`S ∼ Γ`) threaded through preservation; eliminating it needs a
-    thinning metatheorem the paper does not provide.  Dropping it only widens
-    the accepted programs (the γ slot can only add read/write prohibitions),
-    and it is not load-bearing for soundness: the comparison redex inspects
-    the operand values without reading the store, and both operands are
-    discarded by the result.  See the README. -/
-    | eq {env₁ env₂ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-        {lhs rhs : Term} {lhsTy rhsTy : Ty} :
+    The paper types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous
+    fresh `γ` and erases `γ` afterwards, so that borrows inside `T₁` keep
+    prohibiting conflicting uses while the right operand is typed.  The
+    third premise is exactly that check.  The ghost slot has no runtime
+    counterpart, so its derivation cannot be threaded through preservation
+    (safe abstraction `S ∼ Γ` demands two-way domain agreement), and
+    eliminating it afterwards would need the fresh-slot thinning
+    metatheorem, which the paper does not provide.  Following the
+    rule-carried-obligation convention (cf. `T-WhileJoin`), the rule
+    therefore *also* carries the eliminated form (fourth premise) — in the
+    paper's system it is implied by the ghost form, and it is what the
+    metatheory threads.  The ghost premise is a pure filter restoring the
+    paper's strictness: a right operand that conflicts with borrows in the
+    left operand's result type is rejected. -/
+    | eq {env₁ env₂ env₃ envGhost : Env} {ghost : Name}
+        {typing : StoreTyping} {lifetime : Lifetime}
+        {lhs rhs : Term} {lhsTy rhsTy ghostRhsTy : Ty} :
         TermTyping env₁ typing lifetime lhs lhsTy env₂ →
+        env₂.fresh ghost →
+        TermTyping
+          (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
+          typing lifetime rhs ghostRhsTy envGhost →
         TermTyping env₂ typing lifetime rhs rhsTy env₃ →
         CopyTy lhsTy →
         CopyTy rhsTy →
