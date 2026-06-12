@@ -234,126 +234,129 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     SourceTerm term := by
   intro htyping
-  exact TermTyping.rec
+  refine TermTyping.rec
     (motive_1 := fun _env typing lifetime term _ty _env₂ _ =>
       typing = StoreTyping.empty → SourceTerm term)
     (motive_2 := fun _env typing lifetime terms _ty _env₂ _ =>
       typing = StoreTyping.empty → SourceTerm (.block lifetime terms))
-    (by
-      intro _env _typing _lifetime value _ty hvalueTyping htypingEq
-      subst htypingEq
-      intro candidate hmem
-      simp [termValues] at hmem
-      subst hmem
-      exact valueTyping_empty_sourceValue hvalueTyping)
-    (by
-      intro _env _typing _lifetime _ty _hwellTy _hloanFree _htypingEq
-        candidate hmem
-      simp [termValues] at hmem)
-    (by
-      intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
-        _htypingEq candidate hmem
-      simp [termValues] at hmem)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hnotWrite _hmove _htypingEq candidate hmem
-        simp [termValues] at hmem)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv
-          _hmutable _hnotWrite _htypingEq candidate hmem
-        simp [termValues] at hmem)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv
-          _hnotRead _htypingEq candidate hmem
-        simp [termValues] at hmem)
-    (by
-      intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
-        candidate hmem
-      exact ih htypingEq candidate (by simpa [termValues] using hmem))
-    (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime blockLifetime _terms _ty
-        _hchild _hterms _hwellTy _hdrop ih htypingEq
-      exact ih htypingEq)
-    (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty
-        _hfresh _hterm _hfreshOut _hcoh _henv₃ ih htypingEq candidate hmem
-      exact ih htypingEq candidate (by simpa [termValues] using hmem))
-    (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-        _rhs _rhsTy _hLhs _hRhs _hLhsPost _hshape _hwellTy _hwrite _hranked
-        _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
-      exact ih htypingEq candidate (by simpa [termValues] using hmem))
-    (by
-      intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-        _lhsTy _rhsTy _ghostRhsTy
-        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
-        ihL _ihGhost ihR htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hleft | hright
-      · exact ihL htypingEq candidate hleft
-      · exact ihR htypingEq candidate hright)
-    (by
-      intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-        _trueBranch _falseBranch _trueTy _falseTy _joinTy
-        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
-        _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe _hresultSafe
-        ihCondition ihTrue ihFalse htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hconditionMem | hbranchMem
-      · exact ihCondition htypingEq candidate hconditionMem
-      · rcases hbranchMem with htrueMem | hfalseMem
-        · exact ihTrue htypingEq candidate htrueMem
-        · exact ihFalse htypingEq candidate hfalseMem)
-    (by
-      intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-        _trueBranch _falseBranch _trueTy _falseTy
-        _hcondition _htrue _hfalse _hdiverges
-        ihCondition ihTrue ihFalse htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hconditionMem | hbranchMem
-      · exact ihCondition htypingEq candidate hconditionMem
-      · rcases hbranchMem with htrueMem | hfalseMem
-        · exact ihTrue htypingEq candidate htrueMem
-        · exact ihFalse htypingEq candidate hfalseMem)
-    (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-        _body _bodyTy _hchild _hcond _hbody _hwellTyBody _hdropEq
-        ihCondition ihBody htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hconditionMem | hbodyMem
-      · exact ihCondition htypingEq candidate hconditionMem
-      · exact ihBody htypingEq candidate hbodyMem)
-    (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-        _body _bodyTy _hchild _hcond _hbody _hdiverges
-        ihCondition ihBody htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hconditionMem | hbodyMem
-      · exact ihCondition htypingEq candidate hconditionMem
-      · exact ihBody htypingEq candidate hbodyMem)
-    (by
-      intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-        _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-        _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-        _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-        ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hconditionMem | hbodyMem
-      · exact ihCondInv htypingEq candidate hconditionMem
-      · exact ihBodyInv htypingEq candidate hbodyMem)
-    (by
-      intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
-        candidate hmem
-      simp [termValues] at hmem
-      exact ih htypingEq candidate hmem)
-    (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-        _hterm _hrest ihHead ihRest htypingEq candidate hmem
-      simp [termValues] at hmem
-      rcases hmem with hhead | htail
-      · exact ihHead htypingEq candidate hhead
-      · exact ihRest htypingEq candidate (by simpa [termValues] using htail))
+    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
+    ?declare ?assign ?eq ?ite ?iteDiverging ?whileLoop
+    ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
     htyping rfl
+  case const =>
+    intro _env _typing _lifetime value _ty hvalueTyping htypingEq
+    subst htypingEq
+    intro candidate hmem
+    simp [termValues] at hmem
+    subst hmem
+    exact valueTyping_empty_sourceValue hvalueTyping
+  case missing =>
+    intro _env _typing _lifetime _ty _hwellTy _hloanFree _htypingEq
+      candidate hmem
+    simp [termValues] at hmem
+  case copy =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
+      _htypingEq candidate hmem
+    simp [termValues] at hmem
+  case move =>
+    intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
+      _hLv _hnotWrite _hmove _htypingEq candidate hmem
+    simp [termValues] at hmem
+  case mutBorrow =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty _hLv
+      _hmutable _hnotWrite _htypingEq candidate hmem
+    simp [termValues] at hmem
+  case immBorrow =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty _hLv
+      _hnotRead _htypingEq candidate hmem
+    simp [termValues] at hmem
+  case box =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
+      candidate hmem
+    exact ih htypingEq candidate (by simpa [termValues] using hmem)
+  case block =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime blockLifetime _terms _ty
+      _hchild _hterms _hwellTy _hdrop ih htypingEq
+    exact ih htypingEq
+  case declare =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty
+      _hfresh _hterm _hfreshOut _hcoh _henv₃ ih htypingEq candidate hmem
+    exact ih htypingEq candidate (by simpa [termValues] using hmem)
+  case assign =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
+      _rhs _rhsTy _hLhs _hRhs _hLhsPost _hshape _hwellTy _hwrite _hranked
+      _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
+    exact ih htypingEq candidate (by simpa [termValues] using hmem)
+  case eq =>
+    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+      _lhsTy _rhsTy _ghostRhsTy
+      _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
+      ihL _ihGhost ihR htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hleft | hright
+    · exact ihL htypingEq candidate hleft
+    · exact ihR htypingEq candidate hright
+  case ite =>
+    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _joinTy
+      _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
+      _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe _hresultSafe
+      ihCondition ihTrue ihFalse htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbranchMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · rcases hbranchMem with htrueMem | hfalseMem
+      · exact ihTrue htypingEq candidate htrueMem
+      · exact ihFalse htypingEq candidate hfalseMem
+  case iteDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy
+      _hcondition _htrue _hfalse _hdiverges
+      ihCondition ihTrue ihFalse htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbranchMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · rcases hbranchMem with htrueMem | hfalseMem
+      · exact ihTrue htypingEq candidate htrueMem
+      · exact ihFalse htypingEq candidate hfalseMem
+  case whileLoop =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+      _body _bodyTy _hchild _hcond _hbody _hwellTyBody _hdropEq
+      ihCondition ihBody htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbodyMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · exact ihBody htypingEq candidate hbodyMem
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+      _body _bodyTy _hchild _hcond _hbody _hdiverges
+      ihCondition ihBody htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbodyMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · exact ihBody htypingEq candidate hbodyMem
+  case whileLoopJoin =>
+    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+      _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
+      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+      _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+      ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbodyMem
+    · exact ihCondInv htypingEq candidate hconditionMem
+    · exact ihBodyInv htypingEq candidate hbodyMem
+  case singleton =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
+      candidate hmem
+    simp [termValues] at hmem
+    exact ih htypingEq candidate hmem
+  case cons =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
+      _hterm _hrest ihHead ihRest htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hhead | htail
+    · exact ihHead htypingEq candidate hhead
+    · exact ihRest htypingEq candidate (by simpa [termValues] using htail)
 
 theorem sourceInitialState_valid {term : Term} :
     SourceTerm term →
