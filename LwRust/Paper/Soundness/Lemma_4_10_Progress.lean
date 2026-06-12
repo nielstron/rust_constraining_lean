@@ -140,18 +140,20 @@ decreasing_by
         Finset.card_erase_lt_of_mem hmem
       omega
 
+private theorem drops_nonOwner_primitive : ∀ {v : PartialValue},
+    PartialValueNonOwner v →
+    ∃ store', Drops ProgramStore.empty [v] store' :=
+  fun {v} hnonOwner => ⟨ProgramStore.empty, drops_nonOwner hnonOwner⟩
+
 theorem drops_empty_value (value : Value) :
     ∃ store', Drops ProgramStore.empty [.value value] store' := by
   cases value with
   | unit =>
-      exact ⟨ProgramStore.empty,
-        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
+      exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
   | int value =>
-      exact ⟨ProgramStore.empty,
-        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
+      exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
   | bool value =>
-      exact ⟨ProgramStore.empty,
-        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
+      exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
   | ref ref =>
       cases howner : ref.owner with
       | false =>
@@ -174,8 +176,7 @@ theorem drops_empty_partial (value : PartialValue) :
     ∃ store', Drops ProgramStore.empty [value] store' := by
   cases value with
   | undef =>
-      exact ⟨ProgramStore.empty,
-        drops_nonOwner (by intro ref; exact Or.inl (by simp))⟩
+      exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
   | value value =>
       exact drops_empty_value value
 

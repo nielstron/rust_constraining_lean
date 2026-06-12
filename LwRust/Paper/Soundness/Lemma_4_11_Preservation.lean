@@ -225,15 +225,13 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
   | @box location slot inner hslot _hinner ih =>
       intro hreach
       have hlocNe : location ≠ updated := hreach location (Reaches.boxHere hslot)
-      refine ValidPartialValue.box
-        (location := location) (slot := slot) ?_ ?_
+      refine ValidPartialValue.box (location := location) (slot := slot) ?_ ?_
       · rw [ProgramStore.slotAt_update_ne hlocNe]; exact hslot
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxInner hslot hℓ))
   | @boxFull location slot ty hslot _hinner ih =>
       intro hreach
       have hlocNe : location ≠ updated := hreach location (Reaches.boxFullHere hslot)
-      refine ValidPartialValue.boxFull
-        (location := location) (slot := slot) ?_ ?_
+      refine ValidPartialValue.boxFull (location := location) (slot := slot) ?_ ?_
       · rw [ProgramStore.slotAt_update_ne hlocNe]; exact hslot
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
@@ -260,20 +258,14 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
   | @box location slot inner hslot _hinner ih =>
       intro hreach
       have hlocNe : location ≠ erased := hreach location (Reaches.boxHere hslot)
-      refine ValidPartialValue.box
-        (location := location) (slot := slot) ?_ ?_
-      · rw [ProgramStore.erase_slotAt_ne]
-        · exact hslot
-        · exact hlocNe
+      refine ValidPartialValue.box (location := location) (slot := slot) ?_ ?_
+      · rw [ProgramStore.erase_slotAt_ne]; exact hslot; exact hlocNe
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxInner hslot hℓ))
   | @boxFull location slot ty hslot _hinner ih =>
       intro hreach
       have hlocNe : location ≠ erased := hreach location (Reaches.boxFullHere hslot)
-      refine ValidPartialValue.boxFull
-        (location := location) (slot := slot) ?_ ?_
-      · rw [ProgramStore.erase_slotAt_ne]
-        · exact hslot
-        · exact hlocNe
+      refine ValidPartialValue.boxFull (location := location) (slot := slot) ?_ ?_
+      · rw [ProgramStore.erase_slotAt_ne]; exact hslot; exact hlocNe
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
 /-- Value reachability observed after an erase was already present in the
