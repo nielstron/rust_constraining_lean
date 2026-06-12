@@ -381,12 +381,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       cases htypingEq
       have hsourceLeft : SourceTerm _lhs := SourceTerm.eq_lhs hsource
       have hsourceRight : SourceTerm _rhs := SourceTerm.eq_rhs hsource
-      have hvstLeft : ValidStoreTyping store _lhs typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstRightSource : ValidStoreTyping store _rhs typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
+      have hvstLeft : ValidStoreTyping store _lhs typing :=
+        hvst.eq_lhs
+      have hvstRightSource : ValidStoreTyping store _rhs typing :=
+        hvst.eq_rhs
       rcases multistep_eq_prefix_inv hmulti with
         ⟨lhs', hfinal, hmsLeft⟩ |
         ⟨midStore, leftValue, hmsLeft, hcase⟩
@@ -470,15 +468,12 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         SourceTerm.ite_trueBranch hsource
       have hsourceFalse : SourceTerm _falseBranch :=
         SourceTerm.ite_falseBranch hsource
-      have hvstCondition : ValidStoreTyping store _condition typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstTrueSource : ValidStoreTyping store _trueBranch typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstFalseSource : ValidStoreTyping store _falseBranch typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
+      have hvstCondition : ValidStoreTyping store _condition typing :=
+        hvst.ite_condition
+      have hvstTrueSource : ValidStoreTyping store _trueBranch typing :=
+        hvst.ite_trueBranch
+      have hvstFalseSource : ValidStoreTyping store _falseBranch typing :=
+        hvst.ite_falseBranch
       rcases multistep_ite_prefix_inv hmulti with
         ⟨condition', hfinal, hmsCondition⟩ |
         ⟨midStore, hmsCondition, hmsTrue⟩ |
@@ -555,15 +550,12 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         SourceTerm.ite_trueBranch hsource
       have hsourceFalse : SourceTerm _falseBranch :=
         SourceTerm.ite_falseBranch hsource
-      have hvstCondition : ValidStoreTyping store _condition typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstTrueSource : ValidStoreTyping store _trueBranch typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstFalseSource : ValidStoreTyping store _falseBranch typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
+      have hvstCondition : ValidStoreTyping store _condition typing :=
+        hvst.ite_condition
+      have hvstTrueSource : ValidStoreTyping store _trueBranch typing :=
+        hvst.ite_trueBranch
+      have hvstFalseSource : ValidStoreTyping store _falseBranch typing :=
+        hvst.ite_falseBranch
       rcases multistep_ite_prefix_inv hmulti with
         ⟨condition', hfinal, hmsCondition⟩ |
         ⟨midStore, hmsCondition, hmsTrue⟩ |
@@ -645,12 +637,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         rcases hmem with hbody | hunit
         · exact hsourceBody v hbody
         · subst hunit; trivial
-      have hvstCondition : ValidStoreTyping store _condition typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstBody : ValidStoreTyping store _body typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
+      have hvstCondition : ValidStoreTyping store _condition typing :=
+        hvst.while_condition
+      have hvstBody : ValidStoreTyping store _body typing :=
+        hvst.while_body
       have hvstIterBlock :
           ValidStoreTyping store (.block _bodyLifetime [_body, .val .unit])
             typing := by
@@ -828,12 +818,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       have hsourceCondition : SourceTerm _condition :=
         SourceTerm.while_condition hsource
       have hsourceBody : SourceTerm _body := SourceTerm.while_body hsource
-      have hvstCondition : ValidStoreTyping store _condition typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstBody : ValidStoreTyping store _body typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
+      have hvstCondition : ValidStoreTyping store _condition typing :=
+        hvst.while_condition
+      have hvstBody : ValidStoreTyping store _body typing :=
+        hvst.while_body
       have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
         (typingPreservesBorrowSafeResult_global hsourceCondition hbs
           _hcondition).1
@@ -960,12 +948,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         rcases hmem with hbody | hunit
         · exact hsourceBody v hbody
         · subst hunit; trivial
-      have hvstCondition : ValidStoreTyping store _condition typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
-      have hvstBody : ValidStoreTyping store _body typing := by
-        intro value hmem
-        exact hvst value (by simp [termValues, hmem])
+      have hvstCondition : ValidStoreTyping store _condition typing :=
+        hvst.while_condition
+      have hvstBody : ValidStoreTyping store _body typing :=
+        hvst.while_body
       have hvstIterBlock :
           ValidStoreTyping store (.block _bodyLifetime [_body, .val .unit])
             typing := by

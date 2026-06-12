@@ -345,6 +345,33 @@ theorem EnvJoin.right_sameShapeStrengthening {left right join : Env} :
         subst hslotEq
         exact ⟨joinSlot, rfl, hlifetime⟩
 
+/-- Transport one branch's terminal state into the join environment: the
+join is well-formed (its slots-outlive component comes from the branch via
+lifetime preservation; the remaining components are the rule's join
+obligations), safe abstraction transports along the same-shape strengthening
+map, and the final value strengthens into the join type.  This packages the
+per-branch conclusion of `T-IfJoin` in the preservation proof. -/
+theorem TerminalStateSafe.strengthen_join {finalStore : ProgramStore}
+    {finalValue : Value} {branchEnv joinEnv : Env} {lifetime : Lifetime}
+    {branchTy joinTy : Ty}
+    (hcontained : ContainedBorrowsWellFormed joinEnv)
+    (hcoherent : Coherent joinEnv)
+    (hlinear : Linearizable joinEnv)
+    (hpreserved : EnvLifetimesPreserved branchEnv joinEnv)
+    (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
+    (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
+    (hwellBranch : WellFormedEnv branchEnv lifetime)
+    (hterminal : TerminalStateSafe finalStore finalValue branchEnv branchTy) :
+    WellFormedEnv joinEnv lifetime ∧
+      TerminalStateSafe finalStore finalValue joinEnv joinTy := by
+  have hwellJoin : WellFormedEnv joinEnv lifetime :=
+    ⟨hcontained,
+      EnvSlotsOutlive.of_lifetimesPreserved hwellBranch.2.1 hpreserved,
+      hcoherent, hlinear⟩
+  have hsafeJoin : finalStore ∼ₛ joinEnv := hmap.safe hterminal.2.1
+  exact ⟨hwellJoin, hterminal.1, hsafeJoin,
+    safeStrengthening hwellJoin hsafeJoin hstrengthens hterminal.2.2⟩
+
 theorem WriteBorrowTargets.initialized_leaves_of_typed
     {rank : Nat} {env result : Env} {path : Path}
     {targets : List LVal} {rhsTy : Ty} :

@@ -360,6 +360,63 @@ theorem validStoreTyping_block_tail_of_cons {store : ProgramStore}
     simp [termValues] at hmem ⊢
     exact Or.inr hmem)
 
+/-- `ValidStoreTyping` is monotone along value containment; the
+per-constructor corollaries below give dot-notation access at the
+sub-term extraction sites of the soundness proofs. -/
+theorem ValidStoreTyping.mono {store : ProgramStore} {big sub : Term}
+    {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store big typing)
+    (hsub : ∀ value, value ∈ termValues sub → value ∈ termValues big) :
+    ValidStoreTyping store sub typing :=
+  fun value hmem => hvalid value (hsub value hmem)
+
+theorem ValidStoreTyping.eq_lhs {store : ProgramStore} {lhs rhs : Term}
+    {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.eq lhs rhs) typing) :
+    ValidStoreTyping store lhs typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
+theorem ValidStoreTyping.eq_rhs {store : ProgramStore} {lhs rhs : Term}
+    {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.eq lhs rhs) typing) :
+    ValidStoreTyping store rhs typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
+theorem ValidStoreTyping.ite_condition {store : ProgramStore}
+    {condition trueBranch falseBranch : Term} {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.ite condition trueBranch falseBranch)
+      typing) :
+    ValidStoreTyping store condition typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
+theorem ValidStoreTyping.ite_trueBranch {store : ProgramStore}
+    {condition trueBranch falseBranch : Term} {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.ite condition trueBranch falseBranch)
+      typing) :
+    ValidStoreTyping store trueBranch typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
+theorem ValidStoreTyping.ite_falseBranch {store : ProgramStore}
+    {condition trueBranch falseBranch : Term} {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.ite condition trueBranch falseBranch)
+      typing) :
+    ValidStoreTyping store falseBranch typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
+theorem ValidStoreTyping.while_condition {store : ProgramStore}
+    {bodyLifetime : Lifetime} {condition body : Term} {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.whileLoop bodyLifetime condition body)
+      typing) :
+    ValidStoreTyping store condition typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
+theorem ValidStoreTyping.while_body {store : ProgramStore}
+    {bodyLifetime : Lifetime} {condition body : Term} {typing : StoreTyping}
+    (hvalid : ValidStoreTyping store (.whileLoop bodyLifetime condition body)
+      typing) :
+    ValidStoreTyping store body typing :=
+  hvalid.mono fun value hmem => by simp [termValues, hmem]
+
 theorem validStoreTyping_sourceTerm_of_validStoreTyping
     {store store' : ProgramStore} {term : Term} {typing : StoreTyping} :
     SourceTerm term →

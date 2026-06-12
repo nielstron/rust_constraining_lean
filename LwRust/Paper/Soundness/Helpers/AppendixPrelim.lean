@@ -3097,6 +3097,32 @@ theorem EnvJoin.le_right {left right join : Env}
     (h : EnvJoin left right join) : right ≤ join :=
   h.1 (Set.mem_insert_of_mem _ rfl)
 
+/-- Slots present in both branches of a join have the same shape: each
+branch slot is `sameShape` to the join slot (the `EnvJoinSameShape` rule
+premises), and shapes compose through the join.  This is the cross-branch
+fact needed by the same-shape strengthening maps of `T-IfJoin` and
+`T-WhileJoin`. -/
+theorem EnvJoin.branches_sameShape {left right join : Env}
+    (hjoin : EnvJoin left right join)
+    (hsameLeft : EnvJoinSameShape left join)
+    (hsameRight : EnvJoinSameShape right join) :
+    ∀ x leftSlot rightSlot,
+      left.slotAt x = some leftSlot →
+      right.slotAt x = some rightSlot →
+      PartialTy.sameShape leftSlot.ty rightSlot.ty := by
+  intro x leftSlot rightSlot hleft hright
+  have hle := EnvJoin.le_left hjoin x
+  rw [hleft] at hle
+  cases hjoinSlot : join.slotAt x with
+  | none =>
+      rw [hjoinSlot] at hle
+      exact False.elim hle
+  | some joinSlot =>
+      exact PartialTy.sameShape_trans
+        (hsameLeft x leftSlot joinSlot hleft hjoinSlot)
+        (PartialTy.sameShape_symm
+          (hsameRight x rightSlot joinSlot hright hjoinSlot))
+
 /-- One-directional target-list transport at the type level.  Given a sub-list
 inclusion `tgts ⊆ tgts'` of borrow targets jointly typed in two environments
 `e` (type `pTy`) and `e'` (type `jTy`), together with per-member transport facts

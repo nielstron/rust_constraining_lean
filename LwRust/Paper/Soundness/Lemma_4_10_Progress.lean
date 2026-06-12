@@ -478,6 +478,21 @@ theorem ProgressResult.step_of_not_terminal {store : ProgramStore}
   · exact False.elim (hnotTerminal hterminal)
   · exact hstep
 
+/-- Case split on a sub-term's progress result: either the sub-term is
+already a value, or its step lifts to the surrounding context.  The two
+lifetimes differ when the sub-term steps under a block lifetime. -/
+theorem ProgressResult.elim_value {store : ProgramStore}
+    {inner outer : Lifetime} {term big : Term}
+    (hprogress : ProgressResult store inner term)
+    (hvalue : ∀ value, term = .val value → ProgressResult store outer big)
+    (hstep : (∃ store' term', Step store inner term store' term') →
+      ProgressResult store outer big) :
+    ProgressResult store outer big := by
+  rcases hprogress with hterminal | h
+  · rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
+    exact hvalue value hterm
+  · exact hstep h
+
 /-- Lemma 4.10, `T-Const`/value case. -/
 theorem progress_value (store : ProgramStore) (lifetime : Lifetime) (value : Value) :
     ProgressResult store lifetime (.val value) := by
@@ -536,52 +551,45 @@ theorem progress_borrow_lval {store : ProgramStore} {env : Env}
 theorem progress_subBox {store : ProgramStore} {lifetime : Lifetime}
     {term : Term} :
     (∃ store' term', Step store lifetime term store' term') →
-    ProgressResult store lifetime (.box term) := by
-  intro hstep
-  rcases hstep with ⟨store', term', hstep⟩
-  exact Or.inr ⟨store', .box term', Step.subBox hstep⟩
+    ProgressResult store lifetime (.box term) :=
+  fun ⟨store', term', hstep⟩ => Or.inr ⟨store', .box term', Step.subBox hstep⟩
 
 /-- Lemma 4.10, `let mut x = E` evaluation-context case. -/
 theorem progress_subDeclare {store : ProgramStore} {lifetime : Lifetime}
     {x : Name} {term : Term} :
     (∃ store' term', Step store lifetime term store' term') →
-    ProgressResult store lifetime (.letMut x term) := by
-  intro hstep
-  rcases hstep with ⟨store', term', hstep⟩
-  exact Or.inr ⟨store', .letMut x term', Step.subDeclare hstep⟩
+    ProgressResult store lifetime (.letMut x term) :=
+  fun ⟨store', term', hstep⟩ =>
+    Or.inr ⟨store', .letMut x term', Step.subDeclare hstep⟩
 
 /-- Lemma 4.10, `w = E` evaluation-context case. -/
 theorem progress_subAssign {store : ProgramStore} {lifetime : Lifetime}
     {lhs : LVal} {rhs : Term} :
     (∃ store' rhs', Step store lifetime rhs store' rhs') →
-    ProgressResult store lifetime (.assign lhs rhs) := by
-  intro hstep
-  rcases hstep with ⟨store', rhs', hstep⟩
-  exact Or.inr ⟨store', .assign lhs rhs', Step.subAssign hstep⟩
+    ProgressResult store lifetime (.assign lhs rhs) :=
+  fun ⟨store', rhs', hstep⟩ =>
+    Or.inr ⟨store', .assign lhs rhs', Step.subAssign hstep⟩
 
 theorem progress_subEqLeft {store : ProgramStore} {lifetime : Lifetime}
     {lhs rhs : Term} :
     (∃ store' lhs', Step store lifetime lhs store' lhs') →
-    ProgressResult store lifetime (.eq lhs rhs) := by
-  intro hstep
-  rcases hstep with ⟨store', lhs', hstep⟩
-  exact Or.inr ⟨store', .eq lhs' rhs, Step.subEqLeft hstep⟩
+    ProgressResult store lifetime (.eq lhs rhs) :=
+  fun ⟨store', lhs', hstep⟩ =>
+    Or.inr ⟨store', .eq lhs' rhs, Step.subEqLeft hstep⟩
 
 theorem progress_subEqRight {store : ProgramStore} {lifetime : Lifetime}
     {value : Value} {rhs : Term} :
     (∃ store' rhs', Step store lifetime rhs store' rhs') →
-    ProgressResult store lifetime (.eq (.val value) rhs) := by
-  intro hstep
-  rcases hstep with ⟨store', rhs', hstep⟩
-  exact Or.inr ⟨store', .eq (.val value) rhs', Step.subEqRight hstep⟩
+    ProgressResult store lifetime (.eq (.val value) rhs) :=
+  fun ⟨store', rhs', hstep⟩ =>
+    Or.inr ⟨store', .eq (.val value) rhs', Step.subEqRight hstep⟩
 
 theorem progress_subIte {store : ProgramStore} {lifetime : Lifetime}
     {condition trueBranch falseBranch : Term} :
     (∃ store' condition', Step store lifetime condition store' condition') →
-    ProgressResult store lifetime (.ite condition trueBranch falseBranch) := by
-  intro hstep
-  rcases hstep with ⟨store', condition', hstep⟩
-  exact Or.inr ⟨store', .ite condition' trueBranch falseBranch, Step.subIte hstep⟩
+    ProgressResult store lifetime (.ite condition trueBranch falseBranch) :=
+  fun ⟨store', condition', hstep⟩ =>
+    Or.inr ⟨store', .ite condition' trueBranch falseBranch, Step.subIte hstep⟩
 
 theorem progress_eq_values {store : ProgramStore} {lifetime : Lifetime}
     {lhs rhs : Value} :
@@ -622,10 +630,9 @@ theorem progress_ite_value {store : ProgramStore} {typing : StoreTyping}
 theorem progress_block_head {store : ProgramStore}
     {lifetime blockLifetime : Lifetime} {term : Term} {rest : List Term} :
     (∃ store' term', Step store blockLifetime term store' term') →
-    ProgressResult store lifetime (.block blockLifetime (term :: rest)) := by
-  intro hstep
-  rcases hstep with ⟨store', term', hstep⟩
-  exact Or.inr ⟨store', .block blockLifetime (term' :: rest), Step.blockA hstep⟩
+    ProgressResult store lifetime (.block blockLifetime (term :: rest)) :=
+  fun ⟨store', term', hstep⟩ =>
+    Or.inr ⟨store', .block blockLifetime (term' :: rest), Step.blockA hstep⟩
 
 /-- Lemma 4.10, typed `box E` context case. -/
 theorem progress_box_context_typing {store : ProgramStore} {env₁ env₂ : Env}
@@ -824,11 +831,9 @@ theorem progress_box_typing {store : ProgramStore} {env₁ env₂ : Env}
     ProgressResult store lifetime term →
     ProgressResult store lifetime (.box term) := by
   intro hstore _htyping hprogress
-  rcases hprogress with hterminal | hstep
-  · rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
-    subst hterm
-    exact progress_box_value hstore
-  · exact progress_subBox hstep
+  exact hprogress.elim_value
+    (fun value hterm => by subst hterm; exact progress_box_value hstore)
+    progress_subBox
 
 /-- Lemma 4.10, composed `T-Declare` progress case. -/
 theorem progress_declare_typing {store : ProgramStore} {env₁ env₂ : Env}
@@ -837,11 +842,10 @@ theorem progress_declare_typing {store : ProgramStore} {env₁ env₂ : Env}
     ProgressResult store lifetime term →
     ProgressResult store lifetime (.letMut x term) := by
   intro htyping hprogress
-  rcases hprogress with hterminal | hstep
-  · rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
-    subst hterm
-    exact progress_declare_value_typing htyping
-  · exact progress_subDeclare hstep
+  exact hprogress.elim_value
+    (fun value hterm => by
+      subst hterm; exact progress_declare_value_typing htyping)
+    progress_subDeclare
 
 /-- Lemma 4.10, composed `T-Assign` progress case. -/
 theorem progress_assign_typing {store : ProgramStore} {env₁ env₂ : Env}
@@ -854,11 +858,11 @@ theorem progress_assign_typing {store : ProgramStore} {env₁ env₂ : Env}
     ProgressResult store lifetime rhs →
     ProgressResult store lifetime (.assign lhs rhs) := by
   intro hwellFormed hsafe hstore htyping hprogress
-  rcases hprogress with hterminal | hstep
-  · rcases (terminal_iff_value rhs).mp hterminal with ⟨value, hrhs⟩
-    subst hrhs
-    exact progress_assign_value_typing hwellFormed hsafe hstore htyping
-  · exact progress_subAssign hstep
+  exact hprogress.elim_value
+    (fun value hrhs => by
+      subst hrhs
+      exact progress_assign_value_typing hwellFormed hsafe hstore htyping)
+    progress_subAssign
 
 /-- Lemma 4.10, composed block-head progress case. -/
 theorem progress_block_of_head_progress {store : ProgramStore}
@@ -867,15 +871,13 @@ theorem progress_block_of_head_progress {store : ProgramStore}
     ProgressResult store blockLifetime term →
     ProgressResult store lifetime (.block blockLifetime (term :: rest)) := by
   intro hstore hprogress
-  rcases hprogress with hterminal | hstep
-  · rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
-    subst hterm
-    cases rest with
-    | nil =>
-        exact progress_block_value hstore
-    | cons next rest =>
-        exact progress_seq_value hstore
-  · exact progress_block_head hstep
+  exact hprogress.elim_value
+    (fun value hterm => by
+      subst hterm
+      cases rest with
+      | nil => exact progress_block_value hstore
+      | cons next rest => exact progress_seq_value hstore)
+    progress_block_head
 
 /-- Well-formedness is downward monotone along the lifetime order: only the
 slot-outliving component mentions the lifetime, and outliving an outer
@@ -923,133 +925,121 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
     ?iteDiverging ?whileLoop ?whileLoopDiverging ?whileLoopJoin
     ?singleton ?cons htyping
-  · intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
+  case const =>
+    intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
-  · intro _env _typing lifetime _ty _hwellTy _hloanFree _hvst _hwf _hsafe _hstore
+  case missing =>
+    intro _env _typing lifetime _ty _hwellTy _hloanFree _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, .missing, Step.missing⟩
-  · intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy hreadProhibited
+  case copy =>
+    intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy hreadProhibited
       _hvst hwf hsafe _hstore
     exact progress_copy_typing (typing := _typing) hwf hsafe
       (TermTyping.copy (typing := _typing) hLv hcopy hreadProhibited)
-  · intro _env₁ _env₂ _typing lifetime _valueLifetime _lv _ty hLv hwriteProhibited hmove
+  case move =>
+    intro _env₁ _env₂ _typing lifetime _valueLifetime _lv _ty hLv hwriteProhibited hmove
       _hvst hwf hsafe _hstore
     exact progress_move_typing (typing := _typing) hwf hsafe
       (TermTyping.move (typing := _typing) hLv hwriteProhibited hmove)
-  · intro _env _typing lifetime _valueLifetime _lv _ty hLv hmutable hwriteProhibited
+  case mutBorrow =>
+    intro _env _typing lifetime _valueLifetime _lv _ty hLv hmutable hwriteProhibited
       _hvst hwf hsafe _hstore
     exact progress_borrow_typing (typing := _typing) hwf hsafe
       (TermTyping.mutBorrow (typing := _typing) hLv hmutable hwriteProhibited)
-  · intro _env _typing lifetime _valueLifetime _lv _ty hLv hreadProhibited
+  case immBorrow =>
+    intro _env _typing lifetime _valueLifetime _lv _ty hLv hreadProhibited
       _hvst hwf hsafe _hstore
     exact progress_borrow_typing (typing := _typing) hwf hsafe
       (TermTyping.immBorrow (typing := _typing) hLv hreadProhibited)
-  · intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hvst hwf hsafe hstore
+  case box =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hvst hwf hsafe hstore
     exact progress_box_typing hstore (TermTyping.box hterm)
       (ih (validStoreTyping_box_inner hvst) hwf hsafe hstore)
-  · intro _env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty hchild _hterms
+  case block =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty hchild _hterms
       _hwellTy _hdrop ih hvst hwf hsafe hstore
     exact ih hvst lifetime
       (WellFormedEnv.of_outlives hwf (LifetimeChild.outlives hchild)) hsafe hstore
-  · intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm hfreshOut
+  case declare =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm hfreshOut
       hcoh henv ih hvst hwf hsafe hstore
     exact progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
       (ih (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
-  · intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
+  case assign =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
       hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
       hvst hwf hsafe hstore
     exact progress_assign_typing hwf hsafe hstore
       (TermTyping.assign hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
         hcontained hnotWrite)
       (ih (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
-  · intro _env₁ _env₂ _env₃ _envGhost _ghost _typing lifetime lhs rhs lhsTy
+  case eq =>
+    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing lifetime lhs rhs lhsTy
       rhsTy _ghostRhsTy hLhs _hfresh _hghostRhs hRhs _hcopyL
       _hcopyR _hshape ihL _ihGhost ihR hvst hwf hsafe hstore
-    rcases ihL
-        (by
-          intro value hmem
-          exact hvst value (by
-            simp [termValues] at hmem ⊢
-            exact Or.inl hmem))
-        hwf hsafe hstore with hterminalL | hstepL
+    rcases ihL hvst.eq_lhs hwf hsafe hstore with hterminalL | hstepL
     · rcases (terminal_iff_value lhs).mp hterminalL with ⟨lhsValue, hlhs⟩
       subst hlhs
       cases hLhs with
       | const _hvalueL =>
-          rcases ihR
-              (by
-                intro value hmem
-                exact hvst value (by
-                  simp [termValues] at hmem ⊢
-                  exact Or.inr hmem))
-              hwf hsafe hstore with hterminalR | hstepR
+          rcases ihR hvst.eq_rhs hwf hsafe hstore with hterminalR | hstepR
           · rcases (terminal_iff_value rhs).mp hterminalR with ⟨rhsValue, hrhs⟩
             subst hrhs
             exact progress_eq_values
           · exact progress_subEqRight hstepR
     · exact progress_subEqLeft hstepL
-  · intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
+  case ite =>
+    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
       _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe
       _hresultSafe ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
-    rcases ihCondition
-        (by
-          intro value hmem
-          exact hvst value (by
-            simp [termValues] at hmem ⊢
-            exact Or.inl hmem))
-        hwf hsafe hstore with hterminalCondition | hstepCondition
+    rcases ihCondition hvst.ite_condition hwf hsafe hstore with
+      hterminalCondition | hstepCondition
     · rcases (terminal_iff_value condition).mp hterminalCondition with
         ⟨conditionValue, hconditionValue⟩
       subst hconditionValue
       cases hcondition with
       | const hvalueTyping =>
-          exact progress_ite_value hvalueTyping (by
-            intro value hmem
-            exact hvst value (by
-              simp [termValues] at hmem ⊢
-              exact Or.inl hmem))
+          exact progress_ite_value hvalueTyping hvst.ite_condition
     · exact progress_subIte hstepCondition
-  · intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
+  case iteDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy hcondition _htrue _hfalse _hdiverges
       ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
-    rcases ihCondition
-        (by
-          intro value hmem
-          exact hvst value (by
-            simp [termValues] at hmem ⊢
-            exact Or.inl hmem))
-        hwf hsafe hstore with hterminalCondition | hstepCondition
+    rcases ihCondition hvst.ite_condition hwf hsafe hstore with
+      hterminalCondition | hstepCondition
     · rcases (terminal_iff_value condition).mp hterminalCondition with
         ⟨conditionValue, hconditionValue⟩
       subst hconditionValue
       cases hcondition with
       | const hvalueTyping =>
-          exact progress_ite_value hvalueTyping (by
-            intro value hmem
-            exact hvst value (by
-              simp [termValues] at hmem ⊢
-              exact Or.inl hmem))
+          exact progress_ite_value hvalueTyping hvst.ite_condition
     · exact progress_subIte hstepCondition
-  · intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
+  case whileLoop =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
       _bodyTy _hchild _hcond _hbody _hwellTy _hdrop _ihCond _ihBody
       _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
-  · intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
       _bodyTy _hchild _hcond _hbody _hdiverges _ihCond _ihBody
       _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
-  · intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+  case whileLoopJoin =>
+    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
       _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
       _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       _ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
       _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
-  · intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hvst outerLifetime
+  case singleton =>
+    intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hvst outerLifetime
       hwf hsafe hstore
     exact progress_block_of_head_progress hstore
       (ih (validStoreTyping_block_singleton_inner hvst) hwf hsafe hstore)
-  · intro _env₁ _env₂ _env₃ _typing _blockLifetime _term _rest _termTy _finalTy
+  case cons =>
+    intro _env₁ _env₂ _env₃ _typing _blockLifetime _term _rest _termTy _finalTy
       _hterm _hrest ihHead _ihRest hvst outerLifetime hwf hsafe hstore
     exact progress_block_of_head_progress hstore
       (ihHead (validStoreTyping_block_head hvst) hwf hsafe hstore)
@@ -1169,49 +1159,6 @@ theorem progress_runtime_step {store : ProgramStore} {env₁ env₂ : Env}
   intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstore htyping hnotTerminal
   exact (progress_runtime hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstore htyping).step_of_not_terminal
     hnotTerminal
-
-/-- Lemma 4.10, `R-Copy` variable-lval base case. -/
-theorem progress_copy_var {store : ProgramStore} {env : Env}
-    {lifetime : Lifetime} {x : Name} {slot : EnvSlot} {ty : Ty} :
-    store ∼ₛ env →
-    env.slotAt x = some slot →
-    slot.ty = .ty ty →
-    ∃ value,
-      Step store lifetime (.copy (.var x)) store (.val value) := by
-  intro hsafe henv hty
-  rcases readPreservation_var (store := store) (env := env)
-      (x := x) (slot := slot) (ty := ty) hsafe henv hty with
-    ⟨value, runtimeSlot, hread, hvalue, _hvalid⟩
-  rcases runtimeSlot with ⟨partialValue, valueLifetime⟩
-  cases hvalue
-  exact ⟨value, Step.copy (valueLifetime := valueLifetime) hread⟩
-
-/-- Lemma 4.10, `R-Move` variable-lval base case. -/
-theorem progress_move_var {store : ProgramStore} {env : Env}
-    {lifetime : Lifetime} {x : Name} {slot : EnvSlot} {ty : Ty} :
-    store ∼ₛ env →
-    env.slotAt x = some slot →
-    slot.ty = .ty ty →
-    ∃ value store',
-      Step store lifetime (.move (.var x)) store' (.val value) := by
-  intro hsafe henv hty
-  have hlocation :
-      LValLocationAbstraction store (.var x) (.ty ty) := by
-    simpa [hty] using location_var (store := store) (env := env) hsafe henv
-  rcases readPreservation_of_location hlocation with
-    ⟨value, runtimeSlot, hread, hvalue, _hvalid⟩
-  rcases write_defined_of_location (value := PartialValue.undef) hlocation with
-    ⟨store', hwrite⟩
-  rcases runtimeSlot with ⟨partialValue, valueLifetime⟩
-  cases hvalue
-  exact ⟨value, store', Step.move (valueLifetime := valueLifetime) hread hwrite⟩
-
-/-- Lemma 4.10, `R-Borrow` variable-lval base case. -/
-theorem progress_borrow_var (store : ProgramStore) (lifetime : Lifetime)
-    (mutable : Bool) (x : Name) :
-    Step store lifetime (.borrow mutable (.var x)) store
-      (.val (.ref { location := .var x, owner := false })) := by
-  exact Step.borrow (by simp [ProgramStore.loc])
 
 end Paper
 end LwRust

@@ -319,6 +319,19 @@ theorem SourceTerm.while_body {bodyLifetime : Lifetime}
     simp [termValues] at hmem ⊢
     exact Or.inr hmem)
 
+theorem sourceTerm_unit_value : SourceTerm (.val .unit) := by
+  intro value hmem
+  simp [termValues] at hmem
+  subst hmem
+  trivial
+
+theorem sourceTerm_unit_block {lifetime : Lifetime} :
+    SourceTerm (.block lifetime [.val .unit]) := by
+  intro value hmem
+  simp [termValues] at hmem
+  subst hmem
+  trivial
+
 namespace ProgramStore
 
 /--
