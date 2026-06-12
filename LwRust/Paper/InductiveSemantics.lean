@@ -229,15 +229,6 @@ theorem value_no_step {store store' : ProgramStore} {lifetime : Lifetime}
   intro h
   cases h
 
-theorem terminal_no_step {store store' : ProgramStore} {lifetime : Lifetime}
-    {term term' : Term} :
-    Terminal term →
-    ¬ Step store lifetime term store' term' := by
-  intro hterminal hstep
-  rcases (terminal_iff_value term).mp hterminal with ⟨value, hterm⟩
-  subst hterm
-  exact value_no_step hstep
-
 theorem multistep_value_inv {store finalStore : ProgramStore} {lifetime : Lifetime}
     {value : Value} {term : Term} :
     MultiStep store lifetime (.val value) finalStore term →
@@ -571,18 +562,6 @@ theorem multistep_while_form_to_value_inv {store finalStore : ProgramStore}
               obtain ⟨hvalue, hends⟩ := ih hfinal (WhileForm.cond _)
               exact ⟨hvalue, .bodyPhase MultiStep.refl hends⟩
 
-theorem multistep_terminal_inv {store finalStore : ProgramStore} {lifetime : Lifetime}
-    {term finalTerm : Term} :
-    Terminal term →
-    MultiStep store lifetime term finalStore finalTerm →
-    finalStore = store ∧ finalTerm = term := by
-  intro hterminal hmulti
-  cases hmulti with
-  | refl =>
-      exact ⟨rfl, rfl⟩
-  | trans hstep _ =>
-      exact False.elim (terminal_no_step hterminal hstep)
-
 theorem multistep_append {store₁ store₂ store₃ : ProgramStore} {lifetime : Lifetime}
     {term₁ term₂ term₃ : Term} :
     MultiStep store₁ lifetime term₁ store₂ term₂ →
@@ -616,17 +595,6 @@ theorem multistep_first_step_of_not_terminal {store finalStore : ProgramStore}
   | trans hstep hrest =>
       exact ⟨_, _, hstep, hrest⟩
 
-theorem multistep_box_context {store finalStore : ProgramStore} {lifetime : Lifetime}
-    {term finalTerm : Term} :
-    MultiStep store lifetime term finalStore finalTerm →
-    MultiStep store lifetime (.box term) finalStore (.box finalTerm) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.subBox hstep) ih
-
 theorem multistep_box_to_value_inv {store finalStore : ProgramStore}
     {lifetime : Lifetime} {term : Term} {finalValue : Value} :
     MultiStep store lifetime (.box term) finalStore (.val finalValue) →
@@ -657,17 +625,6 @@ theorem multistep_box_to_value_inv {store finalStore : ProgramStore}
           rcases ih rfl hend with ⟨midStore, value, hinnerMulti, hboxStep⟩
           exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti, hboxStep⟩
 
-theorem multistep_declare_context {store finalStore : ProgramStore} {lifetime : Lifetime}
-    {x : Name} {term finalTerm : Term} :
-    MultiStep store lifetime term finalStore finalTerm →
-    MultiStep store lifetime (.letMut x term) finalStore (.letMut x finalTerm) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.subDeclare hstep) ih
-
 theorem multistep_declare_to_value_inv {store finalStore : ProgramStore}
     {lifetime : Lifetime} {x : Name} {term : Term} {finalValue : Value} :
     MultiStep store lifetime (.letMut x term) finalStore (.val finalValue) →
@@ -697,17 +654,6 @@ theorem multistep_declare_to_value_inv {store finalStore : ProgramStore}
           rcases ih rfl hend with ⟨midStore, value, hinnerMulti, hdeclareStep⟩
           exact ⟨midStore, value, MultiStep.trans hinnerStep hinnerMulti,
             hdeclareStep⟩
-
-theorem multistep_assign_context {store finalStore : ProgramStore} {lifetime : Lifetime}
-    {lhs : LVal} {rhs finalRhs : Term} :
-    MultiStep store lifetime rhs finalStore finalRhs →
-    MultiStep store lifetime (.assign lhs rhs) finalStore (.assign lhs finalRhs) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.subAssign hstep) ih
 
 theorem multistep_assign_to_value_inv {store finalStore : ProgramStore}
     {lifetime : Lifetime} {lhs : LVal} {rhs : Term} {finalValue : Value} :
@@ -871,18 +817,6 @@ theorem multistep_block_prefix_inv {store finalStore : ProgramStore}
           exact Or.inr ⟨_, _, MultiStep.refl,
             Or.inr ⟨rfl, _, hdropsL, rfl, rfl⟩⟩
 
-theorem multistep_block_context {store finalStore : ProgramStore}
-    {lifetime blockLifetime : Lifetime} {term finalTerm : Term} {rest : List Term} :
-    MultiStep store blockLifetime term finalStore finalTerm →
-    MultiStep store lifetime (.block blockLifetime (term :: rest))
-      finalStore (.block blockLifetime (finalTerm :: rest)) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.blockA hstep) ih
-
 theorem multistep_block_to_value_first_step_inv {store finalStore : ProgramStore}
     {lifetime blockLifetime : Lifetime} {terms : List Term} {finalValue : Value} :
     MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
@@ -949,47 +883,6 @@ theorem multistep_block_head_to_value_inv {store finalStore : ProgramStore}
           exact ⟨_, _, MultiStep.refl,
             MultiStep.trans (Step.blockB hdrops) htail⟩
 
-theorem multistep_eq_left_context {store finalStore : ProgramStore}
-    {lifetime : Lifetime} {lhs finalLhs rhs : Term} :
-    MultiStep store lifetime lhs finalStore finalLhs →
-    MultiStep store lifetime (.eq lhs rhs) finalStore (.eq finalLhs rhs) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.subEqLeft hstep) ih
-
-theorem multistep_eq_right_context {store finalStore : ProgramStore}
-    {lifetime : Lifetime} {value : Value} {rhs finalRhs : Term} :
-    MultiStep store lifetime rhs finalStore finalRhs →
-    MultiStep store lifetime (.eq (.val value) rhs) finalStore
-      (.eq (.val value) finalRhs) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.subEqRight hstep) ih
-
-theorem multistep_ite_context {store finalStore : ProgramStore}
-    {lifetime : Lifetime} {condition finalCondition trueBranch falseBranch : Term} :
-    MultiStep store lifetime condition finalStore finalCondition →
-    MultiStep store lifetime (.ite condition trueBranch falseBranch) finalStore
-      (.ite finalCondition trueBranch falseBranch) := by
-  intro h
-  induction h with
-  | refl =>
-      exact MultiStep.refl
-  | trans hstep _ ih =>
-      exact MultiStep.trans (Step.subIte hstep) ih
-
-/--
-Prefix inversion for equality runs: an arbitrary partial execution is still
-inside the left operand, or the left operand finished and the run is still
-inside the right operand, or both operands finished and the comparison redex
-fired (after which the term is a value and the run is over).
--/
 theorem multistep_eq_prefix_inv {store finalStore : ProgramStore}
     {lifetime : Lifetime} {lhs rhs finalTerm : Term} :
     MultiStep store lifetime (.eq lhs rhs) finalStore finalTerm →
@@ -1131,7 +1024,6 @@ theorem multistep_ite_to_value_inv {store finalStore : ProgramStore}
   · simp at hfinal
   · exact ⟨midStore, Or.inl ⟨hcond, hbranch⟩⟩
   · exact ⟨midStore, Or.inr ⟨hcond, hbranch⟩⟩
-
 
 end Paper
 end LwRust

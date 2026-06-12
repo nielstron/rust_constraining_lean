@@ -16,37 +16,6 @@ open Core
 `BorrowSafeEnv` (Definition 4.13) itself lives in `LwRust.Paper.Typing`, since
 the control-flow extension's `T-If` rule carries it as a join obligation. -/
 
-theorem BorrowSafeEnv.same_root_of_mut_conflict {env : Env}
-    {x y : Name} {mutable : Bool}
-    {targetsMutable targetsOther : List LVal}
-    {targetMutable targetOther : LVal} :
-    BorrowSafeEnv env →
-    env ⊢ x ↝ (&mut targetsMutable) →
-    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
-    targetMutable ∈ targetsMutable →
-    targetOther ∈ targetsOther →
-    targetMutable ⋈ targetOther →
-    x = y := by
-  intro hsafe hmutable hother htargetMutable htargetOther hconflict
-  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
-    hmutable hother htargetMutable htargetOther hconflict
-
-theorem BorrowSafeEnv.no_other_root_conflict {env : Env}
-    {x y : Name} {mutable : Bool}
-    {targetsMutable targetsOther : List LVal}
-    {targetMutable targetOther : LVal} :
-    BorrowSafeEnv env →
-    x ≠ y →
-    env ⊢ x ↝ (&mut targetsMutable) →
-    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
-    targetMutable ∈ targetsMutable →
-    targetOther ∈ targetsOther →
-    ¬ targetMutable ⋈ targetOther := by
-  intro hsafe hne hmutable hother htargetMutable htargetOther hconflict
-  exact hne
-    (BorrowSafeEnv.same_root_of_mut_conflict hsafe hmutable hother
-      htargetMutable htargetOther hconflict)
-
 theorem PathConflicts.symm {left right : LVal} :
     left ⋈ right →
     right ⋈ left := by
@@ -174,13 +143,6 @@ theorem LValTargetsTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot}
   intro hfresh htyping
   exact (LValTyping.update_fresh (slot := slot) hfresh).2 htyping
 
-/-- The target-list typing judgment is intentionally non-empty. -/
-theorem LValTargetsTyping.nil_false {env : Env} {ty : PartialTy}
-    {lifetime : Lifetime} :
-    ¬ LValTargetsTyping env [] ty lifetime := by
-  intro htyping
-  cases htyping
-
 theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
     {slot : EnvSlot} {slotLifetime : Lifetime} {targets : List LVal} :
     env.fresh x →
@@ -232,36 +194,12 @@ theorem LifetimeOutlives.trans {first second third : Lifetime} :
   simp [LifetimeOutlives, Core.Lifetime.contains] at hfirst hsecond ⊢
   exact hfirst.trans hsecond
 
-theorem LifetimeOutlives.antisymm {left right : Lifetime} :
-    left ≤ right →
-    right ≤ left →
-    left = right := by
-  intro hleftRight hrightLeft
-  have hleftPrefix : left.path <+: right.path := by
-    simpa [LifetimeOutlives, Core.Lifetime.contains] using hleftRight
-  have hrightPrefix : right.path <+: left.path := by
-    simpa [LifetimeOutlives, Core.Lifetime.contains] using hrightLeft
-  have hpath : left.path = right.path :=
-    hleftPrefix.eq_of_length (hleftPrefix.length_le.antisymm hrightPrefix.length_le)
-  cases left
-  cases right
-  simp at hpath ⊢
-  exact hpath
-
 theorem LifetimeChild.outlives {parent child : Lifetime} :
     LifetimeChild parent child →
     parent ≤ child := by
   intro hchild
   rcases hchild with ⟨label, hpath⟩
   simp [LifetimeOutlives, Core.Lifetime.contains, hpath]
-
-theorem LifetimeChild.ne {parent child : Lifetime} :
-    LifetimeChild parent child →
-    parent ≠ child := by
-  intro hchild heq
-  rcases hchild with ⟨label, hpath⟩
-  have hlen := congrArg (fun lifetime : Lifetime => lifetime.path.length) heq
-  simp [hpath] at hlen
 
 theorem LifetimeChild.parent_of_outlives_child_ne {parent child slot : Lifetime} :
     LifetimeChild parent child →
@@ -540,101 +478,6 @@ theorem partialTy_vars_mem_contains {pt : PartialTy} :
         exact (List.not_mem_nil (show v ∈ ([] : List Name) from hv)).elim)
     pt
 
-/--
-If a mutable-borrow target's base occurs in another root's type, borrow safety
-forces that root to be the mutable-borrow authority itself.
--/
-theorem BorrowSafeEnv.same_root_of_mut_target_var {env : Env}
-    {authority y : Name} {targetsMutable : List LVal} {targetMutable : LVal}
-    {slot : EnvSlot} :
-    BorrowSafeEnv env →
-    env ⊢ authority ↝ (&mut targetsMutable) →
-    targetMutable ∈ targetsMutable →
-    env.slotAt y = some slot →
-    LVal.base targetMutable ∈ PartialTy.vars slot.ty →
-    authority = y := by
-  intro hsafe hmut htargetMutable hslotY hvars
-  rcases partialTy_vars_mem_contains (pt := slot.ty)
-      (LVal.base targetMutable) hvars with
-    ⟨mutable, targetsOther, hcontainsOther, targetOther, htargetOther,
-      hbaseOther⟩
-  exact BorrowSafeEnv.same_root_of_mut_conflict hsafe hmut
-    ⟨slot, hslotY, hcontainsOther⟩ htargetMutable htargetOther
-    (by simp [PathConflicts, hbaseOther])
-
-theorem BorrowSafeEnv.no_other_root_mut_target_var {env : Env}
-    {authority y : Name} {targetsMutable : List LVal} {targetMutable : LVal}
-    {slot : EnvSlot} :
-    BorrowSafeEnv env →
-    authority ≠ y →
-    env ⊢ authority ↝ (&mut targetsMutable) →
-    targetMutable ∈ targetsMutable →
-    env.slotAt y = some slot →
-    ¬ LVal.base targetMutable ∈ PartialTy.vars slot.ty := by
-  intro hsafe hne hmut htargetMutable hslotY hvars
-  exact hne
-    (BorrowSafeEnv.same_root_of_mut_target_var hsafe hmut htargetMutable
-      hslotY hvars)
-
-/--
-If a variable at the base of a known mutable-borrow target is write-prohibited,
-then every borrow witness responsible for that prohibition lives in the mutable
-borrow's authority root.
--/
-theorem BorrowSafeEnv.writeProhibited_var_witness_root_of_mut_target
-    {env : Env} {authority witness : Name}
-    {targetsMutable targetsOther : List LVal} {targetMutable targetOther : LVal}
-    {mutable : Bool} :
-    BorrowSafeEnv env →
-    env ⊢ authority ↝ (&mut targetsMutable) →
-    targetMutable ∈ targetsMutable →
-    env ⊢ witness ↝ (Ty.borrow mutable targetsOther) →
-    targetOther ∈ targetsOther →
-    targetOther ⋈ (.var (LVal.base targetMutable)) →
-    authority = witness := by
-  intro hsafe hmut htargetMutable hother htargetOther hconflict
-  exact BorrowSafeEnv.same_root_of_mut_conflict hsafe hmut hother
-    htargetMutable htargetOther (by
-      simpa [PathConflicts, LVal.base] using hconflict.symm)
-
-theorem BorrowSafeEnv.writeProhibited_var_of_mut_target_authority
-    {env : Env} {authority : Name}
-    {targetsMutable : List LVal} {targetMutable : LVal} :
-    BorrowSafeEnv env →
-    env ⊢ authority ↝ (&mut targetsMutable) →
-    targetMutable ∈ targetsMutable →
-    WriteProhibited env (.var (LVal.base targetMutable)) →
-    ∃ mutable targetsOther targetOther,
-      env ⊢ authority ↝ (Ty.borrow mutable targetsOther) ∧
-        targetOther ∈ targetsOther ∧
-        targetOther ⋈ (.var (LVal.base targetMutable)) := by
-  intro hsafe hmut htargetMutable hwrite
-  cases hwrite with
-  | inl hread =>
-      rcases hread with
-        ⟨witness, targetsOther, targetOther, hother, htargetOther,
-          hconflict⟩
-      have hauthority :
-          authority = witness :=
-        BorrowSafeEnv.writeProhibited_var_witness_root_of_mut_target
-          hsafe hmut htargetMutable hother htargetOther hconflict
-      subst hauthority
-      exact ⟨true, targetsOther, targetOther, hother, htargetOther,
-        hconflict⟩
-  | inr himm =>
-      rcases himm with
-        ⟨witness, targetsOther, targetOther, hother, htargetOther,
-          hconflict⟩
-      have hauthority :
-          authority = witness :=
-        BorrowSafeEnv.writeProhibited_var_witness_root_of_mut_target
-          hsafe hmut htargetMutable hother htargetOther hconflict
-      subst hauthority
-      exact ⟨false, targetsOther, targetOther, hother, htargetOther,
-        hconflict⟩
-
-/-- Variables occurring in a well-formed type are bound in the environment (each
-is the base of a borrow target, which types in `env`). -/
 theorem wellFormedTy_vars_in_env {env : Env} {ty : Ty} {lifetime : Lifetime} :
     WellFormedTy env ty lifetime →
     ∀ v, v ∈ Ty.vars ty → ∃ slot, env.slotAt v = some slot := by
@@ -704,35 +547,6 @@ theorem Coherent.update_fresh_ty {env : Env} {x : Name}
     exact ⟨targetTy, targetLifetime,
       LValTargetsTyping.update_fresh
         (slot := { ty := .ty ty, lifetime := lifetime }) hfresh htargetsOld⟩
-
-/-- Bare `Coherent.update_fresh_ty` is false: `WellFormedTy` accepts `&[]`
-vacuously, but coherence requires the target list to be jointly typeable, and
-`LValTargetsTyping` is intentionally non-empty. -/
-theorem Coherent.update_fresh_ty_bare_counterexample :
-    ∃ env x ty lifetime,
-      Coherent env ∧ WellFormedTy env ty lifetime ∧ env.fresh x ∧
-        ¬ Coherent (env.update x { ty := .ty ty, lifetime := lifetime }) := by
-  refine ⟨Env.empty, "x", .borrow false [], Lifetime.root, ?_, ?_, ?_, ?_⟩
-  · exact (wellFormedEnv_empty Lifetime.root).2.2.1
-  · exact WellFormedTy.borrow (BorrowTargetsWellFormed.intro (by
-      intro target htarget
-      simp at htarget))
-  · simp [Env.fresh, Env.empty]
-  · intro hcoh
-    have hx :
-        (Env.empty.update "x"
-          { ty := .ty (.borrow false []), lifetime := Lifetime.root }).slotAt "x" =
-          some { ty := .ty (.borrow false []), lifetime := Lifetime.root } := by
-      simp [Env.update]
-    have htyping :
-        LValTyping
-          (Env.empty.update "x"
-            { ty := .ty (.borrow false []), lifetime := Lifetime.root })
-          (.var "x") (.ty (.borrow false [])) Lifetime.root :=
-      LValTyping.var hx
-    rcases hcoh (.var "x") false [] Lifetime.root htyping with
-      ⟨targetTy, targetLifetime, htargets⟩
-    exact LValTargetsTyping.nil_false htargets
 
 theorem Coherent.update_fresh_ty_of_obligations {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime} :
@@ -1227,13 +1041,6 @@ theorem EnvJoin.lifetimesSurvive_left {left right join : Env} :
   exact EnvStrengthens.lifetimesSurvive
     (hjoin.1 (by simp))
 
-theorem EnvJoin.lifetimesSurvive_right {left right join : Env} :
-    EnvJoin left right join →
-    EnvLifetimesSurvive right join := by
-  intro hjoin
-  exact EnvStrengthens.lifetimesSurvive
-    (hjoin.1 (by simp))
-
 theorem EnvLifetimesSurvive.update_from_source_slot {source middle : Env}
     {x : Name} {slot : EnvSlot} {newTy : PartialTy} :
     EnvLifetimesSurvive source middle →
@@ -1403,359 +1210,6 @@ theorem LValBaseOutlives.write {rank : Nat} {env result : Env}
     ⟨resultSlot, hresultSlot, hlifetime⟩
   exact ⟨resultSlot, hresultSlot, by rw [← hlifetime]; exact houtlives⟩
 
-theorem TermTyping.slot_lifetime_survives :
-    (∀ {env₁ typing lifetime term ty env₂},
-      TermTyping env₁ typing lifetime term ty env₂ →
-      ∀ {x sourceSlot},
-        sourceSlot.lifetime ≤ lifetime →
-        env₁.slotAt x = some sourceSlot →
-        ∃ resultSlot,
-          env₂.slotAt x = some resultSlot ∧
-          sourceSlot.lifetime = resultSlot.lifetime) ∧
-    (∀ {env₁ typing lifetime terms ty env₂},
-      TermListTyping env₁ typing lifetime terms ty env₂ →
-      ∀ {x sourceSlot},
-        sourceSlot.lifetime ≤ lifetime →
-        env₁.slotAt x = some sourceSlot →
-        ∃ resultSlot,
-          env₂.slotAt x = some resultSlot ∧
-          sourceSlot.lifetime = resultSlot.lifetime) := by
-  constructor
-  · intro env₁ typing lifetime term ty env₂ htyping
-    exact TermTyping.rec
-      (motive_1 := fun env₁ _typing lifetime _term _ty env₂ _ =>
-        ∀ {x sourceSlot},
-          sourceSlot.lifetime ≤ lifetime →
-          env₁.slotAt x = some sourceSlot →
-          ∃ resultSlot,
-            env₂.slotAt x = some resultSlot ∧
-            sourceSlot.lifetime = resultSlot.lifetime)
-      (motive_2 := fun env₁ _typing lifetime _terms _ty env₂ _ =>
-        ∀ {x sourceSlot},
-          sourceSlot.lifetime ≤ lifetime →
-          env₁.slotAt x = some sourceSlot →
-          ∃ resultSlot,
-            env₂.slotAt x = some resultSlot ∧
-            sourceSlot.lifetime = resultSlot.lifetime)
-      (by
-        intro _env _typing _lifetime _value _ty _hvalue x sourceSlot
-          _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env _typing _lifetime _ty _hwellTy _hloanFree x sourceSlot
-          _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
-          x sourceSlot _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hnotWrite hmove x sourceSlot _houtlives hslot
-        exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
-          x sourceSlot _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hnotRead
-          x sourceSlot _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
-          x sourceSlot houtlives hslot
-        exact ih houtlives hslot)
-      (by
-        intro _env₁ _env₂ _env₃ _typing lifetime blockLifetime _terms _ty
-          hchild _hterms _hwellTy hdrop ih x sourceSlot houtlives hslot
-        rcases ih (LifetimeOutlives.trans houtlives (LifetimeChild.outlives hchild))
-            hslot with
-          ⟨bodySlot, hbodySlot, hbodyLifetime⟩
-        subst hdrop
-        have hbodyNotDropped : bodySlot.lifetime ≠ blockLifetime := by
-          intro hdropped
-          have hchildOutlivesParent : blockLifetime ≤ lifetime := by
-            rw [← hdropped, ← hbodyLifetime]
-            exact houtlives
-          exact LifetimeChild.not_child_outlives_parent hchild hchildOutlivesParent
-        exact ⟨bodySlot,
-          Env.dropLifetime_slotAt_eq_some.mpr ⟨hbodySlot, hbodyNotDropped⟩,
-          hbodyLifetime⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _typing lifetime y _term _ty
-          hfresh _hterm _hfreshOut _hcoh henv₃ ih x sourceSlot houtlives hslot
-        subst henv₃
-        by_cases hxy : x = y
-        · subst hxy
-          rw [hfresh] at hslot
-          cases hslot
-        · rcases ih houtlives hslot with ⟨innerSlot, hinnerSlot, hlifetime⟩
-          exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _hcoh _hcontained
-          _hnotWrite ih x sourceSlot houtlives hslot
-        rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
-        rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by rw [hrhsLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-          _lhsTy _rhsTy _ghostRhsTy
-          _hLhs _hfresh _hghostRhs _hRhs _hcopyLhs _hcopyRhs _hshape
-          ihLhs _ihGhost ihRhs
-          x sourceSlot houtlives hslot
-        rcases ihLhs houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
-        have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
-          rw [← hmidLifetime]
-          exact houtlives
-        rcases ihRhs hmidOutlives hmidSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by rw [hmidLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-          _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcond _htrue _hfalse
-          _htyJoin hjoin _hshapeTrue _hshapeFalse _hwellJoin _hcontained _hcoherent _hlin
-          _hborrowSafe _hresultSafe ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
-        rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
-        have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
-          rw [← hcondLifetime]
-          exact houtlives
-        rcases ihTrue hcondOutlives hcondSlot with
-          ⟨trueSlot, htrueSlot, htrueLifetime⟩
-        rcases (EnvJoin.left_le hjoin).slot_forward htrueSlot with
-          ⟨joinSlot, hjoinSlot, hjoinLifetime, _⟩
-        exact ⟨joinSlot, hjoinSlot, by
-          rw [hcondLifetime, htrueLifetime, hjoinLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-          _falseBranch _trueTy _falseTy _hcond _htrue _hfalse _hdiv
-          ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
-        rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
-        have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
-          rw [← hcondLifetime]
-          exact houtlives
-        rcases ihTrue hcondOutlives hcondSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by
-          rw [hcondLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-          _body _bodyTy _hchild _hcond _hbody _hwellTy _hdrop
-          ihCond _ihBody x sourceSlot houtlives hslot
-        exact ihCond houtlives hslot)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-          _body _bodyTy _hchild _hcond _hbody _hdiverges
-          ihCond _ihBody x sourceSlot houtlives hslot
-        exact ihCond houtlives hslot)
-      (by
-        intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃
-          _typing _lifetime _bodyLifetime _condition _body _bodyTy
-          _bodyEntryTy _hchild hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-          _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-          ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
-          x sourceSlot houtlives hslot
-        rcases (EnvJoin.left_le hjoin).slot_forward hslot with
-          ⟨invSlot, hinvSlot, hinvLifetime, _⟩
-        have hinvOutlives : invSlot.lifetime ≤ _lifetime := by
-          rw [← hinvLifetime]
-          exact houtlives
-        rcases ihCondInv hinvOutlives hinvSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by
-          rw [hinvLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
-          x sourceSlot houtlives hslot
-        exact ih houtlives hslot)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-          _hterm _hrest ihHead ihRest x sourceSlot houtlives hslot
-        rcases ihHead houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
-        have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
-          rw [← hmidLifetime]
-          exact houtlives
-        rcases ihRest hmidOutlives hmidSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by rw [hmidLifetime, hresultLifetime]⟩)
-      htyping
-
-  · intro env₁ typing lifetime terms ty env₂ htyping
-    exact TermListTyping.rec
-      (motive_1 := fun env₁ _typing lifetime _term _ty env₂ _ =>
-        ∀ {x sourceSlot},
-          sourceSlot.lifetime ≤ lifetime →
-          env₁.slotAt x = some sourceSlot →
-          ∃ resultSlot,
-            env₂.slotAt x = some resultSlot ∧
-            sourceSlot.lifetime = resultSlot.lifetime)
-      (motive_2 := fun env₁ _typing lifetime _terms _ty env₂ _ =>
-        ∀ {x sourceSlot},
-          sourceSlot.lifetime ≤ lifetime →
-          env₁.slotAt x = some sourceSlot →
-          ∃ resultSlot,
-            env₂.slotAt x = some resultSlot ∧
-            sourceSlot.lifetime = resultSlot.lifetime)
-      (by
-        intro _env _typing _lifetime _value _ty _hvalue x sourceSlot
-          _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env _typing _lifetime _ty _hwellTy _hloanFree x sourceSlot
-          _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
-          x sourceSlot _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty
-          _hLv _hnotWrite hmove x sourceSlot _houtlives hslot
-        exact EnvMove.lifetimesSurvive hmove x sourceSlot hslot)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hmutable _hnotWrite
-          x sourceSlot _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hnotRead
-          x sourceSlot _houtlives hslot
-        exact ⟨sourceSlot, hslot, rfl⟩)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
-          x sourceSlot houtlives hslot
-        exact ih houtlives hslot)
-      (by
-        intro _env₁ _env₂ _env₃ _typing lifetime blockLifetime _terms _ty
-          hchild _hterms _hwellTy hdrop ih x sourceSlot houtlives hslot
-        rcases ih (LifetimeOutlives.trans houtlives (LifetimeChild.outlives hchild))
-            hslot with
-          ⟨bodySlot, hbodySlot, hbodyLifetime⟩
-        subst hdrop
-        have hbodyNotDropped : bodySlot.lifetime ≠ blockLifetime := by
-          intro hdropped
-          have hchildOutlivesParent : blockLifetime ≤ lifetime := by
-            rw [← hdropped, ← hbodyLifetime]
-            exact houtlives
-          exact LifetimeChild.not_child_outlives_parent hchild hchildOutlivesParent
-        exact ⟨bodySlot,
-          Env.dropLifetime_slotAt_eq_some.mpr ⟨hbodySlot, hbodyNotDropped⟩,
-          hbodyLifetime⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _typing lifetime y _term _ty
-          hfresh _hterm _hfreshOut _hcoh henv₃ ih x sourceSlot houtlives hslot
-        subst henv₃
-        by_cases hxy : x = y
-        · subst hxy
-          rw [hfresh] at hslot
-          cases hslot
-        · rcases ih houtlives hslot with ⟨innerSlot, hinnerSlot, hlifetime⟩
-          exact ⟨innerSlot, by simpa [Env.update, hxy] using hinnerSlot, hlifetime⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-          _hLhs _hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _hcoh _hcontained
-          _hnotWrite ih x sourceSlot houtlives hslot
-        rcases ih houtlives hslot with ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
-        rcases EnvWrite.lifetimesSurvive hwrite x rhsSlot hrhsSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by rw [hrhsLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-          _lhsTy _rhsTy _ghostRhsTy
-          _hLhs _hfresh _hghostRhs _hRhs _hcopyLhs _hcopyRhs _hshape
-          ihLhs _ihGhost ihRhs
-          x sourceSlot houtlives hslot
-        rcases ihLhs houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
-        have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
-          rw [← hmidLifetime]
-          exact houtlives
-        rcases ihRhs hmidOutlives hmidSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by rw [hmidLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-          _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcond _htrue _hfalse
-          _htyJoin hjoin _hshapeTrue _hshapeFalse _hwellJoin _hcontained _hcoherent _hlin
-          _hborrowSafe _hresultSafe ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
-        rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
-        have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
-          rw [← hcondLifetime]
-          exact houtlives
-        rcases ihTrue hcondOutlives hcondSlot with
-          ⟨trueSlot, htrueSlot, htrueLifetime⟩
-        rcases (EnvJoin.left_le hjoin).slot_forward htrueSlot with
-          ⟨joinSlot, hjoinSlot, hjoinLifetime, _⟩
-        exact ⟨joinSlot, hjoinSlot, by
-          rw [hcondLifetime, htrueLifetime, hjoinLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-          _falseBranch _trueTy _falseTy _hcond _htrue _hfalse _hdiv
-          ihCond ihTrue _ihFalse x sourceSlot houtlives hslot
-        rcases ihCond houtlives hslot with ⟨condSlot, hcondSlot, hcondLifetime⟩
-        have hcondOutlives : condSlot.lifetime ≤ _lifetime := by
-          rw [← hcondLifetime]
-          exact houtlives
-        rcases ihTrue hcondOutlives hcondSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by
-          rw [hcondLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-          _body _bodyTy _hchild _hcond _hbody _hwellTy _hdrop
-          ihCond _ihBody x sourceSlot houtlives hslot
-        exact ihCond houtlives hslot)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-          _body _bodyTy _hchild _hcond _hbody _hdiverges
-          ihCond _ihBody x sourceSlot houtlives hslot
-        exact ihCond houtlives hslot)
-      (by
-        intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃
-          _typing _lifetime _bodyLifetime _condition _body _bodyTy
-          _bodyEntryTy _hchild hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-          _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-          ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
-          x sourceSlot houtlives hslot
-        rcases (EnvJoin.left_le hjoin).slot_forward hslot with
-          ⟨invSlot, hinvSlot, hinvLifetime, _⟩
-        have hinvOutlives : invSlot.lifetime ≤ _lifetime := by
-          rw [← hinvLifetime]
-          exact houtlives
-        rcases ihCondInv hinvOutlives hinvSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by
-          rw [hinvLifetime, hresultLifetime]⟩)
-      (by
-        intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
-          x sourceSlot houtlives hslot
-        exact ih houtlives hslot)
-      (by
-        intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-          _hterm _hrest ihHead ihRest x sourceSlot houtlives hslot
-        rcases ihHead houtlives hslot with ⟨midSlot, hmidSlot, hmidLifetime⟩
-        have hmidOutlives : midSlot.lifetime ≤ _lifetime := by
-          rw [← hmidLifetime]
-          exact houtlives
-        rcases ihRest hmidOutlives hmidSlot with
-          ⟨resultSlot, hresultSlot, hresultLifetime⟩
-        exact ⟨resultSlot, hresultSlot, by rw [hmidLifetime, hresultLifetime]⟩)
-      htyping
-
-theorem LValBaseOutlives.termTyping {env₁ env₂ : Env}
-    {typing : StoreTyping} {lifetime current : Lifetime}
-    {term : Term} {ty : Ty} {lv : LVal} :
-    TermTyping env₁ typing lifetime term ty env₂ →
-    LValBaseOutlives env₁ lv current →
-    current ≤ lifetime →
-    LValBaseOutlives env₂ lv current := by
-  intro htyping hbase hcurrent
-  rcases hbase with ⟨sourceSlot, hsourceSlot, hsourceOutlives⟩
-  rcases (TermTyping.slot_lifetime_survives.1 htyping)
-      (LifetimeOutlives.trans hsourceOutlives hcurrent)
-      hsourceSlot with
-    ⟨resultSlot, hresultSlot, hresultLifetime⟩
-  exact ⟨resultSlot, hresultSlot, by rw [← hresultLifetime]; exact hsourceOutlives⟩
-
 /-- Definition 3.18 `move(Γ,w)` preserves the lifetime of every surviving slot. -/
 theorem EnvSlotsOutlive.move {env env' : Env} {lv : LVal}
     {current : Lifetime} :
@@ -1798,22 +1252,6 @@ theorem borrowInvariance_result_extension {env₂ : Env} {gamma : Name}
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime := by
   exact WellFormedEnv.update_fresh_ty
 
-/--
-Final environment-extension step with fresh-slot coherence made explicit.
-
-This avoids the legacy `Coherent.update_fresh_ty` shortcut by requiring the local
-fresh-update coherence obligations for the result binding.
--/
-theorem borrowInvariance_result_extension_of_coherenceObligations
-    {env₂ : Env} {gamma : Name} {ty : Ty} {lifetime : Lifetime} :
-    WellFormedEnv env₂ lifetime →
-    WellFormedTy env₂ ty lifetime →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
-      lifetime := by
-  exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
-
 theorem LifetimeIntersection.le_of_le {left right intersection current : Lifetime} :
     LifetimeIntersection left right intersection →
     left ≤ current →
@@ -1838,89 +1276,6 @@ theorem LifetimeIntersection.right_le {left right intersection : Lifetime} :
     right ≤ intersection := by
   intro hintersection
   exact hintersection.1 (by simp)
-
-theorem LifetimeIntersection.unique {left right first second : Lifetime} :
-    LifetimeIntersection left right first →
-    LifetimeIntersection left right second →
-    first = second := by
-  intro hfirst hsecond
-  exact LifetimeOutlives.antisymm
-    (hfirst.2 hsecond.1)
-    (hsecond.2 hfirst.1)
-
-theorem LifetimeOutlives.comparable_of_common_inner {left right current : Lifetime} :
-    left ≤ current →
-    right ≤ current →
-    left ≤ right ∨ right ≤ left := by
-  intro hleft hright
-  have hleftPrefix : left.path <+: current.path := by
-    simpa [LifetimeOutlives, Core.Lifetime.contains] using hleft
-  have hrightPrefix : right.path <+: current.path := by
-    simpa [LifetimeOutlives, Core.Lifetime.contains] using hright
-  rcases Nat.le_total left.path.length right.path.length with hlen | hlen
-  · have hprefix : left.path <+: right.path :=
-      List.prefix_of_prefix_length_le hleftPrefix hrightPrefix hlen
-    exact Or.inl (by
-      simpa [LifetimeOutlives, Core.Lifetime.contains] using hprefix)
-  · have hprefix : right.path <+: left.path :=
-      List.prefix_of_prefix_length_le hrightPrefix hleftPrefix hlen
-    exact Or.inr (by
-      simpa [LifetimeOutlives, Core.Lifetime.contains] using hprefix)
-
-theorem LifetimeIntersection.exists_of_common_inner {left right current : Lifetime} :
-    left ≤ current →
-    right ≤ current →
-    ∃ intersection, LifetimeIntersection left right intersection := by
-  intro hleft hright
-  rcases LifetimeOutlives.comparable_of_common_inner hleft hright with
-    hleftRight | hrightLeft
-  · exact ⟨right, LifetimeIntersection.left hleftRight⟩
-  · exact ⟨left, LifetimeIntersection.right hrightLeft⟩
-
-theorem LValTargetsTyping.member_lifetime_outlives {env : Env}
-    {targets : List LVal} {partialTy : PartialTy}
-    {targetLifetime current : Lifetime} :
-    LValTargetsTyping env targets partialTy targetLifetime →
-    targetLifetime ≤ current →
-    ∀ target,
-      target ∈ targets →
-      ∃ targetTy selectedLifetime,
-        LValTyping env target (.ty targetTy) selectedLifetime ∧
-        selectedLifetime ≤ current := by
-  intro htyping houtlives
-  refine LValTargetsTyping.rec
-    (motive_1 := fun _lv _partialTy _lifetime _ => True)
-    (motive_2 := fun targets _partialTy targetLifetime _ =>
-      targetLifetime ≤ current →
-      ∀ target,
-        target ∈ targets →
-        ∃ targetTy selectedLifetime,
-          LValTyping env target (.ty targetTy) selectedLifetime ∧
-          selectedLifetime ≤ current)
-    ?var ?box ?borrow ?singleton ?cons htyping houtlives
-  · intro _x _slot _hslot
-    trivial
-  · intro _lv _inner _lifetime _htyping _ih
-    trivial
-  · intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-      _hborrow _htargets _ihBorrow _ihTargets
-    trivial
-  · intro target ty lifetime htarget _ihTarget houtlives selected hmem
-    simp at hmem
-    subst hmem
-    exact ⟨ty, lifetime, htarget, houtlives⟩
-  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
-      hhead _hrest _hunion hintersection _ihHead ihRest houtlives selected hmem
-    simp at hmem
-    rcases hmem with hselected | hselected
-    · subst hselected
-      exact ⟨headTy, headLifetime, hhead,
-        LifetimeOutlives.trans
-          (LifetimeIntersection.left_le hintersection) houtlives⟩
-    · exact ihRest
-        (LifetimeOutlives.trans
-          (LifetimeIntersection.right_le hintersection) houtlives)
-        selected hselected
 
 theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
     WellFormedEnv env current →
@@ -1985,94 +1340,6 @@ theorem LValTyping.lifetime_outlives_one {env : Env} {current : Lifetime}
   intro hwellEnv htyping
   exact (LValTyping.lifetime_outlives hwellEnv).1 htyping
 
-/-- The lifetime bound `lifetime ≤ current` for a typed lval needs only
-`EnvSlotsOutlive env current` (every slot lives at least as long as `current`):
-the lval's lifetime is the LUB of the base slots its borrow chain bottoms out at,
-each bounded by `current`.  This is the `EnvSlotsOutlive`-only core of
-`lifetime_outlives_one`, used to discharge the deref-borrow join lifetime bound
-without circular appeal to `ContainedBorrows join`. -/
-theorem LValTyping.lifetime_le_of_slotsOutlive {env : Env} {current : Lifetime}
-    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime}
-    (houtlive : EnvSlotsOutlive env current)
-    (htyping : LValTyping env lv ty lifetime) :
-    lifetime ≤ current := by
-  exact LValTyping.rec
-    (motive_1 := fun _lv _ty lifetime _ => lifetime ≤ current)
-    (motive_2 := fun _targets _ty lifetime _ => lifetime ≤ current)
-    (by intro x slot hslot; exact houtlive x slot hslot)
-    (by intro _lv _inner _lifetime _htyping ih; exact ih)
-    (by
-      intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-        _hborrow _htargets _ihBorrow ihTargets
-      exact ihTargets)
-    (by intro _target _ty _lifetime _htarget ihTarget; exact ihTarget)
-    (by
-      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy _unionTy
-        _hhead _hrest _hunion hintersection ihHead ihRest
-      exact LifetimeIntersection.le_of_le hintersection ihHead ihRest)
-    htyping
-
-/-- A target-list typing's union lifetime is bounded by `bound` whenever every
-member lval's own typing lifetime is.  The union lifetime is the iterated LUB
-(`LifetimeIntersection`) of the members, so it is `≤ bound` exactly when `bound`
-is an upper bound of all members (`LifetimeIntersection.le_of_le`).  This is the
-per-member fold used by the deref-borrow lifetime bound in the φ-stratified
-join/contained-borrow bootstrap. -/
-theorem lvalTargetsTyping_le_of_members {e : Env} {bound : Lifetime}
-    {T : List LVal} {pt : PartialTy} {lf : Lifetime}
-    (htgts : LValTargetsTyping e T pt lf)
-    (hmem : ∀ t, t ∈ T → ∀ tt tlf, LValTyping e t (.ty tt) tlf → tlf ≤ bound) :
-    lf ≤ bound := by
-  refine LValTargetsTyping.rec
-    (motive_1 := fun _lv _pt _lf _ => True)
-    (motive_2 := fun T _pt lf _ =>
-      (∀ t, t ∈ T → ∀ tt tlf, LValTyping e t (.ty tt) tlf → tlf ≤ bound) → lf ≤ bound)
-    ?var ?box ?borrow ?singleton ?cons htgts hmem
-  case var => intros; trivial
-  case box => intros; trivial
-  case borrow => intros; trivial
-  case singleton =>
-      intro target ty lifetime htarget _ih hmem
-      exact hmem target (by simp) _ _ htarget
-  case cons =>
-      intro target rest headTy headLife restLife life restTy unionTy
-        hhead _hrest hunion hintersection _ihHead ihRest hmem
-      exact LifetimeIntersection.le_of_le hintersection
-        (hmem target (by simp) _ _ hhead)
-        (ihRest (fun t ht => hmem t (List.mem_cons_of_mem _ ht)))
-
-/-- Structural classification of a typed lval: either a needle borrow occurring
-in its partial type is `PartialTyContains`-reachable from the *base slot* (the
-lval's spine is var/box only, so the borrow is slot-contained), or the spine
-passes through a borrow dereference (a reborrow `*u`, with `u` a borrow lval of
-the same base, hence same rank).  This is the case split the contained-borrow
-bootstrap needs to know whether `ContainedBorrowsWellFormed` applies directly or
-the φ-recursion must descend through `u`. -/
-theorem lvalTyping_contained_or_reborrow {e : Env} :
-    ∀ (lv : LVal) {pt : PartialTy} {lf : Lifetime} {needle : Ty},
-      LValTyping e lv pt lf → PartialTyContains pt needle →
-      (∃ bs, e.slotAt (LVal.base lv) = some bs ∧ PartialTyContains bs.ty needle) ∨
-      (∃ u m0 T0 blf0, LVal.base u = LVal.base lv ∧
-        LValTyping e u (.ty (.borrow m0 T0)) blf0) := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro pt lf needle h hcontains
-      cases h with
-      | var hslot => exact Or.inl ⟨_, hslot, hcontains⟩
-  | deref lv0 ih =>
-      intro pt lf needle h hcontains
-      cases h with
-      | box hbox =>
-          rcases ih hbox (PartialTyContains.box hcontains) with hc | hr
-          · left; simpa [LVal.base] using hc
-          · right
-            rcases hr with ⟨u, m0, T0, blf0, hbase, htyp⟩
-            exact ⟨u, m0, T0, blf0, by simpa [LVal.base] using hbase, htyp⟩
-      | borrow hbor _htgts =>
-          right
-          exact ⟨lv0, _, _, _, by simp [LVal.base], hbor⟩
-
 theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
@@ -2101,32 +1368,6 @@ theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
       trivial)
     htyping
 
-theorem EnvWrite.writeSlot_outlives_current_lifetime {env₁ env₂ env₃ : Env}
-    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
-    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
-    WellFormedEnv env₁ lifetime →
-    LValTyping env₁ lhs oldTy targetLifetime →
-    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-    EnvWrite 0 env₂ lhs rhsTy env₃ →
-    ∃ writeSlot,
-      env₂.slotAt (LVal.base lhs) = some writeSlot ∧
-      writeSlot.lifetime ≤ lifetime := by
-  intro hwellInitial hLhs hRhs hwrite
-  have hbase : LValBaseOutlives env₁ lhs lifetime :=
-    LValTyping.base_outlives_one hwellInitial hLhs
-  rcases hbase with ⟨sourceSlot, hsourceSlot, hsourceOutlives⟩
-  rcases (TermTyping.slot_lifetime_survives.1 hRhs)
-      hsourceOutlives hsourceSlot with
-    ⟨rhsSlot, hrhsSlot, hrhsLifetime⟩
-  cases hwrite with
-  | intro hwriteSlot _hupdate =>
-      rename_i writeEnv writeSlot updatedTy
-      have hslotEq : writeSlot = rhsSlot := by
-        have hsomeEq : some writeSlot = some rhsSlot := by
-          rw [← hwriteSlot, hrhsSlot]
-        exact Option.some.inj hsomeEq
-      exact ⟨writeSlot, hwriteSlot, by rw [hslotEq, ← hrhsLifetime]; exact hsourceOutlives⟩
-
 theorem LValTyping.var_inv {env : Env} {x : Name}
     {ty : PartialTy} {lifetime : Lifetime} :
     LValTyping env (.var x) ty lifetime →
@@ -2138,7 +1379,6 @@ theorem LValTyping.var_inv {env : Env} {x : Name}
   cases htyping with
   | var hslot =>
       exact ⟨_, hslot, rfl, rfl⟩
-
 
 end Paper
 end LwRust

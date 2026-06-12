@@ -227,34 +227,6 @@ theorem ValidPartialValue.no_storage_ownership_cycle {store : ProgramStore}
         mem_partialValueOwningLocations_of_eq_owningRef hslotValue
       exact ValidPartialValue.no_owned_path_to_storage hvalid hslot rfl hmem htail
 
-/-- Values valid at statically non-owning types contain no owning reference. -/
-theorem validValue_nonOwner_of_nonOwnerTy {store : ProgramStore}
-    {value : Value} {ty : Ty} :
-    NonOwnerTy ty →
-    ValidValue store value ty →
-    valueOwnedLocation? value = none := by
-  intro hnonOwner hvalid
-  cases hnonOwner <;> cases hvalid <;> simp [valueOwnedLocation?]
-
-/--
-Dropping a list of non-owning partial values preserves existing partial-value
-abstractions, since the store is unchanged.
--/
-theorem validPartialValue_after_drops_all_nonOwner {store store' : ProgramStore}
-    {values : List PartialValue} {value : PartialValue} {ty : PartialTy} :
-    (∀ dropped, dropped ∈ values → PartialValueNonOwner dropped) →
-    Drops store values store' →
-    ValidPartialValue store value ty →
-    ValidPartialValue store' value ty := by
-  intro hnonOwner hdrops hvalid
-  have hstore : store' = store := drops_all_nonOwner_eq hnonOwner hdrops
-  subst hstore
-  exact hvalid
-
-/-- Safe strengthening for partial values when strengthening preserves the
-initialized/undefined shape.  Same-shape excludes the `ty → undef` and
-`box → undef` strengthening cases, which are not valid for initialized runtime
-values. -/
 theorem validPartialValue_strengthen_sameShape {store : ProgramStore}
     {value : PartialValue} {oldTy newTy : PartialTy} :
     ValidPartialValue store value oldTy →
@@ -439,19 +411,6 @@ theorem validStoreTyping_sourceTerm_of_validStoreTyping
   | ref _ =>
       cases hsourceValue
 
-/--
-After `R-Seq` drops a completed head value, the remaining block mentions only
-runtime values that were already present in the original block.
--/
-theorem validStoreTyping_block_tail {store : ProgramStore} {typing : StoreTyping}
-    {blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
-    ValidStoreTyping store (.block blockLifetime (.val value :: next :: rest)) typing →
-    ValidStoreTyping store (.block blockLifetime (next :: rest)) typing := by
-  intro htyping candidate hmem
-  exact htyping candidate (by
-    simp [termValues] at hmem ⊢
-    exact Or.inr hmem)
-
 /-- A singleton block has the same runtime values as its body term. -/
 theorem validStoreTyping_block_singleton_inner {store : ProgramStore}
     {typing : StoreTyping} {blockLifetime : Lifetime} {term : Term} :
@@ -527,168 +486,6 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
         cases hundef
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
-
-theorem partialTy_nonOwnerShape_of_shapeCompatible_right_ty {env : Env}
-    {oldTy : PartialTy} {rhsTy : Ty} :
-    NonOwnerTy rhsTy →
-    ShapeCompatible env oldTy (.ty rhsTy) →
-    oldTy = .ty .unit ∨ oldTy = .ty .int ∨ oldTy = .ty .bool ∨
-      (∃ inner, oldTy = .undef inner) ∨
-      ∃ mutable targets, oldTy = .ty (.borrow mutable targets) := by
-  intro hnonOwner hshape
-  cases hshape with
-  | unit =>
-      exact Or.inl rfl
-  | int =>
-      exact Or.inr (Or.inl rfl)
-  | bool =>
-      exact Or.inr (Or.inr (Or.inl rfl))
-  | tyBox =>
-      cases hnonOwner
-  | borrow =>
-      exact Or.inr (Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩)))
-  | undefLeft _hinner =>
-      exact Or.inr (Or.inr (Or.inr (Or.inl ⟨_, rfl⟩)))
-
-theorem ty_nonOwnerShape_of_strengthens_shapeCompatible_right_ty {env : Env}
-    {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
-    NonOwnerTy rhsTy →
-    PartialTyStrengthens (.ty selectedTy) oldTy →
-    ShapeCompatible env oldTy (.ty rhsTy) →
-    selectedTy = .unit ∨ selectedTy = .int ∨ selectedTy = .bool ∨
-      ∃ mutable targets, selectedTy = .borrow mutable targets := by
-  intro hnonOwner hstrength hshape
-  cases hshape with
-  | unit =>
-      cases hstrength
-      exact Or.inl rfl
-  | int =>
-      cases hstrength
-      exact Or.inr (Or.inl rfl)
-  | bool =>
-      cases hstrength
-      exact Or.inr (Or.inr (Or.inl rfl))
-  | tyBox =>
-      cases hnonOwner
-  | borrow =>
-      cases hstrength with
-      | reflex =>
-          exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
-      | borrow _hsubset =>
-          exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
-  | undefLeft hinner =>
-      cases hstrength with
-      | intoUndef hinnerStrength =>
-          cases hinner with
-          | unit =>
-              cases hinnerStrength
-              exact Or.inl rfl
-          | int =>
-              cases hinnerStrength
-              exact Or.inr (Or.inl rfl)
-          | bool =>
-              cases hinnerStrength
-              exact Or.inr (Or.inr (Or.inl rfl))
-          | tyBox =>
-              cases hnonOwner
-          | borrow =>
-              cases hinnerStrength with
-              | reflex =>
-                  exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
-              | borrow _hsubset =>
-                  exact Or.inr (Or.inr (Or.inr ⟨_, _, rfl⟩))
-
-theorem ShapeCompatible.ty_ty_left_of_strengthens {env : Env}
-    {selectedTy oldTy rhsTy : Ty} :
-    PartialTyStrengthens (.ty selectedTy) (.ty oldTy) →
-    ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
-    ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
-  intro hstrength hshape
-  have aux :
-      ∀ {left right : PartialTy},
-        ShapeCompatible env left right →
-        ∀ {selectedTy oldTy rhsTy : Ty},
-          left = .ty oldTy →
-          right = .ty rhsTy →
-          PartialTyStrengthens (.ty selectedTy) (.ty oldTy) →
-          ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
-    intro left right h
-    induction h with
-    | unit =>
-        intro selectedTy oldTy rhsTy hleft hright hstrength
-        cases hleft
-        cases hright
-        cases hstrength
-        exact ShapeCompatible.unit
-    | int =>
-        intro selectedTy oldTy rhsTy hleft hright hstrength
-        cases hleft
-        cases hright
-        cases hstrength
-        exact ShapeCompatible.int
-    | bool =>
-        intro selectedTy oldTy rhsTy hleft hright hstrength
-        cases hleft
-        cases hright
-        cases hstrength
-        exact ShapeCompatible.bool
-    | tyBox hinner ih =>
-        intro selectedTy oldTy rhsTy hleft hright hstrength
-        cases hleft
-        cases hright
-        cases hstrength with
-        | reflex =>
-            exact ShapeCompatible.tyBox hinner
-        | tyBox hselectedInner =>
-            exact ShapeCompatible.tyBox
-              (ih rfl rfl hselectedInner)
-    | box _hinner _ih =>
-        intro _selectedTy _oldTy _rhsTy hleft _hright _hstrength
-        cases hleft
-    | borrow hleft hright hinner =>
-        intro selectedTy oldTy rhsTy hleftEq hrightEq hstrength
-        cases hleftEq
-        cases hrightEq
-        cases hstrength with
-        | reflex =>
-            exact ShapeCompatible.borrow hleft hright hinner
-        | borrow hsubset =>
-            exact ShapeCompatible.borrow
-              (fun target hmem => hleft target (hsubset hmem))
-              hright hinner
-    | undefLeft _hinner _ih =>
-        intro _selectedTy _oldTy _rhsTy hleft _hright _hstrength
-        cases hleft
-    | undefRight _hinner _ih =>
-        intro _selectedTy _oldTy _rhsTy _hleft hright _hstrength
-        cases hright
-  exact aux hshape rfl rfl hstrength
-
-theorem ShapeCompatible.ty_left_of_strengthens {env : Env}
-    {selectedTy : Ty} {oldTy : PartialTy} {rhsTy : Ty} :
-    PartialTyStrengthens (.ty selectedTy) oldTy →
-    ShapeCompatible env oldTy (.ty rhsTy) →
-    ShapeCompatible env (.ty selectedTy) (.ty rhsTy) := by
-  intro hstrength hshape
-  cases hstrength with
-  | reflex =>
-      exact hshape
-  | borrow hsubset =>
-      cases hshape with
-      | borrow hleft hright hinner =>
-          exact ShapeCompatible.borrow
-            (fun target hmem => hleft target (hsubset hmem))
-            hright hinner
-  | tyBox hinnerStrength =>
-      cases hshape with
-      | tyBox hinnerShape =>
-          exact ShapeCompatible.tyBox
-            (ShapeCompatible.ty_ty_left_of_strengthens hinnerStrength hinnerShape)
-  | intoUndef hinnerStrength =>
-      cases hshape with
-      | undefLeft hinnerShape =>
-          exact ShapeCompatible.ty_ty_left_of_strengthens
-            hinnerStrength hinnerShape
 
 theorem validValue_owningLocation_allocated {store : ProgramStore}
     {value : Value} {ty : Ty} {owned : Location} :
@@ -851,25 +648,6 @@ theorem safeAbstraction_transport_sameShape {store : ProgramStore}
     · simpa [hlife] using hstore
     · exact validPartialValue_strengthen_sameShape hvalid hstrength hshape
 
-/--
-Drop Preservation, non-owning drop-set fragment: if every value in `ψ` is
-non-owning, then `drop(S, ψ)` leaves the safe abstraction unchanged.
--/
-theorem safeAbstraction_drops_all_nonOwner {store store' : ProgramStore}
-    {env : Env} {values : List PartialValue} :
-    store ∼ₛ env →
-    (∀ value, value ∈ values → PartialValueNonOwner value) →
-    Drops store values store' →
-    store' ∼ₛ env := by
-  intro hsafe hnonOwner hdrops
-  have hstore : store' = store := drops_all_nonOwner_eq hnonOwner hdrops
-  subst hstore
-  exact hsafe
-
-/--
-If no store slot has lifetime `m`, then no environment slot has lifetime `m`
-under a safe abstraction.
--/
 theorem safeAbstraction_env_no_lifetime_of_store_no_lifetime {store : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
     store ∼ₛ env →
@@ -928,157 +706,6 @@ current store validity interface alone: dropping the inner-lifetime variable `x`
 recursively drops the outer-lifetime variable `y`, while `Γ.dropLifetime` keeps
 `y`.
 -/
-
-def dropCounterInner : Lifetime := [0, 0]
-
-def dropCounterOuter : Lifetime := [0]
-
-def dropCounterXSlot : StoreSlot :=
-  { value := .value (.ref { location := .var "y", owner := true }),
-    lifetime := dropCounterInner }
-
-def dropCounterYSlot : StoreSlot :=
-  { value := .value .unit, lifetime := dropCounterOuter }
-
-def dropCounterStore : ProgramStore :=
-  (ProgramStore.empty.update (.var "x") dropCounterXSlot).update (.var "y")
-    dropCounterYSlot
-
-def dropCounterStoreAfter : ProgramStore :=
-  (dropCounterStore.erase (.var "x")).erase (.var "y")
-
-def dropCounterEnv : Env :=
-  (Env.empty.update "x"
-      { ty := .box (.ty .unit), lifetime := dropCounterInner }).update "y"
-    { ty := .ty .unit, lifetime := dropCounterOuter }
-
-theorem dropCounter_dropsLifetime :
-    DropsLifetime dropCounterStore dropCounterInner dropCounterStoreAfter := by
-  refine ProgramStore.DropsLifetime.intro (dropSet := [
-      .value (.ref { location := .var "x", owner := true })]) ?dropSet ?drops
-  · intro value
-    constructor
-    · intro hmem
-      simp at hmem
-      subst hmem
-      exact ⟨.var "x", dropCounterXSlot, by
-          simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot],
-        rfl, rfl⟩
-    · intro h
-      rcases h with ⟨location, slot, hslot, hlifetime, hvalue⟩
-      have hlocation : location = .var "x" := by
-        by_cases hx : location = .var "x"
-        · exact hx
-        · by_cases hy : location = .var "y"
-          · subst hy
-            simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot] at hslot
-            subst hslot
-            simp [dropCounterInner, dropCounterOuter] at hlifetime
-          · cases location with
-            | var name =>
-                simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot, hx, hy] at hslot
-            | heap address =>
-                simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot] at hslot
-      subst hlocation
-      simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot] at hslot
-      subst hslot
-      simp [hvalue]
-  · refine ProgramStore.Drops.ownerPresent (ref := { location := .var "x", owner := true })
-      (slot := dropCounterXSlot) rfl ?xSlot ?tail
-    · simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot]
-    · refine ProgramStore.Drops.ownerPresent (ref := { location := .var "y", owner := true })
-        (slot := dropCounterYSlot) rfl ?ySlot ?unitTail
-      · simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot, ProgramStore.erase]
-      · refine ProgramStore.Drops.nonOwner ?unitNonOwner ProgramStore.Drops.nil
-        intro ref
-        cases ref with
-        | mk location owner =>
-            cases location <;> cases owner <;> simp [dropCounterYSlot]
-
-theorem dropCounter_safeAbstraction :
-    dropCounterStore ∼ₛ dropCounterEnv := by
-  constructor
-  · intro name
-    constructor
-    · intro hstore
-      by_cases hx : name = "x"
-      · subst hx
-        exact ⟨{ ty := .box (.ty .unit), lifetime := dropCounterInner }, by
-          simp [dropCounterEnv]⟩
-      · by_cases hy : name = "y"
-        · subst hy
-          exact ⟨{ ty := .ty .unit, lifetime := dropCounterOuter }, by
-            simp [dropCounterEnv]⟩
-        · rcases hstore with ⟨slot, hslot⟩
-          simp [dropCounterStore, VariableProjection, dropCounterXSlot,
-            dropCounterYSlot, hx, hy] at hslot
-    · intro henv
-      by_cases hx : name = "x"
-      · subst hx
-        exact ⟨dropCounterXSlot, by
-          simp [dropCounterStore, VariableProjection, dropCounterXSlot,
-            dropCounterYSlot]⟩
-      · by_cases hy : name = "y"
-        · subst hy
-          exact ⟨dropCounterYSlot, by
-            simp [dropCounterStore, VariableProjection, dropCounterXSlot,
-              dropCounterYSlot]⟩
-        · rcases henv with ⟨envSlot, henvSlot⟩
-          simp [dropCounterEnv, Env.empty, hx, hy] at henvSlot
-  · intro name envSlot henv
-    by_cases hx : name = "x"
-    · subst hx
-      have henvSlot :
-          envSlot = { ty := .box (.ty .unit), lifetime := dropCounterInner } := by
-        simpa [dropCounterEnv, Env.update] using henv.symm
-      subst henvSlot
-      exact ⟨.value (.ref { location := .var "y", owner := true }), by
-          simp [dropCounterStore, VariableProjection, dropCounterXSlot,
-            dropCounterYSlot],
-        ValidPartialValue.box (location := .var "y") (slot := dropCounterYSlot) (by
-          simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot])
-          ValidPartialValue.unit⟩
-    · by_cases hy : name = "y"
-      · subst hy
-        have henvSlot :
-            envSlot = { ty := .ty .unit, lifetime := dropCounterOuter } := by
-          simpa [dropCounterEnv, Env.update] using henv.symm
-        subst henvSlot
-        exact ⟨.value .unit, by
-            simp [dropCounterStore, VariableProjection, dropCounterXSlot,
-              dropCounterYSlot],
-          ValidPartialValue.unit⟩
-      · simp [dropCounterEnv, Env.empty, hx, hy] at henv
-
-theorem dropCounter_not_safeAfterDrop :
-    ¬ dropCounterStoreAfter ∼ₛ dropCounterEnv.dropLifetime dropCounterInner := by
-  intro hsafe
-  have henvY :
-      (dropCounterEnv.dropLifetime dropCounterInner).slotAt "y" =
-        some { ty := .ty .unit, lifetime := dropCounterOuter } := by
-    simp [dropCounterEnv, Env.dropLifetime, Env.update, dropCounterInner,
-      dropCounterOuter]
-  rcases hsafe.2 "y" { ty := .ty .unit, lifetime := dropCounterOuter } henvY with
-    ⟨value, hslot, _hvalid⟩
-  simp [dropCounterStoreAfter, dropCounterStore, ProgramStore.erase, VariableProjection,
-    dropCounterXSlot, dropCounterYSlot] at hslot
-
-theorem dropCounter_not_storeOwnerTargetsHeap :
-    ¬ StoreOwnerTargetsHeap dropCounterStore := by
-  intro hheap
-  have hownsY : ProgramStore.Owns dropCounterStore (.var "y") := by
-    exact ⟨.var "x", dropCounterInner, by
-      simp [dropCounterStore, dropCounterXSlot, dropCounterYSlot, owningRef]⟩
-  rcases hheap (.var "y") hownsY with ⟨address, hheapLocation⟩
-  cases hheapLocation
-
-theorem dropCounter_safe_dropLifetime_fails :
-    ∃ store store' env lifetime,
-      store ∼ₛ env ∧ DropsLifetime store lifetime store' ∧
-        ¬ store' ∼ₛ env.dropLifetime lifetime := by
-  exact ⟨dropCounterStore, dropCounterStoreAfter, dropCounterEnv, dropCounterInner,
-    dropCounter_safeAbstraction, dropCounter_dropsLifetime,
-    dropCounter_not_safeAfterDrop⟩
 
 @[simp] theorem Env.dropLifetime_slotAt_eq_some {env : Env} {x : Name}
     {slot : EnvSlot} {lifetime : Lifetime} :
@@ -1165,71 +792,6 @@ theorem dropPreservation_lifetime {store store' : ProgramStore}
   intro _hsafe _hdrops hdomain hpreserve
   exact safeAbstraction_dropLifetime_of_preserved hdomain hpreserve
 
-/--
-Lemma 9.5, Drop Preservation, lifetime-drop form from a store-slot
-characterisation.
-
-`hslotAt` is the concrete store-side analogue of Definition 3.20: a variable
-slot remains after `drop(S, m)` exactly when it existed before and its allocation
-lifetime was not `m`.
--/
-theorem dropPreservation_lifetime_of_slotAt {store store' : ProgramStore}
-    {env : Env} {lifetime : Lifetime} :
-    store ∼ₛ env →
-    DropsLifetime store lifetime store' →
-    (∀ x slot,
-      store'.slotAt (VariableProjection x) = some slot ↔
-        store.slotAt (VariableProjection x) = some slot ∧ slot.lifetime ≠ lifetime) →
-    (∀ x envSlot value,
-      env.slotAt x = some envSlot →
-      envSlot.lifetime ≠ lifetime →
-      store.slotAt (VariableProjection x) =
-        some { value := value, lifetime := envSlot.lifetime } →
-      ValidPartialValue store' value envSlot.ty) →
-    store' ∼ₛ env.dropLifetime lifetime := by
-  intro hsafe hdrops hslotAt hpreserve
-  refine dropPreservation_lifetime hsafe hdrops ?domain ?preserve
-  · intro x
-    constructor
-    · intro hstore'
-      rcases hstore' with ⟨slot, hslot'⟩
-      rcases (hslotAt x slot).mp hslot' with ⟨hslot, hlifetime⟩
-      rcases (hsafe.1 x).mp ⟨slot, hslot⟩ with ⟨envSlot, henv⟩
-      have henvLifetime : envSlot.lifetime = slot.lifetime := by
-        rcases hsafe.2 x envSlot henv with ⟨value, hsafeSlot, _hvalid⟩
-        rw [hslot] at hsafeSlot
-        injection hsafeSlot with hslotEq
-        exact (congrArg StoreSlot.lifetime hslotEq).symm
-      exact ⟨envSlot, by
-        exact Env.dropLifetime_slotAt_eq_some.mpr
-          ⟨henv, by simpa [henvLifetime] using hlifetime⟩⟩
-    · intro henvDropped
-      rcases henvDropped with ⟨envSlot, henvDropped⟩
-      rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
-        ⟨henv, hlifetime⟩
-      rcases (hsafe.1 x).mpr ⟨envSlot, henv⟩ with ⟨slot, hslot⟩
-      have hslotEq :
-          slot.lifetime = envSlot.lifetime := by
-        rcases hsafe.2 x envSlot henv with ⟨value, hsafeSlot, _hvalid⟩
-        rw [hslot] at hsafeSlot
-        injection hsafeSlot with hslotEq
-        exact congrArg StoreSlot.lifetime hslotEq
-      exact ⟨slot, (hslotAt x slot).mpr
-        ⟨hslot, by simpa [hslotEq] using hlifetime⟩⟩
-  · intro x envSlot henv hlifetime
-    rcases hsafe.2 x envSlot henv with ⟨value, hslot, _hvalid⟩
-    exact ⟨value,
-      (hslotAt x { value := value, lifetime := envSlot.lifetime }).mpr
-        ⟨hslot, hlifetime⟩,
-      hpreserve x envSlot value henv hlifetime hslot⟩
-
-/--
-Store-domain half of Lemma 9.5: if a variable slot survives a lifetime drop,
-then the corresponding environment variable survives `Γ.dropLifetime`.
-
-The explicit side condition is the store-side fact still needed from the runtime
-drop relation: final variable slots are not allocated in the dropped lifetime.
--/
 theorem dropLifetime_envDomain_of_storeSurvivor {store store' : ProgramStore}
     {env : Env} {lifetime : Lifetime} {x : Name} :
     store ∼ₛ env →
@@ -1254,32 +816,6 @@ theorem dropLifetime_envDomain_of_storeSurvivor {store store' : ProgramStore}
       intro hdrop
       exact hnotDropped slot hslot' (by simpa [henvLifetime] using hdrop)⟩⟩
 
-/--
-Store-domain converse for Lemma 9.5: if an environment variable survives
-`Γ.dropLifetime`, then the store has the corresponding variable slot after the
-runtime drop, assuming non-dropped variable slots are preserved by the drop.
--/
-theorem dropLifetime_storeDomain_of_envSurvivor {store store' : ProgramStore}
-    {env : Env} {lifetime : Lifetime} {x : Name} :
-    store ∼ₛ env →
-    (∀ slot,
-      store.slotAt (VariableProjection x) = some slot →
-      slot.lifetime ≠ lifetime →
-      store'.slotAt (VariableProjection x) = some slot) →
-    (∃ envSlot, (env.dropLifetime lifetime).slotAt x = some envSlot) →
-    ∃ slot, store'.slotAt (VariableProjection x) = some slot := by
-  intro hsafe hpreserve henvDomain
-  rcases henvDomain with ⟨envSlot, henvDropped⟩
-  rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
-    ⟨henv, hlifetime⟩
-  rcases (hsafe.1 x).mpr ⟨envSlot, henv⟩ with ⟨slot, hslot⟩
-  have hslotLifetime : slot.lifetime = envSlot.lifetime := by
-    rcases hsafe.2 x envSlot henv with ⟨value, hsafeSlot, _hvalid⟩
-    rw [hslot] at hsafeSlot
-    injection hsafeSlot with hslotEq
-    exact congrArg StoreSlot.lifetime hslotEq
-  exact ⟨slot, hpreserve slot hslot (by simpa [hslotLifetime] using hlifetime)⟩
-
 theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} {x : Name} :
     store ∼ₛ env →
@@ -1299,29 +835,6 @@ theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap
     exact congrArg StoreSlot.lifetime hslotEq
   exact ⟨slot, dropsLifetime_preserves_var_slot_of_not_lifetime hdrops hheap hslot
     (by simpa [hslotLifetime] using hlifetime)⟩
-
-/--
-Domain component of Lemma 9.5.  This packages the two store-side facts needed
-to align runtime lifetime drops with Definition 3.20's environment drop.
--/
-theorem dropLifetime_domain_equiv_of_slot_preservation
-    {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
-    store ∼ₛ env →
-    DropsLifetime store lifetime store' →
-    (∀ x slot,
-      store'.slotAt (VariableProjection x) = some slot →
-      slot.lifetime ≠ lifetime) →
-    (∀ x slot,
-      store.slotAt (VariableProjection x) = some slot →
-      slot.lifetime ≠ lifetime →
-      store'.slotAt (VariableProjection x) = some slot) →
-    ∀ x,
-      (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
-        ∃ envSlot, (env.dropLifetime lifetime).slotAt x = some envSlot := by
-  intro hsafe hdrops hnotDropped hpreserve x
-  constructor
-  · exact dropLifetime_envDomain_of_storeSurvivor hsafe hdrops (hnotDropped x)
-  · exact dropLifetime_storeDomain_of_envSurvivor hsafe (hpreserve x)
 
 theorem dropLifetime_domain_equiv_of_ownerTargetsHeap
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
@@ -1657,42 +1170,6 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
     exact ⟨slot, by
       rw [hstoreAfterWrite]
       simpa [ProgramStore.update, VariableProjection, hyx] using hslot⟩
-
-/--
-Variable-base assignment store preservation when the old lhs environment type is
-non-owning-shaped (`unit`, `int`, `undef`, or borrow).
-
-This packages the Section 4.1 argument at the abstraction level: from `S ∼ Γ`,
-the environment slot shape, and the lhs read, the old runtime partial value is
-known to be non-owning, so its drop leaves the store unchanged.
--/
-theorem storePreservation_assign_var_envShape_of_preserved
-    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
-    {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
-    {value : Value} {ty : Ty} :
-    store ∼ₛ env →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) ty env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
-    store.read (.var x) = some oldSlot →
-    store.write (.var x) (.value value) = some storeAfterWrite →
-    Drops storeAfterWrite [oldSlot.value] store' →
-    ValidPartialValue store' (.value value) (.ty ty) →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ∼ₛ env' := by
-  intro hsafe henvX hwriteEnv hshape hread hwrite hdrops hnewValid hpreserveOther
-  have hnonOwner : PartialValueNonOwner oldSlot.value :=
-    safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
-  exact storePreservation_assign_var_old_nonOwner_of_preserved
-    hsafe henvX hwriteEnv hnonOwner hread hwrite hdrops hnewValid hpreserveOther
 
 /-- Updating a fresh location does not change an already-defined lval location. -/
 theorem loc_update_of_loc {store : ProgramStore} {updatedLocation : Location}
@@ -2053,70 +1530,6 @@ theorem storePreservation_move_var_step {store store' : ProgramStore}
               intro y envSlot oldOtherValue hyx henv hslot
               exact hpreserveOld y envSlot oldOtherValue hyx henv hslot)
 
-/-- Lemma 9.10, `R-Declare` store-preservation fragment. -/
-theorem storePreservation_declare_step {store store' : ProgramStore}
-    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {x : Name} {value : Value} :
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.letMut x (.val value)) .unit env₃ →
-    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
-    (∀ ty,
-      ValueTyping typing value ty →
-      ValidPartialValue (store.declare x lifetime value) (.value value) (.ty ty)) →
-    (∀ y envSlot oldValue,
-      y ≠ x →
-      env₁.slotAt y = some envSlot →
-      store.slotAt (VariableProjection y) =
-        some { value := oldValue, lifetime := envSlot.lifetime } →
-      ValidPartialValue (store.declare x lifetime value) oldValue envSlot.ty) →
-    store' ∼ₛ env₃ := by
-  intro hsafe htyping hstep hnewValid hpreserveOld
-  cases htyping with
-  | declare hfresh hinit _hfreshOut _hcoh henv₃ =>
-      cases hstep with
-      | declare hstore' =>
-          cases hinit with
-          | const hvalueTyping =>
-              subst hstore'
-              subst henv₃
-              exact safeAbstraction_declare hsafe hfresh
-                (hnewValid _ hvalueTyping)
-                hpreserveOld
-
-/--
-Lemma 9.10, `R-Declare` store preservation, with the store-extension
-obligations discharged from the existing validity hypotheses.
--/
-theorem storePreservation_declare_step_valid {store store' : ProgramStore}
-    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {x : Name} {value : Value} :
-    ValidStoreTyping store (.letMut x (.val value)) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.letMut x (.val value)) .unit env₃ →
-    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
-    store' ∼ₛ env₃ := by
-  intro hvalidStoreTyping hsafe htyping hstep
-  cases htyping with
-  | declare hfresh hinit hfreshOut hcoh henv₃ =>
-      have hfreshStore : store.fresh (VariableProjection x) :=
-        safeAbstraction_store_fresh_var hsafe hfresh
-      refine storePreservation_declare_step hsafe
-        (TermTyping.declare hfresh hinit hfreshOut hcoh henv₃) hstep ?newValid ?preserveOld
-      · intro ty hvalueTyping
-        rcases hvalidStoreTyping value (by simp [termValues]) with
-          ⟨storedTy, hstoredTyping, hvalidValue⟩
-        have hty : storedTy = ty :=
-          ValueTyping.deterministic hstoredTyping hvalueTyping
-        subst hty
-        exact validPartialValue_declare hfreshStore hvalidValue
-      · intro y envSlot oldValue _hyx henv hstoreSlot
-        rcases hsafe.2 y envSlot henv with
-          ⟨safeValue, hsafeSlot, hsafeValid⟩
-        rw [hstoreSlot] at hsafeSlot
-        injection hsafeSlot with hslotEq
-        cases hslotEq
-        exact validPartialValue_declare hfreshStore hsafeValid
-
 /-- Box allocation preserves existing partial-value abstractions. -/
 theorem validPartialValue_boxAt {store : ProgramStore} {address : Nat}
     {newValue : Value} {partialValue : PartialValue} {ty : PartialTy} :
@@ -2175,65 +1588,6 @@ theorem safeAbstraction_boxAt {store : ProgramStore} {env : Env}
         simpa [ProgramStore.boxAt, ProgramStore.update, VariableProjection]
           using hslot,
       validPartialValue_boxAt hfresh hvalid⟩
-
-/--
-Lemma 9.10, `R-Box` store-preservation fragment, factored around the
-operand-value abstraction established by the inner preservation proof.
--/
-theorem storePreservation_box_step_of_validValue {store store' : ProgramStore}
-    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {value : Value} {ty : Ty} {ref : Reference} :
-    store ∼ₛ env₁ →
-    ValidValue store value ty →
-    TermTyping env₁ typing lifetime (.box (.val value)) (.box ty) env₂ →
-    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    store' ∼ₛ env₂ ∧ ValidValue store' (.ref ref) (.box ty) := by
-  intro hsafe hvalidValue htyping hstep
-  cases htyping with
-  | box hinner =>
-      cases hinner with
-      | const _hvalueTyping =>
-          cases hstep with
-          | box hfresh hbox =>
-              cases hbox
-              exact ⟨safeAbstraction_boxAt hfresh hsafe,
-                validValue_boxAt_ref hfresh hvalidValue⟩
-
-/-- Lemma 9.10, `R-Box` store-preservation fragment. -/
-theorem storePreservation_box_step {store store' : ProgramStore}
-    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {value : Value} {ty : Ty} {ref : Reference} :
-    ValidStoreTyping store (.box (.val value)) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.box (.val value)) (.box ty) env₂ →
-    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    store' ∼ₛ env₂ ∧ ValidValue store' (.ref ref) (.box ty) := by
-  intro hvalidStoreTyping hsafe htyping hstep
-  cases htyping with
-  | box hinner =>
-      cases hinner with
-      | const hvalueTyping =>
-          rcases hvalidStoreTyping value (by simp [termValues]) with
-            ⟨storedTy, hstoredTyping, hvalidValue⟩
-          have hty : storedTy = ty :=
-            ValueTyping.deterministic hstoredTyping hvalueTyping
-          subst hty
-          exact storePreservation_box_step_of_validValue hsafe hvalidValue
-            (TermTyping.box (typing := typing) (TermTyping.const hvalueTyping))
-            hstep
-
-/-- Lemma 9.9, `R-Box` one-step value preservation fragment. -/
-theorem valuePreservation_box_step {store store' : ProgramStore}
-    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {value : Value} {ty : Ty} {ref : Reference} :
-    ValidStoreTyping store (.box (.val value)) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.box (.val value)) (.box ty) env₂ →
-    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    ValidValue store' (.ref ref) (.box ty) := by
-  intro hvalidStoreTyping hsafe htyping hstep
-  exact (storePreservation_box_step hvalidStoreTyping hsafe htyping hstep).2
-
 
 end Paper
 end LwRust

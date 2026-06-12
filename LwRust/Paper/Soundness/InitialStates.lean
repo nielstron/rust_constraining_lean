@@ -13,7 +13,6 @@ namespace Paper
 
 open Core
 
-
 theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
     SourceValue value →
     ∃ ty, ValueTyping StoreTyping.empty value ty ∧ ValidValue store value ty := by
@@ -58,15 +57,6 @@ theorem sourceValue_empty_valueTyping_borrowFree {value : Value} {ty : Ty} :
       exact tyBorrowFree_bool
   | ref _ =>
       cases hsource
-
-theorem sourceTerm_empty_valueTyping_borrowFree {term : Term}
-    {value : Value} {ty : Ty} :
-    SourceTerm term →
-    value ∈ termValues term →
-    ValueTyping StoreTyping.empty value ty →
-    TyBorrowFree ty := by
-  intro hsource hmem htyping
-  exact sourceValue_empty_valueTyping_borrowFree (hsource value hmem) htyping
 
 /-- **Corollary 4.14.** Source-initial borrow-safety result extension for values. -/
 theorem sourceInitial_value_borrowSafety_result_extension
@@ -699,14 +689,6 @@ theorem sourceInitial_multistep_value_preservation
     safeAbstraction_empty
     htyping
     hmulti
-
-theorem valueTyping_empty_result_wellFormed {env : Env}
-    {lifetime : Lifetime} {value : Value} {ty : Ty} :
-    ValueTyping StoreTyping.empty value ty →
-    WellFormedTy env ty lifetime := by
-  intro htyping
-  exact valueTyping_result_wellFormed_of_refs
-    (storeTypingRefsWellFormed_empty env lifetime) htyping
 
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried route. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}

@@ -38,7 +38,6 @@ def update (env : Env) (x : Name) (slot : EnvSlot) : Env :=
 def erase (env : Env) (x : Name) : Env :=
   { slotAt := fun y => if y = x then none else env.slotAt y }
 
-
 @[simp] theorem update_slotAt_same (env : Env) (x : Name) (slot : EnvSlot) :
     (env.update x slot).slotAt x = some slot := by
   simp [update]
@@ -79,17 +78,6 @@ inductive CopyTy : Ty → Prop where
       CopyTy .bool
   | immBorrow {targets : List LVal} :
       CopyTy (.borrow false targets)
-
-/-- Runtime non-owner classification used by frame lemmas. -/
-inductive NonOwnerTy : Ty → Prop where
-  | unit :
-      NonOwnerTy .unit
-  | int :
-      NonOwnerTy .int
-  | bool :
-      NonOwnerTy .bool
-  | borrow {mutable : Bool} {targets : List LVal} :
-      NonOwnerTy (.borrow mutable targets)
 
 /-- Definition 3.7, type strengthening `T̃₁ ⊑ T̃₂`. -/
 inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
@@ -194,25 +182,6 @@ instance : LE Env where
 def EnvJoin (left right join : Env) : Prop :=
   IsLUB ({left, right} : Set Env) join
 
-/-- A finite join of environments, used by the write-through-borrow case. -/
-inductive EnvJoinMany : List Env → Env → Prop where
-  | nil {env : Env} :
-      EnvJoinMany [] env
-  | singleton {env : Env} :
-      EnvJoinMany [env] env
-  | cons {first second join final : Env} {rest : List Env} :
-      EnvJoin first second join →
-      EnvJoinMany (join :: rest) final →
-      EnvJoinMany (first :: second :: rest) final
-
-/--
-Lifetime order used in the paper: `outer` outlives `inner` when `outer` is a
-prefix of `inner`.
-
-The full set of lifetimes is tree-shaped, but the active lifetimes at one
-program point form a chain.  On that chain we get semilattice-style min/max
-operations.  This is not a ring or a monad.
--/
 def LifetimeOutlives (outer inner : Lifetime) : Prop :=
   outer.contains inner
 
@@ -347,11 +316,6 @@ def LVal.path : LVal → Path
 def LVal.base : LVal → Name
   | .var x => x
   | .deref lv => LVal.base lv
-
-/-- Number of dereferences in an lval (length of its path). -/
-def LVal.derefCount : LVal → Nat
-  | .var _ => 0
-  | .deref lv => LVal.derefCount lv + 1
 
 /-- Variables occurring in a full type (the base names of all borrow targets). -/
 def Ty.vars : Ty → List Name
@@ -553,11 +517,6 @@ def WriteProhibited (env : Env) (lv : LVal) : Prop :=
     target ∈ targets ∧
     target ⋈ lv
 
-/-- Syntactic predicate for variable lvalues, retained for helper lemmas. -/
-def LValIsVar : LVal → Prop
-  | .var _ => True
-  | .deref _ => False
-
 def Strike : Path → PartialTy → PartialTy → Prop
   | [], .ty sourceTy, .undef targetTy => sourceTy = targetTy
   | _ :: path, .box inner, .box struck => Strike path inner struck
@@ -737,23 +696,6 @@ def PartialTyLoanFree (ty : PartialTy) : Prop :=
   ∀ mutable targets,
     PartialTyContains ty (.borrow mutable targets) → targets = []
 
-theorem TyBorrowFree.loanFree {ty : Ty} (hfree : TyBorrowFree ty) :
-    TyLoanFree ty :=
-  fun mutable targets hcontains => absurd hcontains (hfree mutable targets)
-
-/--
-Per-slot shape agreement between a branch environment and a join result.
-
-Used by `T-If`: it restricts the mechanised conditional to branches that
-leave every variable in the same initialisation state (no move/initialise
-asymmetry between the branches), in which case the join only merges borrow
-target lists.  The paper's join is more liberal — it can collapse a
-fully-initialised branch slot with a moved-out one into an `undef` shadow —
-but the paper's own Definition 4.4 has no rule validating a still-present
-runtime value against an `undef` type, so safe abstraction (Definition 4.7)
-is not preserved across such joins as printed.  See the README deviation
-entry for the control-flow extension.
--/
 def EnvJoinSameShape (branch join : Env) : Prop :=
   ∀ x branchSlot joinSlot,
     branch.slotAt x = some branchSlot →
@@ -794,26 +736,6 @@ theorem EnvStrengthens.slot_forward {left right : Env} {x : Name}
   | some rightSlot =>
       rw [hright] at h
       exact ⟨rightSlot, rfl, h.1, h.2⟩
-
-/-- `EnvStrengthens` componentwise view, from the stronger side. -/
-theorem EnvStrengthens.slot_backward {left right : Env} {x : Name}
-    {rightSlot : EnvSlot} :
-    EnvStrengthens left right →
-    right.slotAt x = some rightSlot →
-    ∃ leftSlot,
-      left.slotAt x = some leftSlot ∧
-      leftSlot.lifetime = rightSlot.lifetime ∧
-      PartialTyStrengthens leftSlot.ty rightSlot.ty := by
-  intro hstrengthens hright
-  have h := hstrengthens x
-  rw [hright] at h
-  cases hleft : left.slotAt x with
-  | none =>
-      rw [hleft] at h
-      exact False.elim h
-  | some leftSlot =>
-      rw [hleft] at h
-      exact ⟨leftSlot, rfl, h.1, h.2⟩
 
 /-- Definition 3.21, well-formed type `Γ ⊢ T ≽ l`. -/
 inductive WellFormedTy : Env → Ty → Lifetime → Prop where
@@ -1248,25 +1170,6 @@ mutual
         TermListTyping env₂ typing lifetime rest finalTy env₃ →
         TermListTyping env₁ typing lifetime (term :: rest) finalTy env₃
 end
-
-/-- Convenience constructor for a two-term block body.
-
-This is not a new typing rule: it is just `T-Block` plus `T-Seq/cons`, and
-records that typed blocks are no longer restricted to singleton bodies.
--/
-theorem TermTyping.block_two {env₁ env₂ env₃ env₄ : Env}
-    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
-    {first second : Term} {firstTy resultTy : Ty} :
-    LifetimeChild lifetime blockLifetime →
-    TermTyping env₁ typing blockLifetime first firstTy env₂ →
-    TermTyping env₂ typing blockLifetime second resultTy env₃ →
-    WellFormedTy env₃ resultTy lifetime →
-    env₄ = env₃.dropLifetime blockLifetime →
-    TermTyping env₁ typing lifetime (.block blockLifetime [first, second]) resultTy env₄ := by
-  intro hchild hfirst hsecond hwellTy hdrop
-  exact TermTyping.block hchild
-    (TermListTyping.cons hfirst (TermListTyping.singleton hsecond))
-    hwellTy hdrop
 
 end Paper
 end LwRust

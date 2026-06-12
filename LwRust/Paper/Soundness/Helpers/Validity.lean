@@ -14,7 +14,6 @@ namespace Paper
 
 open Core
 
-
 /--
 The owned heap/variable location, if this runtime value is an owning reference.
 Borrowed references and scalar values do not contribute ownership occurrences.
@@ -380,17 +379,6 @@ theorem OwnsTransitively.to_owns {store : ProgramStore}
   | trans _hfirst _htail ih =>
       exact ih
 
-theorem OwnsTransitively.head_owns {store : ProgramStore}
-    {storage owned : Location} :
-    ProgramStore.OwnsTransitively store storage owned →
-    ∃ first, ProgramStore.OwnsAt store first storage := by
-  intro hpath
-  cases hpath with
-  | direct howns =>
-      exact ⟨owned, howns⟩
-  | trans howns _htail =>
-      exact ⟨_, howns⟩
-
 end ProgramStore
 
 /--
@@ -512,11 +500,6 @@ theorem ValidState.validStore {store : ProgramStore} {term : Term} :
     ValidState store term → ValidStore store := by
   intro hvalid
   exact hvalid.1
-
-theorem ValidState.validTerm {store : ProgramStore} {term : Term} :
-    ValidState store term → ValidTerm term := by
-  intro hvalid
-  exact hvalid.2.1
 
 theorem ValidState.storeTermDisjoint {store : ProgramStore} {term : Term} :
     ValidState store term →
@@ -766,24 +749,6 @@ theorem validRuntimeState_block_singleton_value_of_value {store : ProgramStore}
       exact (ValidRuntimeState.termOwnerTargetsHeap hvalid) owned
         (by simpa [termOwningLocations, termValues] using hmem)⟩
 
-theorem validRuntimeState_sourceTerm_of_store {store : ProgramStore}
-    {term : Term} :
-    ValidStore store →
-    StoreOwnersAllocated store →
-    StoreOwnerTargetsHeap store →
-    HeapSlotsRootLifetime store →
-    SourceTerm term →
-    ValidRuntimeState store term := by
-  intro hstore hallocated hheap hroot hsource
-  exact ⟨⟨hstore, sourceTerm_validTerm hsource,
-      by
-        intro owned hmem
-        simp [sourceTerm_no_owningLocations hsource] at hmem⟩,
-    hallocated,
-    hheap,
-    hroot,
-    sourceTerm_ownerTargetsHeap hsource⟩
-
 theorem validRuntimeState_block_value_cons_of_value_source_tail
     {store : ProgramStore} {blockLifetime : Lifetime}
     {value : Value} {next : Term} {rest : List Term} :
@@ -930,11 +895,6 @@ theorem ValidRuntimeState.validStore {store : ProgramStore} {term : Term} :
   intro hvalid
   exact hvalid.validState.validStore
 
-theorem ValidRuntimeState.validTerm {store : ProgramStore} {term : Term} :
-    ValidRuntimeState store term → ValidTerm term := by
-  intro hvalid
-  exact hvalid.validState.validTerm
-
 theorem ValidRuntimeState.storeTermDisjoint {store : ProgramStore} {term : Term} :
     ValidRuntimeState store term →
     ∀ owned,
@@ -975,43 +935,6 @@ theorem validTerm_value (value : Value) :
 @[simp] theorem validTerm_int (value : Int) :
     ValidTerm (.val (.int value)) := by
   exact validTerm_value_nonOwner rfl
-
-/-- Definition 4.1 excludes two owning references to the same location in one term. -/
-theorem invalidTerm_duplicateOwner (location : Location) (lifetime : Lifetime) :
-    ¬ ValidTerm
-      (.block lifetime [.val (owningRef location), .val (owningRef location)]) := by
-  simp [ValidTerm, termOwningLocations, termValues, valueOwningLocations,
-    valueOwnedLocation?, owningRef]
-
-/--
-Definition 4.3 excludes the paper's motivating invalid-state shape: an owning
-reference to the same location appears both in the store and in the term.
--/
-theorem invalidState_storeTerm_duplicateOwner
-    (owned storage : Location) (lifetime : Lifetime) :
-    ¬ ValidState
-      (ProgramStore.empty.update storage
-        { value := .value (owningRef owned), lifetime := lifetime })
-      (.val (owningRef owned)) := by
-  intro hvalid
-  exact hvalid.storeTermDisjoint owned
-    (by simp [termOwningLocations, termValues, valueOwningLocations,
-      valueOwnedLocation?, owningRef])
-    (by
-      exact ⟨storage, lifetime, by simp [ProgramStore.update, owningRef]⟩)
-
-/-- Definition 4.2 excludes two distinct store slots owning the same location. -/
-theorem invalidStore_duplicateOwner {owned storage₁ storage₂ : Location}
-    {lifetime₁ lifetime₂ : Lifetime} :
-    storage₁ ≠ storage₂ →
-    ¬ ValidStore
-      ((ProgramStore.empty.update storage₁
-          { value := .value (owningRef owned), lifetime := lifetime₁ }).update storage₂
-        { value := .value (owningRef owned), lifetime := lifetime₂ }) := by
-  intro hne hvalid
-  exact hne (hvalid owned storage₁ storage₂
-    ⟨lifetime₁, by simp [ProgramStore.update, hne, owningRef]⟩
-    ⟨lifetime₂, by simp [ProgramStore.update, owningRef]⟩)
 
 @[simp] theorem validStore_empty :
     ValidStore ProgramStore.empty := by
@@ -1103,22 +1026,6 @@ theorem not_owns_var_of_storeOwnerTargetsHeap {store : ProgramStore} {x : Name} 
   rcases hheap (.var x) howns with ⟨address, hlocation⟩
   cases hlocation
 
-theorem lifetimeDropOwnersDisjoint_of_heapOwnerTargets {store : ProgramStore}
-    {lifetime : Lifetime} :
-    StoreOwnerTargetsHeap store →
-    (∀ address slot,
-      store.slotAt (.heap address) = some slot →
-      slot.lifetime ≠ lifetime) →
-    LifetimeDropOwnersDisjoint store lifetime := by
-  intro hheap hheapLifetime location slot hslot hlifetime howns
-  rcases hheap location howns with ⟨address, hlocation⟩
-  subst hlocation
-  exact hheapLifetime address slot hslot hlifetime
-
-/--
-If a valid store has an owning reference to `owned` at `storage`, then erasing
-`storage` removes all store ownership of `owned`.
--/
 theorem not_owns_erase_of_ownsAt {store : ProgramStore}
     {owned storage : Location} :
     ValidStore store →
@@ -1276,17 +1183,6 @@ theorem storeOwnerTargetsHeap_update_undef {store : ProgramStore} {updated : Loc
   exact storeOwnerTargetsHeap_update hheap (by
     intro owned hmem
     simp [partialValueOwningLocations] at hmem)
-
-theorem heapSlotsRootLifetime_update_undef_existing {store : ProgramStore}
-    {updated : Location} {updatedLifetime : Lifetime} :
-    HeapSlotsRootLifetime store →
-    store.slotAt updated = some { value := .undef, lifetime := updatedLifetime } →
-    HeapSlotsRootLifetime (store.update updated { value := .undef, lifetime := updatedLifetime }) := by
-  intro hroot hslot
-  exact heapSlotsRootLifetime_update hroot (by
-    intro address hupdated
-    subst hupdated
-    exact hroot address { value := .undef, lifetime := updatedLifetime } hslot)
 
 /-- Writing `undef` through an lval preserves store validity. -/
 theorem validStore_write_undef {store store' : ProgramStore} {lv : LVal} :
@@ -1916,45 +1812,6 @@ theorem drops_partialValue_nonOwner_eq {store store' : ProgramStore}
   | ownerPresent howner _hpresent _hrest =>
       exact False.elim (not_partialValueNonOwner_owning_ref howner hnonOwner)
 
-/-- Dropping a runtime value with no owning reference leaves the store unchanged. -/
-theorem drops_value_nonOwner_eq {store store' : ProgramStore} {value : Value} :
-    valueOwnedLocation? value = none →
-    Drops store [.value value] store' →
-    store' = store := by
-  intro hnonOwner hdrops
-  exact drops_partialValue_nonOwner_eq (by
-    intro ref
-    cases value with
-    | unit =>
-        exact Or.inl (by simp)
-    | int _ =>
-        exact Or.inl (by simp)
-    | bool _ =>
-        exact Or.inl (by simp)
-    | ref valueRef =>
-        cases valueRef with
-        | mk location owner =>
-            cases owner with
-            | false =>
-                by_cases href :
-                    PartialValue.value
-                      (Value.ref { location := location, owner := false }) =
-                    PartialValue.value (Value.ref ref)
-                · exact Or.inr (by
-                    injection href with hvalue
-                    cases ref
-                    cases hvalue
-                    rfl)
-                · exact Or.inl href
-            | true =>
-                simp [valueOwnedLocation?] at hnonOwner) hdrops
-
-/--
-Dropping a list of non-owning partial values leaves the store unchanged.
-
-This is the list-shaped version of Definition 3.4's non-owner case for
-`drop(S, ψ)`.
--/
 theorem drops_all_nonOwner_eq {store store' : ProgramStore} {values : List PartialValue} :
     (∀ value, value ∈ values → PartialValueNonOwner value) →
     Drops store values store' →
@@ -2392,29 +2249,6 @@ theorem validStore_write_disjoint {store store' : ProgramStore} {lv : LVal}
           subst hwrite
           exact validStore_update_disjoint hvalid hdisjoint
 
-/-- Writing a partial value preserves owner-allocation when its owners are allocated after the write. -/
-theorem storeOwnersAllocated_write {store store' : ProgramStore} {lv : LVal}
-    {value : PartialValue} :
-    StoreOwnersAllocated store →
-    (∀ owned,
-      owned ∈ partialValueOwningLocations value →
-      ∃ allocatedSlot, store'.slotAt owned = some allocatedSlot) →
-    store.write lv value = some store' →
-    StoreOwnersAllocated store' := by
-  intro hallocated hvalueAllocated hwrite
-  unfold ProgramStore.write at hwrite
-  cases hloc : store.loc lv with
-  | none =>
-      simp [hloc] at hwrite
-  | some location =>
-      cases hslot : store.slotAt location with
-      | none =>
-          simp [hloc, hslot] at hwrite
-      | some oldSlot =>
-          simp [hloc, hslot] at hwrite
-          subst hwrite
-          exact storeOwnersAllocated_update hallocated hvalueAllocated
-
 theorem storeOwnerTargetsHeap_write {store store' : ProgramStore} {lv : LVal}
     {value : PartialValue} :
     StoreOwnerTargetsHeap store →
@@ -2519,7 +2353,6 @@ theorem empty_no_lifetime_slots (lifetime : Lifetime) :
   exact ⟨validStore_empty, validTerm_unit, by
     intro owned _hmem
     exact empty_owns_false owned⟩
-
 
 end Paper
 end LwRust

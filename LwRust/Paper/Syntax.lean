@@ -38,7 +38,6 @@ inductive Location where
   | heap (address : Nat)
   deriving BEq, DecidableEq, Repr
 
-
 mutual
   inductive Ty where
     | unit
@@ -84,11 +83,6 @@ def Lifetime.root : Lifetime := { path := [] }
 
 def Lifetime.contains (outer inner : Lifetime) : Bool :=
   outer.path.isPrefixOf inner.path
-
-def Lifetime.min? (lhs rhs : Lifetime) : Option Lifetime :=
-  if lhs.contains rhs then some rhs
-  else if rhs.contains lhs then some lhs
-  else none
 
 inductive Term where
   | block (lifetime : Lifetime) (terms : List Term)
@@ -150,27 +144,12 @@ mutual
     | term :: rest => term.size + Term.sizeList rest
 end
 
-theorem Term.size_pos : ∀ term : Term, 0 < term.size := by
-  intro term
-  cases term <;> simp [Term.size] <;> omega
-
-/--
-Syntactic divergence: a conservative approximation of "never evaluates to a
-value", modelling rustc's never-type (`!`) propagation.  `Term.missing` plays
-the role of `panic!()` (it self-loops at runtime), and a block diverges when
-one of its statements does — control cannot reach the block's end.
-
-This powers the divergence-aware conditional rule `T-IfDiv`
-(`TermTyping.iteDiverging`), the analogue of rustc treating a
-`panic!()`-terminated branch as unreachable at the merge point.
--/
 inductive Term.Diverges : Term → Prop where
   | missing : Term.Diverges .missing
   | block {lifetime : Lifetime} {terms : List Term} {term : Term} :
       term ∈ terms →
       Term.Diverges term →
       Term.Diverges (.block lifetime terms)
-
 
 end Core
 end LwRust

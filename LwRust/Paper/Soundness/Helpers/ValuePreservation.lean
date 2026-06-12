@@ -302,21 +302,6 @@ theorem storeOwnersAllocated_declare_step_of_validValue {store store' : ProgramS
       subst hstore'
       exact storeOwnersAllocated_declare_of_validValue hallocated hvalidValue
 
-/-- Allocation invariant preservation for `R-Declare`. -/
-theorem storeOwnersAllocated_declare_step {store store' : ProgramStore}
-    {typing : StoreTyping} {lifetime : Lifetime} {x : Name} {value : Value} :
-    StoreOwnersAllocated store →
-    ValidStoreTyping store (.letMut x (.val value)) typing →
-    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
-    StoreOwnersAllocated store' := by
-  intro hallocated hvalidStoreTyping hstep
-  cases hstep with
-  | declare hstore' =>
-      rcases hvalidStoreTyping value (by simp [termValues]) with
-        ⟨_ty, _hvalueTyping, hvalidValue⟩
-      exact storeOwnersAllocated_declare_step_of_validValue hallocated hvalidValue
-        (Step.declare (lifetime := lifetime) hstore')
-
 /-- Allocation invariant preservation for `R-Seq`. -/
 theorem storeOwnersAllocated_seq_step {store store' : ProgramStore}
     {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
@@ -407,23 +392,6 @@ theorem validState_box_step_of_validValue {store store' : ProgramStore}
         (not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
         hbox
 
-/-- Lemma 9.8, typed `R-Box` valid-state preservation fragment. -/
-theorem validState_box_step_typed {store store' : ProgramStore}
-    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ref : Reference} :
-    ValidState store (.box (.val value)) →
-    StoreOwnersAllocated store →
-    ValidStoreTyping store (.box (.val value)) typing →
-    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    ValidState store' (.val (.ref ref)) := by
-  intro hvalidState hallocated hvalidStoreTyping hstep
-  cases hstep with
-  | box hfresh hbox =>
-      rcases hvalidStoreTyping value (by simp [termValues]) with
-        ⟨_ty, _hvalueTyping, hvalidValue⟩
-      exact validState_box_step_of_validValue (lifetime := lifetime)
-        hvalidState hallocated hvalidValue
-        (Step.box (lifetime := lifetime) hfresh hbox)
-
 /-- Allocation invariant preservation for `R-Box`, from operand validity. -/
 theorem storeOwnersAllocated_box_step_of_validValue {store store' : ProgramStore}
     {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
@@ -436,22 +404,6 @@ theorem storeOwnersAllocated_box_step_of_validValue {store store' : ProgramStore
   | box _hfresh hbox =>
       cases hbox
       exact storeOwnersAllocated_boxAt_of_validValue hallocated hvalidValue
-
-/-- Allocation invariant preservation for `R-Box`. -/
-theorem storeOwnersAllocated_box_step {store store' : ProgramStore}
-    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ref : Reference} :
-    StoreOwnersAllocated store →
-    ValidStoreTyping store (.box (.val value)) typing →
-    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    StoreOwnersAllocated store' := by
-  intro hallocated hvalidStoreTyping hstep
-  cases hstep with
-  | box hfresh hbox =>
-      rcases hvalidStoreTyping value (by simp [termValues]) with
-        ⟨_ty, _hvalueTyping, hvalidValue⟩
-      exact storeOwnersAllocated_box_step_of_validValue (lifetime := lifetime)
-        hallocated hvalidValue
-        (Step.box (lifetime := lifetime) hfresh hbox)
 
 /-! ### Composed Runtime Validity Preservation Fragments -/
 
@@ -623,22 +575,6 @@ theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStor
               (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
         termOwnerTargetsHeap_unit⟩
 
-/-- Runtime-validity preservation for `R-Declare`. -/
-theorem validRuntimeState_declare_step {store store' : ProgramStore}
-    {typing : StoreTyping} {lifetime : Lifetime} {x : Name} {value : Value} :
-    ValidRuntimeState store (.letMut x (.val value)) →
-    store.fresh (.var x) →
-    ValidStoreTyping store (.letMut x (.val value)) typing →
-    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
-    ValidRuntimeState store' (.val .unit) := by
-  intro hvalidRuntime hfresh hvalidStoreTyping hstep
-  cases hstep with
-  | declare hstore' =>
-      rcases hvalidStoreTyping value (by simp [termValues]) with
-        ⟨_ty, _hvalueTyping, hvalidValue⟩
-      exact validRuntimeState_declare_step_of_validValue hvalidRuntime hfresh hvalidValue
-        (Step.declare (lifetime := lifetime) hstore')
-
 /-- Runtime-validity preservation for `R-Seq`. -/
 theorem validRuntimeState_seq_step {store store' : ProgramStore}
     {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
@@ -739,22 +675,6 @@ theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
             valueOwnedLocation?] at hmem
           subst hmem
           exact ⟨_, rfl⟩⟩
-
-/-- Runtime-validity preservation for `R-Box`. -/
-theorem validRuntimeState_box_step {store store' : ProgramStore}
-    {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ref : Reference} :
-    ValidRuntimeState store (.box (.val value)) →
-    ValidStoreTyping store (.box (.val value)) typing →
-    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
-    ValidRuntimeState store' (.val (.ref ref)) := by
-  intro hvalidRuntime hvalidStoreTyping hstep
-  cases hstep with
-  | box hfresh hbox =>
-      rcases hvalidStoreTyping value (by simp [termValues]) with
-        ⟨_ty, _hvalueTyping, hvalidValue⟩
-      exact validRuntimeState_box_step_of_validValue (lifetime := lifetime)
-        hvalidRuntime hvalidValue
-        (Step.box (lifetime := lifetime) hfresh hbox)
 
 /-- Lemma 9.10, `R-Copy` store-preservation fragment. -/
 theorem storePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
@@ -1095,32 +1015,6 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
           rw [henv₃]
           exact hpreserved
 
-/--
-Lemma 4.11, `R-Assign` runtime/value preservation fragment.
-
-This stops short of store preservation (`S₂ ∼ Γ₂`), which requires the paper's
-Update Preservation lemma for the flow-sensitive `EnvWrite` relation.
--/
-theorem preservation_assign_step_runtime_validity {store store' : ProgramStore}
-    {lifetime : Lifetime} {lhs : LVal} {value : Value} :
-    ValidRuntimeState store (.assign lhs (.val value)) →
-    StoreOwnersAllocated store' →
-    StoreOwnerTargetsHeap store' →
-    HeapSlotsRootLifetime store' →
-    Step store lifetime (.assign lhs (.val value)) store' (.val .unit) →
-    ValidRuntimeState store' (.val .unit) ∧ ValidValue store' .unit .unit := by
-  intro hvalidRuntime hallocated hheap hroot hstep
-  exact ⟨validRuntimeState_assign_step hvalidRuntime hallocated hheap hroot hstep,
-    ValidPartialValue.unit⟩
-
-/--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
-value is non-owning.
-
-This composes the runtime-validity bridge with the variable-base update
-preservation fragment.  The only remaining premise is the genuine
-path-stability/update-preservation obligation for variables other than `x`.
--/
 theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
@@ -1220,51 +1114,6 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
     hvalidValue hread hwrite hdrops hnewValid hpreserveOther
 
-/--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
-environment type is non-owning (`unit`, `int`, `undef`, or borrow).
-
-This derives the runtime non-owner drop side condition from `S ∼ Γ`, the
-variable read, and the environment slot shape.
--/
-theorem preservation_assign_var_envShape_step_runtime_of_preserved
-    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
-    {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
-    {value : Value} {ty : Ty} :
-    store ∼ₛ env →
-    ValidRuntimeState store (.assign (.var x) (.val value)) →
-    env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) ty env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
-    ValidValue store value ty →
-    store.read (.var x) = some oldSlot →
-    store.write (.var x) (.value value) = some storeAfterWrite →
-    Drops storeAfterWrite [oldSlot.value] store' →
-    ValidPartialValue store' (.value value) (.ty ty) →
-    (∀ y otherEnvSlot,
-      y ≠ x →
-      env.slotAt y = some otherEnvSlot →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
-      ValidValue store' .unit .unit := by
-  intro hsafe hvalidRuntime henvX hwriteEnv hshape hvalidValue
-    hread hwrite hdrops hnewValid hpreserveOther
-  have hnonOwner : PartialValueNonOwner oldSlot.value :=
-    safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
-  exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
-    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
-    hvalidValue hread hwrite hdrops hnewValid hpreserveOther
-
-/--
-Lemma 4.11, direct-variable `R-Assign` preservation fragment when the old lhs
-environment type is non-owning-shaped, with post-write validity derived from
-reachability frame conditions.
--/
 theorem preservation_assign_var_envShape_step_runtime_of_frames
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
@@ -1299,106 +1148,6 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
     hvalidValue hread hwrite hdrops hvalueFrame hotherFrames
 
-/--
-Lemma 4.11, `R-Seq` preservation fragment for non-owning values.
-
-This covers unit, integers, and shared references.  Owning references need the
-paper's full Drop Preservation lemma, because the step may recursively erase
-reachable storage.
--/
-theorem preservation_seq_nonOwner_step_runtime {store store' : ProgramStore}
-    {env : Env} {lifetime blockLifetime : Lifetime} {value : Value}
-    {next : Term} {rest : List Term} :
-    valueOwnedLocation? value = none →
-    store ∼ₛ env →
-    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
-    Step store lifetime (.block blockLifetime (.val value :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧ store' ∼ₛ env := by
-  intro hnonOwner hsafe hvalidRuntime hstep
-  cases hstep with
-  | seq hdrops =>
-      have hstore : store' = store := drops_value_nonOwner_eq hnonOwner hdrops
-      subst hstore
-      exact ⟨validRuntimeState_seq_step hvalidRuntime
-        (Step.seq (lifetime := lifetime) hdrops), hsafe⟩
-
-/--
-Lemma 4.11 support, `R-Seq` preservation fragment for non-owning values, also
-carrying forward the valid store typing needed to continue progress on the
-remaining block.
--/
-theorem preservation_seq_nonOwner_step_runtime_with_storeTyping
-    {store store' : ProgramStore} {env : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {value : Value} {next : Term}
-    {rest : List Term} :
-    valueOwnedLocation? value = none →
-    store ∼ₛ env →
-    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
-    ValidStoreTyping store (.block blockLifetime (.val value :: next :: rest)) typing →
-    Step store lifetime (.block blockLifetime (.val value :: next :: rest))
-      store' (.block blockLifetime (next :: rest)) →
-    ValidRuntimeState store' (.block blockLifetime (next :: rest)) ∧
-      store' ∼ₛ env ∧
-      ValidStoreTyping store' (.block blockLifetime (next :: rest)) typing := by
-  intro hnonOwner hsafe hvalidRuntime hstoreTyping hstep
-  rcases preservation_seq_nonOwner_step_runtime hnonOwner hsafe hvalidRuntime hstep with
-    ⟨hvalidRuntime', hsafe'⟩
-  cases hstep with
-  | seq hdrops =>
-      have hstore : store' = store := drops_value_nonOwner_eq hnonOwner hdrops
-      subst hstore
-      exact ⟨hvalidRuntime', hsafe', validStoreTyping_block_tail hstoreTyping⟩
-
-/--
-Lemma 4.11, `R-BlockB` one-step preservation fragment, factored through the
-store-side premises needed by Lemma 9.5 (`drop(S, m) ∼ drop(Γ, m)`).
--/
-theorem preservation_blockB_value_step_runtime_of_drop_preserved
-    {store store' : ProgramStore} {env env' : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {value : Value} {ty : Ty} :
-    ValidRuntimeState store (.block blockLifetime [.val value]) →
-    store ∼ₛ env →
-    TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
-    Step store lifetime (.block blockLifetime [.val value]) store' (.val value) →
-    ValidValue store' value ty →
-    (∀ x envSlot,
-      env.slotAt x = some envSlot →
-      envSlot.lifetime ≠ blockLifetime →
-      ∃ oldValue,
-        store'.slotAt (VariableProjection x) =
-          some { value := oldValue, lifetime := envSlot.lifetime } ∧
-        ValidPartialValue store' oldValue envSlot.ty) →
-    ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env' ∧
-      ValidValue store' value ty := by
-  intro hvalidRuntime hsafe htyping hstep hvalidValue hpreserve
-  have henv' : env' = env.dropLifetime blockLifetime := by
-    exact blockValueTyping_output_eq htyping
-  have hdropDisjoint : LifetimeDropOwnersDisjoint store blockLifetime := by
-    cases htyping with
-    | block hchild _hterms _hwellTy _hdrop =>
-        exact lifetimeDropOwnersDisjoint_of_heapRootLifetime
-          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-          (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime)
-          hchild
-  have hsafeDrop : store' ∼ₛ env.dropLifetime blockLifetime := by
-    cases hstep with
-    | blockB hdrops =>
-        exact dropPreservation_lifetime hsafe hdrops
-          (dropLifetime_domain_equiv_of_ownerTargetsHeap hsafe hdrops
-            (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime))
-          hpreserve
-  have hsafe' : store' ∼ₛ env' := by
-    rw [henv']
-    exact hsafeDrop
-  exact ⟨validRuntimeState_blockB_step hvalidRuntime hdropDisjoint hstep,
-    hsafe', hvalidValue⟩
-
-/--
-Lemma 4.11, `R-BlockB` one-step preservation when the block lifetime is absent
-from the store.  In this case the runtime lifetime drop and environment lifetime
-drop are both no-ops.
--/
 theorem preservation_blockB_value_step_runtime_no_slots
     {store store' : ProgramStore} {env env' : Env} {typing : StoreTyping}
     {lifetime blockLifetime : Lifetime} {value : Value} {ty : Ty} :
@@ -1480,64 +1229,6 @@ theorem preservation_borrow_multistep_runtime {store finalStore : ProgramStore}
       | borrow hloc =>
           exact preservation_borrow_step_runtime hsafe hvalidRuntime htyping
             (Step.borrow (lifetime := lifetime) hloc))
-    hmulti
-
-/--
-Lemma 4.11, multistep preservation for variable `R-Move` redexes, factored
-through the move/update preservation obligations.
-
-The paper's `R-Move` proof relies on Update Preservation for the overwritten
-source slot.  For the abstract store, we expose the two facts needed by the
-one-step fragment: the moved value remains valid in the post-store, and all
-other environment slots keep valid abstractions.
--/
-theorem preservation_move_var_multistep_runtime_of_preserved
-    {store finalStore : ProgramStore}
-    {env₁ env₂ : Env} {typing : StoreTyping}
-    {current lifetime valueLifetime : Lifetime}
-    {x : Name} {finalValue : Value} {ty : Ty} :
-    WellFormedEnv env₁ current →
-    store ∼ₛ env₁ →
-    ValidRuntimeState store (.move (.var x)) →
-    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
-    EnvMove env₁ (.var x) env₂ →
-    TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
-    (∀ store' value,
-      Step store lifetime (.move (.var x)) store' (.val value) →
-      ValidValue store' value ty) →
-    (∀ store' value,
-      Step store lifetime (.move (.var x)) store' (.val value) →
-      ∀ y envSlot oldValue,
-        y ≠ x →
-        env₁.slotAt y = some envSlot →
-        store.slotAt (VariableProjection y) =
-          some { value := oldValue, lifetime := envSlot.lifetime } →
-        ValidPartialValue store' oldValue envSlot.ty) →
-    MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
-      ValidValue finalStore finalValue ty := by
-  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hvaluePreserved
-    hpreserveOld hmulti
-  exact preservation_runtime_multistep_of_step_to_value
-    (term := .move (.var x))
-    (ty := ty)
-    (by simp [Terminal])
-    (by
-      intro _store' _term' hstep
-      cases hstep with
-      | move _hread _hwrite =>
-          exact ⟨_, rfl⟩)
-    (by
-      intro store' value hstep
-      cases hstep with
-      | move hread hwrite =>
-          exact preservation_move_var_step_runtime hwellFormed hsafe hvalidRuntime
-            henvSlot hmove htyping
-            (Step.move (lifetime := lifetime) hread hwrite)
-            (hvaluePreserved store' value
-              (Step.move (lifetime := lifetime) hread hwrite))
-            (hpreserveOld store' value
-              (Step.move (lifetime := lifetime) hread hwrite)))
     hmulti
 
 /-- Lemma 4.11, multistep preservation for `R-Box` redexes. -/
@@ -1679,214 +1370,6 @@ theorem preservation_declare_multistep_runtime {store finalStore : ProgramStore}
               (Step.declare (lifetime := lifetime) hstore))
     hmulti
 
-/--
-Lemma 4.11, `T-Declare` composition step.
-
-This is the induction-over-constructor shape for `let mut x = t`: apply the
-preservation induction hypothesis to the initializer, then apply `R-Declare`.
-The `env₂.fresh x` premise is the paper-side freshness fact needed after the
-initializer has produced its output environment.
--/
-theorem preservation_declare_context_multistep_runtime
-    {store midStore finalStore : ProgramStore}
-    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {x : Name} {term : Term} {value finalValue : Value} :
-    (∀ {innerTy innerEnv},
-      ValidRuntimeState store term →
-      ValidStoreTyping store term typing →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime term innerTy innerEnv →
-      MultiStep store lifetime term midStore (.val value) →
-      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ innerEnv ∧
-        ValidValue midStore value innerTy) →
-    ValidRuntimeState store (.letMut x term) →
-    ValidStoreTyping store (.letMut x term) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.letMut x term) .unit env₃ →
-    MultiStep store lifetime term midStore (.val value) →
-    Step midStore lifetime (.letMut x (.val value)) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-      ValidValue finalStore finalValue .unit := by
-  intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping
-    hinnerMulti hdeclareStep
-  cases htyping with
-  | declare _hfresh₁ hinnerTyping hfreshOut _hcoh henv₃ =>
-      rcases hinnerPreservation
-          (validRuntimeState_declare_inner hvalidRuntime)
-          (validStoreTyping_declare_inner hvalidStoreTyping)
-          hsafe hinnerTyping hinnerMulti with
-        ⟨hvalidInner, hsafeInner, hvalidValue⟩
-      cases hdeclareStep with
-      | declare hstore =>
-          have hpreserved :=
-            preservation_declare_redex_runtime_of_validValue hsafeInner
-              hfreshOut
-              (validRuntimeState_declare_value_of_value hvalidInner)
-              hvalidValue
-              (Step.declare (lifetime := lifetime) hstore)
-          rw [henv₃]
-          exact hpreserved
-
-/--
-Lemma 4.11, `T-Declare` multistep preservation case.
-
-This packages the operational decomposition of a terminal `let mut x = t`
-reduction with the constructor-shaped preservation composition above.
--/
-theorem preservation_declare_context_terminal_multistep_runtime
-    {store finalStore : ProgramStore}
-    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {x : Name} {term : Term} {finalValue : Value} :
-    (∀ {midStore value innerTy innerEnv},
-      ValidRuntimeState store term →
-      ValidStoreTyping store term typing →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime term innerTy innerEnv →
-      MultiStep store lifetime term midStore (.val value) →
-      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ innerEnv ∧
-        ValidValue midStore value innerTy) →
-    ValidRuntimeState store (.letMut x term) →
-    ValidStoreTyping store (.letMut x term) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.letMut x term) .unit env₃ →
-    MultiStep store lifetime (.letMut x term) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-      ValidValue finalStore finalValue .unit := by
-  intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
-  rcases multistep_declare_to_value_inv hmulti with
-    ⟨midStore, value, hinnerMulti, hdeclareStep⟩
-  exact preservation_declare_context_multistep_runtime
-    (midStore := midStore)
-    (value := value)
-    (by
-      intro innerTy innerEnv hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping
-        hmultiInner
-      exact hinnerPreservation (midStore := midStore) (value := value)
-        (innerTy := innerTy) (innerEnv := innerEnv)
-        hvalidInner hvalidStoreTypingInner hsafeInner
-        hinnerTyping hmultiInner)
-    hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hdeclareStep
-
-/--
-Lemma 4.11, `T-Assign` composition step.
-
-This is the induction-over-constructor shape for `w = t`: apply the
-preservation induction hypothesis to the RHS, then discharge the assignment
-redex with the paper's Update Preservation obligation.
--/
-theorem preservation_assign_context_multistep_runtime
-    {store midStore finalStore : ProgramStore}
-    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {lhs : LVal} {rhs : Term} {value finalValue : Value} :
-    (∀ {rhsTy env₂},
-      ValidRuntimeState store rhs →
-      ValidStoreTyping store rhs typing →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-      MultiStep store lifetime rhs midStore (.val value) →
-      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ env₂ ∧
-        ValidValue midStore value rhsTy) →
-    (∀ {targetLifetime oldTy rhsTy env₂},
-      LValTyping env₁ lhs oldTy targetLifetime →
-      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-      LValTyping env₂ lhs oldTy targetLifetime →
-      ShapeCompatible env₂ oldTy (.ty rhsTy) →
-      WellFormedTy env₂ rhsTy targetLifetime →
-      EnvWrite 0 env₂ lhs rhsTy env₃ →
-      ¬ WriteProhibited env₃ lhs →
-      ValidRuntimeState midStore (.assign lhs (.val value)) →
-      midStore ∼ₛ env₂ →
-      ValidValue midStore value rhsTy →
-      Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
-      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-        ValidValue finalStore finalValue .unit) →
-    ValidRuntimeState store (.assign lhs rhs) →
-    ValidStoreTyping store (.assign lhs rhs) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ →
-    MultiStep store lifetime rhs midStore (.val value) →
-    Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-      ValidValue finalStore finalValue .unit := by
-  intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping
-    hinnerMulti hassignStep
-  cases htyping with
-  | assign hLv hinnerTyping hLvPost hshape hwellTy hwrite _hranked _hcoh _hcontained
-      hnotWrite =>
-      rcases hinnerPreservation
-          (validRuntimeState_assign_inner hvalidRuntime)
-          (validStoreTyping_assign_inner hvalidStoreTyping)
-          hsafe hinnerTyping hinnerMulti with
-        ⟨hvalidInner, hsafeInner, hvalidValue⟩
-      exact hassignRedex hLv hinnerTyping hLvPost hshape hwellTy hwrite hnotWrite
-        (validRuntimeState_assign_value_of_value hvalidInner)
-        hsafeInner hvalidValue hassignStep
-
-/--
-Lemma 4.11, `T-Assign` multistep preservation case.
-
-This packages the operational decomposition of a terminal assignment reduction
-with the constructor-shaped preservation composition above.
--/
-theorem preservation_assign_context_terminal_multistep_runtime
-    {store finalStore : ProgramStore}
-    {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {lhs : LVal} {rhs : Term} {finalValue : Value} :
-    (∀ {midStore value rhsTy env₂},
-      ValidRuntimeState store rhs →
-      ValidStoreTyping store rhs typing →
-      store ∼ₛ env₁ →
-      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-      MultiStep store lifetime rhs midStore (.val value) →
-      ValidRuntimeState midStore (.val value) ∧ midStore ∼ₛ env₂ ∧
-        ValidValue midStore value rhsTy) →
-    (∀ {midStore value targetLifetime oldTy rhsTy env₂},
-      LValTyping env₁ lhs oldTy targetLifetime →
-      TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-      LValTyping env₂ lhs oldTy targetLifetime →
-      ShapeCompatible env₂ oldTy (.ty rhsTy) →
-      WellFormedTy env₂ rhsTy targetLifetime →
-      EnvWrite 0 env₂ lhs rhsTy env₃ →
-      ¬ WriteProhibited env₃ lhs →
-      ValidRuntimeState midStore (.assign lhs (.val value)) →
-      midStore ∼ₛ env₂ →
-      ValidValue midStore value rhsTy →
-      Step midStore lifetime (.assign lhs (.val value)) finalStore (.val finalValue) →
-      ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-        ValidValue finalStore finalValue .unit) →
-    ValidRuntimeState store (.assign lhs rhs) →
-    ValidStoreTyping store (.assign lhs rhs) typing →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ →
-    MultiStep store lifetime (.assign lhs rhs) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-      ValidValue finalStore finalValue .unit := by
-  intro hinnerPreservation hassignRedex hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
-  rcases multistep_assign_to_value_inv hmulti with
-    ⟨midStore, value, hinnerMulti, hassignStep⟩
-  exact preservation_assign_context_multistep_runtime
-    (midStore := midStore)
-    (value := value)
-    (by
-      intro rhsTy env₂ hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping
-        hmultiInner
-      exact hinnerPreservation (midStore := midStore) (value := value)
-        (rhsTy := rhsTy) (env₂ := env₂)
-        hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping hmultiInner)
-    (by
-      intro targetLifetime oldTy rhsTy env₂ hLv hinnerTyping hLvPost hshape hwellTy
-        hwrite hnotWrite hvalidAssign hsafeAssign hvalidValue hstep
-      exact hassignRedex (midStore := midStore) (value := value)
-        (targetLifetime := targetLifetime) (oldTy := oldTy)
-        (rhsTy := rhsTy) (env₂ := env₂)
-        hLv hinnerTyping hLvPost hshape hwellTy hwrite hnotWrite
-        hvalidAssign hsafeAssign hvalidValue hstep)
-    hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hassignStep
-
-/--
-Lemma 4.11, multistep preservation for `R-BlockB` redexes when the block
-lifetime is absent from the store.
--/
 theorem preservation_blockB_value_multistep_runtime_no_slots
     {store finalStore : ProgramStore} {env env' : Env} {typing : StoreTyping}
     {lifetime blockLifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
@@ -1927,68 +1410,6 @@ theorem preservation_blockB_value_multistep_runtime_no_slots
             hvalidValue')
     hmulti
 
-/--
-Lemma 4.11, multistep preservation for `R-BlockB` redexes, factored through
-the paper's Drop Preservation obligations.
-
-This is the general version of the absent-lifetime special case below: the
-runtime lifetime drop must provide domain agreement with `Γ.dropLifetime` and
-preservation of valid abstractions for surviving variables.
--/
-theorem preservation_blockB_value_multistep_runtime_of_drop_preserved
-    {store finalStore : ProgramStore} {env env' : Env} {typing : StoreTyping}
-    {lifetime blockLifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
-    ValidRuntimeState store (.block blockLifetime [.val value]) →
-    store ∼ₛ env →
-    TermTyping env typing lifetime (.block blockLifetime [.val value]) ty env' →
-    ValidValue store value ty →
-    (∀ store',
-      DropsLifetime store blockLifetime store' →
-      ValidValue store' value ty) →
-    (∀ store',
-      DropsLifetime store blockLifetime store' →
-      ∀ x envSlot,
-        env.slotAt x = some envSlot →
-        envSlot.lifetime ≠ blockLifetime →
-        ∃ oldValue,
-          store'.slotAt (VariableProjection x) =
-            some { value := oldValue, lifetime := envSlot.lifetime } ∧
-          ValidPartialValue store' oldValue envSlot.ty) →
-    MultiStep store lifetime (.block blockLifetime [.val value]) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env' ∧
-      ValidValue finalStore finalValue ty := by
-  intro hvalidRuntime hsafe htyping _hvalidValue hresultValue hpreserve
-    hmulti
-  exact preservation_runtime_multistep_of_step_to_value
-    (term := .block blockLifetime [.val value])
-    (ty := ty)
-    (by simp [Terminal])
-    (by
-      intro _store' _term' hstep
-      cases hstep with
-      | blockA hvalueStep =>
-          exact False.elim (value_no_step hvalueStep)
-      | blockB _hdrops =>
-          exact ⟨value, rfl⟩)
-    (by
-      intro _store' _value hstep
-      cases hstep with
-      | blockB hdrops =>
-          exact preservation_blockB_value_step_runtime_of_drop_preserved
-            hvalidRuntime hsafe htyping
-            (Step.blockB (lifetime := lifetime) hdrops)
-            (hresultValue _store' hdrops)
-            (hpreserve _store' hdrops))
-    hmulti
-
-/--
-Lemma 4.11, block terminal multistep dispatcher.
-
-The operational decomposition of a terminal block reduction has exactly the
-three paper rule shapes: `R-Seq`, `R-BlockA`, and `R-BlockB`.  This theorem is
-the preservation-side induction skeleton; the branch premises are discharged by
-the term-list preservation proof and the paper's Drop Preservation obligations.
--/
 theorem preservation_block_terminal_multistep_runtime_of_first_step
     {store finalStore : ProgramStore} {env' : Env}
     {lifetime blockLifetime : Lifetime} {terms : List Term}
@@ -2025,23 +1446,6 @@ theorem preservation_block_terminal_multistep_runtime_of_first_step
     exact hblockA term rest store' term' hterms hstep htail
   · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
     exact hblockB value store' hterms hdrops htail
-
-/-- Lemma 9.9, `R-Assign` one-step value preservation fragment. -/
-theorem valuePreservation_assign_step {store₁ store₂ : ProgramStore}
-    {lifetime : Lifetime} {lhs : LVal} {value : Value} :
-    Step store₁ lifetime (.assign lhs (.val value)) store₂ (.val .unit) →
-    ValidValue store₂ .unit .unit := by
-  intro _hstep
-  exact ValidPartialValue.unit
-
-/-- Lemma 9.9, `R-Declare` one-step value preservation fragment. -/
-theorem valuePreservation_declare_step {store₁ store₂ : ProgramStore}
-    {lifetime : Lifetime} {x : Name} {value : Value} :
-    Step store₁ lifetime (.letMut x (.val value)) store₂ (.val .unit) →
-    ValidValue store₂ .unit .unit := by
-  intro _hstep
-  exact ValidPartialValue.unit
-
 
 end Paper
 end LwRust

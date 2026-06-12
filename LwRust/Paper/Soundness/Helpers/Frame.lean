@@ -35,17 +35,6 @@ inductive LocReads (store : ProgramStore) : LVal → Location → Prop where
       LocReads store lv location →
       LocReads store (.deref lv) location
 
-theorem LocReads.false_of_lvalIsVar {store : ProgramStore} {lv : LVal}
-    {location : Location} :
-    LValIsVar lv →
-    ¬ LocReads store lv location := by
-  intro hvar hreads
-  cases lv with
-  | var _ =>
-      cases hreads
-  | deref _ =>
-      cases hvar
-
 /-- If an update misses every location read while resolving `lv`, resolution is unchanged. -/
 theorem loc_update_of_not_locReads {store : ProgramStore}
     {updated : Location} {slot : StoreSlot} :
@@ -77,47 +66,6 @@ theorem loc_update_of_not_locReads {store : ProgramStore}
             simp [ProgramStore.loc, hsource, hsource', hslotEq]
           rw [hlocEq]
           exact hloc
-
-/--
-If updating `updated` cannot affect resolution of `lv` in the original store,
-then every location read while resolving `lv` after the update was already read
-while resolving `lv` before the update.
--/
-theorem locReads_update_to_store_of_not_locReads {store : ProgramStore}
-    {updated : Location} {slot : StoreSlot} :
-    ∀ {lv : LVal} {location read : Location},
-      store.loc lv = some location →
-      (∀ mid, LocReads store lv mid → mid ≠ updated) →
-      LocReads (store.update updated slot) lv read →
-      LocReads store lv read := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro location read _hloc _hreads hread
-      cases hread
-  | deref lv ih =>
-      intro location read hloc hreads hread
-      cases hsource : store.loc lv with
-      | none =>
-          simp [ProgramStore.loc, hsource] at hloc
-      | some source =>
-          have hsource' : (store.update updated slot).loc lv = some source := by
-            refine loc_update_of_not_locReads hsource ?_
-            intro mid hmid
-            exact hreads mid (LocReads.there hmid)
-          cases hread with
-          | here hsourceRead =>
-              rw [hsource'] at hsourceRead
-              have hsourceEq : source = read := Option.some.inj hsourceRead
-              subst hsourceEq
-              exact LocReads.here hsource
-          | there hinner =>
-              exact LocReads.there
-                (ih hsource
-                  (by
-                    intro mid hmid
-                    exact hreads mid (LocReads.there hmid))
-                  hinner)
 
 /-- If an erase misses every location read while resolving `lv`, resolution is unchanged. -/
 theorem loc_erase_of_not_locReads {store : ProgramStore}
@@ -399,117 +347,6 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
         exact hslot
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
-/--
-Recursive drops preserve lvalue resolution when they avoid every store location
-read while resolving the lvalue.
--/
-theorem loc_drops_of_avoids_locReads {store store' : ProgramStore}
-    {values : List PartialValue} :
-    Drops store values store' →
-    ∀ {lv : LVal} {location : Location},
-      store.loc lv = some location →
-      (∀ read, LocReads store lv read → DropsAvoids store values read) →
-      store'.loc lv = some location := by
-  intro hdrops lv
-  induction lv with
-  | var x =>
-      intro location hloc _havoids
-      simpa [ProgramStore.loc] using hloc
-  | deref lv ih =>
-      intro location hloc havoids
-      cases hsource : store.loc lv with
-      | none =>
-          simp [ProgramStore.loc, hsource] at hloc
-      | some source =>
-          cases hslot : store.slotAt source with
-          | none =>
-              simp [ProgramStore.loc, hsource, hslot] at hloc
-          | some slot =>
-              have hsource' : store'.loc lv = some source :=
-                ih hsource (by
-                  intro read hread
-                  exact havoids read (LocReads.there hread))
-              have hslot' : store'.slotAt source = some slot :=
-                dropsAvoids_slotAt_preserved hdrops
-                  (havoids source (LocReads.here hsource)) hslot
-              simp [ProgramStore.loc, hsource, hslot] at hloc
-              simp [ProgramStore.loc, hsource', hslot', hloc]
-
-/--
-Recursive drops preserve validity when they avoid owner reachability and the
-borrow-resolution dependencies selected by the validity proof.
--/
-theorem validPartialValue_drops_of_avoids_selected
-    {store store' : ProgramStore} {values : List PartialValue} :
-    Drops store values store' →
-    ∀ {value : PartialValue} {ty : PartialTy}
-      (hvalid : ValidPartialValue store value ty),
-      (∀ location,
-        OwnerReaches store value ty location →
-          DropsAvoids store values location) →
-      (∀ dependency,
-        SelectedBorrowDependency store hvalid dependency →
-          DropsAvoids store values dependency) →
-      ValidPartialValue store' value ty := by
-  intro hdrops value ty hvalid
-  induction hvalid with
-  | unit =>
-      intro _howners _hdependencies
-      exact ValidPartialValue.unit
-  | int =>
-      intro _howners _hdependencies
-      exact ValidPartialValue.int
-  | bool =>
-      intro _howners _hdependencies
-      exact ValidPartialValue.bool
-  | undef =>
-      intro _howners _hdependencies
-      exact ValidPartialValue.undef
-  | @borrow location mutable targets target hmem hloc =>
-      intro _howners hdependencies
-      exact ValidPartialValue.borrow hmem
-        (loc_drops_of_avoids_locReads hdrops hloc (by
-          intro read hread
-          exact hdependencies read
-            (SelectedBorrowDependency.borrow
-              (store := store) (location := location) (mutable := mutable)
-              (targets := targets) (target := target) (hmem := hmem)
-              (hloc := hloc) hread)))
-  | @box location slot inner hslot hinner ih =>
-      intro howners hdependencies
-      have hslot' : store'.slotAt location = some slot :=
-        dropsAvoids_slotAt_preserved hdrops
-          (howners location (OwnerReaches.boxHere hslot)) hslot
-      exact ValidPartialValue.box hslot'
-        (ih
-          (by
-            intro reached hreach
-            exact howners reached (OwnerReaches.boxInner hslot hreach))
-          (by
-            intro dependency hdependency
-            exact hdependencies dependency
-              (SelectedBorrowDependency.boxInner
-                (store := store) (location := location) (slot := slot)
-                (inner := inner) (hslot := hslot) (hinner := hinner)
-                hdependency)))
-  | @boxFull location slot innerTy hslot hinner ih =>
-      intro howners hdependencies
-      have hslot' : store'.slotAt location = some slot :=
-        dropsAvoids_slotAt_preserved hdrops
-          (howners location (OwnerReaches.boxFullHere hslot)) hslot
-      exact ValidPartialValue.boxFull hslot'
-        (ih
-          (by
-            intro reached hreach
-            exact howners reached (OwnerReaches.boxFullInner hslot hreach))
-          (by
-            intro dependency hdependency
-            exact hdependencies dependency
-              (SelectedBorrowDependency.boxFullInner
-                (store := store) (location := location) (slot := slot)
-                (ty := innerTy) (hslot := hslot) (hinner := hinner)
-                hdependency)))
-
 /-- Frame lemma for `ValidPartialValue`: erasing an uninspected location preserves validity. -/
 theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
     {erased : Location} :
@@ -639,24 +476,6 @@ theorem validPartialValue_drops_of_avoids_reaches {store store' : ProgramStore}
             cases hpresent'
             exact hrest)
 
-/-- Ground unit values inspect no store location. -/
-theorem reaches_unit_false {store : ProgramStore} {ℓ : Location} :
-    ¬ Reaches store (.value .unit) (.ty .unit) ℓ := by
-  intro h
-  cases h
-
-/-- Integer values inspect no store location. -/
-theorem reaches_int_false {store : ProgramStore} {n : Int} {ℓ : Location} :
-    ¬ Reaches store (.value (.int n)) (.ty .int) ℓ := by
-  intro h
-  cases h
-
-/-- Undefined partial values inspect no store location. -/
-theorem reaches_undef_false {store : ProgramStore} {ty : Ty} {ℓ : Location} :
-    ¬ Reaches store .undef (.undef ty) ℓ := by
-  intro h
-  cases h
-
 /-- `ValidValue` specialization of the store-update frame. -/
 theorem validValue_update_of_not_reaches {store : ProgramStore}
     {updated : Location} {newSlot : StoreSlot} {value : Value} {ty : Ty} :
@@ -664,14 +483,6 @@ theorem validValue_update_of_not_reaches {store : ProgramStore}
     (∀ ℓ, Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ updated) →
     ValidValue (store.update updated newSlot) value ty :=
   validPartialValue_update_of_not_reaches
-
-/-- `ValidValue` specialization of the store-erase frame. -/
-theorem validValue_erase_of_not_reaches {store : ProgramStore}
-    {erased : Location} {value : Value} {ty : Ty} :
-    ValidValue store value ty →
-    (∀ ℓ, Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ erased) →
-    ValidValue (store.erase erased) value ty :=
-  validPartialValue_erase_of_not_reaches
 
 /-- `ValidValue` specialization of the recursive-drop frame. -/
 theorem validValue_drops_of_avoids_reaches {store store' : ProgramStore}
@@ -683,89 +494,6 @@ theorem validValue_drops_of_avoids_reaches {store store' : ProgramStore}
     ValidValue store' value ty :=
   validPartialValue_drops_of_avoids_reaches
 
-theorem reaches_owning_or_store_owns_of_validPartialValue {env : Env}
-    {store : ProgramStore} {slotLifetime : Lifetime}
-    {value : PartialValue} {ty : PartialTy} {location : Location} :
-    PartialTyBorrowsWellFormedInSlot env slotLifetime ty →
-    ValidPartialValue store value ty →
-    OwnerReaches store value ty location →
-    location ∈ partialValueOwningLocations value ∨ ProgramStore.Owns store location := by
-  intro hborrows hvalid
-  induction hvalid generalizing env slotLifetime location with
-  | unit =>
-      intro hreach
-      cases hreach
-  | int =>
-      intro hreach
-      cases hreach
-  | bool =>
-      intro hreach
-      cases hreach
-  | undef =>
-      intro hreach
-      cases hreach
-  | borrow _hmem _hloc =>
-      intro hreach
-      cases hreach
-  | @box ownerLocation slot inner hslot _hinner ih =>
-      intro hreach
-      cases hreach with
-      | boxHere _hslot =>
-          exact Or.inl (by
-            simp [partialValueOwningLocations, valueOwningLocations,
-              valueOwnedLocation?])
-      | @boxInner _ slot' _ _ hslot' hinnerReach =>
-          have hslotEq : slot' = slot := by
-            rw [hslot] at hslot'
-            injection hslot' with hslotEq
-            exact hslotEq.symm
-          subst hslotEq
-          have hinnerBorrows :
-              PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
-            intro mutable targets hcontains
-            exact hborrows (PartialTyContains.box hcontains)
-          rcases ih hinnerBorrows hinnerReach with howned | howns
-          · exact Or.inr ⟨ownerLocation, slot'.lifetime, by
-              have hslotValue : slot'.value = .value (owningRef location) :=
-                eq_owningRef_of_mem_partialValueOwningLocations howned
-              cases slot' with
-              | mk slotValue slotLifetime =>
-                  cases hslotValue
-                  simpa using hslot⟩
-          · exact Or.inr howns
-  | @boxFull ownerLocation slot innerTy hslot _hinner ih =>
-      intro hreach
-      cases hreach with
-      | boxFullHere _hslot =>
-          exact Or.inl (by
-            simp [partialValueOwningLocations, valueOwningLocations,
-              valueOwnedLocation?])
-      | @boxFullInner _ slot' _ _ hslot' hinnerReach =>
-          have hslotEq : slot' = slot := by
-            rw [hslot] at hslot'
-            injection hslot' with hslotEq
-            exact hslotEq.symm
-          subst hslotEq
-          have hinnerBorrows :
-              PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
-            intro mutable targets hcontains
-            exact hborrows (PartialTyContains.tyBox hcontains)
-          rcases ih hinnerBorrows hinnerReach with howned | howns
-          · exact Or.inr ⟨ownerLocation, slot'.lifetime, by
-              have hslotValue : slot'.value = .value (owningRef location) :=
-                eq_owningRef_of_mem_partialValueOwningLocations howned
-              cases slot' with
-              | mk slotValue slotLifetime =>
-                  cases hslotValue
-                  simpa using hslot⟩
-          · exact Or.inr howns
-
-/--
-Stronger source form of `reaches_owning_or_store_owns_of_validPartialValue`.
-When a reached location is not the direct owner carried by the value itself, it
-is owned by a storage location that is also reached by the same validity
-derivation.
--/
 theorem reaches_owner_source_of_validPartialValue {env : Env}
     {store : ProgramStore} {slotLifetime : Lifetime}
     {value : PartialValue} {ty : PartialTy} {location : Location} :
@@ -899,131 +627,6 @@ theorem store_owns_of_reaches_stored_validPartialValue {env : Env}
       simpa [owningRef] using hstored⟩
   · rcases hsource with ⟨sourceStorage, _hsourceReach, howns⟩
     exact ⟨sourceStorage, howns⟩
-
-/--
-If a valid partial value is stored in a slot whose location is protected from a
-drop, then every location inspected by that value's validity derivation is also
-protected from the same drop, provided the explicit drop-list roots are disjoint
-from those inspected locations.
-
-For owner roots this follows from `dropsAvoids_of_protected_owner`.  For inner
-owner graphs the owner storage is reached first, so the induction hypothesis
-protects that storage before descending.
--/
-theorem dropsAvoids_of_ownerReaches_stored_validPartialValue
-    {store store' : ProgramStore} {values : List PartialValue} :
-    Drops store values store' →
-    ValidStore store →
-    ∀ {env : Env} {slotLifetime storageLifetime : Lifetime} {storage : Location}
-      {storedValue : PartialValue} {partialTy : PartialTy} {location : Location},
-      store.slotAt storage =
-        some { value := storedValue, lifetime := storageLifetime } →
-      PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
-        ValidPartialValue store storedValue partialTy →
-        DropsAvoids store values storage →
-        (∀ reached,
-          OwnerReaches store storedValue partialTy reached →
-          ∀ dropValue, dropValue ∈ values →
-            reached ∉ partialValueOwningLocations dropValue) →
-      OwnerReaches store storedValue partialTy location →
-      DropsAvoids store values location := by
-  intro hdrops hvalidStore env slotLifetime storageLifetime storage storedValue
-    partialTy location hstored hborrows hvalid havoidStorage hdisjoint hreach
-  induction hvalid generalizing env slotLifetime storageLifetime storage location with
-  | unit =>
-      cases hreach
-  | int =>
-      cases hreach
-  | bool =>
-      cases hreach
-  | undef =>
-      cases hreach
-  | borrow _hmem _hloc =>
-      cases hreach
-  | @box ownerLocation slot inner hslot _hinnerValid ih =>
-      cases hreach with
-      | boxHere hreachSlot =>
-          have howns : ProgramStore.OwnsAt store ownerLocation storage :=
-            ⟨storageLifetime, hstored⟩
-          exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
-            havoidStorage (by
-              intro dropValue hmem howned
-              exact hdisjoint ownerLocation (OwnerReaches.boxHere hreachSlot)
-                dropValue hmem howned)
-      | @boxInner _ reachSlot _ _ hreachSlot hinnerReach =>
-          have hrootAvoid : DropsAvoids store values ownerLocation := by
-            have howns : ProgramStore.OwnsAt store ownerLocation storage :=
-              ⟨storageLifetime, hstored⟩
-            exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
-              havoidStorage (by
-                intro dropValue hmem howned
-                exact hdisjoint ownerLocation (OwnerReaches.boxHere hreachSlot)
-                  dropValue hmem howned)
-          have hslotEq : reachSlot = slot := by
-            rw [hslot] at hreachSlot
-            injection hreachSlot with hslotEq
-            exact hslotEq.symm
-          subst reachSlot
-          have hinnerBorrows :
-              PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
-            intro mutable targets hcontains
-            exact hborrows (PartialTyContains.box hcontains)
-          exact ih
-            (env := env) (slotLifetime := slotLifetime)
-            (storageLifetime := slot.lifetime)
-            (storage := ownerLocation)
-            (by
-              cases slot with
-              | mk slotValue slotLifetime =>
-                  simpa using hslot)
-            hinnerBorrows hrootAvoid
-              (by
-                intro innerReached hinnerReached dropValue hmem howned
-                exact hdisjoint innerReached
-                  (OwnerReaches.boxInner hslot hinnerReached) dropValue hmem howned)
-            hinnerReach
-  | @boxFull ownerLocation slot innerTy hslot _hinnerValid ih =>
-      cases hreach with
-      | boxFullHere hreachSlot =>
-          have howns : ProgramStore.OwnsAt store ownerLocation storage :=
-            ⟨storageLifetime, hstored⟩
-          exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
-            havoidStorage (by
-              intro dropValue hmem howned
-              exact hdisjoint ownerLocation (OwnerReaches.boxFullHere hreachSlot)
-                dropValue hmem howned)
-      | @boxFullInner _ reachSlot _ _ hreachSlot hinnerReach =>
-          have hrootAvoid : DropsAvoids store values ownerLocation := by
-            have howns : ProgramStore.OwnsAt store ownerLocation storage :=
-              ⟨storageLifetime, hstored⟩
-            exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
-              havoidStorage (by
-                intro dropValue hmem howned
-                exact hdisjoint ownerLocation (OwnerReaches.boxFullHere hreachSlot)
-                  dropValue hmem howned)
-          have hslotEq : reachSlot = slot := by
-            rw [hslot] at hreachSlot
-            injection hreachSlot with hslotEq
-            exact hslotEq.symm
-          subst reachSlot
-          have hinnerBorrows :
-              PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
-            intro mutable targets hcontains
-            exact hborrows (PartialTyContains.tyBox hcontains)
-          exact ih
-            (env := env) (slotLifetime := slotLifetime)
-            (storageLifetime := slot.lifetime)
-            (storage := ownerLocation)
-            (by
-              cases slot with
-              | mk slotValue slotLifetime =>
-                  simpa using hslot)
-            hinnerBorrows hrootAvoid
-              (by
-                intro innerReached hinnerReached dropValue hmem howned
-                exact hdisjoint innerReached
-                  (OwnerReaches.boxFullInner hslot hinnerReached) dropValue hmem howned)
-            hinnerReach
 
 theorem dropsAvoids_of_reaches_stored_validPartialValue
     {store store' : ProgramStore} {values : List PartialValue} :

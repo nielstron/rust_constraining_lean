@@ -369,19 +369,6 @@ theorem validPartialValue_drops_of_avoids_reaches {store store' : ProgramStore}
             cases hpresent'
             exact hrest)
 
-/-- Ground (non-reference) values inspect no store location. -/
-theorem reaches_unit_false {store : ProgramStore} {ℓ : Location} :
-    ¬ Reaches store (.value .unit) (.ty .unit) ℓ := by
-  intro h; cases h
-
-theorem reaches_int_false {store : ProgramStore} {n : Int} {ℓ : Location} :
-    ¬ Reaches store (.value (.int n)) (.ty .int) ℓ := by
-  intro h; cases h
-
-theorem reaches_undef_false {store : ProgramStore} {ty : Ty} {ℓ : Location} :
-    ¬ Reaches store .undef (.undef ty) ℓ := by
-  intro h; cases h
-
 /-- `ValidValue` specialization of the store-update frame. -/
 theorem validValue_update_of_not_reaches {store : ProgramStore}
     {updated : Location} {newSlot : StoreSlot} {value : Value} {ty : Ty} :
@@ -389,103 +376,6 @@ theorem validValue_update_of_not_reaches {store : ProgramStore}
     (∀ ℓ, Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ updated) →
     ValidValue (store.update updated newSlot) value ty :=
   validPartialValue_update_of_not_reaches
-
-/-- Reverse-abstraction bridge (variable case): a store borrow reference sitting
-in a variable's slot reflects an env borrow type at that variable whose target
-list contains a target resolving to the referenced location. -/
-theorem env_borrow_of_store_var_borrow {store : ProgramStore} {env : Env}
-    {z : Name} {ℓ : Location} {lifetime : Lifetime} :
-    store ∼ₛ env →
-    store.slotAt (VariableProjection z) =
-      some { value := .value (.ref { location := ℓ, owner := false }),
-             lifetime := lifetime } →
-    ∃ envSlot mutable targets target,
-      env.slotAt z = some envSlot ∧
-      envSlot.ty = .ty (.borrow mutable targets) ∧
-      target ∈ targets ∧
-      store.loc target = some ℓ := by
-  intro hsafe hstoreSlot
-  have hdomain : ∃ envSlot, env.slotAt z = some envSlot :=
-    (hsafe.1 z).mp ⟨_, hstoreSlot⟩
-  rcases hdomain with ⟨⟨envTy, envLf⟩, henvSlot⟩
-  rcases hsafe.2 z _ henvSlot with ⟨value, hstoreSlot', hvalid⟩
-  -- the store slot is unique, so `value` is the borrow reference
-  rw [hstoreSlot] at hstoreSlot'
-  simp only [Option.some.injEq, StoreSlot.mk.injEq] at hstoreSlot'
-  obtain ⟨hvalueEq, _⟩ := hstoreSlot'
-  subst hvalueEq
-  -- a borrow reference (owner := false) is only valid at a borrow type
-  cases hvalid with
-  | borrow hmem hloc =>
-      exact ⟨_, _, _, _, henvSlot, rfl, hmem, hloc⟩
-
-/-- A dereference of a borrow-typed lval resolves to the store location of one
-of the borrow's targets.  Derived from the borrow *value* (V-borrow), so it does
-not need the joint (Def 3.21) target typing — only the per-target invariant. -/
-theorem loc_deref_borrow_resolves_target {store : ProgramStore} {env : Env}
-    {current : Lifetime} {lv : LVal} {mutable : Bool} {targets : List LVal}
-    {borrowLifetime : Lifetime} {L : Location} :
-    WellFormedEnv env current →
-    store ∼ₛ env →
-    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
-    store.loc (.deref lv) = some L →
-    ∃ target, target ∈ targets ∧ store.loc target = some L := by
-  intro hwellFormed hsafe htyping hderefLoc
-  rcases readPreservation hwellFormed hsafe htyping with
-    ⟨value, slot, hread, hslotValue, hvalidValue⟩
-  -- the borrow value is a (non-owning) reference to a target's location
-  cases hvalidValue with
-  | @borrow refLoc _ _ target hmem hloc =>
-      -- `read lv` resolves `loc lv` to the slot holding this reference
-      rcases hlocLv : store.loc lv with _ | ℓ
-      · simp [ProgramStore.read, hlocLv] at hread
-      · -- `loc (.deref lv)` follows that reference to the target location
-        have hslotAt : store.slotAt ℓ = some slot := by
-          simpa [ProgramStore.read, hlocLv] using hread
-        have hderef : store.loc (.deref lv) = some refLoc := by
-          simp [ProgramStore.loc, hlocLv, hslotAt, hslotValue]
-        rw [hderef] at hderefLoc
-        injection hderefLoc with hLeq
-        exact ⟨target, hmem, by rw [← hLeq]; exact hloc⟩
-
-/-- Reverse-abstraction bridge (owned/box case): a store owning reference in a
-variable's slot reflects an env box type at that variable, and the pointed-to
-slot is valid at the box's inner type. -/
-theorem env_box_of_store_var_box {store : ProgramStore} {env : Env}
-    {z : Name} {ℓ : Location} {lifetime : Lifetime} :
-    store ∼ₛ env →
-    store.slotAt (VariableProjection z) =
-      some { value := .value (.ref { location := ℓ, owner := true }),
-             lifetime := lifetime } →
-    ∃ envSlot inner pointee,
-      env.slotAt z = some envSlot ∧
-      (envSlot.ty = .box inner ∨ ∃ ty, envSlot.ty = .ty (.box ty) ∧ inner = .ty ty) ∧
-      store.slotAt ℓ = some pointee ∧
-      ValidPartialValue store pointee.value inner := by
-  intro hsafe hstoreSlot
-  have hdomain : ∃ envSlot, env.slotAt z = some envSlot :=
-    (hsafe.1 z).mp ⟨_, hstoreSlot⟩
-  rcases hdomain with ⟨⟨envTy, envLf⟩, henvSlot⟩
-  rcases hsafe.2 z _ henvSlot with ⟨value, hstoreSlot', hvalid⟩
-  rw [hstoreSlot] at hstoreSlot'
-  have hvalueEq :
-      PartialValue.value (.ref { location := ℓ, owner := true }) = value := by
-    injection hstoreSlot' with hslotEq
-    injection hslotEq
-  subst hvalueEq
-  cases hvalid with
-  | box hslot hinner =>
-      exact ⟨_, _, _, henvSlot, Or.inl rfl, hslot, hinner⟩
-  | boxFull hslot hinner =>
-      exact ⟨_, _, _, henvSlot, Or.inr ⟨_, rfl, rfl⟩, hslot, hinner⟩
-
-theorem terminalStateSafe_assign_unit_of_postconditions {store : ProgramStore}
-    {env : Env} :
-    ValidRuntimeState store (.val .unit) →
-    store ∼ₛ env →
-    TerminalStateSafe store .unit env .unit := by
-  intro hvalidRuntime hsafe
-  exact ⟨hvalidRuntime, hsafe, ValidPartialValue.unit⟩
 
 theorem validRuntimeState_of_sourceTerm {store : ProgramStore} {context term : Term} :
     SourceTerm term →

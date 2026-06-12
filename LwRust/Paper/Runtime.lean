@@ -124,13 +124,6 @@ def readValue (store : ProgramStore) (lv : LVal) : Option Value := do
   | .value value => some value
   | .undef => none
 
-def writeValue (store : ProgramStore) (lv : LVal) (value : Value) : Option ProgramStore :=
-  store.write lv (.value value)
-
-/--
-Definition 3.4, drop-set form.  `Drops S ψ S'` is the paper's recursive
-`drop(S, ψ) = S'`.
--/
 inductive Drops : ProgramStore → List PartialValue → ProgramStore → Prop where
   | nil {store : ProgramStore} :
       Drops store [] store
@@ -285,10 +278,6 @@ def readValue (store : ConcreteProgramStore) (lv : LVal) : Option Value := do
   match slot.value with
   | .value value => some value
   | .undef => none
-
-def writeValue (store : ConcreteProgramStore) (lv : LVal) (value : Value) :
-    Option ConcreteProgramStore :=
-  store.write lv (.value value)
 
 @[simp] theorem toProgramStore_slotAt (store : ConcreteProgramStore) (location : Location) :
     (store : ProgramStore).slotAt location = store.slotAt location := by
