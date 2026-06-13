@@ -148,11 +148,7 @@ private theorem drops_nonOwner_primitive : ∀ {v : PartialValue},
 theorem drops_empty_value (value : Value) :
     ∃ store', Drops ProgramStore.empty [.value value] store' := by
   cases value with
-  | unit =>
-      exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
-  | int value =>
-      exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
-  | bool value =>
+  | unit | int _ | bool _ =>
       exact drops_nonOwner_primitive (by intro ref; exact Or.inl (by simp))
   | ref ref =>
       cases howner : ref.owner with
@@ -270,8 +266,7 @@ theorem ProgramStore.FiniteSupport.drops {store store' : ProgramStore}
   intro hdrops
   induction hdrops with
   | nil => exact id
-  | nonOwner _ _ ih => exact ih
-  | ownerMissing _ _ _ ih => exact ih
+  | nonOwner _ _ ih | ownerMissing _ _ _ ih => exact ih
   | ownerPresent _ _ _ ih => exact fun hfs => ih hfs.erase
 
 theorem ProgramStore.FiniteSupport.dropsLifetime {store store' : ProgramStore}
@@ -290,11 +285,9 @@ theorem ProgramStore.FiniteSupport.step {store store' : ProgramStore}
     store'.FiniteSupport := by
   intro hstep
   induction hstep with
-  | missing => exact id
-  | copy _ => exact id
+  | missing | copy _ | borrow _ => exact id
   | move _ hwrite => exact ProgramStore.FiniteSupport.write hwrite
   | box _ hbox => exact ProgramStore.FiniteSupport.boxAt hbox
-  | borrow _ => exact id
   | assign _ hwrite hdrops =>
       exact fun hfs =>
         ProgramStore.FiniteSupport.drops hdrops
@@ -302,24 +295,12 @@ theorem ProgramStore.FiniteSupport.step {store store' : ProgramStore}
   | declare hstore =>
       exact fun hfs => hstore ▸ hfs.declare
   | seq hdrops => exact ProgramStore.FiniteSupport.drops hdrops
-  | blockA _ ih => exact ih
+  | blockA _ ih | subWhileCond _ ih | subWhileBody _ ih => exact ih
   | blockB hdrops => exact ProgramStore.FiniteSupport.dropsLifetime hdrops
-  | subBox _ ih => exact ih
-  | subDeclare _ ih => exact ih
-  | subAssign _ ih => exact ih
-  | eqTrue => exact id
-  | eqFalse _ => exact id
-  | iteTrue => exact id
-  | iteFalse => exact id
-  | subEqLeft _ ih => exact ih
-  | subEqRight _ ih => exact ih
-  | subIte _ ih => exact ih
-  | whileStart => exact id
-  | subWhileCond _ ih => exact ih
-  | whileCondFalse => exact id
-  | whileCondTrue => exact id
-  | subWhileBody _ ih => exact ih
-  | whileBodyDone => exact id
+  | subBox _ ih | subDeclare _ ih | subAssign _ ih => exact ih
+  | eqTrue | eqFalse _ | iteTrue | iteFalse => exact id
+  | subEqLeft _ ih | subEqRight _ ih | subIte _ ih => exact ih
+  | whileStart | whileCondFalse | whileCondTrue | whileBodyDone => exact id
 
 /-- Finite support is preserved along any execution. -/
 theorem ProgramStore.FiniteSupport.multiStep {store store' : ProgramStore}
@@ -366,7 +347,6 @@ theorem OperationalStoreProgress.of_finiteSupport {store : ProgramStore} :
     | none => exact hslot
     | some slot =>
         exfalso
-        have hmem := hsupport _ _ hslot
         have haddr : ((support.toList.filterMap fun location =>
             match location with
             | .heap address => some address
@@ -375,7 +355,7 @@ theorem OperationalStoreProgress.of_finiteSupport {store : ProgramStore} :
               match location with
               | .heap address => some address
               | .var _ => none) :=
-          List.mem_filterMap.mpr ⟨_, Finset.mem_toList.mpr hmem, rfl⟩
+          List.mem_filterMap.mpr ⟨_, Finset.mem_toList.mpr (hsupport _ _ hslot), rfl⟩
         exact Nat.not_succ_le_self _ (le_foldr_max haddr)
   · intro value
     exact drops_exists_of_supported support store [.value value] hsupport

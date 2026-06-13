@@ -334,10 +334,7 @@ theorem WriteBorrowTargets.initialized_leaves_of_typed
         WriteLeafTy env (LVal.path (prependPath path target)) targetSlot.ty rhsTy)
     (motive_3 := fun _ _ _ _ _ _ => True)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites
-  case strong => intros; trivial
-  case weak => intros; trivial
-  case box => intros; trivial
-  case mutBorrow => intros; trivial
+  case strong | weak | box | mutBorrow => intros; trivial
   case nil =>
     intro rank env path ty target htarget
     simp at htarget
@@ -388,10 +385,7 @@ theorem WriteBorrowTargets.selected_var_strong_to_result_map
           result)
     (motive_3 := fun _ _ _ _ _ _ => True)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites rfl hrank
-  case strong => intros; trivial
-  case weak => intros; trivial
-  case box => intros; trivial
-  case mutBorrow => intros; trivial
+  case strong | weak | box | mutBorrow => intros; trivial
   case nil =>
     intro rank env path ty hpath _hrank selectedName selectedSlot selectedTy hmem
     simp at hmem
@@ -482,10 +476,7 @@ theorem WriteBorrowTargets.selected_branch_to_result_map
     (motive_3 := fun _ _ _ _ _ _ => True)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro
     hwrites hrank hleaves hmem hselectedBranch
-  case strong => intros; trivial
-  case weak => intros; trivial
-  case box => intros; trivial
-  case mutBorrow => intros; trivial
+  case strong | weak | box | mutBorrow => intros; trivial
   case nil =>
     intro rank env path ty _hrank _hleaves selectedSource selectedTarget hmem
     simp at hmem
@@ -560,10 +551,7 @@ theorem WriteBorrowTargets.selected_branch_to_result_exists
     (motive_3 := fun _ _ _ _ _ _ => True)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro
     hwrites hrank hleaves hmem
-  case strong => intros; trivial
-  case weak => intros; trivial
-  case box => intros; trivial
-  case mutBorrow => intros; trivial
+  case strong | weak | box | mutBorrow => intros; trivial
   case nil =>
     intro rank env path ty _hrank _hleaves selectedTarget hmem
     simp at hmem
@@ -793,9 +781,7 @@ theorem TargetsPathSelected.of_lvalTargetsTyping {env : Env}
         PathSelected env pt path selectedName selectedSlot selectedTy →
         TargetsPathSelected env targets path selectedName selectedSlot selectedTy)
     ?var ?box ?borrow ?singleton ?cons htargets hselected
-  case var => intros; trivial
-  case box => intros; trivial
-  case borrow => intros; trivial
+  case var | box | borrow => intros; trivial
   case singleton =>
       intro target ty lifetime htarget _ih path selectedName selectedSlot selectedTy hselected
       exact TargetsPathSelected.target (by simp) htarget hselected
@@ -1053,12 +1039,7 @@ theorem valueTyping_result_wellFormed_of_refs {env : Env} {typing : StoreTyping}
     WellFormedTy env ty lifetime := by
   intro hrefs htyping
   cases htyping with
-  | unit =>
-      exact WellFormedTy.unit
-  | int =>
-      exact WellFormedTy.int
-  | bool =>
-      exact WellFormedTy.bool
+  | unit | int | bool => constructor
   | ref hlookup =>
       exact hrefs _ _ hlookup
 
@@ -1088,9 +1069,7 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
       have hsourceValue : SourceValue value :=
         hsource value (by simp [termValues])
       cases hvalueTyping with
-      | unit => exact TermTyping.const ValueTyping.unit
-      | int => exact TermTyping.const ValueTyping.int
-      | bool => exact TermTyping.const ValueTyping.bool
+      | unit | int | bool => exact TermTyping.const (by constructor)
       | ref _hlookup => exact absurd hsourceValue (by simp [SourceValue]))
     (fun hwellTy hloanFree _hsource =>
       TermTyping.missing hwellTy hloanFree)
@@ -1473,12 +1452,7 @@ theorem copyTy_result_wellFormed {env : Env} {lv : LVal}
     WellFormedTy env ty lifetime := by
   intro hwellFormed hLv hcopy
   cases hcopy with
-  | unit =>
-      exact WellFormedTy.unit
-  | int =>
-      exact WellFormedTy.int
-  | bool =>
-      exact WellFormedTy.bool
+  | unit | int | bool => constructor
   | immBorrow =>
       exact WellFormedTy.borrow
         (copyBorrowTargetsWellFormed hwellFormed hLv)
@@ -1512,9 +1486,7 @@ theorem WriteLeafTy.not_strike_deref {env : Env} {path : Path}
   | box hinner ih =>
       intro hstrike
       cases struck with
-      | ty struckTy =>
-          simp [Strike] at hstrike
-      | undef struckTy =>
+      | ty struckTy | undef struckTy =>
           simp [Strike] at hstrike
       | box struckInner =>
           exact ih (struck := struckInner) (by
@@ -2050,12 +2022,7 @@ theorem WellFormedTy.move_of_no_pathConflicts {env env' : Env}
     WellFormedTy env' ty lifetime := by
   intro hmove hnotWrite hwellTy hnotConflicts
   induction hwellTy with
-  | unit =>
-      exact WellFormedTy.unit
-  | int =>
-      exact WellFormedTy.int
-  | bool =>
-      exact WellFormedTy.bool
+  | unit | int | bool => constructor
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.move_of_no_pathConflicts
@@ -2097,10 +2064,8 @@ theorem Strike.vars_subset :
       | ty t =>
           cases struck with
           | undef t' => simp [PartialTy.vars] at hv
-          | ty _ => simp [Strike] at h
-          | box _ => simp [Strike] at h
-      | box _ => simp [Strike] at h
-      | undef _ => simp [Strike] at h
+          | ty _ | box _ => simp [Strike] at h
+      | box _ | undef _ => simp [Strike] at h
   | cons _ rest ih =>
       intro ty struck h v hv
       cases ty with
@@ -2109,10 +2074,8 @@ theorem Strike.vars_subset :
           | box struck' =>
               simp only [PartialTy.vars] at hv ⊢
               exact ih (show Strike rest inner struck' from h) v hv
-          | ty _ => simp [Strike] at h
-          | undef _ => simp [Strike] at h
-      | ty _ => simp [Strike] at h
-      | undef _ => simp [Strike] at h
+          | ty _ | undef _ => simp [Strike] at h
+      | ty _ | undef _ => simp [Strike] at h
 
 /-- `Linearizable` is preserved by a move (the same rank function works; the
 moved slot's type loses variables via `Strike`). -/
@@ -2153,10 +2116,8 @@ theorem Strike.isBoxUndef :
       cases ty with
       | ty t => cases struck with
         | undef _ => trivial
-        | ty _ => simp [Strike] at h
-        | box _ => simp [Strike] at h
-      | box _ => simp [Strike] at h
-      | undef _ => simp [Strike] at h
+        | ty _ | box _ => simp [Strike] at h
+      | box _ | undef _ => simp [Strike] at h
   | cons _ rest ih =>
       intro ty struck h
       cases ty with
@@ -2165,10 +2126,8 @@ theorem Strike.isBoxUndef :
             have h' : Strike rest inner struck' := h
             show IsBoxUndef struck'
             exact ih h'
-        | ty _ => simp [Strike] at h
-        | undef _ => simp [Strike] at h
-      | ty _ => simp [Strike] at h
-      | undef _ => simp [Strike] at h
+        | ty _ | undef _ => simp [Strike] at h
+      | ty _ | undef _ => simp [Strike] at h
 
 /-- An lval typed in the moved environment whose base is the moved variable has a
 `Strike`-shaped (box/undef) type — never a defined `.ty` (in particular never a
@@ -2631,12 +2590,7 @@ theorem WellFormedTy.dropLifetime_child_of_transport
     WellFormedTy (env.dropLifetime child) ty parent := by
   intro hchild htransport hwellTy
   induction hwellTy with
-  | unit =>
-      exact WellFormedTy.unit
-  | int =>
-      exact WellFormedTy.int
-  | bool =>
-      exact WellFormedTy.bool
+  | unit | int | bool => constructor
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.dropLifetime_child_of_transport
@@ -4787,9 +4741,7 @@ theorem valid_after_strike_nonempty_aux {store : ProgramStore}
   | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
       htail ih =>
       cases struck with
-      | ty struckTy =>
-          simp [Strike] at hstrike
-      | undef struckTy =>
+      | ty struckTy | undef struckTy =>
           simp [Strike] at hstrike
       | box struckInner =>
           have hinnerStrike : Strike path inner struckInner := by
@@ -4882,8 +4834,7 @@ theorem updateAtPath_env_eq {store : ProgramStore} {env writeEnv : Env}
   induction hspine generalizing env writeEnv updatedTy rhsTy rank with
   | nil _hslot _hvalid =>
       cases hupdate with
-      | strong => rfl
-      | weak _hshape _hjoin => rfl
+      | strong | weak _hshape _hjoin => rfl
   | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
       htail ih =>
       cases hupdate with
@@ -6402,18 +6353,9 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_borrow_dependency_fra
       ValidPartialValue (store.update updated newSlot) value ty := by
   intro value ty hvalid
   induction hvalid with
-  | unit =>
+  | unit | int | bool | undef =>
       intro _howners _hdeps
-      exact ValidPartialValue.unit
-  | int =>
-      intro _howners _hdeps
-      exact ValidPartialValue.int
-  | bool =>
-      intro _howners _hdeps
-      exact ValidPartialValue.bool
-  | undef =>
-      intro _howners _hdeps
-      exact ValidPartialValue.undef
+      constructor
   | @borrow location mutable targets target hmem hloc =>
       intro _howners hdeps
       refine ValidPartialValue.borrow hmem ?_
@@ -7048,13 +6990,7 @@ theorem RuntimeFrame.loc_deref_step_below {store : ProgramStore} {env : Env}
       hborrowsM, _hcontainsM, _hdescentM⟩
   rcases slotM with ⟨middleValue, middleLifetime⟩
   cases hvalidM with
-  | unit =>
-      simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
-  | int =>
-      simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
-  | bool =>
-      simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
-  | undef =>
+  | unit | int | bool | undef =>
       simp [ProgramStore.loc, hmiddleLoc, hslotM] at hloc
   | @borrow target₀Loc mutable' targets' witness hmemW hlocW =>
       have hderefLoc : store.loc (.deref u) = some target₀Loc := by
@@ -7207,13 +7143,7 @@ where
             hbound, hborrowsM, hcontainsM, _hdescentM⟩
         rcases slotM with ⟨middleValue, middleLifetime⟩
         cases hvalidM with
-        | unit =>
-            simp [ProgramStore.loc, hMloc, hslotM] at hloc
-        | int =>
-            simp [ProgramStore.loc, hMloc, hslotM] at hloc
-        | bool =>
-            simp [ProgramStore.loc, hMloc, hslotM] at hloc
-        | undef =>
+        | unit | int | bool | undef =>
             simp [ProgramStore.loc, hMloc, hslotM] at hloc
         | @box owned ownedSlot innerView hownedSlot _hinner =>
             have hderefLoc : store.loc (.deref u) = some owned := by
@@ -7712,10 +7642,7 @@ theorem WriteBorrowTargets.typed_of_mem {rank : Nat} {env result : Env}
           LValTyping env (prependPath path target) (.ty leafTy) leafLifetime)
     (motive_3 := fun _ _ _ _ _ _ => True)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrites
-  case strong => intros; trivial
-  case weak => intros; trivial
-  case box => intros; trivial
-  case mutBorrow => intros; trivial
+  case strong | weak | box | mutBorrow => intros; trivial
   case nil =>
     intro _rank _env _path _ty target htarget
     simp at htarget

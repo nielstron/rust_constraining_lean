@@ -212,10 +212,7 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
       ValidPartialValue (store.update updated newSlot) v ty := by
   intro v ty hvalid
   induction hvalid with
-  | unit => intro _; exact ValidPartialValue.unit
-  | int => intro _; exact ValidPartialValue.int
-  | bool => intro _; exact ValidPartialValue.bool
-  | undef => intro _; exact ValidPartialValue.undef
+  | unit | int | bool | undef => intro _; constructor
   | borrow hmem hloc =>
       intro hreach
       refine ValidPartialValue.borrow hmem ?_
@@ -245,10 +242,7 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
       ValidPartialValue (store.erase erased) v ty := by
   intro v ty hvalid
   induction hvalid with
-  | unit => intro _; exact ValidPartialValue.unit
-  | int => intro _; exact ValidPartialValue.int
-  | bool => intro _; exact ValidPartialValue.bool
-  | undef => intro _; exact ValidPartialValue.undef
+  | unit | int | bool | undef => intro _; constructor
   | borrow hmem hloc =>
       intro hreach
       refine ValidPartialValue.borrow hmem ?_
@@ -518,10 +512,7 @@ theorem WriteBorrowTargets.sameShapeStrengthening_init {rank : Nat}
     (motive_3 := fun _ _ _ _ _ _ => True)
     ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro
     hwrites hrank hleaf
-  case strong => intros; trivial
-  case weak => intros; trivial
-  case box => intros; trivial
-  case mutBorrow => intros; trivial
+  case strong | weak | box | mutBorrow => intros; trivial
   case nil =>
     intro rank env path ty _hrank _hleaf
     exact EnvSameShapeStrengthening.refl env
@@ -865,18 +856,9 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_selected_dependency_f
       ValidPartialValue (store.update updated newSlot) value ty := by
   intro value ty hvalid
   induction hvalid with
-  | unit =>
+  | unit | int | bool | undef =>
       intro _howners _hdeps
-      exact ValidPartialValue.unit
-  | int =>
-      intro _howners _hdeps
-      exact ValidPartialValue.int
-  | bool =>
-      intro _howners _hdeps
-      exact ValidPartialValue.bool
-  | undef =>
-      intro _howners _hdeps
-      exact ValidPartialValue.undef
+      constructor
   | @borrow location mutable targets target hmem hloc =>
       intro _howners hdeps
       refine ValidPartialValue.borrow hmem ?_
@@ -1139,9 +1121,7 @@ theorem RuntimeTargetsPathSelected.of_lvalTargetsTyping {store : ProgramStore}
         RuntimeTargetsPathSelected store env targets path selectedName
           selectedSlot selectedSlotTy)
     ?var ?box ?borrow ?singleton ?cons htargets hselected
-  case var => intros; trivial
-  case box => intros; trivial
-  case borrow => intros; trivial
+  case var | box | borrow => intros; trivial
   case singleton =>
       intro target ty lifetime htarget _ih path selectedName selectedSlot
         selectedSlotTy hselected
@@ -1197,10 +1177,7 @@ theorem RuntimePathSelected.prepend_of_lvalTyping {store : ProgramStore}
     exact ih hslot (() :: path)
       (RuntimePathSelected.borrowStep
         (RuntimeTargetsPathSelected.of_lvalTargetsTyping htargets hselected))
-  case singleton =>
-    intros
-    trivial
-  case cons =>
+  case singleton | cons =>
     intros
     trivial
 
@@ -1729,9 +1706,7 @@ theorem RuntimeSpineTargetsSelected.of_lvalTargetsTyping {store : ProgramStore}
         RuntimeSpinePathSelected store env pt path address →
         RuntimeSpineTargetsSelected store env targets path address)
     ?var ?box ?borrow ?singleton ?cons htargets hselected
-  case var => intros; trivial
-  case box => intros; trivial
-  case borrow => intros; trivial
+  case var | box | borrow => intros; trivial
   case singleton =>
       intro target ty lifetime htarget _ih path address hselected
       exact RuntimeSpineTargetsSelected.target (by simp) htarget hselected
@@ -1784,10 +1759,7 @@ theorem RuntimeSpinePathSelected.prepend_of_lvalTyping {store : ProgramStore}
     exact ih hslot (() :: path)
       (RuntimeSpinePathSelected.borrowStep
         (RuntimeSpineTargetsSelected.of_lvalTargetsTyping htargets hselected))
-  case singleton =>
-    intros
-    trivial
-  case cons =>
+  case singleton | cons =>
     intros
     trivial
 
