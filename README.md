@@ -1,6 +1,8 @@
 # lw_rust
 
-Lean mechanisation of the core FR/lw-rust calculus from the paper.
+Lean mechanisation of the core FR calculus from the paper "A Lightweight Formalism for Reference Lifetimes and
+Borrowing in Rust", extended with if/else constructs, diverging panic statements, and while loops.
+It additionally includes a formalization of the extractor and completion definitions from the Rust Constraining paper and shows that the extractor is indeed complete. The main argument is around the fact that follow-up statements can only add conflicts to the type- and borrow system and thus partial code is usually more permissible than the completed code.
 
 ## Deviations from the Paper
 
