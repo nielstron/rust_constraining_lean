@@ -268,6 +268,17 @@ theorem BorrowSafeRealized.weaken {store : ProgramStore} {env env' : Env} :
   rintro ⟨envBS, hsafeBS, hbs, hstr⟩ hstr'
   exact ⟨envBS, hsafeBS, hbs, EnvSameShapeStrengthening.trans hstr hstr'⟩
 
+/-- `t` is the live target a stored borrow value actually points to: some store
+cell holds a (non-owning) reference to a location that `t` resolves to.  Unlike
+mere resolvability, a *stale* merged-join target — one no current borrow points
+to — does not satisfy this, so the live-target witness env can drop it and stay
+borrow safe. -/
+def TargetPointedTo (store : ProgramStore) (t : LVal) : Prop :=
+  ∃ cell cellSlot loc,
+    store.slotAt cell = some cellSlot ∧
+      cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
+      store.loc t = some loc
+
 /-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
 strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
 dependency present at the finer type persists at the coarser type.  Equivalently,
@@ -7302,7 +7313,7 @@ theorem RuntimeFrame.loc_protected_guarded_base {store : ProgramStore}
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
-      t ∈ ts → G (LVal.base t) → G container) →
+      t ∈ ts → TargetPointedTo store t → G (LVal.base t) → G container) →
     LValTyping env lv pt lifetime →
     store.loc lv = some location →
     ProtectedByBase store r location →
@@ -7320,7 +7331,7 @@ where
       (hheap : StoreOwnerTargetsHeap store)
       (hcollapse : ∀ container mutable ts t,
         env ⊢ container ↝ (.borrow mutable ts) →
-        t ∈ ts → G (LVal.base t) → G container)
+        t ∈ ts → TargetPointedTo store t → G (LVal.base t) → G container)
       (htyping : LValTyping env lv pt lifetime)
       (hloc : store.loc lv = some location)
       (hprot : ProtectedByBase store r location) (hG : G r) :
@@ -7400,7 +7411,8 @@ where
                 hwitnessTyping hlocW hprot hG
             have hGrootM : G rootM :=
               hcollapse rootM mutable' targets' witness
-                (hcontainsM PartialTyContains.here) hmemW hGwitness
+                (hcontainsM PartialTyContains.here) hmemW
+                ⟨M, _, location, hslotM, rfl, hlocW⟩ hGwitness
             have hres :=
               go hφ hwellFormed hsafe hvalidStore hheap hcollapse hsource
                 hMloc hprotM hGrootM
@@ -7452,7 +7464,7 @@ theorem RuntimeFrame.locReads_protected_guarded_base {store : ProgramStore}
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
-      t ∈ ts → G (LVal.base t) → G container) →
+      t ∈ ts → TargetPointedTo store t → G (LVal.base t) → G container) →
     LValTyping env lv pt lifetime →
     RuntimeFrame.LocReads store lv location →
     ProtectedByBase store r location →
@@ -7485,17 +7497,6 @@ def SlotDepKill (store : ProgramStore) (env : Env) (leaf : Location)
     store.slotAt (VariableProjection z) =
       some { value := value, lifetime := zslot.lifetime } →
     ¬ RuntimeFrame.BorrowDependency store value zslot.ty leaf
-
-/-- `t` is the live target a stored borrow value actually points to: some store
-cell holds a (non-owning) reference to a location that `t` resolves to.  Unlike
-mere resolvability, a *stale* merged-join target — one no current borrow points
-to — does not satisfy this, so the live-target witness env can drop it and stay
-borrow safe. -/
-def TargetPointedTo (store : ProgramStore) (t : LVal) : Prop :=
-  ∃ cell cellSlot loc,
-    store.slotAt cell = some cellSlot ∧
-      cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
-      store.loc t = some loc
 
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)

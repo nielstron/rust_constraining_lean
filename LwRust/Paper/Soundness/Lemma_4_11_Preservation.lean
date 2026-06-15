@@ -2859,11 +2859,12 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                 have hcollapse :
                     ∀ container mutable' ts' t',
                       env ⊢ container ↝ (.borrow mutable' ts') → t' ∈ ts' →
+                      TargetPointedTo store t' →
                       WriteGuarded store env lhsLocation (LVal.base source)
                         (LVal.base t') →
                       WriteGuarded store env lhsLocation (LVal.base source)
                         container :=
-                  fun c m' ts' t' hn hm hG =>
+                  fun c m' ts' t' hn hm _hlive hG =>
                     (WriteGuarded.collapse_kill hborrowSafe hnotWPbase hn hm
                       hG).1
                 have hGt :
