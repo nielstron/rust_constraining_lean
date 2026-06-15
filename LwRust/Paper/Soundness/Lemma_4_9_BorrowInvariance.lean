@@ -74,6 +74,91 @@ theorem EnvSameShapeStrengthening.refl (env : Env) :
   · intro x sourceSlot hslot
     exact ⟨sourceSlot, hslot, rfl⟩
 
+/-- A borrow contained in the finer (source) type of a shape-preserving
+strengthening is also contained in the coarser (result) type, with a *superset*
+of targets.  This is the structural core of "preserve writeProhibited":
+strengthening only grows borrow target lists (W-Bor), and `sameShape` rules out
+the contained borrow being struck to `undef`. -/
+theorem partialTyContains_borrow_transport_strengthens
+    {sourceTy resultTy : PartialTy} {mutable : Bool} {targets : List LVal} :
+    PartialTyContains sourceTy (.borrow mutable targets) →
+    PartialTyStrengthens sourceTy resultTy →
+    PartialTy.sameShape sourceTy resultTy →
+    ∃ targets',
+      PartialTyContains resultTy (.borrow mutable targets') ∧
+        targets.Subset targets' := by
+  intro hcontains hstrength
+  induction hstrength with
+  | @reflex ty =>
+      intro _hshape
+      exact ⟨targets, hcontains, fun _ h => h⟩
+  | @box left right _hsub ih =>
+      intro hshape
+      cases hcontains with
+      | box hinner =>
+          have hshape' : PartialTy.sameShape left right := by
+            simpa [PartialTy.sameShape] using hshape
+          rcases ih hinner hshape' with ⟨targets', hc, hsub⟩
+          exact ⟨targets', PartialTyContains.box hc, hsub⟩
+  | @tyBox left right _hsub ih =>
+      intro hshape
+      cases hcontains with
+      | tyBox hinner =>
+          have hshape' : PartialTy.sameShape (.ty left) (.ty right) := by
+            simpa [PartialTy.sameShape, Ty.sameShape] using hshape
+          rcases ih hinner hshape' with ⟨targets', hc, hsub⟩
+          exact ⟨targets', PartialTyContains.tyBox hc, hsub⟩
+  | @borrow m leftTargets rightTargets hsubset =>
+      intro _hshape
+      cases hcontains with
+      | here => exact ⟨rightTargets, PartialTyContains.here, hsubset⟩
+  | @undefLeft left right _hsub _ih =>
+      intro _hshape
+      cases hcontains
+  | @intoUndef left right _hsub _ih =>
+      intro hshape
+      simp [PartialTy.sameShape] at hshape
+  | @boxIntoUndef left right _hsub _ih =>
+      intro hshape
+      simp [PartialTy.sameShape] at hshape
+
+/-- "Preserve writeProhibited": a write that is not prohibited in the coarser
+(result) environment is not prohibited in any finer same-shape strengthening
+environment.  Strengthening only grows borrow target lists, so the finer
+environment has *fewer* conflicting borrows.  This is the mechanised form of the
+T-If insight — every write that type-checks against the merged join env is
+automatically safe against each (borrow-safe) branch env. -/
+theorem not_writeProhibited_of_sameShapeStrengthening
+    {envFine envCoarse : Env} {w : LVal} :
+    EnvSameShapeStrengthening envFine envCoarse →
+    ¬ WriteProhibited envCoarse w →
+    ¬ WriteProhibited envFine w := by
+  intro hstr hnot hfine
+  have htransport :
+      ∀ x mutable targets target,
+        envFine ⊢ x ↝ (.borrow mutable targets) →
+        target ∈ targets →
+        ∃ targets', envCoarse ⊢ x ↝ (.borrow mutable targets') ∧ target ∈ targets' := by
+    intro x mutable targets target hcontains hmem
+    rcases hcontains with ⟨fineSlot, hfineSlot, hcont⟩
+    rcases hstr.2 x fineSlot hfineSlot with ⟨coarseSlot, hcoarseSlot, _hlife⟩
+    rcases hstr.1 x coarseSlot hcoarseSlot with
+      ⟨fineSlot', hfineSlot', _hlife', hstrength, hshape⟩
+    have heq : fineSlot = fineSlot' :=
+      Option.some.inj (hfineSlot.symm.trans hfineSlot')
+    subst heq
+    rcases partialTyContains_borrow_transport_strengthens hcont hstrength hshape with
+      ⟨targets', hcontR, hsub⟩
+    exact ⟨targets', ⟨coarseSlot, hcoarseSlot, hcontR⟩, hsub hmem⟩
+  apply hnot
+  unfold WriteProhibited ReadProhibited at hfine ⊢
+  rcases hfine with ⟨x, targets, target, hcont, hmem, hconf⟩ |
+      ⟨x, targets, target, hcont, hmem, hconf⟩
+  · rcases htransport x true targets target hcont hmem with ⟨targets', hcontR, hmemR⟩
+    exact Or.inl ⟨x, targets', target, hcontR, hmemR, hconf⟩
+  · rcases htransport x false targets target hcont hmem with ⟨targets', hcontR, hmemR⟩
+    exact Or.inr ⟨x, targets', target, hcontR, hmemR, hconf⟩
+
 theorem EnvSameShapeStrengthening.trans {first second third : Env} :
     EnvSameShapeStrengthening first second →
     EnvSameShapeStrengthening second third →
