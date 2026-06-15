@@ -7486,6 +7486,17 @@ def SlotDepKill (store : ProgramStore) (env : Env) (leaf : Location)
       some { value := value, lifetime := zslot.lifetime } →
     ¬ RuntimeFrame.BorrowDependency store value zslot.ty leaf
 
+/-- `t` is the live target a stored borrow value actually points to: some store
+cell holds a (non-owning) reference to a location that `t` resolves to.  Unlike
+mere resolvability, a *stale* merged-join target — one no current borrow points
+to — does not satisfy this, so the live-target witness env can drop it and stay
+borrow safe. -/
+def TargetPointedTo (store : ProgramStore) (t : LVal) : Prop :=
+  ∃ cell cellSlot loc,
+    store.slotAt cell = some cellSlot ∧
+      cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
+      store.loc t = some loc
+
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
     (base₀ : Name) : Name → Prop where
@@ -7498,7 +7509,7 @@ inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
       t ∈ targets →
       LVal.base t = z →
       SlotDepKill store env leaf container →
-      (∃ location, store.loc t = some location) →
+      TargetPointedTo store t →
       WriteGuarded store env leaf base₀ z
 
 /-- Borrow safety collapses any borrow node targeting a guarded base onto a
@@ -7531,6 +7542,52 @@ theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
       have hceq : container = c :=
         hborrowSafe container c mutable targets' ts t' t hnode' hnode hmem'
           hmem hconflict
+      subst hceq
+      exact ⟨hGc, hkill'⟩
+
+/-- Runtime-grounded `collapse_kill`: borrow-node uniqueness is supplied by a
+witness environment `env_w` that the store realises (`store ∼ₛ env_w`), that is
+genuinely borrow safe, and that *keeps every resolvable target* of `env`'s
+borrows (`hkept`).  Because the guard chase only ever uses live targets (tagged
+on `WriteGuarded.step`), the witness's borrow safety replaces the static `env`'s
+— which is exactly what lets the merged, borrow-unsafe `T-If` join `env₅` be the
+typing environment while the borrow-safe executed-branch env₃ witnesses safety. -/
+theorem WriteGuarded.collapse_kill_realized {store : ProgramStore}
+    {env env_w : Env} {leaf : Location} {base₀ : Name}
+    (hbs_w : BorrowSafeEnv env_w)
+    (hkept : ∀ x mutable targets s, env ⊢ x ↝ (.borrow mutable targets) →
+      s ∈ targets → TargetPointedTo store s →
+      ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
+    (hnotWP : ¬ WriteProhibited env (.var base₀)) :
+    ∀ {c : Name} {mutable : Bool} {ts : List LVal} {t : LVal},
+      env ⊢ c ↝ (.borrow mutable ts) →
+      t ∈ ts →
+      TargetPointedTo store t →
+      WriteGuarded store env leaf base₀ (LVal.base t) →
+      WriteGuarded store env leaf base₀ c ∧ SlotDepKill store env leaf c := by
+  intro c mutable ts t hnode hmem htlive hG
+  generalize hz : LVal.base t = z at hG
+  cases hG with
+  | base _hkill =>
+      exfalso
+      apply hnotWP
+      cases mutable with
+      | true =>
+          exact Or.inl ⟨c, ts, t, hnode, hmem,
+            by simpa [PathConflicts, LVal.base] using hz⟩
+      | false =>
+          exact Or.inr ⟨c, ts, t, hnode, hmem,
+            by simpa [PathConflicts, LVal.base] using hz⟩
+  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' hlive' =>
+      have hconflict : t' ⋈ t := by
+        simpa [PathConflicts, hbase'] using hz.symm
+      rcases hkept container true targets' t' hnode' hmem' hlive' with
+        ⟨Tw', hnode_w', hmem_w'⟩
+      rcases hkept c mutable ts t hnode hmem htlive with
+        ⟨Tw, hnode_w, hmem_w⟩
+      have hceq : container = c :=
+        hbs_w container c mutable Tw' Tw t' t hnode_w' hnode_w hmem_w'
+          hmem_w hconflict
       subst hceq
       exact ⟨hGc, hkill'⟩
 
@@ -7984,7 +8041,7 @@ where
                     have hGtarget :
                         WriteGuarded store env leaf base₀ (LVal.base tSel) :=
                       WriteGuarded.step hGbase ⟨envSlot, h1, hcontains⟩
-                        hmemSel rfl hkill ⟨_, hlocSel⟩
+                        hmemSel rfl hkill ⟨cell, cellSlot, L, h3, h4, hlocSel⟩
                     rcases WriteBorrowTargets.selected_branch_to_result_exists
                         (Nat.succ_pos rank) hfanout
                         (WriteBorrowTargets.initialized_leaves_of_typed
