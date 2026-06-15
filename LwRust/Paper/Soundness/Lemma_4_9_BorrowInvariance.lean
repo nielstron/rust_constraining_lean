@@ -188,6 +188,48 @@ theorem EnvSameShapeStrengthening.safe
   intro hmap hsafe
   exact safeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
 
+/-- Same-shape strengthening commutes with `dropLifetime`: both environments
+drop exactly the slots at the given lifetime (strengthening preserves slot
+lifetimes), and the survivors keep their strengthening relationship.  This is the
+block-exit transport for the runtime-grounded borrow-safety witness. -/
+theorem EnvSameShapeStrengthening.dropLifetime {source result : Env}
+    {lifetime : Lifetime} :
+    EnvSameShapeStrengthening source result →
+    EnvSameShapeStrengthening (source.dropLifetime lifetime)
+      (result.dropLifetime lifetime) := by
+  intro hmap
+  constructor
+  · intro x resultSlot hresult
+    simp only [Env.dropLifetime] at hresult
+    cases hr : result.slotAt x with
+    | none => rw [hr] at hresult; simp at hresult
+    | some slot =>
+        rw [hr] at hresult
+        by_cases hlt : slot.lifetime = lifetime
+        · simp [hlt] at hresult
+        · simp [hlt] at hresult
+          subst hresult
+          rcases hmap.1 x slot hr with ⟨sourceSlot, hsource, hlife, hstr, hshape⟩
+          refine ⟨sourceSlot, ?_, hlife, hstr, hshape⟩
+          simp only [Env.dropLifetime, hsource]
+          have hne : sourceSlot.lifetime ≠ lifetime := by rw [hlife]; exact hlt
+          simp [hne]
+  · intro x sourceSlot hsource
+    simp only [Env.dropLifetime] at hsource
+    cases hs : source.slotAt x with
+    | none => rw [hs] at hsource; simp at hsource
+    | some slot =>
+        rw [hs] at hsource
+        by_cases hlt : slot.lifetime = lifetime
+        · simp [hlt] at hsource
+        · simp [hlt] at hsource
+          subst hsource
+          rcases hmap.2 x slot hs with ⟨resultSlot, hresult, hlife⟩
+          refine ⟨resultSlot, ?_, hlife⟩
+          simp only [Env.dropLifetime, hresult]
+          have hne : resultSlot.lifetime ≠ lifetime := by rw [← hlife]; exact hlt
+          simp [hne]
+
 /--
 Runtime-grounded borrow safety: the store is realised by *some* borrow-safe
 environment `envBS` that same-shape-strengthens the (possibly join-merged, hence
