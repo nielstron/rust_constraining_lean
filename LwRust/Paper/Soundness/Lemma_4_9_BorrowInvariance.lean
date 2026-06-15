@@ -188,6 +188,44 @@ theorem EnvSameShapeStrengthening.safe
   intro hmap hsafe
   exact safeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
 
+/--
+Runtime-grounded borrow safety: the store is realised by *some* borrow-safe
+environment `envBS` that same-shape-strengthens the (possibly join-merged, hence
+borrow-unsafe) typing environment `env`.
+
+Because strengthening preserves the mutable bit and the shape (W-Bor), `envBS`
+pins down the real per-borrow mutabilities — unlike a bare
+`∃ env, store ∼ₛ env ∧ BorrowSafeEnv env`, which is vacuous (V-Borrow leaves
+`mutable` free, so the runtime store alone cannot witness borrow safety).
+
+This is the invariant threaded by preservation in place of static
+`BorrowSafeEnv env`: after a `T-If` join the typing env is `env₅` (unsafe) but
+the runtime store still realises the executed branch's borrow-safe `env₃`. -/
+def BorrowSafeRealized (store : ProgramStore) (env : Env) : Prop :=
+  ∃ envBS,
+    store ∼ₛ envBS ∧ BorrowSafeEnv envBS ∧ EnvSameShapeStrengthening envBS env
+
+/-- A genuinely borrow-safe environment realises itself. -/
+theorem BorrowSafeRealized.of_borrowSafeEnv {store : ProgramStore} {env : Env} :
+    store ∼ₛ env → BorrowSafeEnv env → BorrowSafeRealized store env :=
+  fun hsafe hbs => ⟨env, hsafe, hbs, EnvSameShapeStrengthening.refl env⟩
+
+/-- Runtime-grounded borrow safety still abstracts the typing environment. -/
+theorem BorrowSafeRealized.safeAbstraction {store : ProgramStore} {env : Env} :
+    BorrowSafeRealized store env → store ∼ₛ env := by
+  rintro ⟨_envBS, hsafeBS, _hbs, hstr⟩
+  exact EnvSameShapeStrengthening.safe hstr hsafeBS
+
+/-- Runtime-grounded borrow safety transports forward along a further same-shape
+strengthening of the typing environment: the same witness still strengthens the
+coarser env by transitivity. -/
+theorem BorrowSafeRealized.weaken {store : ProgramStore} {env env' : Env} :
+    BorrowSafeRealized store env →
+    EnvSameShapeStrengthening env env' →
+    BorrowSafeRealized store env' := by
+  rintro ⟨envBS, hsafeBS, hbs, hstr⟩ hstr'
+  exact ⟨envBS, hsafeBS, hbs, EnvSameShapeStrengthening.trans hstr hstr'⟩
+
 theorem EnvSameShapeStrengthening.update_result_strengthening
     {source result : Env} {x : Name} {sourceSlot resultSlot : EnvSlot} :
     EnvSameShapeStrengthening source result →
