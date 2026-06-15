@@ -2262,7 +2262,7 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
     {lhsLocation : Location} {oldSlot : StoreSlot} {oldTy oldSlotTy : PartialTy}
     {value : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeEnv env →
+    BorrowSafeWitness store env →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env (.deref source) oldTy targetLifetime →
@@ -2280,8 +2280,9 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
     store.write (.deref source) (.value value) = some writtenStore →
     Drops writtenStore [oldSlot.value] store' →
     store' ∼ₛ env' := by
-  intro hwellFormed hborrowSafe hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
+  intro hwellFormed hwitness hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
     hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot holdSlotValid hwriteStore hdrops
+  obtain ⟨env_w, hsafe_w, hbs_w, _hstr_w, hkept_w⟩ := hwitness
   have hsafeWrite : writtenStore ∼ₛ env' := by
     have hwriteEq :
         writtenStore =
@@ -2846,8 +2847,9 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     hvalidStore hheap hlhsSlot holdSelectedValid hLhsTyping
                     hlhsLoc hwrite (WriteGuarded.base hkill₀) with
                   ⟨r, hprotR, hGr⟩
-                rcases RuntimeFrame.borrowDependency_witness hdep with
-                  ⟨m, ts, t, hcontains, hmem, hreads⟩
+                rcases RuntimeFrame.borrowDependency_targetPointedTo hdep
+                    hstoreSlot rfl with
+                  ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
                 have hborrowsX :
                     PartialTyBorrowsWellFormedInSlot env sourceSlot.lifetime
                       sourceSlot.ty := by
@@ -2864,9 +2866,9 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                         (LVal.base t') →
                       WriteGuarded store env lhsLocation (LVal.base source)
                         container :=
-                  fun c m' ts' t' hn hm _hlive hG =>
-                    (WriteGuarded.collapse_kill hborrowSafe hnotWPbase hn hm
-                      hG).1
+                  fun c m' ts' t' hn hm hlive hG =>
+                    (WriteGuarded.collapse_kill_realized hbs_w hkept_w
+                      hnotWPbase hn hm hlive hG).1
                 have hGt :
                     WriteGuarded store env lhsLocation (LVal.base source)
                       (LVal.base t) :=
@@ -2874,8 +2876,8 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     hsafe hvalidStore hheap hcollapse htTyping hreads hprotR
                     hGr
                 have hkillX :=
-                  (WriteGuarded.collapse_kill hborrowSafe hnotWPbase
-                    ⟨sourceSlot, hsourceSlot, hcontains⟩ hmem hGt).2
+                  (WriteGuarded.collapse_kill_realized hbs_w hkept_w hnotWPbase
+                    ⟨sourceSlot, hsourceSlot, hcontains⟩ hmem htpt hGt).2
                 exact hkillX sourceSlot oldValue hsourceSlot hstoreSlot hdep
               have holdValid :
                   ValidPartialValue
@@ -2934,7 +2936,7 @@ theorem preservation_assign_deref_envWrite_terminal_of_wellFormed
     {lhsLocation : Location} {oldSlot : StoreSlot} {oldTy oldSlotTy : PartialTy}
     {value : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeEnv env →
+    BorrowSafeWitness store env →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env (.deref source) oldTy targetLifetime →
@@ -3037,7 +3039,8 @@ theorem preservation_assign_deref_box_step_runtime_of_wellFormed
   have holdSlotValid : ValidPartialValue store oldSlot.value oldTy := by
     simpa [htypedSlotEq] using htypedValid
   exact preservation_assign_deref_envWrite_terminal_of_wellFormed
-    hwellFormed hborrowSafe hsafe hvalidRuntime (LValTyping.box hsourceBox) hshape hwellTy
+    hwellFormed (BorrowSafeWitness.of_borrowSafeEnv hsafe hborrowSafe) hsafe
+    hvalidRuntime (LValTyping.box hsourceBox) hshape hwellTy
     hvalidValue hwrite hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot holdSlotValid
     hwriteStore hdrops
 
@@ -3096,7 +3099,8 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
   have holdSlotValid : ValidPartialValue store oldSlot.value (.ty selectedTy) := by
     simpa [htypedSlotEq] using htypedValid
   exact preservation_assign_deref_envWrite_terminal_of_wellFormed
-    hwellFormed hborrowSafe hsafe hvalidRuntime (LValTyping.borrow hsourceBorrow htargets)
+    hwellFormed (BorrowSafeWitness.of_borrowSafeEnv hsafe hborrowSafe) hsafe
+    hvalidRuntime (LValTyping.borrow hsourceBorrow htargets)
     hshape hwellTy hvalidValue hwrite hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot
     holdSlotValid hwriteStore hdrops
 
