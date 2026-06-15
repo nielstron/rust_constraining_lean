@@ -7498,6 +7498,7 @@ inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
       t ∈ targets →
       LVal.base t = z →
       SlotDepKill store env leaf container →
+      (∃ location, store.loc t = some location) →
       WriteGuarded store env leaf base₀ z
 
 /-- Borrow safety collapses any borrow node targeting a guarded base onto a
@@ -7524,7 +7525,7 @@ theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
       | false =>
           exact Or.inr ⟨c, ts, t, hnode, hmem,
             by simpa [PathConflicts, LVal.base] using hz⟩
-  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' =>
+  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' _hlive' =>
       have hconflict : t' ⋈ t := by
         simpa [PathConflicts, hbase'] using hz.symm
       have hceq : container = c :=
@@ -7983,7 +7984,7 @@ where
                     have hGtarget :
                         WriteGuarded store env leaf base₀ (LVal.base tSel) :=
                       WriteGuarded.step hGbase ⟨envSlot, h1, hcontains⟩
-                        hmemSel rfl hkill
+                        hmemSel rfl hkill ⟨_, hlocSel⟩
                     rcases WriteBorrowTargets.selected_branch_to_result_exists
                         (Nat.succ_pos rank) hfanout
                         (WriteBorrowTargets.initialized_leaves_of_typed
