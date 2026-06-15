@@ -3880,7 +3880,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin hcontained
-      hcoherent hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
+      hcoherent hlinear _hresultSafe ihCondition ihTrue
       ihFalse htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
     cases htypingEq

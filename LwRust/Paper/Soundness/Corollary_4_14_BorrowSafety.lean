@@ -1872,11 +1872,16 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin _hcontained
-      _hcoherent _hlinear hborrowSafeJoin hresultSafe ihCondition ihTrue
+      _hcoherent _hlinear hresultSafe ihCondition ihTrue
       ihFalse hsource hborrowSafe
     have hconditionSafe := ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
     have _htrueSafe := ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
     have _hfalseSafe := ihFalse (SourceTerm.ite_falseBranch hsource) hconditionSafe.1
+    -- SCAFFOLD (chunk 1): `BorrowSafeEnv env₅` is no longer a rule premise and is
+    -- genuinely false for the merged join (W-Bor unions target lists).  This is the
+    -- single obligation the dropped premise was buying.  The real fix re-threads
+    -- borrow-safety as a runtime-store property, dropping this static corollary.
+    have hborrowSafeJoin : BorrowSafeEnv _env₅ := by sorry
     exact ⟨hborrowSafeJoin, hresultSafe, fun _gamma _hfresh =>
       borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hborrowSafeJoin hresultSafe⟩
   case iteDiverging =>

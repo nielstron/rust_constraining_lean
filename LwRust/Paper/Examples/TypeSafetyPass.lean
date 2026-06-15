@@ -68,7 +68,6 @@ theorem ifThenElseInt_typing :
     containedBorrowsWellFormed_empty
     coherent_empty
     linearizable_empty
-    borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
   · simp [EnvJoin, IsLUB, IsLeast, upperBounds, lowerBounds]
   · intro x branchSlot joinSlot hbranch
@@ -111,7 +110,6 @@ theorem ifEqThenElseInt_typing :
     containedBorrowsWellFormed_empty
     coherent_empty
     linearizable_empty
-    borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
   · simp [EnvJoin, IsLUB, IsLeast, upperBounds, lowerBounds]
   · intro x branchSlot joinSlot hbranch
@@ -1697,7 +1695,6 @@ theorem ifPointerAssignment_typing :
     ifPointerAssignment_join_obligations.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.1
-    ifPointerAssignment_join_obligations.2.2.2.2.2.2
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit)
 
 end Paper

@@ -1098,11 +1098,11 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihGhost (SourceTerm.eq_rhs hsource))
         (ihR (SourceTerm.eq_rhs hsource)) hcopyL hcopyR hshape)
     (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
-        hcontained hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
+        hcontained hcoherent hlinear hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear hborrowSafe
+        hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear
         hresultSafe)
     (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
         hsource =>
@@ -2798,7 +2798,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
           _falseBranch _trueTy _falseTy _joinTy}
         _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
-        hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        hcontained hcoherent hlinear _hresultSafe ihCondition ihTrue ihFalse
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1

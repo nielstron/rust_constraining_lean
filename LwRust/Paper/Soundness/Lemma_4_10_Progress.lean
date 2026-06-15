@@ -972,7 +972,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
-      _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe
+      _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear
       _hresultSafe ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
     rcases ihCondition hvst.ite_condition hwf hsafe hstore with
       hterminalCondition | hstepCondition

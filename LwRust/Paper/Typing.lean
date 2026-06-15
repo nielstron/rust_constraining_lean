@@ -1046,7 +1046,6 @@ mutual
         ContainedBorrowsWellFormed env₅ →
         Coherent env₅ →
         Linearizable env₅ →
-        BorrowSafeEnv env₅ →
         TyBorrowSafeAgainstEnv env₅ joinTy →
         TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
           joinTy env₅
