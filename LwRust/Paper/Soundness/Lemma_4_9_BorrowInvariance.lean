@@ -226,6 +226,48 @@ theorem BorrowSafeRealized.weaken {store : ProgramStore} {env env' : Env} :
   rintro ⟨envBS, hsafeBS, hbs, hstr⟩ hstr'
   exact ⟨envBS, hsafeBS, hbs, EnvSameShapeStrengthening.trans hstr hstr'⟩
 
+/-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
+strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
+dependency present at the finer type persists at the coarser type.  Equivalently,
+`SlotDepKill` over the coarse (join) type implies it over each finer branch type
+— the bridge for transporting the deref-write frame between `env₅` and the
+witness `env₃`. -/
+theorem borrowDependency_mono_sameShape {store : ProgramStore}
+    {value : PartialValue} {tyFine tyCoarse : PartialTy} {dep : Location} :
+    RuntimeFrame.BorrowDependency store value tyFine dep →
+    PartialTyStrengthens tyFine tyCoarse →
+    PartialTy.sameShape tyFine tyCoarse →
+    RuntimeFrame.BorrowDependency store value tyCoarse dep := by
+  intro hdep
+  induction hdep generalizing tyCoarse with
+  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+      intro hstr hshape
+      cases hstr with
+      | reflex => exact RuntimeFrame.BorrowDependency.borrow hmem hloc hreads
+      | borrow hsub =>
+          exact RuntimeFrame.BorrowDependency.borrow (hsub hmem) hloc hreads
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | @boxInner location slot inner dependency hslot _hinner ih =>
+      intro hstr hshape
+      cases hstr with
+      | reflex => exact RuntimeFrame.BorrowDependency.boxInner hslot _hinner
+      | @box _innerL innerC hsubInner =>
+          have hshapeInner : PartialTy.sameShape inner innerC := by
+            simpa [PartialTy.sameShape] using hshape
+          exact RuntimeFrame.BorrowDependency.boxInner hslot
+            (ih hsubInner hshapeInner)
+      | boxIntoUndef _ => simp [PartialTy.sameShape] at hshape
+  | @boxFullInner location slot ty dependency hslot _hinner ih =>
+      intro hstr hshape
+      cases hstr with
+      | reflex => exact RuntimeFrame.BorrowDependency.boxFullInner hslot _hinner
+      | @tyBox _innerL innerC hsubInner =>
+          have hshapeInner : PartialTy.sameShape (.ty ty) (.ty innerC) := by
+            simpa [PartialTy.sameShape, Ty.sameShape] using hshape
+          exact RuntimeFrame.BorrowDependency.boxFullInner hslot
+            (ih hsubInner hshapeInner)
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+
 theorem EnvSameShapeStrengthening.update_result_strengthening
     {source result : Env} {x : Name} {sourceSlot resultSlot : EnvSlot} :
     EnvSameShapeStrengthening source result →
