@@ -8303,6 +8303,37 @@ theorem RuntimeFrame.borrowDependency_witness {store : ProgramStore}
       rcases ih with ⟨m, ts, t, hcontains, hmem, hreads⟩
       exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads⟩
 
+/-- The borrow-resolution dependency's target is a *live* target: the leaf borrow
+value (reached through any owning boxes from a cell holding `value`) is a
+reference to the location that `target` resolves to.  So `TargetPointedTo` holds
+for the dependency target, which is what lets `collapse_kill_realized` discharge
+the deref-write frame from the live-target witness. -/
+theorem RuntimeFrame.borrowDependency_targetPointedTo {store : ProgramStore}
+    {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
+    {cell : Location} {cellSlot : StoreSlot} :
+    RuntimeFrame.BorrowDependency store value partialTy dependency →
+    store.slotAt cell = some cellSlot →
+    cellSlot.value = value →
+    ∃ mutable targets target,
+      PartialTyContains partialTy (.borrow mutable targets) ∧
+      target ∈ targets ∧
+      RuntimeFrame.LocReads store target dependency ∧
+      TargetPointedTo store target := by
+  intro hdep
+  induction hdep generalizing cell cellSlot with
+  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+      intro hcell hval
+      exact ⟨mutable, targets, target, PartialTyContains.here, hmem, hreads,
+        ⟨cell, cellSlot, location, hcell, hval, hloc⟩⟩
+  | @boxInner location slot inner dep hslot _hinner ih =>
+      intro _hcell _hval
+      rcases ih hslot rfl with ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
+      exact ⟨m, ts, t, PartialTyContains.box hcontains, hmem, hreads, htpt⟩
+  | @boxFullInner location slot innerTy dep hslot _hinner ih =>
+      intro _hcell _hval
+      rcases ih hslot rfl with ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
+      exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads, htpt⟩
+
 /-- A contained borrow survives same-shape strengthening, with a grown target
 list. -/
 theorem PartialTyContains.mono_strengthens_sameShape
