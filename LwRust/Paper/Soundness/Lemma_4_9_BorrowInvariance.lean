@@ -279,6 +279,27 @@ def TargetPointedTo (store : ProgramStore) (t : LVal) : Prop :=
       cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
       store.loc t = some loc
 
+/-- `t` is the live target selected by root `x`'s OWN borrow: `x`'s value reaches
+(via ownership) a cell holding a reference to a location that `t` resolves to.
+Unlike `TargetPointedTo` (which allows *any* root's borrow), this ties the live
+target to `x` — the refinement that discharges the `T-If` join side condition,
+since a merged-in target only `x`-selected in the executed branch is not
+`x`-selected by a stale branch.  (`ProtectedByBase` inlined to keep this before
+the witness definition.) -/
+def SelectedTarget (store : ProgramStore) (x : Name) (t : LVal) : Prop :=
+  ∃ cell cellSlot loc,
+    (cell = VariableProjection x ∨
+        ProgramStore.OwnsTransitively store (VariableProjection x) cell) ∧
+      store.slotAt cell = some cellSlot ∧
+      cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
+      store.loc t = some loc
+
+/-- A selected target is in particular pointed to (forgetting the root). -/
+theorem SelectedTarget.targetPointedTo {store : ProgramStore} {x : Name}
+    {t : LVal} : SelectedTarget store x t → TargetPointedTo store t := by
+  rintro ⟨cell, cellSlot, loc, _hprot, hslot, hval, hloc⟩
+  exact ⟨cell, cellSlot, loc, hslot, hval, hloc⟩
+
 /-- The borrow-safety invariant threaded by preservation in place of the static
 `BorrowSafeEnv env`: a witness env `env_w` realises the store, is genuinely
 borrow safe, same-shape-strengthens the typing env `env`, and *keeps every live
