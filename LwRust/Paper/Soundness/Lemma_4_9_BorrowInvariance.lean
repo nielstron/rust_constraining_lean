@@ -329,6 +329,19 @@ theorem BorrowSafeWitness.weaken {store : ProgramStore} {env env' : Env} :
   rcases hlive x mutable targets s hnode' hmem' htpt with ⟨targets₀, hnode, hmem⟩
   exact hkept_w x mutable targets₀ s hnode hmem htpt
 
+/-- The empty environment is vacuously borrow safe (it has no slots, so no
+borrow node resolves). -/
+theorem borrowSafeEnv_empty_env : BorrowSafeEnv Env.empty := by
+  intro x y mutable tsM tsO tM tO hx _hy _htMmem _htOmem _hconf
+  rcases hx with ⟨slot, hslot, _hcontains⟩
+  simp [Env.empty] at hslot
+
+/-- The empty initial state is its own borrow-safety witness — the base of the
+preservation threading. -/
+theorem BorrowSafeWitness.empty :
+    BorrowSafeWitness ProgramStore.empty Env.empty :=
+  BorrowSafeWitness.of_borrowSafeEnv safeAbstraction_empty borrowSafeEnv_empty_env
+
 /-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
 strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
 dependency present at the finer type persists at the coarser type.  Equivalently,
