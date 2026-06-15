@@ -4852,6 +4852,24 @@ theorem ownsTransitively_of_cons {store : ProgramStore} {storage leaf : Location
   intro hspine
   exact ownsTransitively_of_nonempty hspine (by simp)
 
+/-- An ownership spine from a variable's projection protects its leaf: the leaf
+is the variable itself (empty spine) or transitively owned by it.  This connects
+`firstNodePack`'s spine to `ProtectedByBase`, the root component of a borrow's
+*selected* target. -/
+theorem protectedByBase {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path}
+    {x : Name} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    storage = VariableProjection x →
+    ProtectedByBase store x leaf := by
+  intro hspine hstorage
+  cases hspine with
+  | nil _hslot _hvalid => exact Or.inl hstorage
+  | box hslot howner htail =>
+      subst hstorage
+      exact Or.inr (ownsTransitively_of_cons
+        (StoreOwnerSpine.box hslot howner htail))
+
 theorem leaf_ne_storage_of_cons {store : ProgramStore} {storage leaf : Location}
     {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
     StoreOwnerSpine store storage slot ty (() :: path) leaf leafSlot leafTy →
