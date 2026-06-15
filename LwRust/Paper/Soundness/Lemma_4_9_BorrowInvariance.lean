@@ -279,6 +279,33 @@ def TargetPointedTo (store : ProgramStore) (t : LVal) : Prop :=
       cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
       store.loc t = some loc
 
+/-- The borrow-safety invariant threaded by preservation in place of the static
+`BorrowSafeEnv env`: a witness env `env_w` realises the store, is genuinely
+borrow safe, same-shape-strengthens the typing env `env`, and *keeps every live
+target* (`TargetPointedTo`) of `env`'s borrows.  For a borrow-safe `env` the
+witness is `env` itself; after a `T-If` join the witness is the executed branch's
+borrow-safe env₃.  This is exactly what `collapse_kill_realized` consumes. -/
+def BorrowSafeWitness (store : ProgramStore) (env : Env) : Prop :=
+  ∃ env_w,
+    store ∼ₛ env_w ∧ BorrowSafeEnv env_w ∧
+      EnvSameShapeStrengthening env_w env ∧
+      (∀ x mutable targets s, env ⊢ x ↝ (.borrow mutable targets) →
+        s ∈ targets → TargetPointedTo store s →
+        ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
+
+/-- A genuinely borrow-safe environment is its own live-target witness. -/
+theorem BorrowSafeWitness.of_borrowSafeEnv {store : ProgramStore} {env : Env} :
+    store ∼ₛ env → BorrowSafeEnv env → BorrowSafeWitness store env :=
+  fun hsafe hbs =>
+    ⟨env, hsafe, hbs, EnvSameShapeStrengthening.refl env,
+      fun _x _mutable targets _s hnode hmem _ => ⟨targets, hnode, hmem⟩⟩
+
+/-- The witness invariant still abstracts the typing environment. -/
+theorem BorrowSafeWitness.safeAbstraction {store : ProgramStore} {env : Env} :
+    BorrowSafeWitness store env → store ∼ₛ env := by
+  rintro ⟨_env_w, hsafe_w, _hbs, hstr, _hkept⟩
+  exact EnvSameShapeStrengthening.safe hstr hsafe_w
+
 /-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
 strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
 dependency present at the finer type persists at the coarser type.  Equivalently,
