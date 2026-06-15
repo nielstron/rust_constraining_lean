@@ -306,6 +306,29 @@ theorem BorrowSafeWitness.safeAbstraction {store : ProgramStore} {env : Env} :
   rintro ⟨_env_w, hsafe_w, _hbs, hstr, _hkept⟩
   exact EnvSameShapeStrengthening.safe hstr hsafe_w
 
+/-- Weaken the witness invariant along a same-shape strengthening of the typing
+env (the `T-If` join `env ⊢ env₃`, `env' ⊢ env₅`).  The same borrow-safe witness
+serves the coarser env; its `hkept` transports because every live
+(`TargetPointedTo`) target of the coarser env's borrows is already a target of
+the finer env's borrow (`hlive`).  That side condition is exactly "a join's
+merged target list introduces no *new live* targets" — true because a target
+present only in the non-executed branch is not pointed to by the current store,
+and genuine aliasing of distinct-base lvals under a live mutable borrow is
+excluded by borrow checking at creation. -/
+theorem BorrowSafeWitness.weaken {store : ProgramStore} {env env' : Env} :
+    BorrowSafeWitness store env →
+    EnvSameShapeStrengthening env env' →
+    (∀ x mutable targets s, env' ⊢ x ↝ (.borrow mutable targets) →
+      s ∈ targets → TargetPointedTo store s →
+      ∃ targets₀, env ⊢ x ↝ (.borrow mutable targets₀) ∧ s ∈ targets₀) →
+    BorrowSafeWitness store env' := by
+  rintro ⟨env_w, hsafe_w, hbs_w, hstr_w, hkept_w⟩ hstr hlive
+  refine ⟨env_w, hsafe_w, hbs_w,
+    EnvSameShapeStrengthening.trans hstr_w hstr, ?_⟩
+  intro x mutable targets s hnode' hmem' htpt
+  rcases hlive x mutable targets s hnode' hmem' htpt with ⟨targets₀, hnode, hmem⟩
+  exact hkept_w x mutable targets₀ s hnode hmem htpt
+
 /-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
 strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
 dependency present at the finer type persists at the coarser type.  Equivalently,
