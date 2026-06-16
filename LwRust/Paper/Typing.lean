@@ -659,18 +659,64 @@ def BorrowSafeEnv (env : Env) : Prop :=
     targetMutable ⋈ targetOther →
     x = y
 
+/-- Borrow safety for one mutable-borrow root against the rest of an environment. -/
+def BorrowSafeRoot (env : Env) (root : Name) : Prop :=
+  ∀ y mutable targetsMutable targetsOther targetMutable targetOther,
+    env ⊢ root ↝ (&mut targetsMutable) →
+    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
+    targetMutable ∈ targetsMutable →
+    targetOther ∈ targetsOther →
+    targetMutable ⋈ targetOther →
+    root = y
+
+/--
+Static over-approximation of the roots whose mutable-borrow slots can act as
+write authority for a dereference rooted at `base`.
+
+The guard starts at the written lvalue's base.  If a guarded root contains a
+mutable borrow to a target, the target's base is also guarded, matching the
+authority chase used by dereference-assignment preservation.
+-/
+inductive BorrowAuthorityGuard (env : Env) (base : Name) : Name → Prop where
+  | base :
+      BorrowAuthorityGuard env base base
+  | step {container : Name} {targets : List LVal} {target : LVal} :
+      BorrowAuthorityGuard env base container →
+      env ⊢ container ↝ (&mut targets) →
+      target ∈ targets →
+      BorrowAuthorityGuard env base (LVal.base target)
+
 /--
 Assignment-level borrow-safety frame.
 
 Direct root writes do not need the whole post-RHS environment to be globally
 borrow-safe: the ordinary `WriteProhibited` and write/coherence obligations
-control the written root.  Writes through a dereference still need the existing
-global witness, because preservation has to justify that the selected mutable
-borrow target is exclusive in the concrete store.
+control the written root.  Writes through a dereference only require borrow
+safety for the roots in that dereference's authority closure, so unrelated
+conflicts elsewhere in a path-insensitive join do not block the assignment.
 -/
 def AssignmentBorrowSafety (env : Env) : LVal → Prop
   | .var _ => True
-  | .deref _ => BorrowSafeEnv env
+  | .deref source =>
+      ∀ root,
+        BorrowAuthorityGuard env (LVal.base source) root →
+        BorrowSafeRoot env root
+
+theorem BorrowSafeRoot.of_borrowSafeEnv {env : Env} {root : Name} :
+    BorrowSafeEnv env → BorrowSafeRoot env root := by
+  intro hsafe y mutable targetsMutable targetsOther targetMutable targetOther
+    hmutable hother htargetMutable htargetOther hconflict
+  exact hsafe root y mutable targetsMutable targetsOther targetMutable targetOther
+    hmutable hother htargetMutable htargetOther hconflict
+
+theorem AssignmentBorrowSafety.of_borrowSafeEnv {env : Env} {lhs : LVal} :
+    BorrowSafeEnv env → AssignmentBorrowSafety env lhs := by
+  intro hsafe
+  cases lhs with
+  | var _ => trivial
+  | deref source =>
+      intro root _hguard
+      exact BorrowSafeRoot.of_borrowSafeEnv hsafe
 
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/

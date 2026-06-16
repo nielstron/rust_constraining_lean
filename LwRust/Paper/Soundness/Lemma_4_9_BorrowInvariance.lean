@@ -8251,6 +8251,18 @@ inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
       SelectedTarget store container t →
       WriteGuarded store env leaf base₀ z
 
+/-- Runtime write guards are contained in the static authority closure. -/
+theorem WriteGuarded.authorityGuard {store : ProgramStore} {env : Env}
+    {leaf : Location} {base₀ root : Name} :
+    WriteGuarded store env leaf base₀ root →
+    BorrowAuthorityGuard env base₀ root := by
+  intro hguard
+  induction hguard with
+  | base _hkill =>
+      exact BorrowAuthorityGuard.base
+  | step hcontainer hnode hmem _hbase _hkill _hlive ih =>
+      simpa [_hbase] using BorrowAuthorityGuard.step ih hnode hmem
+
 /-- Borrow safety collapses any borrow node targeting a guarded base onto a
 guarded container carrying a dependency kill. -/
 theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
@@ -8280,6 +8292,47 @@ theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
         simpa [PathConflicts, hbase'] using hz.symm
       have hceq : container = c :=
         hborrowSafe container c mutable targets' ts t' t hnode' hnode hmem'
+          hmem hconflict
+      subst hceq
+      exact ⟨hGc, hkill'⟩
+
+/--
+Authority-local version of `WriteGuarded.collapse_kill`.
+
+Only roots in the write's authority closure need to be borrow-safe against the
+rest of the environment.  Unrelated conflicts elsewhere in a joined environment
+are irrelevant to this collapse.
+-/
+theorem WriteGuarded.collapse_kill_authority {store : ProgramStore} {env : Env}
+    {leaf : Location} {base₀ : Name}
+    (hsafeRoot :
+      ∀ root, BorrowAuthorityGuard env base₀ root → BorrowSafeRoot env root)
+    (hnotWP : ¬ WriteProhibited env (.var base₀)) :
+    ∀ {c : Name} {mutable : Bool} {ts : List LVal} {t : LVal},
+      env ⊢ c ↝ (.borrow mutable ts) →
+      t ∈ ts →
+      WriteGuarded store env leaf base₀ (LVal.base t) →
+      WriteGuarded store env leaf base₀ c ∧ SlotDepKill store env leaf c := by
+  intro c mutable ts t hnode hmem hG
+  generalize hz : LVal.base t = z at hG
+  cases hG with
+  | base _hkill =>
+      exfalso
+      apply hnotWP
+      cases mutable with
+      | true =>
+          exact Or.inl ⟨c, ts, t, hnode, hmem,
+            by simpa [PathConflicts, LVal.base] using hz⟩
+      | false =>
+          exact Or.inr ⟨c, ts, t, hnode, hmem,
+            by simpa [PathConflicts, LVal.base] using hz⟩
+  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' _hlive' =>
+      have hconflict : t' ⋈ t := by
+        simpa [PathConflicts, hbase'] using hz.symm
+      have hcontainerSafe : BorrowSafeRoot env container :=
+        hsafeRoot container hGc.authorityGuard
+      have hceq : container = c :=
+        hcontainerSafe c mutable targets' ts t' t hnode' hnode hmem'
           hmem hconflict
       subst hceq
       exact ⟨hGc, hkill'⟩

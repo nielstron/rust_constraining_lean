@@ -1140,7 +1140,7 @@ theorem pointerWriteBranch_typing :
   exact TermTyping.assign
     pointerIf_deref_p_typing
     (TermTyping.const ValueTyping.int)
-    pointerIfEnv_borrowSafe
+    (AssignmentBorrowSafety.of_borrowSafeEnv pointerIfEnv_borrowSafe)
     pointerIf_deref_p_typing
     ShapeCompatible.int
     WellFormedTy.int

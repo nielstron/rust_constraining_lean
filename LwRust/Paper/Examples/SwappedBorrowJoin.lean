@@ -34,6 +34,8 @@ def swappedBorrowA : LVal := .var "a"
 def swappedBorrowB : LVal := .var "b"
 def swappedBorrowX : LVal := .var "x"
 def swappedBorrowY : LVal := .var "y"
+def swappedBorrowC : LVal := .var "c"
+def swappedBorrowP : LVal := .var "p"
 
 def swappedBorrowIntSlot : EnvSlot :=
   { ty := .ty .int, lifetime := Lifetime.root }
@@ -148,14 +150,167 @@ theorem swappedBorrowJoin_root_assignment_frame_safe :
     AssignmentBorrowSafety swappedBorrowJoinEnv (.var "c") := by
   trivial
 
-/--
-Dereference assignments still need the old global witness.  This is the part
-that remains conservative relative to rustc after a path-insensitive join.
--/
-theorem swappedBorrowJoin_deref_assignment_frame_safe_iff :
-    AssignmentBorrowSafety swappedBorrowJoinEnv (.deref swappedBorrowX) ↔
-      BorrowSafeEnv swappedBorrowJoinEnv :=
-  Iff.rfl
+theorem swappedBorrowJoin_deref_x_assignment_frame_not_safe :
+    ¬ AssignmentBorrowSafety swappedBorrowJoinEnv (.deref swappedBorrowX) := by
+  intro hsafe
+  have hroot : BorrowSafeRoot swappedBorrowJoinEnv "x" := by
+    exact hsafe "x" (by
+      simpa [swappedBorrowX, LVal.base] using
+        (BorrowAuthorityGuard.base :
+          BorrowAuthorityGuard swappedBorrowJoinEnv "x" "x"))
+  have hx : swappedBorrowJoinEnv ⊢ "x" ↝
+      (.borrow true [swappedBorrowA, swappedBorrowB]) := by
+    refine ⟨swappedBorrowSlot [swappedBorrowA, swappedBorrowB], ?_,
+      PartialTyContains.here⟩
+    simp [swappedBorrowJoinEnv, swappedBorrowEnv, swappedBorrowSlot,
+      swappedBorrowIntSlot, Env.update]
+  have hy : swappedBorrowJoinEnv ⊢ "y" ↝
+      (.borrow true [swappedBorrowB, swappedBorrowA]) := by
+    refine ⟨swappedBorrowSlot [swappedBorrowB, swappedBorrowA], ?_,
+      PartialTyContains.here⟩
+    simp [swappedBorrowJoinEnv, swappedBorrowEnv, swappedBorrowSlot,
+      swappedBorrowIntSlot, Env.update]
+  have hxy : "x" = "y" :=
+    hroot "y" true [swappedBorrowA, swappedBorrowB]
+      [swappedBorrowB, swappedBorrowA] swappedBorrowA swappedBorrowA
+      hx hy (by simp) (by simp) (by simp [PathConflicts, swappedBorrowA])
+  contradiction
+
+def swappedBorrowJoinWithPEnv : Env :=
+  (swappedBorrowJoinEnv.update "c" swappedBorrowIntSlot).update
+    "p" (swappedBorrowSlot [swappedBorrowC])
+
+theorem swappedBorrowJoinWithP_p_targets {targets : List LVal} :
+    swappedBorrowJoinWithPEnv ⊢ "p" ↝ (.borrow true targets) →
+    targets = [swappedBorrowC] := by
+  rintro ⟨slot, hslot, hcontains⟩
+  have hslotTy : slot.ty = .ty (.borrow true [swappedBorrowC]) := by
+    simpa [swappedBorrowJoinWithPEnv, swappedBorrowSlot, Env.update] using
+      (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+  rw [hslotTy] at hcontains
+  cases hcontains
+  rfl
+
+theorem swappedBorrowJoinWithP_c_no_mut {targets : List LVal} :
+    ¬ swappedBorrowJoinWithPEnv ⊢ "c" ↝ (.borrow true targets) := by
+  rintro ⟨slot, hslot, hcontains⟩
+  have hslotTy : slot.ty = .ty .int := by
+    simpa [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv, swappedBorrowEnv,
+      swappedBorrowSlot, swappedBorrowIntSlot, Env.update] using
+      (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+  rw [hslotTy] at hcontains
+  cases hcontains
+
+theorem swappedBorrowJoinWithP_guard_p_or_c {root : Name} :
+    BorrowAuthorityGuard swappedBorrowJoinWithPEnv "p" root →
+    root = "p" ∨ root = "c" := by
+  intro hguard
+  induction hguard with
+  | base =>
+      exact Or.inl rfl
+  | step hcontainer hnode hmem ih =>
+      rcases ih with hcontainerRoot | hcontainerRoot
+      · subst hcontainerRoot
+        have htargets := swappedBorrowJoinWithP_p_targets hnode
+        subst htargets
+        simp [swappedBorrowC] at hmem
+        right
+        simpa [LVal.base] using congrArg LVal.base hmem
+      · subst hcontainerRoot
+        exact False.elim (swappedBorrowJoinWithP_c_no_mut hnode)
+
+theorem swappedBorrowJoinWithP_p_borrowSafeRoot :
+    BorrowSafeRoot swappedBorrowJoinWithPEnv "p" := by
+  intro y mutable targetsMutable targetsOther targetMutable targetOther
+    hp hother htargetMutable htargetOther hconflict
+  have htargetsMutable := swappedBorrowJoinWithP_p_targets hp
+  subst htargetsMutable
+  simp [swappedBorrowC] at htargetMutable
+  subst htargetMutable
+  by_cases hyp : y = "p"
+  · exact hyp.symm
+  exfalso
+  rcases hother with ⟨slot, hslot, hcontains⟩
+  by_cases hy : y = "y"
+  · subst hy
+    have hslotTy : slot.ty =
+        .ty (.borrow true [swappedBorrowB, swappedBorrowA]) := by
+      simpa [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv, swappedBorrowEnv,
+        swappedBorrowSlot, swappedBorrowIntSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hcontains
+    cases hcontains with
+    | here =>
+        simp [swappedBorrowB, swappedBorrowA] at htargetOther
+        rcases htargetOther with htargetOther | htargetOther
+        · subst htargetOther
+          simp [PathConflicts, LVal.base] at hconflict
+        · subst htargetOther
+          simp [PathConflicts, LVal.base] at hconflict
+  · by_cases hx : y = "x"
+    · subst hx
+      have hslotTy : slot.ty =
+          .ty (.borrow true [swappedBorrowA, swappedBorrowB]) := by
+        simpa [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv, swappedBorrowEnv,
+          swappedBorrowSlot, swappedBorrowIntSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hcontains
+      cases hcontains with
+      | here =>
+          simp [swappedBorrowA, swappedBorrowB] at htargetOther
+          rcases htargetOther with htargetOther | htargetOther
+          · subst htargetOther
+            simp [PathConflicts, LVal.base] at hconflict
+          · subst htargetOther
+            simp [PathConflicts, LVal.base] at hconflict
+    · by_cases hc : y = "c"
+      · subst hc
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv, swappedBorrowEnv,
+            swappedBorrowSlot, swappedBorrowIntSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hcontains
+        cases hcontains
+      · by_cases hb : y = "b"
+        · subst hb
+          have hslotTy : slot.ty = .ty .int := by
+            simpa [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv, swappedBorrowEnv,
+              swappedBorrowSlot, swappedBorrowIntSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          rw [hslotTy] at hcontains
+          cases hcontains
+        · by_cases ha : y = "a"
+          · subst ha
+            have hslotTy : slot.ty = .ty .int := by
+              simpa [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv,
+                swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+                Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+            rw [hslotTy] at hcontains
+            cases hcontains
+          · have hnone : swappedBorrowJoinWithPEnv.slotAt y = none := by
+              simp [swappedBorrowJoinWithPEnv, swappedBorrowJoinEnv,
+                swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+                Env.update, Env.empty, hyp, hy, hx, hc, hb, ha]
+            rw [hslot] at hnone
+            cases hnone
+
+theorem swappedBorrowJoinWithP_c_borrowSafeRoot :
+    BorrowSafeRoot swappedBorrowJoinWithPEnv "c" := by
+  intro y mutable targetsMutable targetsOther targetMutable targetOther
+    hmutable _hother _htargetMutable _htargetOther _hconflict
+  exact False.elim (swappedBorrowJoinWithP_c_no_mut hmutable)
+
+/-- An unrelated dereference assignment is not blocked by the crossed `x/y` join. -/
+theorem swappedBorrowJoin_unrelated_deref_assignment_frame_safe :
+    AssignmentBorrowSafety swappedBorrowJoinWithPEnv (.deref swappedBorrowP) := by
+  intro root hguard
+  rcases swappedBorrowJoinWithP_guard_p_or_c (by
+      simpa [swappedBorrowP, LVal.base] using hguard) with hroot | hroot
+  · subst hroot
+    exact swappedBorrowJoinWithP_p_borrowSafeRoot
+  · subst hroot
+    exact swappedBorrowJoinWithP_c_borrowSafeRoot
 
 end Paper
 end LwRust

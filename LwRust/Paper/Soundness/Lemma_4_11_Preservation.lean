@@ -2287,14 +2287,14 @@ root, `locReads_protected_guarded_base` carries it to the cross-variable target
 container whose `SlotDepKill` contradicts the assumed `BorrowDependency` reading
 `leaf`.  All borrow uniqueness is supplied by the witness, never by the typing
 env — exactly as before, just relocated out of the safe-abstraction frame. -/
-theorem mutLeafExclusive_of_witness {store : ProgramStore} {env : Env}
+theorem mutLeafExclusive_of_assignmentBorrowSafety {store : ProgramStore} {env : Env}
     {current borrowLifetime targetLifetime : Lifetime} {φ : Name → Nat}
     {source : LVal} {mutable : Bool} {targets : List LVal} {targetTy : PartialTy}
     {leaf : Location} {leafSlot : StoreSlot} {leafView : PartialTy}
     {rhsTy : Ty} {result : Env} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    BorrowSafeWitness store env →
+    AssignmentBorrowSafety env (.deref source) →
     store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
@@ -2306,9 +2306,8 @@ theorem mutLeafExclusive_of_witness {store : ProgramStore} {env : Env}
     EnvWrite 0 env (.deref source) rhsTy result →
     ¬ WriteProhibited result (.deref source) →
     MutLeafExclusive store env source leaf := by
-  intro hφ hwellFormed hwitness hsafe hvalidStore hheap hsourceBorrow htargets
+  intro hφ hwellFormed hassignSafe hsafe hvalidStore hheap hsourceBorrow htargets
     hlhsLoc hlhsSlot hleafValid hwrite hnotWrite
-  obtain ⟨env_w, hbs_w, _hstr_w, hkept_w⟩ := hwitness
   intro z _hzSource zslot value hzslot hzstore hdep
   -- Transport the post-write `¬WriteProhibited` to the pre-write base via the
   -- write's same-shape strengthening (`env ⊑ result`).
@@ -2335,6 +2334,11 @@ theorem mutLeafExclusive_of_witness {store : ProgramStore} {env : Env}
       ¬ WriteProhibited env (.var (LVal.base source)) := by
     intro hWP
     exact hnotWrite (writeProhibited_var_transport hglobalMap rfl hWP)
+  have hsafeAuthority :
+      ∀ root,
+        BorrowAuthorityGuard env (LVal.base source) root →
+        BorrowSafeRoot env root := by
+    simpa [AssignmentBorrowSafety] using hassignSafe
   have hkill₀ :
       SlotDepKill store env leaf (LVal.base source) :=
     slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore hheap hsourceBorrow
@@ -2362,16 +2366,16 @@ theorem mutLeafExclusive_of_witness {store : ProgramStore} {env : Env}
         SelectedTarget store container t' →
         WriteGuarded store env leaf (LVal.base source) (LVal.base t') →
         WriteGuarded store env leaf (LVal.base source) container :=
-    fun c m' ts' t' hn hm hlive hG =>
-      (WriteGuarded.collapse_kill_realized hbs_w hkept_w
-        hnotWPbase hn hm hlive hG).1
+    fun _c _m' _ts' _t' hn hm _hlive hG =>
+      (WriteGuarded.collapse_kill_authority hsafeAuthority
+        hnotWPbase hn hm hG).1
   have hGt :
       WriteGuarded store env leaf (LVal.base source) (LVal.base t) :=
     RuntimeFrame.locReads_protected_guarded_base hφ hwellFormed
       hsafe hvalidStore hheap hcollapse htTyping hreads hprotR hGr
   have hkillZ :=
-    (WriteGuarded.collapse_kill_realized hbs_w hkept_w hnotWPbase
-      ⟨zslot, hzslot, hcontains⟩ hmem hsel hGt).2
+    (WriteGuarded.collapse_kill_authority hsafeAuthority hnotWPbase
+      ⟨zslot, hzslot, hcontains⟩ hmem hGt).2
   exact hkillZ zslot value hzslot hzstore hdep
 
 /--
@@ -3109,7 +3113,6 @@ theorem preservation_assign_deref_box_step_runtime_of_wellFormed
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeEnv env →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env source (.box oldTy) targetLifetime →
@@ -3122,7 +3125,7 @@ theorem preservation_assign_deref_box_step_runtime_of_wellFormed
     ValidValue store value rhsTy →
     Step store lifetime (.assign (.deref source) (.val value)) store' (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  intro hwellFormed hborrowSafe hsafe hvalidRuntime hsourceBox hshape hwellTy hwrite
+  intro hwellFormed hsafe hvalidRuntime hsourceBox hshape hwellTy hwrite
     hranked hnotWrite hwellOut hvalidValue hstep
   rcases assign_step_components hstep with
     ⟨writtenStore, oldSlot, lhsLocation, hread, hwriteStore, hdrops,
@@ -3161,7 +3164,7 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
     {source : LVal} {mutable : Bool} {targets : List LVal}
     {targetTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeEnv env →
+    AssignmentBorrowSafety env (.deref source) →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env source (.ty (.borrow mutable targets)) borrowLifetime →
@@ -3175,7 +3178,7 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
     ValidValue store value rhsTy →
     Step store lifetime (.assign (.deref source) (.val value)) store' (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  intro hwellFormed hborrowSafe hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
+  intro hwellFormed hassignSafe hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
     hwrite hranked hnotWrite hwellOut hvalidValue hstep
   rcases assign_step_components hstep with
     ⟨writtenStore, oldSlot, lhsLocation, hread, hwriteStore, hdrops,
@@ -3213,8 +3216,8 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
         LValTyping env source (.ty (.borrow mutBit targets')) bl →
         MutLeafExclusive store env source typedLocation :=
     fun _ _ _ _ =>
-      mutLeafExclusive_of_witness hφ hwellFormed
-        (BorrowSafeWitness.of_borrowSafeEnv hsafe hborrowSafe) hsafe
+      mutLeafExclusive_of_assignmentBorrowSafety hφ hwellFormed
+        hassignSafe hsafe
         (ValidRuntimeState.validStore hvalidRuntime)
         (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
         hsourceBorrow htargets hlhsLoc hlhsSlot holdSlotValid hwrite hnotWrite
@@ -3230,7 +3233,7 @@ theorem preservation_assign_deref_step_runtime_of_wellFormed
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeEnv env →
+    AssignmentBorrowSafety env (.deref source) →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env (.deref source) oldTy targetLifetime →
@@ -3243,16 +3246,16 @@ theorem preservation_assign_deref_step_runtime_of_wellFormed
     ValidValue store value rhsTy →
     Step store lifetime (.assign (.deref source) (.val value)) store' (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  intro hwellFormed hborrowSafe hsafe hvalidRuntime hLhs hshape hwellTy hwrite hranked
+  intro hwellFormed hassignSafe hsafe hvalidRuntime hLhs hshape hwellTy hwrite hranked
     hnotWrite hwellOut hvalidValue hstep
   cases hLhs with
   | box hsourceBox =>
       exact preservation_assign_deref_box_step_runtime_of_wellFormed
-        hwellFormed hborrowSafe hsafe hvalidRuntime hsourceBox hshape hwellTy hwrite
+        hwellFormed hsafe hvalidRuntime hsourceBox hshape hwellTy hwrite
         hranked hnotWrite hwellOut hvalidValue hstep
   | borrow hsourceBorrow htargets =>
       exact preservation_assign_deref_borrow_step_runtime_of_wellFormed
-        hwellFormed hborrowSafe hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
+        hwellFormed hassignSafe hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
         hwrite hranked hnotWrite hwellOut hvalidValue hstep
 
 /-- Assignment redex preservation, dispatching on the lvalue shape. -/
@@ -3282,10 +3285,8 @@ theorem preservation_assign_step_terminal_of_wellFormed
         hwellFormed hsafe hvalidRuntime hLhs hshape hwellTy hwrite
         hnotWrite hwellOut hvalidValue hstep
   | deref source =>
-      have hborrowSafe : BorrowSafeEnv env := by
-        simpa [AssignmentBorrowSafety] using hassignSafe
       exact preservation_assign_deref_step_runtime_of_wellFormed
-        hwellFormed hborrowSafe
+        hwellFormed hassignSafe
         hsafe hvalidRuntime hLhs hshape hwellTy hwrite
         hranked hnotWrite hwellOut hvalidValue hstep
 

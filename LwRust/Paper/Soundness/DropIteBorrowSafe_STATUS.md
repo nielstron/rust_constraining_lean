@@ -15,13 +15,16 @@ Current branch status:
 - Preservation and reachable progress no longer thread static `BorrowSafeEnv`
   through recursive subterm states.  Assignment now uses
   `AssignmentBorrowSafety`: direct root writes need no global borrow-safe
-  environment, while dereference writes still require the existing witness where
-  the write frame consumes it.
+  environment, while dereference writes require `BorrowSafeRoot` only for the
+  roots in the dereference's static `BorrowAuthorityGuard` closure.  Unrelated
+  crossed-join conflicts elsewhere in the environment do not block the
+  assignment premise.
 
 Validated locally:
 
 ```sh
 lake build LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety \
   LwRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety \
-  LwRust.Paper.Soundness.InitialStates
+  LwRust.Paper.Soundness.InitialStates \
+  LwRust.Paper.Examples.SwappedBorrowJoin
 ```
