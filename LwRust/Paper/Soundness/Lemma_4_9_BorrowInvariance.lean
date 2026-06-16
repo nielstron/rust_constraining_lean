@@ -479,7 +479,7 @@ theorem envBorrow_of_selectedTarget {store : ProgramStore} {env : Env}
     SelectedTarget store x s →
     ∃ mutable targets t₃,
       env ⊢ x ↝ (.borrow mutable targets) ∧ t₃ ∈ targets ∧
-      SelectedTarget store x t₃ := by
+      SelectedTarget store x t₃ ∧ store.loc t₃ = store.loc s := by
   intro hrealize hsel
   rcases hsel with ⟨cell, cellSlot, loc, hprot, hcellSlot, hcellval, hsloc⟩
   obtain ⟨xEnvSlot, hxEnvSlot⟩ : ∃ es, env.slotAt x = some es := by
@@ -503,46 +503,75 @@ theorem envBorrow_of_selectedTarget {store : ProgramStore} {env : Env}
     rcases borrowContains_of_valid_borrowRef hxValid with
       ⟨mutable, targets, target, htyEq, hmem, hloc⟩
     refine ⟨mutable, targets, target, ⟨xEnvSlot, hxEnvSlot,
-      htyEq ▸ PartialTyContains.here⟩, hmem, ?_⟩
-    exact ⟨VariableProjection x, cellSlot, loc, Or.inl rfl, hcellSlot,
-      hcellval, hloc⟩
+      htyEq ▸ PartialTyContains.here⟩, hmem,
+      ⟨VariableProjection x, cellSlot, loc, Or.inl rfl, hcellSlot,
+        hcellval, hloc⟩, ?_⟩
+    rw [hloc, hsloc]
   · rcases borrowContains_of_owned_borrowCell hxValid hxStoreSlot howns
         hcellSlot hcellval with ⟨mutable, targets, target, hcontains, hmem, hloc⟩
     refine ⟨mutable, targets, target,
-      ⟨xEnvSlot, hxEnvSlot, hcontains⟩, hmem, ?_⟩
-    exact ⟨cell, cellSlot, loc, Or.inr howns, hcellSlot, hcellval, hloc⟩
+      ⟨xEnvSlot, hxEnvSlot, hcontains⟩, hmem,
+      ⟨cell, cellSlot, loc, Or.inr howns, hcellSlot, hcellval, hloc⟩, ?_⟩
+    rw [hloc, hsloc]
 
-/-- The keystone `T-If` join `hlive` side condition, discharging the env₃ side
-(A) of the split fully, and isolating the genuinely hard env₄-only co-located
-case (B) as an explicit obligation `hbridge`.
+/-- The `&mut` *location-exclusivity* invariant of the executed-branch store
+across a `T-If` join (`store ∼ₛ env₃`, `env₅ = env₃ ⊔ env₄`).
 
-`hbridge` is exactly: an env₄-only join borrow target `s` that is selected by
-the executed-branch store (`SelectedTarget store x s`) is already covered by the
-witness `env_w`'s `x`-borrow target list.  See the module note on
-`borrowSafeWitness_ite_hlive_bridge_blocked` for why this cannot be discharged
-from the per-target syntactic `BorrowSafeEnv` invariant alone (the §4.5.1
-syntactic-vs-location deviation): `s` and the realized env₃ target `t₃` it
-co-resolves with need not be path-conflicting (`⋈`), so `BorrowSafeEnv`'s
-mutable-borrow *root* uniqueness yields no membership relation between them. -/
+Read off the realized env₃ store: whenever an env₅ borrow node at root `x`
+*selects* (`SelectedTarget store x s`) a target `s` reaching some location, and
+the realized branch env₃ *also* selects, at the same root `x`, a target `t₃`
+reaching the *same* location (`store.loc t₃ = store.loc s`), then the two borrow
+nodes carry the same mutability bit.
+
+This is the honest store-level invariant the §4.5.1 ite-join deviation needs:
+at most one *live* `&mut` borrow reaches any given location, so a runtime cell
+that co-resolves an env₄-only join target `s` and an env₃ target `t₃` cannot
+disagree on `&mut`-ness — the mutability reaching a location is a function of the
+location, not of which branch's target names it.  Crucially it is purely a
+property of the realized store plus which targets are `&mut` (read off env₃ and
+the join), so it is *invariant under the type-level ite join*: the join never
+touches the store, and W-Bor preserves the mutable bit. -/
+def LocMutExcl (store : ProgramStore) (env₃ env₅ : Env) : Prop :=
+  ∀ x mutable targets s,
+    env₅ ⊢ x ↝ (.borrow mutable targets) → s ∈ targets → SelectedTarget store x s →
+    ∀ mutable₃ targets₃ t₃,
+      env₃ ⊢ x ↝ (.borrow mutable₃ targets₃) → t₃ ∈ targets₃ →
+      SelectedTarget store x t₃ →
+      store.loc t₃ = store.loc s →
+      mutable₃ = mutable
+
+/-- The keystone `T-If` join `hlive` side condition, now premise-clean modulo the
+honest store-level `&mut` location-exclusivity invariant `LocMutExcl` (replacing
+the opaque `hbridge`).
+
+The keep-contract is stated as **location coverage**: the witness `env_w`'s
+`x`-borrow keeps, at the *same location*, *some* target `t_w` co-resolving with
+the selected env₅ target `s` (`store.loc t_w = store.loc s`).  This is the
+correct contract for the §4.5.1 deviation — an env₄-only join target `s` is not
+syntactically in the env₃-derived witness, but the env₃ target `t₃` it
+co-resolves with *is* kept, and `LocMutExcl` pins the two nodes to the same
+mutability so the kept node has the env₅ borrow's mutable bit.
+
+* (A) env₃ side: `s` is a genuine env₃ target → `hkept₃` keeps it directly.
+* (B) env₄-only side: the realized store selects `s` (`hsel`); the realization
+  bridge `envBorrow_of_selectedTarget` recovers a genuine env₃ node at `x` with
+  a *co-located* realized target `t₃`; `LocMutExcl` makes that node's mutability
+  the env₅ borrow's, and `hkept₃` keeps `t₃` at `s`'s location. -/
 theorem borrowSafeWitness_ite_hlive
     {store : ProgramStore} {env₃ env₄ env₅ env_w : Env} {lifetime : Lifetime}
     (hjoin : EnvJoin env₃ env₄ env₅)
     (hrealize : store ∼ₛ env₃)
     (hwf : WellFormedEnv env₃ lifetime)
     (hbs_w : BorrowSafeEnv env_w) (hstr_w : EnvSameShapeStrengthening env_w env₃)
+    (hlocMutExcl : LocMutExcl store env₃ env₅)
     (hkept₃ : ∀ x mutable targets s, env₃ ⊢ x ↝ (.borrow mutable targets) →
         s ∈ targets → SelectedTarget store x s →
-        ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
-    (hbridge : ∀ x mutable targets s rightSlot rightTargets,
-        env₅ ⊢ x ↝ (.borrow mutable targets) → s ∈ targets →
-        SelectedTarget store x s →
-        env₄.slotAt x = some rightSlot →
-        PartialTyContains rightSlot.ty (.borrow mutable rightTargets) →
-        s ∈ rightTargets →
-        ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw) :
+        ∃ Tw t_w, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ t_w ∈ Tw ∧
+          store.loc t_w = store.loc s) :
     ∀ x mutable targets s, env₅ ⊢ x ↝ (.borrow mutable targets) →
       s ∈ targets → SelectedTarget store x s →
-      ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw := by
+      ∃ Tw t_w, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ t_w ∈ Tw ∧
+        store.loc t_w = store.loc s := by
   intro x mutable targets s hnode₅ hmem hsel
   rcases hnode₅ with ⟨joinSlot, hjoinSlot, hcontains⟩
   -- Split the env₅ join borrow target `s` into its env₃ / env₄ origin (W-Bor).
@@ -552,10 +581,19 @@ theorem borrowSafeWitness_ite_hlive
     rcases hleft with ⟨leftSlot, leftTargets, hleftSlot, hleftContains, hleftMem⟩
     exact hkept₃ x mutable leftTargets s ⟨leftSlot, hleftSlot, hleftContains⟩
       hleftMem hsel
-  · -- (B) env₄-only side: delegated to the explicit bridge obligation.
-    rcases hright with ⟨rightSlot, rightTargets, hrightSlot, hrightContains, hrightMem⟩
-    exact hbridge x mutable targets s rightSlot rightTargets
-      ⟨joinSlot, hjoinSlot, hcontains⟩ hmem hsel hrightSlot hrightContains hrightMem
+  · -- (B) env₄-only side: discharged from `LocMutExcl` + the realization bridge.
+    -- Recover a genuine env₃ borrow node at `x` co-resolving with `s`.
+    rcases envBorrow_of_selectedTarget hrealize hsel with
+      ⟨mutable₃, targets₃, t₃, hnode₃, hmem₃, hsel₃, hloc₃⟩
+    -- `LocMutExcl` pins the env₃ node's mutability to the env₅ borrow's.
+    have hmutEq : mutable₃ = mutable :=
+      hlocMutExcl x mutable targets s ⟨joinSlot, hjoinSlot, hcontains⟩ hmem hsel
+        mutable₃ targets₃ t₃ hnode₃ hmem₃ hsel₃ hloc₃
+    subst hmutEq
+    -- The witness keeps `t₃` at `t₃`'s location = `s`'s location.
+    rcases hkept₃ x mutable₃ targets₃ t₃ hnode₃ hmem₃ hsel₃ with
+      ⟨Tw, t_w, hnode_w, hmem_w, hloc_w⟩
+    exact ⟨Tw, t_w, hnode_w, hmem_w, by rw [hloc_w, hloc₃]⟩
 
 /-- The empty environment is vacuously borrow safe (it has no slots, so no
 borrow node resolves). -/
