@@ -47,6 +47,26 @@ def update (env : FiniteEnv) (name : Name) (slot : EnvSlot) : FiniteEnv :=
 def erase (env : FiniteEnv) (name : Name) : FiniteEnv :=
   { entries := env.entries.filter (fun entry => entry.1 != name) }
 
+private theorem lookupEntries_filter_update_ne
+    (entries : List (Name × EnvSlot)) {name needle : Name}
+    (hne : needle ≠ name) :
+    lookupEntries (entries.filter (fun entry => entry.1 != name)) needle =
+      lookupEntries entries needle := by
+  induction entries with
+  | nil =>
+      simp [lookupEntries]
+  | cons entry rest ih =>
+      rcases entry with ⟨entryName, entrySlot⟩
+      by_cases hentry : entryName = name
+      · have hneedle : ¬ needle = entryName := by
+          intro h
+          exact hne (h.trans hentry)
+        simp [lookupEntries, hentry, hne, ih]
+      · by_cases hneedle : needle = entryName
+        · subst hneedle
+          simp [lookupEntries, hentry]
+        · simp [lookupEntries, hentry, hneedle, ih]
+
 def support (env : FiniteEnv) : List Name :=
   env.entries.foldl
     (fun names entry => if names.contains entry.1 then names else names ++ [entry.1])
@@ -54,6 +74,19 @@ def support (env : FiniteEnv) : List Name :=
 
 def toEnv (env : FiniteEnv) : Env :=
   { slotAt := env.lookup }
+
+@[simp] theorem toEnv_update (env : FiniteEnv) (name : Name)
+    (slot : EnvSlot) :
+    (env.update name slot).toEnv = env.toEnv.update name slot := by
+  cases env with
+  | mk entries =>
+      apply congrArg Env.mk
+      funext needle
+      by_cases hneedle : needle = name
+      · subst hneedle
+        simp [lookup, update, lookupEntries]
+      · simp [toEnv, lookup, update, lookupEntries, hneedle,
+          lookupEntries_filter_update_ne entries hneedle]
 
 def dropLifetime (env : FiniteEnv) (lifetime : Lifetime) : FiniteEnv :=
   { entries := env.entries.filter (fun entry => entry.2.lifetime != lifetime) }
@@ -820,6 +853,13 @@ def checkTermMatches? (fuel : Nat) (env : FiniteEnv)
   | .ok result => result.matches expectedTy expectedEnv
   | .error _ => false
 
+def checkTermListMatches? (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (terms : List Term)
+    (expectedTy : Ty) (expectedEnv : FiniteEnv) : Bool :=
+  match checkTermList? fuel env typing lifetime terms with
+  | .ok result => result.matches expectedTy expectedEnv
+  | .error _ => false
+
 def checkTermRejects? (fuel : Nat) (env : FiniteEnv)
     (typing : StoreTyping) (lifetime : Lifetime) (term : Term) : Bool :=
   !(checkTerm? fuel env typing lifetime term).isOk
@@ -929,6 +969,198 @@ theorem typable {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
       CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv) :
     ∃ env₂ ty, TermTyping env.toEnv typing lifetime term ty env₂ := by
   exact ⟨expectedEnv.toEnv, expectedTy, certificate.typing⟩
+
+def const {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {value : Value} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.val value) ty env = true)
+    (valueTyping : ValueTyping typing value ty) :
+    CertifiedTermCheck fuel env typing lifetime (.val value) ty env :=
+  { checked := checked
+    typing := TermTyping.const valueTyping }
+
+def copy {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.copy lv) ty env = true)
+    (lvalTyping : LValTyping env.toEnv lv (.ty ty) valueLifetime)
+    (copyTy : CopyTy ty)
+    (notReadProhibited : ¬ ReadProhibited env.toEnv lv) :
+    CertifiedTermCheck fuel env typing lifetime (.copy lv) ty env :=
+  { checked := checked
+    typing := TermTyping.copy lvalTyping copyTy notReadProhibited }
+
+def mutBorrow {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.borrow true lv)
+        (.borrow true [lv]) env = true)
+    (lvalTyping : LValTyping env.toEnv lv (.ty ty) valueLifetime)
+    (mutable : Mutable env.toEnv lv)
+    (notWriteProhibited : ¬ WriteProhibited env.toEnv lv) :
+    CertifiedTermCheck fuel env typing lifetime (.borrow true lv)
+      (.borrow true [lv]) env :=
+  { checked := checked
+    typing := TermTyping.mutBorrow lvalTyping mutable notWriteProhibited }
+
+def immBorrow {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.borrow false lv)
+        (.borrow false [lv]) env = true)
+    (lvalTyping : LValTyping env.toEnv lv (.ty ty) valueLifetime)
+    (notReadProhibited : ¬ ReadProhibited env.toEnv lv) :
+    CertifiedTermCheck fuel env typing lifetime (.borrow false lv)
+      (.borrow false [lv]) env :=
+  { checked := checked
+    typing := TermTyping.immBorrow lvalTyping notReadProhibited }
+
+def assign {fuel : Nat} {env rhsEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.assign lhs rhs) .unit
+        outEnv = true)
+    (lhsBefore : LValTyping env.toEnv lhs oldTy targetLifetime)
+    (rhsCert : CertifiedTermCheck fuel env typing lifetime rhs rhsTy rhsEnv)
+    (assignmentSafe : AssignmentBorrowSafety rhsEnv.toEnv lhs)
+    (lhsAfter : LValTyping rhsEnv.toEnv lhs oldTy targetLifetime)
+    (shape : ShapeCompatible rhsEnv.toEnv oldTy (.ty rhsTy))
+    (wellFormed : WellFormedTy rhsEnv.toEnv rhsTy targetLifetime)
+    (write : EnvWrite 0 rhsEnv.toEnv lhs rhsTy outEnv.toEnv)
+    (below :
+      ∃ φ, LinearizedBy φ rhsEnv.toEnv ∧
+        EnvWriteRhsBorrowTargetsBelow φ outEnv.toEnv rhsTy)
+    (coherence :
+      EnvWriteCoherenceObligations rhsEnv.toEnv outEnv.toEnv (LVal.base lhs))
+    (contained : ContainedBorrowsWellFormed outEnv.toEnv)
+    (notWriteProhibited : ¬ WriteProhibited outEnv.toEnv lhs) :
+    CertifiedTermCheck fuel env typing lifetime (.assign lhs rhs) .unit outEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.assign lhsBefore rhsCert.typing assignmentSafe lhsAfter shape
+        wellFormed write below coherence contained notWriteProhibited }
+
+def equal {fuel : Nat} {env lhsEnv rhsEnv ghostEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {lhs rhs : Term}
+    {lhsTy rhsTy ghostRhsTy : Ty} {ghost : Name}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.eq lhs rhs) .bool
+        rhsEnv = true)
+    (lhsCert : CertifiedTermCheck fuel env typing lifetime lhs lhsTy lhsEnv)
+    (freshGhost : lhsEnv.toEnv.fresh ghost)
+    (ghostCert :
+      CertifiedTermCheck fuel
+        (lhsEnv.update ghost { ty := .ty lhsTy, lifetime := lifetime })
+        typing lifetime rhs ghostRhsTy ghostEnv)
+    (rhsCert : CertifiedTermCheck fuel lhsEnv typing lifetime rhs rhsTy rhsEnv)
+    (lhsCopy : CopyTy lhsTy)
+    (rhsCopy : CopyTy rhsTy)
+    (shape : ShapeCompatible rhsEnv.toEnv (.ty lhsTy) (.ty rhsTy)) :
+    CertifiedTermCheck fuel env typing lifetime (.eq lhs rhs) .bool rhsEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.eq (ghost := ghost) lhsCert.typing freshGhost
+        (by simpa [FiniteEnv.toEnv_update] using ghostCert.typing)
+        rhsCert.typing lhsCopy rhsCopy shape }
+
+def ite {fuel : Nat} {env conditionEnv trueEnv falseEnv joinEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {condition trueBranch falseBranch : Term} {trueTy falseTy joinTy : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime
+        (.ite condition trueBranch falseBranch) joinTy joinEnv = true)
+    (conditionCert :
+      CertifiedTermCheck fuel env typing lifetime condition .bool conditionEnv)
+    (trueCert :
+      CertifiedTermCheck fuel conditionEnv typing lifetime trueBranch trueTy
+        trueEnv)
+    (falseCert :
+      CertifiedTermCheck fuel conditionEnv typing lifetime falseBranch falseTy
+        falseEnv)
+    (typeJoin : PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy))
+    (envJoin : EnvJoin trueEnv.toEnv falseEnv.toEnv joinEnv.toEnv)
+    (trueSameShape : EnvJoinSameShape trueEnv.toEnv joinEnv.toEnv)
+    (falseSameShape : EnvJoinSameShape falseEnv.toEnv joinEnv.toEnv)
+    (wellFormed : WellFormedTy joinEnv.toEnv joinTy lifetime)
+    (contained : ContainedBorrowsWellFormed joinEnv.toEnv)
+    (coherent : Coherent joinEnv.toEnv)
+    (linearizable : Linearizable joinEnv.toEnv)
+    (typeBorrowSafe : TyBorrowSafeAgainstEnv joinEnv.toEnv joinTy) :
+    CertifiedTermCheck fuel env typing lifetime
+      (.ite condition trueBranch falseBranch) joinTy joinEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.ite conditionCert.typing trueCert.typing falseCert.typing
+        typeJoin envJoin trueSameShape falseSameShape wellFormed contained
+        coherent linearizable typeBorrowSafe }
+
+end CertifiedTermCheck
+
+/-- Proof-carrying counterpart of `checkTermList?` for block bodies. -/
+structure CertifiedTermListCheck (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (terms : List Term)
+    (expectedTy : Ty) (expectedEnv : FiniteEnv) : Type where
+  checked :
+    checkTermListMatches? fuel env typing lifetime terms expectedTy expectedEnv =
+      true
+  typing :
+    TermListTyping env.toEnv typing lifetime terms expectedTy expectedEnv.toEnv
+
+namespace CertifiedTermListCheck
+
+def singleton {fuel : Nat} {env outEnv : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty}
+    (checked :
+      checkTermListMatches? fuel env typing lifetime [term] ty outEnv = true)
+    (termCert : CertifiedTermCheck fuel env typing lifetime term ty outEnv) :
+    CertifiedTermListCheck fuel env typing lifetime [term] ty outEnv :=
+  { checked := checked
+    typing := TermListTyping.singleton termCert.typing }
+
+def cons {fuel : Nat} {env midEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {rest : List Term} {termTy finalTy : Ty}
+    (checked :
+      checkTermListMatches? fuel env typing lifetime (term :: rest) finalTy
+        outEnv = true)
+    (headCert : CertifiedTermCheck fuel env typing lifetime term termTy midEnv)
+    (restCert :
+      CertifiedTermListCheck fuel midEnv typing lifetime rest finalTy outEnv) :
+    CertifiedTermListCheck fuel env typing lifetime (term :: rest) finalTy
+      outEnv :=
+  { checked := checked
+    typing := TermListTyping.cons headCert.typing restCert.typing }
+
+theorem sound {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {terms : List Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermListCheck fuel env typing lifetime terms expectedTy
+        expectedEnv) :
+    TermListTyping env.toEnv typing lifetime terms expectedTy
+      expectedEnv.toEnv :=
+  certificate.typing
+
+end CertifiedTermListCheck
+
+namespace CertifiedTermCheck
+
+def block {fuel : Nat} {env bodyEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
+    {terms : List Term} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.block blockLifetime terms)
+        ty outEnv = true)
+    (child : LifetimeChild lifetime blockLifetime)
+    (bodyCert :
+      CertifiedTermListCheck fuel env typing blockLifetime terms ty bodyEnv)
+    (wellFormed : WellFormedTy bodyEnv.toEnv ty lifetime)
+    (dropEq : outEnv.toEnv = bodyEnv.toEnv.dropLifetime blockLifetime) :
+    CertifiedTermCheck fuel env typing lifetime (.block blockLifetime terms) ty
+      outEnv :=
+  { checked := checked
+    typing := TermTyping.block child bodyCert.typing wellFormed dropEq }
 
 end CertifiedTermCheck
 

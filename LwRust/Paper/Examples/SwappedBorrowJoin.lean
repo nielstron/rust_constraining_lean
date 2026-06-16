@@ -94,6 +94,42 @@ def swappedBorrowFiniteJoinEnv : FiniteEnv :=
     ("y", swappedBorrowSlot [swappedBorrowB, swappedBorrowA])
   ] }
 
+def swappedBorrowFiniteThenXEnv : FiniteEnv :=
+  { entries := [
+    ("x", swappedBorrowSlot [swappedBorrowA]),
+    ("a", swappedBorrowIntSlot),
+    ("b", swappedBorrowIntSlot),
+    ("y", swappedBorrowSlot [])
+  ] }
+
+def swappedBorrowFiniteThenEnv : FiniteEnv :=
+  { entries := [
+    ("y", swappedBorrowSlot [swappedBorrowB]),
+    ("x", swappedBorrowSlot [swappedBorrowA]),
+    ("a", swappedBorrowIntSlot),
+    ("b", swappedBorrowIntSlot)
+  ] }
+
+def swappedBorrowFiniteElseXEnv : FiniteEnv :=
+  { entries := [
+    ("x", swappedBorrowSlot [swappedBorrowB]),
+    ("a", swappedBorrowIntSlot),
+    ("b", swappedBorrowIntSlot),
+    ("y", swappedBorrowSlot [])
+  ] }
+
+def swappedBorrowFiniteElseEnv : FiniteEnv :=
+  { entries := [
+    ("y", swappedBorrowSlot [swappedBorrowA]),
+    ("x", swappedBorrowSlot [swappedBorrowB]),
+    ("a", swappedBorrowIntSlot),
+    ("b", swappedBorrowIntSlot)
+  ] }
+
+def swappedBorrowFiniteEqGhostEnv : FiniteEnv :=
+  swappedBorrowFinitePreIfEnv.update "γ"
+    { ty := .ty .int, lifetime := Lifetime.root }
+
 theorem swappedBorrowFinitePreIfEnv_toEnv :
     swappedBorrowFinitePreIfEnv.toEnv = swappedBorrowPreIfEnv := by
   apply swappedBorrow_env_ext
@@ -113,6 +149,50 @@ theorem swappedBorrowFiniteJoinEnv_toEnv :
     by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
     simp [swappedBorrowFiniteJoinEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
       FiniteEnv.lookupEntries, swappedBorrowJoinEnv, swappedBorrowEnv,
+      swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty,
+      hy, hx, hb, ha]
+
+theorem swappedBorrowFiniteThenXEnv_toEnv :
+    swappedBorrowFiniteThenXEnv.toEnv = swappedBorrowThenXEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+    by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+    simp [swappedBorrowFiniteThenXEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
+      FiniteEnv.lookupEntries, swappedBorrowThenXEnv, swappedBorrowPreIfEnv,
+      swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot, Env.update,
+      Env.empty, hy, hx, hb, ha]
+
+theorem swappedBorrowFiniteThenEnv_toEnv :
+    swappedBorrowFiniteThenEnv.toEnv = swappedBorrowThenEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+    by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+    simp [swappedBorrowFiniteThenEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
+      FiniteEnv.lookupEntries, swappedBorrowThenEnv, swappedBorrowEnv,
+      swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty,
+      hy, hx, hb, ha]
+
+theorem swappedBorrowFiniteElseXEnv_toEnv :
+    swappedBorrowFiniteElseXEnv.toEnv = swappedBorrowElseXEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+    by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+    simp [swappedBorrowFiniteElseXEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
+      FiniteEnv.lookupEntries, swappedBorrowElseXEnv, swappedBorrowPreIfEnv,
+      swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot, Env.update,
+      Env.empty, hy, hx, hb, ha]
+
+theorem swappedBorrowFiniteElseEnv_toEnv :
+    swappedBorrowFiniteElseEnv.toEnv = swappedBorrowElseEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+    by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+    simp [swappedBorrowFiniteElseEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
+      FiniteEnv.lookupEntries, swappedBorrowElseEnv, swappedBorrowEnv,
       swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty,
       hy, hx, hb, ha]
 
@@ -1140,6 +1220,19 @@ def swappedBorrowCondition : Term :=
 private def swappedBorrowEqGhostEnv : Env :=
   swappedBorrowPreIfEnv.update "γ" { ty := .ty .int, lifetime := Lifetime.root }
 
+private theorem swappedBorrowFiniteEqGhostEnv_toEnv :
+    swappedBorrowFiniteEqGhostEnv.toEnv = swappedBorrowEqGhostEnv := by
+  rw [swappedBorrowFiniteEqGhostEnv, FiniteEnv.toEnv_update,
+    swappedBorrowFinitePreIfEnv_toEnv]
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hγ : name = "γ" <;> by_cases hy : name = "y" <;>
+    by_cases hx : name = "x" <;> by_cases hb : name = "b" <;>
+    by_cases ha : name = "a" <;>
+    simp [swappedBorrowEqGhostEnv, swappedBorrowPreIfEnv, swappedBorrowEnv,
+      swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty,
+      hγ, hy, hx, hb, ha]
+
 private theorem swappedBorrowPreIf_not_readProhibited (lv : LVal) :
     ¬ ReadProhibited swappedBorrowPreIfEnv lv := by
   simp [ReadProhibited, EnvContains, swappedBorrowPreIfEnv, swappedBorrowEnv,
@@ -1308,24 +1401,6 @@ private theorem swappedBorrowEqGhost_not_readProhibited (lv : LVal) :
             subst hslot
             cases hcontains
           · simp [hγ, hy, hx, hb, ha] at hslot
-
-private theorem swappedBorrowCondition_typing {typing : StoreTyping} :
-    TermTyping swappedBorrowPreIfEnv typing Lifetime.root
-      swappedBorrowCondition .bool swappedBorrowPreIfEnv := by
-  unfold swappedBorrowCondition
-  exact TermTyping.eq (ghost := "γ")
-    (TermTyping.copy swappedBorrow_a_typing CopyTy.int
-      (swappedBorrowPreIf_not_readProhibited swappedBorrowA))
-    (by
-      simp [Env.fresh, swappedBorrowPreIfEnv, swappedBorrowEnv,
-        swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty])
-    (TermTyping.copy swappedBorrowEqGhost_b_typing CopyTy.int
-      (swappedBorrowEqGhost_not_readProhibited swappedBorrowB))
-    (TermTyping.copy swappedBorrow_b_typing CopyTy.int
-      (swappedBorrowPreIf_not_readProhibited swappedBorrowB))
-    CopyTy.int
-    CopyTy.int
-    ShapeCompatible.int
 
 private theorem swappedBorrow_write_x_a :
     EnvWrite 0 swappedBorrowPreIfEnv swappedBorrowX
@@ -1697,133 +1772,337 @@ private theorem swappedBorrowElse_not_writeProhibited_y :
         subst target
         simp [LVal.base]))
 
-private theorem swappedBorrow_assign_x_a_typing {typing : StoreTyping}
-    {lifetime : Lifetime} :
-    TermTyping swappedBorrowPreIfEnv typing lifetime
+private theorem swappedBorrow_borrow_a_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowA)
+      (.borrow true [swappedBorrowA]) swappedBorrowFinitePreIfEnv = true := by
+  native_decide
+
+private def swappedBorrow_borrow_a_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowA)
+      (.borrow true [swappedBorrowA]) swappedBorrowFinitePreIfEnv :=
+  CertifiedTermCheck.mutBorrow
+    swappedBorrow_borrow_a_checker_matches
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_a_typing)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_a_mutable)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrowPreIf_not_writeProhibited_a)
+
+private theorem swappedBorrow_assign_x_a_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowX (.borrow true swappedBorrowA))
+      .unit swappedBorrowFiniteThenXEnv = true := by
+  native_decide
+
+private def swappedBorrow_assign_x_a_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowX (.borrow true swappedBorrowA))
+      .unit swappedBorrowFiniteThenXEnv :=
+  CertifiedTermCheck.assign
+    swappedBorrow_assign_x_a_checker_matches
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_x_typing)
+    swappedBorrow_borrow_a_certified
+    (by trivial)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_x_typing)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_shape_borrow swappedBorrow_empty_good
+        swappedBorrow_a_good)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_borrow_wellFormed swappedBorrow_a_good)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv,
+        swappedBorrowFiniteThenXEnv_toEnv]
+      exact swappedBorrow_write_x_a)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv,
+        swappedBorrowFiniteThenXEnv_toEnv]
+      exact swappedBorrow_ranked_x_a)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv,
+        swappedBorrowFiniteThenXEnv_toEnv]
+      exact swappedBorrow_coherent_x_a)
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      exact swappedBorrowThenX_contained)
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      exact swappedBorrowThenX_not_writeProhibited_x)
+
+private theorem swappedBorrow_assign_x_a_typing :
+    TermTyping swappedBorrowPreIfEnv StoreTyping.empty ([0] : Lifetime)
       (.assign swappedBorrowX (.borrow true swappedBorrowA)) .unit
       swappedBorrowThenXEnv := by
-  exact TermTyping.assign
-    swappedBorrow_x_typing
-    (TermTyping.mutBorrow swappedBorrow_a_typing swappedBorrow_a_mutable
-      swappedBorrowPreIf_not_writeProhibited_a)
-    (by trivial)
-    swappedBorrow_x_typing
-    (swappedBorrow_shape_borrow swappedBorrow_empty_good swappedBorrow_a_good)
-    (swappedBorrow_borrow_wellFormed swappedBorrow_a_good)
-    swappedBorrow_write_x_a
-    swappedBorrow_ranked_x_a
-    swappedBorrow_coherent_x_a
-    swappedBorrowThenX_contained
-    swappedBorrowThenX_not_writeProhibited_x
+  simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteThenXEnv_toEnv]
+    using CertifiedTermCheck.sound swappedBorrow_assign_x_a_certified
 
-private theorem swappedBorrow_assign_y_b_typing {typing : StoreTyping}
-    {lifetime : Lifetime} :
-    TermTyping swappedBorrowThenXEnv typing lifetime
-      (.assign swappedBorrowY (.borrow true swappedBorrowB)) .unit
-      swappedBorrowThenEnv := by
-  have hyTyping :
-      LValTyping swappedBorrowThenXEnv swappedBorrowY
-        (.ty (.borrow true [])) Lifetime.root := by
-    simpa [swappedBorrowThenXEnv_eq] using
-      (swappedBorrow_y_typing :
-        LValTyping (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowY
-          (.ty (.borrow true [])) Lifetime.root)
-  have hbTyping :
-      LValTyping swappedBorrowThenXEnv swappedBorrowB (.ty .int)
-        Lifetime.root := by
-    simpa [swappedBorrowThenXEnv_eq] using
-      (swappedBorrow_b_typing :
-        LValTyping (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowB
-          (.ty .int) Lifetime.root)
-  have hbMutable : Mutable swappedBorrowThenXEnv swappedBorrowB := by
-    simpa [swappedBorrowThenXEnv_eq] using
-      (swappedBorrow_b_mutable :
-        Mutable (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowB)
-  exact TermTyping.assign
-    hyTyping
-    (TermTyping.mutBorrow hbTyping hbMutable
-      swappedBorrowThenX_not_writeProhibited_b)
-    (by trivial)
-    hyTyping
+private theorem swappedBorrow_borrow_b_thenX_checker_matches :
+    checkTermMatches? 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowB)
+      (.borrow true [swappedBorrowB]) swappedBorrowFiniteThenXEnv = true := by
+  native_decide
+
+private def swappedBorrow_borrow_b_thenX_certified :
+    CertifiedTermCheck 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowB)
+      (.borrow true [swappedBorrowB]) swappedBorrowFiniteThenXEnv :=
+  CertifiedTermCheck.mutBorrow
+    swappedBorrow_borrow_b_thenX_checker_matches
     (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      simpa [swappedBorrowThenXEnv_eq] using
+        (swappedBorrow_b_typing :
+          LValTyping (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowB
+            (.ty .int) Lifetime.root))
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      simpa [swappedBorrowThenXEnv_eq] using
+        (swappedBorrow_b_mutable :
+          Mutable (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowB))
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      exact swappedBorrowThenX_not_writeProhibited_b)
+
+private theorem swappedBorrow_assign_y_b_checker_matches :
+    checkTermMatches? 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowY (.borrow true swappedBorrowB))
+      .unit swappedBorrowFiniteThenEnv = true := by
+  native_decide
+
+private def swappedBorrow_assign_y_b_certified :
+    CertifiedTermCheck 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowY (.borrow true swappedBorrowB))
+      .unit swappedBorrowFiniteThenEnv :=
+  CertifiedTermCheck.assign
+    swappedBorrow_assign_y_b_checker_matches
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      simpa [swappedBorrowThenXEnv_eq] using
+        (swappedBorrow_y_typing :
+          LValTyping (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowY
+            (.ty (.borrow true [])) Lifetime.root))
+    swappedBorrow_borrow_b_thenX_certified
+    (by trivial)
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
+      simpa [swappedBorrowThenXEnv_eq] using
+        (swappedBorrow_y_typing :
+          LValTyping (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowY
+            (.ty (.borrow true [])) Lifetime.root))
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
       simpa [swappedBorrowThenXEnv_eq] using
         (swappedBorrow_shape_borrow
           (xTargets := [swappedBorrowA]) (yTargets := [])
           swappedBorrow_empty_good swappedBorrow_b_good))
     (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv]
       simpa [swappedBorrowThenXEnv_eq] using
         (swappedBorrow_borrow_wellFormed
           (xTargets := [swappedBorrowA]) (yTargets := [])
           swappedBorrow_b_good))
-    swappedBorrow_write_y_b
-    swappedBorrow_ranked_y_b
-    swappedBorrow_coherent_y_b
-    swappedBorrowThen_contained
-    swappedBorrowThen_not_writeProhibited_y
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv,
+        swappedBorrowFiniteThenEnv_toEnv]
+      exact swappedBorrow_write_y_b)
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv,
+        swappedBorrowFiniteThenEnv_toEnv]
+      exact swappedBorrow_ranked_y_b)
+    (by
+      rw [swappedBorrowFiniteThenXEnv_toEnv,
+        swappedBorrowFiniteThenEnv_toEnv]
+      exact swappedBorrow_coherent_y_b)
+    (by
+      rw [swappedBorrowFiniteThenEnv_toEnv]
+      exact swappedBorrowThen_contained)
+    (by
+      rw [swappedBorrowFiniteThenEnv_toEnv]
+      exact swappedBorrowThen_not_writeProhibited_y)
 
-private theorem swappedBorrow_assign_x_b_typing {typing : StoreTyping}
-    {lifetime : Lifetime} :
-    TermTyping swappedBorrowPreIfEnv typing lifetime
+private theorem swappedBorrow_assign_y_b_typing :
+    TermTyping swappedBorrowThenXEnv StoreTyping.empty ([0] : Lifetime)
+      (.assign swappedBorrowY (.borrow true swappedBorrowB)) .unit
+      swappedBorrowThenEnv := by
+  simpa [swappedBorrowFiniteThenXEnv_toEnv, swappedBorrowFiniteThenEnv_toEnv]
+    using CertifiedTermCheck.sound swappedBorrow_assign_y_b_certified
+
+private theorem swappedBorrow_borrow_b_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowB)
+      (.borrow true [swappedBorrowB]) swappedBorrowFinitePreIfEnv = true := by
+  native_decide
+
+private def swappedBorrow_borrow_b_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowB)
+      (.borrow true [swappedBorrowB]) swappedBorrowFinitePreIfEnv :=
+  CertifiedTermCheck.mutBorrow
+    swappedBorrow_borrow_b_checker_matches
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_b_typing)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_b_mutable)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrowPreIf_not_writeProhibited_b)
+
+private theorem swappedBorrow_assign_x_b_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowX (.borrow true swappedBorrowB))
+      .unit swappedBorrowFiniteElseXEnv = true := by
+  native_decide
+
+private def swappedBorrow_assign_x_b_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowX (.borrow true swappedBorrowB))
+      .unit swappedBorrowFiniteElseXEnv :=
+  CertifiedTermCheck.assign
+    swappedBorrow_assign_x_b_checker_matches
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_x_typing)
+    swappedBorrow_borrow_b_certified
+    (by trivial)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_x_typing)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_shape_borrow swappedBorrow_empty_good
+        swappedBorrow_b_good)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_borrow_wellFormed swappedBorrow_b_good)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv,
+        swappedBorrowFiniteElseXEnv_toEnv]
+      exact swappedBorrow_write_x_b)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv,
+        swappedBorrowFiniteElseXEnv_toEnv]
+      exact swappedBorrow_ranked_x_b)
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv,
+        swappedBorrowFiniteElseXEnv_toEnv]
+      exact swappedBorrow_coherent_x_b)
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      exact swappedBorrowElseX_contained)
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      exact swappedBorrowElseX_not_writeProhibited_x)
+
+private theorem swappedBorrow_assign_x_b_typing :
+    TermTyping swappedBorrowPreIfEnv StoreTyping.empty ([0] : Lifetime)
       (.assign swappedBorrowX (.borrow true swappedBorrowB)) .unit
       swappedBorrowElseXEnv := by
-  exact TermTyping.assign
-    swappedBorrow_x_typing
-    (TermTyping.mutBorrow swappedBorrow_b_typing swappedBorrow_b_mutable
-      swappedBorrowPreIf_not_writeProhibited_b)
-    (by trivial)
-    swappedBorrow_x_typing
-    (swappedBorrow_shape_borrow swappedBorrow_empty_good swappedBorrow_b_good)
-    (swappedBorrow_borrow_wellFormed swappedBorrow_b_good)
-    swappedBorrow_write_x_b
-    swappedBorrow_ranked_x_b
-    swappedBorrow_coherent_x_b
-    swappedBorrowElseX_contained
-    swappedBorrowElseX_not_writeProhibited_x
+  simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteElseXEnv_toEnv]
+    using CertifiedTermCheck.sound swappedBorrow_assign_x_b_certified
 
-private theorem swappedBorrow_assign_y_a_typing {typing : StoreTyping}
-    {lifetime : Lifetime} :
-    TermTyping swappedBorrowElseXEnv typing lifetime
-      (.assign swappedBorrowY (.borrow true swappedBorrowA)) .unit
-      swappedBorrowElseEnv := by
-  have hyTyping :
-      LValTyping swappedBorrowElseXEnv swappedBorrowY
-        (.ty (.borrow true [])) Lifetime.root := by
-    simpa [swappedBorrowElseXEnv_eq] using
-      (swappedBorrow_y_typing :
-        LValTyping (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowY
-          (.ty (.borrow true [])) Lifetime.root)
-  have haTyping :
-      LValTyping swappedBorrowElseXEnv swappedBorrowA (.ty .int)
-        Lifetime.root := by
-    simpa [swappedBorrowElseXEnv_eq] using
-      (swappedBorrow_a_typing :
-        LValTyping (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowA
-          (.ty .int) Lifetime.root)
-  have haMutable : Mutable swappedBorrowElseXEnv swappedBorrowA := by
-    simpa [swappedBorrowElseXEnv_eq] using
-      (swappedBorrow_a_mutable :
-        Mutable (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowA)
-  exact TermTyping.assign
-    hyTyping
-    (TermTyping.mutBorrow haTyping haMutable
-      swappedBorrowElseX_not_writeProhibited_a)
-    (by trivial)
-    hyTyping
+private theorem swappedBorrow_borrow_a_elseX_checker_matches :
+    checkTermMatches? 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowA)
+      (.borrow true [swappedBorrowA]) swappedBorrowFiniteElseXEnv = true := by
+  native_decide
+
+private def swappedBorrow_borrow_a_elseX_certified :
+    CertifiedTermCheck 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
+      ([0] : Lifetime) (.borrow true swappedBorrowA)
+      (.borrow true [swappedBorrowA]) swappedBorrowFiniteElseXEnv :=
+  CertifiedTermCheck.mutBorrow
+    swappedBorrow_borrow_a_elseX_checker_matches
     (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      simpa [swappedBorrowElseXEnv_eq] using
+        (swappedBorrow_a_typing :
+          LValTyping (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowA
+            (.ty .int) Lifetime.root))
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      simpa [swappedBorrowElseXEnv_eq] using
+        (swappedBorrow_a_mutable :
+          Mutable (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowA))
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      exact swappedBorrowElseX_not_writeProhibited_a)
+
+private theorem swappedBorrow_assign_y_a_checker_matches :
+    checkTermMatches? 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowY (.borrow true swappedBorrowA))
+      .unit swappedBorrowFiniteElseEnv = true := by
+  native_decide
+
+private def swappedBorrow_assign_y_a_certified :
+    CertifiedTermCheck 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
+      ([0] : Lifetime) (.assign swappedBorrowY (.borrow true swappedBorrowA))
+      .unit swappedBorrowFiniteElseEnv :=
+  CertifiedTermCheck.assign
+    swappedBorrow_assign_y_a_checker_matches
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      simpa [swappedBorrowElseXEnv_eq] using
+        (swappedBorrow_y_typing :
+          LValTyping (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowY
+            (.ty (.borrow true [])) Lifetime.root))
+    swappedBorrow_borrow_a_elseX_certified
+    (by trivial)
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
+      simpa [swappedBorrowElseXEnv_eq] using
+        (swappedBorrow_y_typing :
+          LValTyping (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowY
+            (.ty (.borrow true [])) Lifetime.root))
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
       simpa [swappedBorrowElseXEnv_eq] using
         (swappedBorrow_shape_borrow
           (xTargets := [swappedBorrowB]) (yTargets := [])
           swappedBorrow_empty_good swappedBorrow_a_good))
     (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv]
       simpa [swappedBorrowElseXEnv_eq] using
         (swappedBorrow_borrow_wellFormed
           (xTargets := [swappedBorrowB]) (yTargets := [])
           swappedBorrow_a_good))
-    swappedBorrow_write_y_a
-    swappedBorrow_ranked_y_a
-    swappedBorrow_coherent_y_a
-    swappedBorrowElse_contained
-    swappedBorrowElse_not_writeProhibited_y
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv,
+        swappedBorrowFiniteElseEnv_toEnv]
+      exact swappedBorrow_write_y_a)
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv,
+        swappedBorrowFiniteElseEnv_toEnv]
+      exact swappedBorrow_ranked_y_a)
+    (by
+      rw [swappedBorrowFiniteElseXEnv_toEnv,
+        swappedBorrowFiniteElseEnv_toEnv]
+      exact swappedBorrow_coherent_y_a)
+    (by
+      rw [swappedBorrowFiniteElseEnv_toEnv]
+      exact swappedBorrowElse_contained)
+    (by
+      rw [swappedBorrowFiniteElseEnv_toEnv]
+      exact swappedBorrowElse_not_writeProhibited_y)
+
+private theorem swappedBorrow_assign_y_a_typing :
+    TermTyping swappedBorrowElseXEnv StoreTyping.empty ([0] : Lifetime)
+      (.assign swappedBorrowY (.borrow true swappedBorrowA)) .unit
+      swappedBorrowElseEnv := by
+  simpa [swappedBorrowFiniteElseXEnv_toEnv, swappedBorrowFiniteElseEnv_toEnv]
+    using CertifiedTermCheck.sound swappedBorrow_assign_y_a_certified
 
 def swappedBorrowThenBranch : Term :=
   .block [0]
@@ -1840,77 +2119,255 @@ def swappedBorrowElseBranch : Term :=
 def swappedBorrowIf : Term :=
   .ite swappedBorrowCondition swappedBorrowThenBranch swappedBorrowElseBranch
 
-private theorem swappedBorrowThenBranch_typing {typing : StoreTyping} :
-    TermTyping swappedBorrowPreIfEnv typing Lifetime.root
-      swappedBorrowThenBranch .unit swappedBorrowThenEnv := by
-  unfold swappedBorrowThenBranch
-  exact TermTyping.block
+private theorem swappedBorrowThenBranch_tail_checker_matches :
+    checkTermListMatches? 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
+      ([0] : Lifetime)
+      [ .assign swappedBorrowY (.borrow true swappedBorrowB) ]
+      .unit swappedBorrowFiniteThenEnv = true := by
+  native_decide
+
+private theorem swappedBorrowThenBranch_body_checker_matches :
+    checkTermListMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime)
+      [ .assign swappedBorrowX (.borrow true swappedBorrowA)
+      , .assign swappedBorrowY (.borrow true swappedBorrowB)
+      ]
+      .unit swappedBorrowFiniteThenEnv = true := by
+  native_decide
+
+private def swappedBorrowThenBranch_body_certified :
+    CertifiedTermListCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime)
+      [ .assign swappedBorrowX (.borrow true swappedBorrowA)
+      , .assign swappedBorrowY (.borrow true swappedBorrowB)
+      ]
+      .unit swappedBorrowFiniteThenEnv :=
+  CertifiedTermListCheck.cons
+    swappedBorrowThenBranch_body_checker_matches
+    swappedBorrow_assign_x_a_certified
+    (CertifiedTermListCheck.singleton
+      swappedBorrowThenBranch_tail_checker_matches
+      swappedBorrow_assign_y_b_certified)
+
+private theorem swappedBorrowThenBranch_block_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowThenBranch .unit swappedBorrowFiniteThenEnv =
+        true := by
+  native_decide
+
+private def swappedBorrowThenBranch_block_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowThenBranch .unit swappedBorrowFiniteThenEnv :=
+  CertifiedTermCheck.block
+    swappedBorrowThenBranch_block_checker_matches
     (⟨0, rfl⟩ : LifetimeChild Lifetime.root ([0] : Lifetime))
-    (TermListTyping.cons
-      (swappedBorrow_assign_x_a_typing (typing := typing)
-        (lifetime := ([0] : Lifetime)))
-      (TermListTyping.singleton
-        (swappedBorrow_assign_y_b_typing (typing := typing)
-          (lifetime := ([0] : Lifetime)))))
+    swappedBorrowThenBranch_body_certified
     WellFormedTy.unit
     (by
+      rw [swappedBorrowFiniteThenEnv_toEnv]
       simpa [swappedBorrowThenEnv] using
         (swappedBorrowEnv_drop_body_lifetime [swappedBorrowA]
           [swappedBorrowB]).symm)
 
-private theorem swappedBorrowElseBranch_typing {typing : StoreTyping} :
-    TermTyping swappedBorrowPreIfEnv typing Lifetime.root
-      swappedBorrowElseBranch .unit swappedBorrowElseEnv := by
-  unfold swappedBorrowElseBranch
-  exact TermTyping.block
+private theorem swappedBorrowElseBranch_tail_checker_matches :
+    checkTermListMatches? 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
+      ([0] : Lifetime)
+      [ .assign swappedBorrowY (.borrow true swappedBorrowA) ]
+      .unit swappedBorrowFiniteElseEnv = true := by
+  native_decide
+
+private theorem swappedBorrowElseBranch_body_checker_matches :
+    checkTermListMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime)
+      [ .assign swappedBorrowX (.borrow true swappedBorrowB)
+      , .assign swappedBorrowY (.borrow true swappedBorrowA)
+      ]
+      .unit swappedBorrowFiniteElseEnv = true := by
+  native_decide
+
+private def swappedBorrowElseBranch_body_certified :
+    CertifiedTermListCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      ([0] : Lifetime)
+      [ .assign swappedBorrowX (.borrow true swappedBorrowB)
+      , .assign swappedBorrowY (.borrow true swappedBorrowA)
+      ]
+      .unit swappedBorrowFiniteElseEnv :=
+  CertifiedTermListCheck.cons
+    swappedBorrowElseBranch_body_checker_matches
+    swappedBorrow_assign_x_b_certified
+    (CertifiedTermListCheck.singleton
+      swappedBorrowElseBranch_tail_checker_matches
+      swappedBorrow_assign_y_a_certified)
+
+private theorem swappedBorrowElseBranch_block_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowElseBranch .unit swappedBorrowFiniteElseEnv =
+        true := by
+  native_decide
+
+private def swappedBorrowElseBranch_block_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowElseBranch .unit swappedBorrowFiniteElseEnv :=
+  CertifiedTermCheck.block
+    swappedBorrowElseBranch_block_checker_matches
     (⟨0, rfl⟩ : LifetimeChild Lifetime.root ([0] : Lifetime))
-    (TermListTyping.cons
-      (swappedBorrow_assign_x_b_typing (typing := typing)
-        (lifetime := ([0] : Lifetime)))
-      (TermListTyping.singleton
-        (swappedBorrow_assign_y_a_typing (typing := typing)
-          (lifetime := ([0] : Lifetime)))))
+    swappedBorrowElseBranch_body_certified
     WellFormedTy.unit
     (by
+      rw [swappedBorrowFiniteElseEnv_toEnv]
       simpa [swappedBorrowElseEnv] using
         (swappedBorrowEnv_drop_body_lifetime [swappedBorrowB]
           [swappedBorrowA]).symm)
 
-/--
-The current `T-If` rule can type this conditional from the initial environment,
-with no global borrow-safety premise for the joined environment.
--/
-theorem swappedBorrowIf_typing_from_branch_derivations
-    {typing : StoreTyping} :
-    TermTyping swappedBorrowPreIfEnv typing Lifetime.root
-      swappedBorrowIf .unit swappedBorrowJoinEnv := by
-  unfold swappedBorrowIf
-  have hthenShape : EnvJoinSameShape swappedBorrowThenEnv swappedBorrowJoinEnv :=
-    swappedBorrowEnv_sameShape
-  have helseShape : EnvJoinSameShape swappedBorrowElseEnv swappedBorrowJoinEnv :=
-    swappedBorrowEnv_sameShape
-  exact TermTyping.ite
-    swappedBorrowCondition_typing
-    swappedBorrowThenBranch_typing
-    swappedBorrowElseBranch_typing
-    (PartialTyJoin.self (.ty .unit))
-    swappedBorrowJoin_obligations.1
-    hthenShape
-    helseShape
-    WellFormedTy.unit
-    swappedBorrowJoin_obligations.2.1
-    swappedBorrowJoin_obligations.2.2.1
-    swappedBorrowJoin_obligations.2.2.2
+private theorem swappedBorrowThenBranch_typing :
+    TermTyping swappedBorrowPreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowThenBranch .unit swappedBorrowThenEnv := by
+  simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteThenEnv_toEnv]
+    using CertifiedTermCheck.sound swappedBorrowThenBranch_block_certified
+
+private theorem swappedBorrowElseBranch_typing :
+    TermTyping swappedBorrowPreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowElseBranch .unit swappedBorrowElseEnv := by
+  simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteElseEnv_toEnv]
+    using CertifiedTermCheck.sound swappedBorrowElseBranch_block_certified
+
+private theorem swappedBorrowCondition_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowCondition .bool swappedBorrowFinitePreIfEnv = true := by
+  native_decide
+
+private theorem swappedBorrow_copy_a_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root (.copy swappedBorrowA) .int swappedBorrowFinitePreIfEnv =
+        true := by
+  native_decide
+
+private def swappedBorrow_copy_a_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root (.copy swappedBorrowA) .int swappedBorrowFinitePreIfEnv :=
+  CertifiedTermCheck.copy
+    swappedBorrow_copy_a_checker_matches
     (by
-      constructor
-      · intro _targetsMutable _mutable _targetsOther _x _targetMutable
-          _targetOther hcontains _hborrow _htargetMutable _htargetOther
-          _hconflict
-        cases hcontains
-      · intro _x _targetsMutable _mutable _targetsOther _targetMutable
-          _targetOther _hborrow hcontains _htargetMutable _htargetOther
-          _hconflict
-        cases hcontains)
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_a_typing)
+    CopyTy.int
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrowPreIf_not_readProhibited swappedBorrowA)
+
+private theorem swappedBorrow_copy_b_checker_matches :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFinitePreIfEnv =
+        true := by
+  native_decide
+
+private def swappedBorrow_copy_b_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFinitePreIfEnv :=
+  CertifiedTermCheck.copy
+    swappedBorrow_copy_b_checker_matches
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrow_b_typing)
+    CopyTy.int
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      exact swappedBorrowPreIf_not_readProhibited swappedBorrowB)
+
+private theorem swappedBorrow_copy_b_ghost_checker_matches :
+    checkTermMatches? 128 swappedBorrowFiniteEqGhostEnv StoreTyping.empty
+      Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFiniteEqGhostEnv =
+        true := by
+  native_decide
+
+private def swappedBorrow_copy_b_ghost_certified :
+    CertifiedTermCheck 128 swappedBorrowFiniteEqGhostEnv StoreTyping.empty
+      Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFiniteEqGhostEnv :=
+  CertifiedTermCheck.copy
+    swappedBorrow_copy_b_ghost_checker_matches
+    (by
+      rw [swappedBorrowFiniteEqGhostEnv_toEnv]
+      exact swappedBorrowEqGhost_b_typing)
+    CopyTy.int
+    (by
+      rw [swappedBorrowFiniteEqGhostEnv_toEnv]
+      exact swappedBorrowEqGhost_not_readProhibited swappedBorrowB)
+
+private def swappedBorrowCondition_certified :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowCondition .bool swappedBorrowFinitePreIfEnv :=
+  CertifiedTermCheck.equal
+    swappedBorrowCondition_checker_matches
+    swappedBorrow_copy_a_certified
+    (by
+      rw [swappedBorrowFinitePreIfEnv_toEnv]
+      simp [Env.fresh, swappedBorrowPreIfEnv, swappedBorrowEnv,
+        swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty])
+    swappedBorrow_copy_b_ghost_certified
+    swappedBorrow_copy_b_certified
+    CopyTy.int
+    CopyTy.int
+    ShapeCompatible.int
+
+private theorem swappedBorrowIf_checker_matches_join_for :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowIf .unit swappedBorrowFiniteJoinEnv = true := by
+  native_decide
+
+private theorem swappedBorrowJoin_unit_tyBorrowSafe :
+    TyBorrowSafeAgainstEnv swappedBorrowJoinEnv .unit := by
+  constructor
+  · intro _targetsMutable _mutable _targetsOther _x _targetMutable
+      _targetOther hcontains _hborrow _htargetMutable _htargetOther _hconflict
+    cases hcontains
+  · intro _x _targetsMutable _mutable _targetsOther _targetMutable
+      _targetOther _hborrow hcontains _htargetMutable _htargetOther _hconflict
+    cases hcontains
+
+private def swappedBorrowIf_certifiedCheckFor :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowIf .unit swappedBorrowFiniteJoinEnv :=
+  CertifiedTermCheck.ite
+    swappedBorrowIf_checker_matches_join_for
+    swappedBorrowCondition_certified
+    swappedBorrowThenBranch_block_certified
+    swappedBorrowElseBranch_block_certified
+    (PartialTyJoin.self (.ty .unit))
+    (by
+      rw [swappedBorrowFiniteThenEnv_toEnv, swappedBorrowFiniteElseEnv_toEnv,
+        swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowJoin_obligations.1)
+    (by
+      rw [swappedBorrowFiniteThenEnv_toEnv, swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowEnv_sameShape)
+    (by
+      rw [swappedBorrowFiniteElseEnv_toEnv, swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowEnv_sameShape)
+    WellFormedTy.unit
+    (by
+      rw [swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowJoin_obligations.2.1)
+    (by
+      rw [swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowJoin_obligations.2.2.1)
+    (by
+      rw [swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowJoin_obligations.2.2.2)
+    (by
+      rw [swappedBorrowFiniteJoinEnv_toEnv]
+      exact swappedBorrowJoin_unit_tyBorrowSafe)
+
+/--
+The proof-carrying checker certificate types this conditional from the initial
+environment, with no global borrow-safety premise for the joined environment.
+-/
+theorem swappedBorrowIf_typing_from_branch_derivations :
+    TermTyping swappedBorrowPreIfEnv StoreTyping.empty Lifetime.root
+      swappedBorrowIf .unit swappedBorrowJoinEnv := by
+  simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteJoinEnv_toEnv]
+    using
+      (CertifiedTermCheck.sound
+        swappedBorrowIf_certifiedCheckFor)
 
 /--
 The executable checker returns `unit` and the same finite join environment for
@@ -1919,7 +2376,7 @@ the crossed-borrow conditional.
 theorem swappedBorrowIf_checker_matches_join :
     checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
       Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv = true := by
-  native_decide
+  exact swappedBorrowIf_checker_matches_join_for
 
 /--
 For this example, executable acceptance agrees with the inductive typing
@@ -1932,8 +2389,8 @@ theorem swappedBorrowIf_checker_agrees_with_inductive :
       Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv := by
   constructor
   · exact swappedBorrowIf_checker_matches_join
-  · rw [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteJoinEnv_toEnv]
-    exact swappedBorrowIf_typing_from_branch_derivations
+  · exact CertifiedTermCheck.sound
+      swappedBorrowIf_certifiedCheckFor
 
 /--
 Proof-carrying checker result for the crossed-borrow conditional.  The boolean
@@ -1942,7 +2399,7 @@ observable at this layer is just whether such a certificate was found.
 def swappedBorrowIf_certifiedCheck :
     CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
       Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv :=
-  CertifiedTermCheck.ofWitness swappedBorrowIf_checker_agrees_with_inductive
+  swappedBorrowIf_certifiedCheckFor
 
 def swappedBorrowIf_certifiedCheck? :
     Option (CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
