@@ -1,4 +1,4 @@
-import LwRust.Paper.Typing
+import LwRust.Paper.BorrowChecker
 
 /-!
 Build-checked conditional-join example for the crossed mutable-borrow pattern:
@@ -77,6 +77,44 @@ private theorem swappedBorrow_env_ext (left right : Env)
           have hfun : leftSlotAt = rightSlotAt := funext h
           subst hfun
           rfl
+
+def swappedBorrowFinitePreIfEnv : FiniteEnv :=
+  { entries := [
+    ("a", swappedBorrowIntSlot),
+    ("b", swappedBorrowIntSlot),
+    ("x", swappedBorrowSlot []),
+    ("y", swappedBorrowSlot [])
+  ] }
+
+def swappedBorrowFiniteJoinEnv : FiniteEnv :=
+  { entries := [
+    ("b", swappedBorrowIntSlot),
+    ("a", swappedBorrowIntSlot),
+    ("x", swappedBorrowSlot [swappedBorrowA, swappedBorrowB]),
+    ("y", swappedBorrowSlot [swappedBorrowB, swappedBorrowA])
+  ] }
+
+theorem swappedBorrowFinitePreIfEnv_toEnv :
+    swappedBorrowFinitePreIfEnv.toEnv = swappedBorrowPreIfEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+    by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+    simp [swappedBorrowFinitePreIfEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
+      FiniteEnv.lookupEntries, swappedBorrowPreIfEnv, swappedBorrowEnv,
+      swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty,
+      hy, hx, hb, ha]
+
+theorem swappedBorrowFiniteJoinEnv_toEnv :
+    swappedBorrowFiniteJoinEnv.toEnv = swappedBorrowJoinEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+    by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+    simp [swappedBorrowFiniteJoinEnv, FiniteEnv.toEnv, FiniteEnv.lookup,
+      FiniteEnv.lookupEntries, swappedBorrowJoinEnv, swappedBorrowEnv,
+      swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty,
+      hy, hx, hb, ha]
 
 private theorem swappedBorrowEnv_slotAt_a (xTargets yTargets : List LVal) :
     (swappedBorrowEnv xTargets yTargets).slotAt "a" =
@@ -1874,6 +1912,81 @@ theorem swappedBorrowIf_typing_from_branch_derivations
           _hconflict
         cases hcontains)
 
+/--
+The executable checker returns `unit` and the same finite join environment for
+the crossed-borrow conditional.
+-/
+theorem swappedBorrowIf_checker_matches_join :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv = true := by
+  native_decide
+
+/--
+For this example, executable acceptance agrees with the inductive typing
+judgment.  The second conjunct is the exact `TermTyping` premise consumed by
+progress and preservation; the first conjunct records that the executable
+checker computes the same type and finite output environment.
+-/
+theorem swappedBorrowIf_checker_agrees_with_inductive :
+    CheckedTermTypingWitness 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv := by
+  constructor
+  · exact swappedBorrowIf_checker_matches_join
+  · rw [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteJoinEnv_toEnv]
+    exact swappedBorrowIf_typing_from_branch_derivations
+
+/--
+Proof-carrying checker result for the crossed-borrow conditional.  The boolean
+observable at this layer is just whether such a certificate was found.
+-/
+def swappedBorrowIf_certifiedCheck :
+    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv :=
+  CertifiedTermCheck.ofWitness swappedBorrowIf_checker_agrees_with_inductive
+
+def swappedBorrowIf_certifiedCheck? :
+    Option (CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+      Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv) :=
+  some swappedBorrowIf_certifiedCheck
+
+theorem swappedBorrowIf_certifiedCheck_found :
+    CertifiedTermCheck.found? swappedBorrowIf_certifiedCheck? = true := by
+  rfl
+
+/--
+The checked example supplies the existential typability premise used by
+`typeAndBorrowProgress_of_typable`.
+-/
+theorem swappedBorrowIf_checker_supplies_progress_typability :
+    checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+        Lifetime.root swappedBorrowIf .unit swappedBorrowFiniteJoinEnv = true ∧
+      ∃ env₂ ty,
+        TermTyping swappedBorrowFinitePreIfEnv.toEnv StoreTyping.empty
+          Lifetime.root swappedBorrowIf ty env₂ := by
+  constructor
+  · exact swappedBorrowIf_checker_matches_join
+  · exact CertifiedTermCheck.typable swappedBorrowIf_certifiedCheck
+
+/-- Executable replacement for the direct-root assignment frame check. -/
+theorem swappedBorrowJoin_root_assignment_frame_check :
+    checkAssignmentBorrowSafety? swappedBorrowFiniteJoinEnv (.var "c") = true := by
+  native_decide
+
+/-- Executable replacement for the rejected dereference-assignment frame check. -/
+theorem swappedBorrowJoin_deref_x_assignment_frame_check :
+    checkAssignmentBorrowSafety? swappedBorrowFiniteJoinEnv
+      (.deref swappedBorrowX) = false := by
+  native_decide
+
+/--
+The full checker rejects assigning through `x` after the crossed join, matching
+the declarative `AssignmentBorrowSafety` rejection below.
+-/
+theorem swappedBorrowJoin_deref_x_assignment_checker_rejects :
+    checkTermRejects? 128 swappedBorrowFiniteJoinEnv StoreTyping.empty
+      Lifetime.root (.assign (.deref swappedBorrowX) (.val (.int 1))) = true := by
+  native_decide
+
 /-- Unrelated direct root assignments are no longer blocked by the crossed join. -/
 theorem swappedBorrowJoin_root_assignment_frame_safe :
     AssignmentBorrowSafety swappedBorrowJoinEnv (.var "c") := by
@@ -1908,6 +2021,44 @@ theorem swappedBorrowJoin_deref_x_assignment_frame_not_safe :
 def swappedBorrowJoinWithPEnv : Env :=
   (swappedBorrowJoinEnv.update "c" swappedBorrowIntSlot).update
     "p" (swappedBorrowSlot [swappedBorrowC])
+
+def swappedBorrowFiniteJoinWithPEnv : FiniteEnv :=
+  { entries := [
+    ("p", swappedBorrowSlot [swappedBorrowC]),
+    ("c", swappedBorrowIntSlot),
+    ("b", swappedBorrowIntSlot),
+    ("a", swappedBorrowIntSlot),
+    ("x", swappedBorrowSlot [swappedBorrowA, swappedBorrowB]),
+    ("y", swappedBorrowSlot [swappedBorrowB, swappedBorrowA])
+  ] }
+
+theorem swappedBorrowFiniteJoinWithPEnv_toEnv :
+    swappedBorrowFiniteJoinWithPEnv.toEnv = swappedBorrowJoinWithPEnv := by
+  apply swappedBorrow_env_ext
+  intro name
+  by_cases hp : name = "p" <;> by_cases hc : name = "c" <;>
+    by_cases hy : name = "y" <;> by_cases hx : name = "x" <;>
+      by_cases hb : name = "b" <;> by_cases ha : name = "a" <;>
+      simp [swappedBorrowFiniteJoinWithPEnv, FiniteEnv.toEnv,
+        FiniteEnv.lookup, FiniteEnv.lookupEntries, swappedBorrowJoinWithPEnv,
+        swappedBorrowJoinEnv, swappedBorrowEnv, swappedBorrowSlot,
+        swappedBorrowIntSlot, Env.update, Env.empty, hp, hc, hy, hx, hb, ha]
+
+/-- Executable replacement for the unrelated-dereference frame check. -/
+theorem swappedBorrowJoin_unrelated_deref_assignment_frame_check :
+    checkAssignmentBorrowSafety? swappedBorrowFiniteJoinWithPEnv
+      (.deref swappedBorrowP) = true := by
+  native_decide
+
+/--
+The full checker accepts an assignment through unrelated `p` after the crossed
+`x/y` join.
+-/
+theorem swappedBorrowJoin_unrelated_deref_assignment_checker_matches :
+    checkTermMatches? 128 swappedBorrowFiniteJoinWithPEnv StoreTyping.empty
+      Lifetime.root (.assign (.deref swappedBorrowP) (.val (.int 1))) .unit
+      swappedBorrowFiniteJoinWithPEnv = true := by
+  native_decide
 
 theorem swappedBorrowJoinWithP_p_targets {targets : List LVal} :
     swappedBorrowJoinWithPEnv ⊢ "p" ↝ (.borrow true targets) →

@@ -1,3 +1,4 @@
+import LwRust.Paper.BorrowChecker
 import LwRust.Paper.Soundness.InitialStates
 
 /-!
@@ -32,6 +33,10 @@ theorem scalarCopyComparison_typing :
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
+
+theorem scalarCopyComparison_checker_accepts :
+    borrowCheck? 32 scalarCopyComparison = true := by
+  native_decide
 
 theorem scalarCopyComparison_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root scalarCopyComparison := by
@@ -75,6 +80,10 @@ theorem ifThenElseInt_typing :
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
 
+theorem ifThenElseInt_checker_accepts :
+    borrowCheck? 32 ifThenElseInt = true := by
+  native_decide
+
 theorem ifThenElseInt_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root ifThenElseInt := by
   unfold ifThenElseInt
@@ -116,6 +125,10 @@ theorem ifEqThenElseInt_typing :
     simp [Env.empty] at hbranch
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
+
+theorem ifEqThenElseInt_checker_accepts :
+    borrowCheck? 64 ifEqThenElseInt = true := by
+  native_decide
 
 theorem ifEqThenElseInt_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root ifEqThenElseInt := by

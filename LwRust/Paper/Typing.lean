@@ -18,7 +18,7 @@ open Core
 structure EnvSlot where
   ty : PartialTy
   lifetime : Lifetime
-  deriving BEq, Repr
+  deriving BEq, DecidableEq, Repr
 
 /-- Paper typing environment `Γ`, as a finite partial map abstracted by lookup. -/
 structure Env where

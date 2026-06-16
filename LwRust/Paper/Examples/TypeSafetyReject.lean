@@ -1,3 +1,4 @@
+import LwRust.Paper.BorrowChecker
 import LwRust.Paper.Examples.Operational
 import LwRust.Paper.Soundness.InitialStates
 
@@ -41,6 +42,10 @@ theorem rawBorrowedReferenceConstant_rejected :
       | ref hlookup =>
           simp [StoreTyping.empty] at hlookup
 
+theorem rawBorrowedReferenceConstant_checker_rejects :
+    borrowReject? 32 rawBorrowedReferenceConstant = true := by
+  native_decide
+
 def boxedRawBorrowedReferenceConstant : Term :=
   .box rawBorrowedReferenceConstant
 
@@ -57,6 +62,10 @@ theorem boxedRawBorrowedReferenceConstant_rejected :
           cases hvalue with
           | ref hlookup =>
               simp [StoreTyping.empty] at hlookup
+
+theorem boxedRawBorrowedReferenceConstant_checker_rejects :
+    borrowReject? 32 boxedRawBorrowedReferenceConstant = true := by
+  native_decide
 
 /--
 Paper Section 3.3 example (10), after the invalid borrow has escaped its inner
@@ -124,6 +133,10 @@ theorem invalidBorrowExample_rejected :
                                                 InvalidBorrowExample.l]
                                             · simp [InvalidBorrowExample.x, LVal.base])
               | cons _hhead htail => cases htail
+
+theorem invalidBorrowExample_checker_rejects :
+    borrowReject? 128 InvalidBorrowExample.invalidProgram = true := by
+  native_decide
 
 end Paper
 end LwRust
