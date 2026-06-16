@@ -359,12 +359,6 @@ theorem whileJoin_not_readProhibited (targets : List LVal) (lv : LVal) :
   rcases hread with ⟨z, bts, target, hcontains, _htarget, _hconflict⟩
   exact whileJoin_no_mut targets hcontains
 
-theorem whileJoin_borrowSafe (targets : List LVal) :
-    BorrowSafeEnv (whileJoinEnv targets) := by
-  intro z w mutable targetsMutable targetsOther targetMutable targetOther
-    hcontainsMutable _hcontainsOther _htargetMutable _htargetOther _hconflict
-  exact absurd hcontainsMutable (whileJoin_no_mut targets)
-
 /-- The only immutable borrow contained anywhere is `q`'s slot. -/
 theorem whileJoin_imm_contains (targets : List LVal) {z : Name}
     {bts : List LVal} :

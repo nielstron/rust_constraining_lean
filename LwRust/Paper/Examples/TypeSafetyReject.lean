@@ -125,57 +125,5 @@ theorem invalidBorrowExample_rejected :
                                             · simp [InvalidBorrowExample.x, LVal.base])
               | cons _hhead htail => cases htail
 
-/-- Paper Section 6.1.3's joined environment after
-`if ... { p = &mut a; } else { q = &mut a; }`. -/
-def rootIntSlot : EnvSlot :=
-  { ty := .ty .int, lifetime := Lifetime.root }
-
-def paperConditionalPSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [.var "x", .var "a"]),
-    lifetime := Lifetime.root }
-
-def paperConditionalQSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [.var "y", .var "a"]),
-    lifetime := Lifetime.root }
-
-def paperConditionalJoinEnv : Env :=
-  (((((Env.empty.update "a" rootIntSlot).update "x" rootIntSlot).update
-    "y" rootIntSlot).update "p" paperConditionalPSlot).update
-    "q" paperConditionalQSlot)
-
-def paperRejectedIfElse : Term :=
-  .ite (.val (.bool true))
-    (.assign (.var "p") (.borrow true (.var "a")))
-    (.assign (.var "q") (.borrow true (.var "a")))
-
-/--
-The paper notes that the Section 6.1.3 conditional join is not borrow safe:
-`p` and `q` may both contain mutable borrows whose target lists include `a`.
-This is the counterexample to the old strengthened Corollary 4.14 conclusion
-that every joined static output environment is globally `BorrowSafeEnv`.
--/
-theorem paperConditionalJoinEnv_not_borrowSafe :
-    ¬ BorrowSafeEnv paperConditionalJoinEnv := by
-  intro hsafe
-  have hp : paperConditionalJoinEnv ⊢ "p" ↝
-      (.borrow true [.var "x", .var "a"]) := by
-    refine ⟨paperConditionalPSlot, ?_, PartialTyContains.here⟩
-    simp [paperConditionalJoinEnv, paperConditionalPSlot, paperConditionalQSlot,
-      rootIntSlot, Env.update]
-  have hq : paperConditionalJoinEnv ⊢ "q" ↝
-      (.borrow true [.var "y", .var "a"]) := by
-    refine ⟨paperConditionalQSlot, ?_, PartialTyContains.here⟩
-    simp [paperConditionalJoinEnv, paperConditionalPSlot, paperConditionalQSlot,
-      rootIntSlot, Env.update]
-  have hpq : "p" = "q" :=
-    hsafe "p" "q" true [.var "x", .var "a"] [.var "y", .var "a"]
-      (.var "a") (.var "a") hp hq (by simp) (by simp)
-      (by simp [PathConflicts, LVal.base])
-  contradiction
-
-theorem paperRejectedIfElse_join_rejected :
-    ¬ BorrowSafeEnv paperConditionalJoinEnv :=
-  paperConditionalJoinEnv_not_borrowSafe
-
 end Paper
 end LwRust

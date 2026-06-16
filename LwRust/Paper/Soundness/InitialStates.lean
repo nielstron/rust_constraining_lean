@@ -58,145 +58,6 @@ theorem sourceValue_empty_valueTyping_borrowFree {value : Value} {ty : Ty} :
   | ref _ =>
       cases hsource
 
-/-- **Corollary 4.14.** Source-initial borrow-safety result extension for values. -/
-theorem sourceInitial_value_borrowSafety_result_extension
-    {value : Value} {ty : Ty} {env₂ : Env} {lifetime : Lifetime}
-    {gamma : Name} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.val value) ty env₂ →
-    WellFormedTy env₂ ty lifetime →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
-      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsource htyping hwellTy hfresh hfreshCoherence
-  cases htyping with
-  | const hvalueTyping =>
-      exact borrowSafety_value_result_extension_borrowFree
-        (TermTyping.const hvalueTyping)
-        (wellFormedEnv_empty lifetime)
-        hwellTy
-        borrowSafeEnv_empty
-        (sourceValue_empty_valueTyping_borrowFree hsource hvalueTyping)
-        hfresh
-        hfreshCoherence
-
-/-- **Corollary 4.14.** Source-initial borrow-safety result extension for `box v`. -/
-theorem sourceInitial_box_value_borrowSafety_result_extension
-    {value : Value} {ty : Ty} {env₂ : Env} {lifetime : Lifetime}
-    {gamma : Name} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.box (.val value)) (.box ty) env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma (.box ty) lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty (.box ty), lifetime := lifetime })
-      lifetime ∧
-      BorrowSafeEnv (env₂.update gamma { ty := .ty (.box ty), lifetime := lifetime }) := by
-  intro _hsource htyping hfresh hfreshCoherence
-  cases htyping with
-  | box hinner =>
-      cases hinner with
-      | const hvalueTyping =>
-          have hinnerFree : TyBorrowFree ty :=
-            sourceValue_empty_valueTyping_borrowFree _hsource hvalueTyping
-          have hwellTy : WellFormedTy Env.empty ty lifetime := by
-            cases hvalueTyping with
-            | unit =>
-                exact WellFormedTy.unit
-            | int =>
-                exact WellFormedTy.int
-            | bool =>
-                exact WellFormedTy.bool
-            | ref hlookup =>
-                simp [StoreTyping.empty] at hlookup
-          have hinnerSafe :
-              BorrowSafeEnv
-                (Env.empty.update gamma { ty := .ty ty, lifetime := lifetime }) :=
-            borrowSafeEnv_update_fresh_borrowFree borrowSafeEnv_empty hinnerFree
-          exact borrowSafety_result_extension_box_of_inner
-            (wellFormedEnv_empty lifetime)
-            hwellTy
-            hinnerSafe
-            hfresh
-            hfreshCoherence
-
-/-- **Corollary 4.14.** Source-initial borrow-safety result extension for `let mut x = v`. -/
-theorem sourceInitial_declare_value_borrowSafety_result_extension
-    {x : Name} {value : Value} {env₃ : Env} {lifetime : Lifetime}
-    {gamma : Name} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime (.letMut x (.val value)) .unit env₃ →
-    env₃.fresh gamma →
-    FreshUpdateCoherenceObligations env₃ gamma .unit lifetime →
-    WellFormedEnv (env₃.update gamma { ty := .ty .unit, lifetime := lifetime })
-      lifetime ∧
-      BorrowSafeEnv (env₃.update gamma { ty := .ty .unit, lifetime := lifetime }) := by
-  intro hsource htyping hfreshGamma hfreshGammaCoherence
-  cases htyping with
-  | declare hfresh hinit _hfreshOut hcoh henv₃ =>
-      cases hinit with
-      | const hvalueTyping =>
-          rename_i initTy
-          have hwellTy : WellFormedTy Env.empty initTy lifetime := by
-            cases hvalueTyping with
-            | unit =>
-                exact WellFormedTy.unit
-            | int =>
-                exact WellFormedTy.int
-            | bool =>
-                exact WellFormedTy.bool
-            | ref hlookup =>
-                simp [StoreTyping.empty] at hlookup
-          have hdeclared :
-              WellFormedEnv
-                  (Env.empty.update x { ty := .ty initTy, lifetime := lifetime })
-                  lifetime ∧
-            BorrowSafeEnv
-                  (Env.empty.update x { ty := .ty initTy, lifetime := lifetime }) := by
-            exact sourceInitial_value_borrowSafety_result_extension hsource
-              (TermTyping.const hvalueTyping) hwellTy hfresh hcoh
-          have hfreshGamma' :
-              (Env.empty.update x { ty := .ty initTy, lifetime := lifetime }).fresh
-                gamma := by
-            simpa [henv₃] using hfreshGamma
-          rw [henv₃]
-          exact borrowSafety_result_extension_borrowFree
-            hdeclared.1
-            WellFormedTy.unit
-            hdeclared.2
-            tyBorrowFree_unit
-            hfreshGamma'
-            (by simpa [henv₃] using hfreshGammaCoherence)
-
-/-- **Corollary 4.14.** Source-initial borrow-safety result extension for singleton value blocks. -/
-theorem sourceInitial_blockB_value_borrowSafety_result_extension
-    {value : Value} {ty : Ty} {env₂ : Env}
-    {lifetime blockLifetime : Lifetime} {gamma : Name} :
-    SourceValue value →
-    TermTyping Env.empty StoreTyping.empty lifetime
-      (.block blockLifetime [.val value]) ty env₂ →
-    env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
-    WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime ∧
-      BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsource htyping hfresh hfreshCoherence
-  cases htyping with
-  | block _hblockChild hterms hwellTy hdrop =>
-      have hvalueTyping := termListTyping_singleton_value_valueTyping hterms
-      have henvList : Env.empty = _ :=
-        termListTyping_singleton_value_environment_eq hterms
-      subst henvList
-      have hdropEmpty : env₂ = Env.empty := by
-        simpa [Env.dropLifetime, Env.empty] using hdrop
-      subst hdropEmpty
-      exact borrowSafety_result_extension_borrowFree
-        (wellFormedEnv_empty lifetime)
-        hwellTy
-        borrowSafeEnv_empty
-        (sourceValue_empty_valueTyping_borrowFree hsource hvalueTyping)
-        hfresh
-        hfreshCoherence
-
 theorem sourceTerm_validStoreTyping_empty {store : ProgramStore} {term : Term} :
     SourceTerm term →
     ValidStoreTyping store term StoreTyping.empty := by
@@ -387,19 +248,17 @@ Section 4 soundness statements.
 -/
 theorem sourceInitialSoundnessHypotheses {term : Term} {lifetime : Lifetime} :
     SourceTerm term →
-    ValidState ProgramStore.empty term ∧
-    ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ₛ Env.empty ∧
-    WellFormedEnv Env.empty lifetime ∧
-    BorrowSafeEnv Env.empty ∧
-    OperationalStoreProgress ProgramStore.empty := by
-  intro hsource
-  exact ⟨sourceInitialState_valid hsource,
-    sourceTerm_validStoreTyping_empty hsource,
-    safeAbstraction_empty,
-    wellFormedEnv_empty lifetime,
-    borrowSafeEnv_empty,
-    operationalStoreProgress_empty⟩
+      ValidState ProgramStore.empty term ∧
+      ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
+      ProgramStore.empty ∼ₛ Env.empty ∧
+      WellFormedEnv Env.empty lifetime ∧
+      OperationalStoreProgress ProgramStore.empty := by
+    intro hsource
+    exact ⟨sourceInitialState_valid hsource,
+      sourceTerm_validStoreTyping_empty hsource,
+      safeAbstraction_empty,
+      wellFormedEnv_empty lifetime,
+      operationalStoreProgress_empty⟩
 
 /--
 Source-level empty-store programs satisfy the mechanised runtime hypotheses,
@@ -407,19 +266,17 @@ including the explicit owner-allocation invariant.
 -/
 theorem sourceInitialRuntimeSoundnessHypotheses {term : Term} {lifetime : Lifetime} :
     SourceTerm term →
-    ValidRuntimeState ProgramStore.empty term ∧
-    ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ₛ Env.empty ∧
-    WellFormedEnv Env.empty lifetime ∧
-    BorrowSafeEnv Env.empty ∧
-    OperationalStoreProgress ProgramStore.empty := by
-  intro hsource
-  exact ⟨sourceInitialRuntimeState_valid hsource,
-    sourceTerm_validStoreTyping_empty hsource,
-    safeAbstraction_empty,
-    wellFormedEnv_empty lifetime,
-    borrowSafeEnv_empty,
-    operationalStoreProgress_empty⟩
+      ValidRuntimeState ProgramStore.empty term ∧
+      ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
+      ProgramStore.empty ∼ₛ Env.empty ∧
+      WellFormedEnv Env.empty lifetime ∧
+      OperationalStoreProgress ProgramStore.empty := by
+    intro hsource
+    exact ⟨sourceInitialRuntimeState_valid hsource,
+      sourceTerm_validStoreTyping_empty hsource,
+      safeAbstraction_empty,
+      wellFormedEnv_empty lifetime,
+      operationalStoreProgress_empty⟩
 
 /--
 Any program typed from the empty environment and empty store typing satisfies the
@@ -430,19 +287,17 @@ theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-      ProgramStore.empty ∼ₛ Env.empty ∧
-      (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
-      BorrowSafeEnv Env.empty ∧
-      OperationalStoreProgress ProgramStore.empty ∧
-      (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
-  intro htyping
-  exact ⟨emptyInitialRuntimeState_valid_of_typing htyping,
-    emptyInitialValidStoreTyping_of_typing htyping,
-      safeAbstraction_empty,
-      wellFormedEnv_empty_all,
-      borrowSafeEnv_empty,
-      operationalStoreProgress_empty,
-      by
+        ProgramStore.empty ∼ₛ Env.empty ∧
+        (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
+        OperationalStoreProgress ProgramStore.empty ∧
+        (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
+    intro htyping
+    exact ⟨emptyInitialRuntimeState_valid_of_typing htyping,
+      emptyInitialValidStoreTyping_of_typing htyping,
+        safeAbstraction_empty,
+        wellFormedEnv_empty_all,
+        operationalStoreProgress_empty,
+        by
         intro env lifetime
         exact storeTypingRefsWellFormed_empty env lifetime⟩
 
@@ -470,7 +325,7 @@ theorem sourceInitial_runtime_progress {term : Term} {lifetime : Lifetime}
   intro hsource htyping
   rcases sourceInitialRuntimeSoundnessHypotheses
       (term := term) (lifetime := lifetime) hsource with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hborrowSafe, hstoreProgress⟩
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, hstoreProgress⟩
   exact progress_runtime
     hvalidRuntime
     hvalidStoreTyping
@@ -486,7 +341,7 @@ theorem emptyInitial_progress {term : Term} {lifetime : Lifetime}
     ProgressResult ProgramStore.empty lifetime term := by
   intro htyping
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hborrowSafe,
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed,
       hstoreProgress, _hrefs⟩
   exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _)
     hsafe hstoreProgress htyping
@@ -502,7 +357,7 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     TerminalStateSafe finalStore finalValue env₂ ty := by
   intro htyping hmulti
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hborrowSafe,
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed,
       _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact preservation hsource hvalidRuntime hvalidStoreTyping
@@ -534,13 +389,13 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
       ∃ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hterminates
-  rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
-      hstoreProgress, _hrefs⟩
-  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping (hwellFormed _)
-    hborrowSafe hsafe hstoreProgress htyping hterminates
+    intro htyping hterminates
+    rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
+      ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed,
+        hstoreProgress, _hrefs⟩
+    have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+    exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping (hwellFormed _)
+      hsafe hstoreProgress htyping hterminates
 
 /--
 **Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.
@@ -863,10 +718,7 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
   intro hranked hwriteCoherent hdeclFresh hsource htyping
-  exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
-    hranked
-    hwriteCoherent
-    hdeclFresh
+  exact borrowInvariance_of_ruleCarriedObligations
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
@@ -910,21 +762,16 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hrankedAssign hwriteCoherent hdeclFresh hsource htyping
-  exact borrowSafety_of_rankedAssign_and_declFreshCoherence
-    hrankedAssign
-    hwriteCoherent
-    hdeclFresh
-    hsource
-    (by
-      intro env lifetime
-      exact storeTypingRefsWellFormed_empty env lifetime)
-    (sourceInitialRuntimeState_valid hsource).1
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    (wellFormedEnv_empty lifetime)
-    borrowSafeEnv_empty
-    safeAbstraction_empty
-    htyping
+    intro hrankedAssign hwriteCoherent hdeclFresh hsource htyping
+    exact borrowInvariance_of_ruleCarriedObligations
+      (by
+        intro env lifetime
+        exact storeTypingRefsWellFormed_empty env lifetime)
+      (sourceInitialRuntimeState_valid hsource).1
+      (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+      (wellFormedEnv_empty lifetime)
+      safeAbstraction_empty
+      htyping
 
 /--
 **Theorem 4.12, empty-initial terminal-safety form.**  Any term typed from the
@@ -940,14 +787,14 @@ theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
       MultiStep ProgramStore.empty lifetime term finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hterminates
-  rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
-      _hstoreProgress, _hrefs⟩
-  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed lifetime) hborrowSafe hsafe
-    ProgramStore.finiteSupport_empty htyping hterminates).2
+    intro htyping hterminates
+    rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
+      ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed,
+        _hstoreProgress, _hrefs⟩
+    have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+    exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
+      (hwellFormed lifetime) hsafe
+      ProgramStore.finiteSupport_empty htyping hterminates).2
 
 /--
 **Unstuckness.**  No state reachable from an empty-initial well-typed program
@@ -960,14 +807,14 @@ theorem emptyInitial_no_stuck_states {term term' : Term} {lifetime : Lifetime}
     MultiStep ProgramStore.empty lifetime term store' term' →
     Terminal term' ∨
       ∃ store'' term'', Step store' lifetime term' store'' term'' := by
-  intro htyping hreach
-  rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
-      _hstoreProgress, _hrefs⟩
-  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact no_stuck_states hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed lifetime) hborrowSafe hsafe ProgramStore.finiteSupport_empty
-    htyping hreach
+    intro htyping hreach
+    rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
+      ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed,
+        _hstoreProgress, _hrefs⟩
+    have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+    exact no_stuck_states hsource hvalidRuntime hvalidStoreTyping
+      (hwellFormed lifetime) hsafe ProgramStore.finiteSupport_empty
+      htyping hreach
 
 /-- **Corollary 4.14.** Source-initial borrow safety through the rule-carried obligation route. -/
 theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
@@ -975,15 +822,13 @@ theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hsource htyping
-  exact borrowSafety_of_ruleCarriedObligations
-    hsource
-    (sourceInitialRuntimeState_valid hsource).1
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    (wellFormedEnv_empty lifetime)
-    borrowSafeEnv_empty
-    safeAbstraction_empty
-    htyping
+    intro hsource htyping
+    exact borrowInvariance_of_sourceTerm
+      hsource
+      (sourceInitialRuntimeState_valid hsource).1
+      (wellFormedEnv_empty lifetime)
+      safeAbstraction_empty
+      htyping
 
 end Paper
 end LwRust

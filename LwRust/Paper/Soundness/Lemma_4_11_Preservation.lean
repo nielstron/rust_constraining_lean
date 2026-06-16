@@ -2273,20 +2273,18 @@ theorem lvalTyping_box_borrow_false {store : ProgramStore} {env : Env}
 
 /--
 The location-based `&mut` leaf-exclusivity invariant `MutLeafExclusive` for a
-mutable-borrow write target, established from the runtime borrow-safety witness
-`BorrowSafeWitness`.
+mutable-borrow write target, established from assignment-local borrow safety.
 
 This is the bridge that lets the deref-assign frame run *purely* on
-`MutLeafExclusive` (a clean store/env-level invariant) while the surrounding
-preservation callers keep supplying the existing borrow-safety witness.  It
-re-runs the borrow-graph guard chase: the firstNode kill
+`MutLeafExclusive` (a clean store/env-level invariant).  It re-runs the
+borrow-graph guard chase: the firstNode kill
 (`slotDepKill_of_firstNode`) seeds the guard set at the write base, the
 resolution chase (`writeGuarded_of_resolution`) lifts it to a `ProtectedByBase`
 root, `locReads_protected_guarded_base` carries it to the cross-variable target
-`t`, and `collapse_kill_realized` collapses `t`'s borrow node onto a guarded
-container whose `SlotDepKill` contradicts the assumed `BorrowDependency` reading
-`leaf`.  All borrow uniqueness is supplied by the witness, never by the typing
-env — exactly as before, just relocated out of the safe-abstraction frame. -/
+`t`, and `WriteGuarded.collapse_kill_authority` collapses `t`'s borrow node
+onto a guarded container whose `SlotDepKill` contradicts the assumed
+`BorrowDependency` reading `leaf`.  Borrow uniqueness is required only for roots
+in the write authority closure. -/
 theorem mutLeafExclusive_of_assignmentBorrowSafety {store : ProgramStore} {env : Env}
     {current borrowLifetime targetLifetime : Lifetime} {φ : Name → Nat}
     {source : LVal} {mutable : Bool} {targets : List LVal} {targetTy : PartialTy}
@@ -3209,18 +3207,17 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
     simpa [htypedSlotEq] using htypedValid
   rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
   -- The `&mut` leaf-exclusivity invariant for this write, established from the
-  -- runtime borrow-safety witness (the only remaining consumer of borrow safety
-  -- in the deref-assign frame, now isolated to this bridge).
+  -- assignment-local authority and root-safety frame.
   have hmutLeafExclOf :
-      ∀ mutBit targets' bl,
-        LValTyping env source (.ty (.borrow mutBit targets')) bl →
-        MutLeafExclusive store env source typedLocation :=
-    fun _ _ _ _ =>
-      mutLeafExclusive_of_assignmentBorrowSafety hφ hwellFormed
-        hassignSafe hsafe
-        (ValidRuntimeState.validStore hvalidRuntime)
-        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-        hsourceBorrow htargets hlhsLoc hlhsSlot holdSlotValid hwrite hnotWrite
+    ∀ mutBit targets' bl,
+      LValTyping env source (.ty (.borrow mutBit targets')) bl →
+      MutLeafExclusive store env source typedLocation :=
+  fun _ _ _ _ =>
+    mutLeafExclusive_of_assignmentBorrowSafety hφ hwellFormed
+      hassignSafe hsafe
+      (ValidRuntimeState.validStore hvalidRuntime)
+      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+      hsourceBorrow htargets hlhsLoc hlhsSlot holdSlotValid hwrite hnotWrite
   exact preservation_assign_deref_envWrite_terminal_of_wellFormed
     hwellFormed hmutLeafExclOf hsafe
     hvalidRuntime (LValTyping.borrow hsourceBorrow htargets)
@@ -4289,7 +4286,6 @@ theorem lemma_4_11_preservation
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
-    (_hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :

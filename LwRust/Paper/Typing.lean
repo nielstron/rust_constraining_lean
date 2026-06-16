@@ -638,27 +638,6 @@ def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
   ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
     Coherent env ∧ Linearizable env
 
-/--
-Definition 4.13, borrow-safe environment.
-
-The paper phrases this over variables in `dom(Γ)` and borrowed lvalues inside
-contained borrow types.  The containment premises already imply the relevant
-variables are present in the environment.
-
-This lives here (rather than with the Section 4.3 helpers) because later typing
-rules and soundness lemmas use it as a static side condition.  It is deliberately
-not a premise of `TermTyping.ite`: joined branch environments can be
-well-formed without being globally borrow-safe.
--/
-def BorrowSafeEnv (env : Env) : Prop :=
-  ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
-    env ⊢ x ↝ (&mut targetsMutable) →
-    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
-    targetMutable ∈ targetsMutable →
-    targetOther ∈ targetsOther →
-    targetMutable ⋈ targetOther →
-    x = y
-
 /-- Borrow safety for one mutable-borrow root against the rest of an environment. -/
 def BorrowSafeRoot (env : Env) (root : Name) : Prop :=
   ∀ y mutable targetsMutable targetsOther targetMutable targetOther,
@@ -701,22 +680,6 @@ def AssignmentBorrowSafety (env : Env) : LVal → Prop
       ∀ root,
         BorrowAuthorityGuard env (LVal.base source) root →
         BorrowSafeRoot env root
-
-theorem BorrowSafeRoot.of_borrowSafeEnv {env : Env} {root : Name} :
-    BorrowSafeEnv env → BorrowSafeRoot env root := by
-  intro hsafe y mutable targetsMutable targetsOther targetMutable targetOther
-    hmutable hother htargetMutable htargetOther hconflict
-  exact hsafe root y mutable targetsMutable targetsOther targetMutable targetOther
-    hmutable hother htargetMutable htargetOther hconflict
-
-theorem AssignmentBorrowSafety.of_borrowSafeEnv {env : Env} {lhs : LVal} :
-    BorrowSafeEnv env → AssignmentBorrowSafety env lhs := by
-  intro hsafe
-  cases lhs with
-  | var _ => trivial
-  | deref source =>
-      intro root _hguard
-      exact BorrowSafeRoot.of_borrowSafeEnv hsafe
 
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/
@@ -1175,8 +1138,7 @@ mutual
 
     Obligations follow the join convention used by `T-If`: joins merge borrow
     target lists, so shape agreement and the well-formedness kit for the join
-    are rule-carried.  The invariant is not required to be globally
-    `BorrowSafeEnv`; assignment carries the local borrow-safety frame it needs.
+    are rule-carried.  Assignment carries the local borrow-safety frame it needs.
     Runtime entry/back-edge states transport into the invariant via
     `EnvSameShapeStrengthening.safe`, exactly as in the `T-If` preservation
     argument.

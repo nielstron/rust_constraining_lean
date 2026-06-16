@@ -17,12 +17,12 @@ if a == b {
 }
 ```
 
-The declarations are represented by the pre-if environment below: `a` and `b`
-are initialized integers, while `x` and `y` are mutable-borrow-shaped slots with
-empty target lists.  The important point is the post-if join environment:
-`x : &mut [a, b]` and `y : &mut [b, a]`.  That environment is intentionally not
-`BorrowSafeEnv`, so this file witnesses the kind of `T-If` join that the old
-borrow-safe premise would reject.
+  The declarations are represented by the pre-if environment below: `a` and `b`
+  are initialized integers, while `x` and `y` are mutable-borrow-shaped slots with
+  empty target lists.  The important point is the post-if join environment:
+  `x : &mut [a, b]` and `y : &mut [b, a]`.  The join is accepted by `T-If`, while
+  later dereference assignment through `x` is rejected by the assignment-local
+  authority check.
 -/
 
 namespace LwRust
@@ -118,8 +118,8 @@ def swappedBorrowIf : Term :=
 
 /--
 The current `T-If` rule can type this conditional from the usual branch and
-join obligations.  Notice that there is no `BorrowSafeEnv swappedBorrowJoinEnv`
-premise here; the theorem below proves that such a premise would be impossible.
+join obligations, with no global borrow-safety premise for the joined
+environment.
 -/
 theorem swappedBorrowIf_typing_from_branch_derivations
     {typing : StoreTyping}
@@ -166,31 +166,6 @@ theorem swappedBorrowIf_typing_from_branch_derivations
           _targetOther _hborrow hcontains _htargetMutable _htargetOther
           _hconflict
         cases hcontains)
-
-theorem swappedBorrowJoinEnv_not_borrowSafe :
-    ¬ BorrowSafeEnv swappedBorrowJoinEnv := by
-  intro hsafe
-  have hx : swappedBorrowJoinEnv ⊢ "x" ↝
-      (.borrow true [swappedBorrowA, swappedBorrowB]) := by
-    refine ⟨swappedBorrowSlot [swappedBorrowA, swappedBorrowB], ?_,
-      PartialTyContains.here⟩
-    simp [swappedBorrowJoinEnv, swappedBorrowEnv, swappedBorrowSlot,
-      swappedBorrowIntSlot, Env.update]
-  have hy : swappedBorrowJoinEnv ⊢ "y" ↝
-      (.borrow true [swappedBorrowB, swappedBorrowA]) := by
-    refine ⟨swappedBorrowSlot [swappedBorrowB, swappedBorrowA], ?_,
-      PartialTyContains.here⟩
-    simp [swappedBorrowJoinEnv, swappedBorrowEnv, swappedBorrowSlot,
-      swappedBorrowIntSlot, Env.update]
-  have hxy : "x" = "y" :=
-    hsafe "x" "y" true [swappedBorrowA, swappedBorrowB]
-      [swappedBorrowB, swappedBorrowA] swappedBorrowA swappedBorrowA
-      hx hy (by simp) (by simp) (by simp [PathConflicts, swappedBorrowA])
-  contradiction
-
-theorem swappedBorrowJoin_old_TIf_borrowSafe_premise_impossible :
-    ¬ BorrowSafeEnv swappedBorrowJoinEnv :=
-  swappedBorrowJoinEnv_not_borrowSafe
 
 /-- Unrelated direct root assignments are no longer blocked by the crossed join. -/
 theorem swappedBorrowJoin_root_assignment_frame_safe :

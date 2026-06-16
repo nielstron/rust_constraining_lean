@@ -23,9 +23,7 @@ The preservation-backed terminal safety component is scoped to `SourceTerm`
 continuations for arbitrary runtime store typings.  Empty-initial wrappers such
 as `emptyInitial_typeAndBorrowSafety` and
 `theorem_4_12_typeAndBorrowSafety_emptyInitial` derive that premise from
-typability under `StoreTyping.empty`.  For arbitrary nonempty runtime
-environments the preservation proof also needs the borrow-safety graph invariant;
-the empty-initial wrappers discharge it with `borrowSafeEnv_empty`.
+typability under `StoreTyping.empty`.
 -/
 
 namespace LwRust
@@ -123,19 +121,18 @@ conditional safety theorem for an explicitly supplied terminal multistep.
 theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     SourceTerm term →
-    ValidRuntimeState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    BorrowSafeEnv env₁ →
-    store ∼ₛ env₁ →
-    OperationalStoreProgress store →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      store ∼ₛ env₁ →
+      OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term →
     ProgressResult store lifetime term ∧
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed
     hsafe hstoreProgress htyping hterminates
   exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
     hwellFormed hsafe hstoreProgress htyping
@@ -149,31 +146,30 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
 Progress at every reachable state.
 
 This is the step-level invariant re-establishment missing from the
-terminal-only preservation statement: starting from a well-typed, well-formed,
-borrow-safe source state over a finite-support store, *every* state reachable
-by the reduction relation is either terminal or can take a further step.
+terminal-only preservation statement: starting from a well-typed, well-formed
+source state over a finite-support store with a safe runtime abstraction,
+*every* state reachable by the reduction relation is either terminal or can
+take a further step.
 
 The proof mirrors the terminal preservation induction: it follows the typing
 derivation, decomposes the partial execution with the prefix-inversion lemmas,
-re-establishes the mid-state invariants for completed subterms from terminal
-preservation (Lemma 4.11), the well-formedness induction (Lemma 4.9), and the
-borrow-safety induction (Corollary 4.14), and re-establishes the operational
-store facts from step-stable finite support.
+  re-establishes the mid-state invariants for completed subterms from terminal
+  preservation (Lemma 4.11), the well-formedness induction (Lemma 4.9), and
+  step-stable finite support.
 -/
 theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
     {ty : Ty} :
     SourceTerm term →
-    ValidRuntimeState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    BorrowSafeEnv env₁ →
-    store ∼ₛ env₁ →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term store' term' →
     ProgressResult store' lifetime term' := by
-  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe
     hfinite htyping hmulti
   refine TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
@@ -1204,8 +1200,7 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
 
 /--
 The step-stable soundness invariant: the state is a suffix of an execution
-from a well-typed, well-formed, borrow-safe source state over a finite-support
-store.
+from a well-typed, well-formed source state over a finite-support store.
 
 This is the invariant that the traditional single-step theorem
 (`SoundState.step`) re-establishes, and it is strong enough to apply both
@@ -1225,11 +1220,10 @@ def SoundState (store : ProgramStore) (lifetime : Lifetime) (term : Term) :
   ∃ (initialStore : ProgramStore) (initialTerm : Term) (env₁ env₂ : Env)
     (typing : StoreTyping) (ty : Ty),
     SourceTerm initialTerm ∧
-    ValidRuntimeState initialStore initialTerm ∧
-    ValidStoreTyping initialStore initialTerm typing ∧
-    WellFormedEnv env₁ lifetime ∧
-    BorrowSafeEnv env₁ ∧
-    initialStore ∼ₛ env₁ ∧
+      ValidRuntimeState initialStore initialTerm ∧
+      ValidStoreTyping initialStore initialTerm typing ∧
+      WellFormedEnv env₁ lifetime ∧
+      initialStore ∼ₛ env₁ ∧
     initialStore.FiniteSupport ∧
     TermTyping env₁ typing lifetime initialTerm ty env₂ ∧
     MultiStep initialStore lifetime initialTerm store term
@@ -1237,18 +1231,17 @@ def SoundState (store : ProgramStore) (lifetime : Lifetime) (term : Term) :
 /-- Every well-set-up source state satisfies the soundness invariant. -/
 theorem SoundState.initial {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-    SourceTerm term →
-    ValidRuntimeState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    BorrowSafeEnv env₁ →
-    store ∼ₛ env₁ →
+      SourceTerm term →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     SoundState store lifetime term :=
-  fun hsource hvalid hvst hwf hbs hsafe hfs htyping =>
-    ⟨store, term, env₁, env₂, typing, ty, hsource, hvalid, hvst, hwf, hbs,
-      hsafe, hfs, htyping, MultiStep.refl⟩
+    fun hsource hvalid hvst hwf hsafe hfs htyping =>
+      ⟨store, term, env₁, env₂, typing, ty, hsource, hvalid, hvst, hwf,
+        hsafe, hfs, htyping, MultiStep.refl⟩
 
 /--
 The traditional step theorem: a reduction step re-establishes the soundness
@@ -1259,11 +1252,11 @@ theorem SoundState.step {store store' : ProgramStore} {lifetime : Lifetime}
     SoundState store lifetime term →
     Step store lifetime term store' term' →
     SoundState store' lifetime term' := by
-  rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
-    hvst, hwf, hbs, hsafe, hfs, htyping, hreached⟩ hstep
-  exact ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
-    hvst, hwf, hbs, hsafe, hfs, htyping,
-    multistep_append hreached (step_multistep hstep)⟩
+    rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
+      hvst, hwf, hsafe, hfs, htyping, hreached⟩ hstep
+    exact ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
+      hvst, hwf, hsafe, hfs, htyping,
+      multistep_append hreached (step_multistep hstep)⟩
 
 /-- The soundness invariant is closed under arbitrary execution. -/
 theorem SoundState.multiStep {store store' : ProgramStore}
@@ -1271,20 +1264,20 @@ theorem SoundState.multiStep {store store' : ProgramStore}
     SoundState store lifetime term →
     MultiStep store lifetime term store' term' →
     SoundState store' lifetime term' := by
-  rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
-    hvst, hwf, hbs, hsafe, hfs, htyping, hreached⟩ hmulti
-  exact ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
-    hvst, hwf, hbs, hsafe, hfs, htyping, multistep_append hreached hmulti⟩
+    rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
+      hvst, hwf, hsafe, hfs, htyping, hreached⟩ hmulti
+    exact ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
+      hvst, hwf, hsafe, hfs, htyping, multistep_append hreached hmulti⟩
 
 /-- Progress holds at every state satisfying the soundness invariant. -/
 theorem SoundState.progress {store : ProgramStore} {lifetime : Lifetime}
     {term : Term} :
     SoundState store lifetime term →
     ProgressResult store lifetime term := by
-  rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
-    hvst, hwf, hbs, hsafe, hfs, htyping, hreached⟩
-  exact reachable_progress hsource hvalid hvst hwf hbs hsafe hfs htyping
-    hreached
+    rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
+      hvst, hwf, hsafe, hfs, htyping, hreached⟩
+    exact reachable_progress hsource hvalid hvst hwf hsafe hfs htyping
+      hreached
 
 /--
 Terminal preservation holds at every state satisfying the soundness
@@ -1296,14 +1289,14 @@ theorem SoundState.preservation {store finalStore : ProgramStore}
     MultiStep store lifetime term finalStore (.val finalValue) →
     ∃ env₂ ty, TerminalStateSafe finalStore finalValue env₂ ty := by
   rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
-    hvst, hwf, _hbs, hsafe, _hfs, htyping, hreached⟩ hmulti
+    hvst, hwf, hsafe, _hfs, htyping, hreached⟩ hmulti
   exact ⟨env₂, ty,
     _root_.LwRust.Paper.preservation hsource hvalid hvst hwf hsafe htyping
       (multistep_append hreached hmulti)⟩
 
 /--
-No reachable state is stuck: from a well-typed, well-formed, borrow-safe
-source state over a finite-support store, every state reachable by the
+No reachable state is stuck: from a well-typed, well-formed source state over a
+finite-support store, every state reachable by the
 reduction relation is either terminal or can take a further step.
 
 This is the composed soundness statement that the paper's Theorem 4.12
@@ -1314,18 +1307,17 @@ theorem no_stuck_states {store store' : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
     {ty : Ty} :
     SourceTerm term →
-    ValidRuntimeState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    BorrowSafeEnv env₁ →
-    store ∼ₛ env₁ →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term store' term' →
     Terminal term' ∨
       ∃ store'' term'', Step store' lifetime term' store'' term'' :=
-  fun hsource hvalid hvst hwf hbs hsafe hfs htyping hmulti =>
-    reachable_progress hsource hvalid hvst hwf hbs hsafe hfs htyping hmulti
+    fun hsource hvalid hvst hwf hsafe hfs htyping hmulti =>
+      reachable_progress hsource hvalid hvst hwf hsafe hfs htyping hmulti
 
 end Paper
 end LwRust
@@ -1354,20 +1346,19 @@ theorem theorem_4_12_typeAndBorrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hsource : SourceTerm term)
-      (hvalid : ValidRuntimeState store term)
-      (hstoreTyping : ValidStoreTyping store term typing)
-      (hwellFormed : WellFormedEnv env₁ lifetime)
-      (hborrowSafe : BorrowSafeEnv env₁)
-      (hsafe : store ∼ₛ env₁)
+        (hvalid : ValidRuntimeState store term)
+        (hstoreTyping : ValidStoreTyping store term typing)
+        (hwellFormed : WellFormedEnv env₁ lifetime)
+        (hsafe : store ∼ₛ env₁)
     (hstore : OperationalStoreProgress store)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hterminates : TerminatesAsValue store lifetime term) :
     ProgressResult store lifetime term ∧
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
-        TerminalStateSafe finalStore finalValue env₂ ty :=
-    typeAndBorrowSafety hsource hvalid
-      hstoreTyping hwellFormed hborrowSafe hsafe hstore htyping hterminates
+          TerminalStateSafe finalStore finalValue env₂ ty :=
+      typeAndBorrowSafety hsource hvalid
+        hstoreTyping hwellFormed hsafe hstore htyping hterminates
 
 /--
 Corollary 4.14, Borrow Safety (paper interface).
@@ -1385,8 +1376,8 @@ Paper statement (Section 4.5):
 The full borrow-safe existential is not derivable for the current control-flow
 calculus with unrestricted `T-If` joins.  The theorem below keeps the terminal
 runtime safety and well-formed result-extension parts of the interface, using
-`Γ₃ = Γ₂` and `T₂ = T₁`; it deliberately omits the false static
-`BorrowSafeEnv` conclusion for the joined environment.
+`Γ₃ = Γ₂` and `T₂ = T₁`; it deliberately omits the false static global
+borrow-safety conclusion for the joined environment.
 
 The fresh-slot coherence obligations (`WellFormedTy` and
 `FreshUpdateCoherenceObligations` for the result binding) are carried
@@ -1398,11 +1389,10 @@ theorem corollary_4_14_borrowSafety_weakening
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty}
     {finalValue : Value}
     (hsource : SourceTerm term)
-    (hvalid : ValidRuntimeState store term)
-    (hstoreTyping : ValidStoreTyping store term typing)
-    (hwellFormed : WellFormedEnv env₁ lifetime)
-    (hborrowSafe : BorrowSafeEnv env₁)
-    (hsafe : store ∼ₛ env₁)
+      (hvalid : ValidRuntimeState store term)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hwellFormed : WellFormedEnv env₁ lifetime)
+      (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue))
     (hwellTy : WellFormedTy env₂ ty lifetime)
@@ -1421,7 +1411,7 @@ theorem corollary_4_14_borrowSafety_weakening
       ValidValue finalStore finalValue resultTy := by
   have hterminal :=
     lemma_4_11_preservation hsource hvalid hstoreTyping hwellFormed
-      hborrowSafe hsafe htyping hmulti
+      hsafe htyping hmulti
   have hwf₂ : WellFormedEnv env₂ lifetime :=
     borrowInvariance_of_sourceTerm hsource hvalid.validState
       hwellFormed hsafe htyping
@@ -1438,18 +1428,17 @@ theorem theorem_4_12_no_stuck_states
     {store store' : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term term' : Term} {ty : Ty}
     (hsource : SourceTerm term)
-    (hvalid : ValidRuntimeState store term)
-    (hstoreTyping : ValidStoreTyping store term typing)
-    (hwellFormed : WellFormedEnv env₁ lifetime)
-    (hborrowSafe : BorrowSafeEnv env₁)
-    (hsafe : store ∼ₛ env₁)
+      (hvalid : ValidRuntimeState store term)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hwellFormed : WellFormedEnv env₁ lifetime)
+      (hsafe : store ∼ₛ env₁)
     (hfinite : store.FiniteSupport)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hreach : MultiStep store lifetime term store' term') :
     Terminal term' ∨
-      ∃ store'' term'', Step store' lifetime term' store'' term'' :=
-  no_stuck_states hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
-    hfinite htyping hreach
+        ∃ store'' term'', Step store' lifetime term' store'' term'' :=
+    no_stuck_states hsource hvalid hstoreTyping hwellFormed hsafe
+      hfinite htyping hreach
 
 /--
 Theorem 4.12, Type and Borrow Safety, total form.
@@ -1462,19 +1451,18 @@ theorem theorem_4_12_typeAndBorrowSafety_total
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hsource : SourceTerm term)
-    (hvalid : ValidRuntimeState store term)
-    (hstoreTyping : ValidStoreTyping store term typing)
-    (hwellFormed : WellFormedEnv env₁ lifetime)
-    (hborrowSafe : BorrowSafeEnv env₁)
-    (hsafe : store ∼ₛ env₁)
+      (hvalid : ValidRuntimeState store term)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hwellFormed : WellFormedEnv env₁ lifetime)
+      (hsafe : store ∼ₛ env₁)
     (hfinite : store.FiniteSupport)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hterminates : TerminatesAsValue store lifetime term) :
     ProgressResult store lifetime term ∧
       ∃ finalStore finalValue,
-        MultiStep store lifetime term finalStore (.val finalValue) ∧
-        TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed hborrowSafe
-    hsafe (OperationalStoreProgress.of_finiteSupport hfinite) htyping hterminates
+          MultiStep store lifetime term finalStore (.val finalValue) ∧
+          TerminalStateSafe finalStore finalValue env₂ ty :=
+    typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed
+      hsafe (OperationalStoreProgress.of_finiteSupport hfinite) htyping hterminates
 
 end LwRust.Paper.Soundness

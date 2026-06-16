@@ -91,7 +91,7 @@ theorem ifThenElseInt_typeSafety :
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
-still joins to the empty borrow-safe environment.
+still joins to the empty environment.
 -/
 def ifEqThenElseInt : Term :=
   .ite scalarCopyComparison (.val (.int 1)) (.val (.int 2))
@@ -618,59 +618,95 @@ theorem pointerIfEnv_contained :
         rw [hslot] at hnone
         cases hnone
 
-theorem pointerIfEnv_borrowSafe :
-    BorrowSafeEnv pointerIfEnv := by
-  intro x y mutable targetsMutable targetsOther targetMutable targetOther
-    hmutable hother _htargetMutable _htargetOther _hconflict
-  have hxRoot : x = "p" := by
-    rcases hmutable with ⟨slot, hslot, hcontains⟩
-    by_cases hp : x = "p"
-    · exact hp
-    · by_cases hy : x = "y"
-      · subst hy
+theorem pointerIfEnv_borrow_root_p {root : Name} {mutable : Bool}
+    {targets : List LVal} :
+    pointerIfEnv ⊢ root ↝ (Ty.borrow mutable targets) →
+    root = "p" := by
+  intro hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  by_cases hp : root = "p"
+  · exact hp
+  · by_cases hy : root = "y"
+    · subst hy
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hcontainsTy
+      cases hcontainsTy
+    · by_cases hx : root = "x"
+      · subst hx
         have hslotTy : slot.ty = .ty .int := by
-          simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+          simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+            Env.update] using
             (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-        rw [hslotTy] at hcontains
-        cases hcontains
-      · by_cases hx : x = "x"
-        · subst hx
-          have hslotTy : slot.ty = .ty .int := by
-            simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-              Env.update] using
-              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-          rw [hslotTy] at hcontains
-          cases hcontains
-        · have hnone : pointerIfEnv.slotAt x = none := by
-            simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-              Env.update, Env.empty, hp, hy, hx]
-          rw [hslot] at hnone
-          cases hnone
-  have hyRoot : y = "p" := by
-    rcases hother with ⟨slot, hslot, hcontains⟩
-    by_cases hp : y = "p"
-    · exact hp
-    · by_cases hy : y = "y"
-      · subst hy
-        have hslotTy : slot.ty = .ty .int := by
-          simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-        rw [hslotTy] at hcontains
-        cases hcontains
-      · by_cases hx : y = "x"
-        · subst hx
-          have hslotTy : slot.ty = .ty .int := by
-            simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-              Env.update] using
-              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-          rw [hslotTy] at hcontains
-          cases hcontains
-        · have hnone : pointerIfEnv.slotAt y = none := by
-            simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-              Env.update, Env.empty, hp, hy, hx]
-          rw [hslot] at hnone
-          cases hnone
-  rw [hxRoot, hyRoot]
+        rw [hslotTy] at hcontainsTy
+        cases hcontainsTy
+      · have hnone : pointerIfEnv.slotAt root = none := by
+          simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+            Env.update, Env.empty, hp, hy, hx]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem pointerIfEnv_p_targets {targets : List LVal} :
+    pointerIfEnv ⊢ "p" ↝ (&mut targets) →
+    targets = [.var "x"] := by
+  rintro ⟨slot, hslot, hcontains⟩
+  have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
+    simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
+      (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+  rw [hslotTy] at hcontains
+  cases hcontains
+  rfl
+
+theorem pointerIfEnv_x_no_mut {targets : List LVal} :
+    ¬ pointerIfEnv ⊢ "x" ↝ (&mut targets) := by
+  rintro ⟨slot, hslot, hcontains⟩
+  have hslotTy : slot.ty = .ty .int := by
+    simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+      Env.update] using
+      (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+  rw [hslotTy] at hcontains
+  cases hcontains
+
+theorem pointerIfEnv_p_borrowSafeRoot :
+    BorrowSafeRoot pointerIfEnv "p" := by
+  intro y mutable targetsMutable targetsOther targetMutable targetOther
+    _hmutable hother _htargetMutable _htargetOther _hconflict
+  exact (pointerIfEnv_borrow_root_p hother).symm
+
+theorem pointerIfEnv_x_borrowSafeRoot :
+    BorrowSafeRoot pointerIfEnv "x" := by
+  intro y mutable targetsMutable targetsOther targetMutable targetOther
+    hmutable _hother _htargetMutable _htargetOther _hconflict
+  exact False.elim (pointerIfEnv_x_no_mut hmutable)
+
+theorem pointerIfEnv_guard_p_or_x {root : Name} :
+    BorrowAuthorityGuard pointerIfEnv "p" root →
+    root = "p" ∨ root = "x" := by
+  intro hguard
+  induction hguard with
+  | base =>
+      exact Or.inl rfl
+  | step hcontainer hnode hmem ih =>
+      rcases ih with hcontainerRoot | hcontainerRoot
+      · subst hcontainerRoot
+        have htargets := pointerIfEnv_p_targets hnode
+        subst htargets
+        simp at hmem
+        right
+        simpa [LVal.base] using congrArg LVal.base hmem
+      · subst hcontainerRoot
+        exact False.elim (pointerIfEnv_x_no_mut hnode)
+
+theorem pointerIf_deref_p_assignmentSafe :
+    AssignmentBorrowSafety pointerIfEnv (.deref (.var "p")) := by
+  intro root hguard
+  rcases pointerIfEnv_guard_p_or_x (by simpa [LVal.base] using hguard) with
+    hroot | hroot
+  · subst hroot
+    exact pointerIfEnv_p_borrowSafeRoot
+  · subst hroot
+    exact pointerIfEnv_x_borrowSafeRoot
 
 theorem pointerIfRetarget_slot_borrows_wellFormed :
     PartialTyBorrowsWellFormedInSlot pointerIfRetargetEnv
@@ -1140,7 +1176,7 @@ theorem pointerWriteBranch_typing :
   exact TermTyping.assign
     pointerIf_deref_p_typing
     (TermTyping.const ValueTyping.int)
-    (AssignmentBorrowSafety.of_borrowSafeEnv pointerIfEnv_borrowSafe)
+    pointerIf_deref_p_assignmentSafe
     pointerIf_deref_p_typing
     ShapeCompatible.int
     WellFormedTy.int
@@ -1449,41 +1485,6 @@ theorem pointerIfJoin_linearizable : Linearizable pointerIfJoinEnv := by
         rw [hslot] at hnone
         cases hnone
 
-theorem pointerIfJoin_borrowSafe : BorrowSafeEnv pointerIfJoinEnv := by
-  have hroot : ∀ root mutable targets,
-      (pointerIfJoinEnv ⊢ root ↝ (Ty.borrow mutable targets)) →
-      root = "p" := by
-    intro root mutable targets hcontains
-    rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
-    by_cases hp : root = "p"
-    · exact hp
-    · exfalso
-      by_cases hy : root = "y"
-      · subst hy
-        have hslotTy : slot.ty = .ty .int := by
-          simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
-            Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-        rw [hslotTy] at hcontainsTy
-        cases hcontainsTy
-      · by_cases hx : root = "x"
-        · subst hx
-          have hslotTy : slot.ty = .ty .int := by
-            simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
-              pointerIfJoinPSlot, Env.update] using
-              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-                hslot).symm
-          rw [hslotTy] at hcontainsTy
-          cases hcontainsTy
-        · have hnone : pointerIfJoinEnv.slotAt root = none := by
-            simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]
-          rw [hslot] at hnone
-          cases hnone
-  intro x y mutable targetsMutable targetsOther targetMutable targetOther
-    hcontainsMutable hcontainsOther _htargetMutable _htargetOther _hconflict
-  rw [hroot x true targetsMutable hcontainsMutable,
-    hroot y mutable targetsOther hcontainsOther]
-
 theorem pointerIfRetarget_le_join :
     EnvStrengthens pointerIfRetargetEnv pointerIfJoinEnv := by
   intro name
@@ -1725,15 +1726,13 @@ theorem pointerIfWrite_join_sameShape :
 theorem ifPointerAssignment_join_obligations :
     EnvJoin pointerIfRetargetEnv pointerIfWriteEnv pointerIfJoinEnv ∧
     EnvJoinSameShape pointerIfRetargetEnv pointerIfJoinEnv ∧
-    EnvJoinSameShape pointerIfWriteEnv pointerIfJoinEnv ∧
-    ContainedBorrowsWellFormed pointerIfJoinEnv ∧
-    Coherent pointerIfJoinEnv ∧
-    Linearizable pointerIfJoinEnv ∧
-    BorrowSafeEnv pointerIfJoinEnv :=
-  ⟨pointerIf_envJoin, pointerIfRetarget_join_sameShape,
-    pointerIfWrite_join_sameShape, pointerIfJoin_contained,
-    pointerIfJoin_coherent, pointerIfJoin_linearizable,
-    pointerIfJoin_borrowSafe⟩
+      EnvJoinSameShape pointerIfWriteEnv pointerIfJoinEnv ∧
+      ContainedBorrowsWellFormed pointerIfJoinEnv ∧
+      Coherent pointerIfJoinEnv ∧
+      Linearizable pointerIfJoinEnv :=
+    ⟨pointerIf_envJoin, pointerIfRetarget_join_sameShape,
+      pointerIfWrite_join_sameShape, pointerIfJoin_contained,
+      pointerIfJoin_coherent, pointerIfJoin_linearizable⟩
 
 theorem ifPointerAssignment_typing :
     TermTyping pointerIfEnv StoreTyping.empty Lifetime.root
@@ -1750,7 +1749,7 @@ theorem ifPointerAssignment_typing :
     WellFormedTy.unit
     ifPointerAssignment_join_obligations.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.1
-    ifPointerAssignment_join_obligations.2.2.2.2.2.1
+    ifPointerAssignment_join_obligations.2.2.2.2.2
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit)
 
 end Paper

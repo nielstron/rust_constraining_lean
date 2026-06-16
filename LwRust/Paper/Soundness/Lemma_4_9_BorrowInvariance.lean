@@ -127,7 +127,7 @@ theorem partialTyContains_borrow_transport_strengthens
 environment.  Strengthening only grows borrow target lists, so the finer
 environment has *fewer* conflicting borrows.  This is the mechanised form of the
 T-If insight — every write that type-checks against the merged join env is
-automatically safe against each (borrow-safe) branch env. -/
+automatically safe against each branch env. -/
 theorem not_writeProhibited_of_sameShapeStrengthening
     {envFine envCoarse : Env} {w : LVal} :
     EnvSameShapeStrengthening envFine envCoarse →
@@ -190,8 +190,7 @@ theorem EnvSameShapeStrengthening.safe
 
 /-- Same-shape strengthening commutes with `dropLifetime`: both environments
 drop exactly the slots at the given lifetime (strengthening preserves slot
-lifetimes), and the survivors keep their strengthening relationship.  This is the
-block-exit transport for the runtime-grounded borrow-safety witness. -/
+lifetimes), and the survivors keep their strengthening relationship. -/
 theorem EnvSameShapeStrengthening.dropLifetime {source result : Env}
     {lifetime : Lifetime} :
     EnvSameShapeStrengthening source result →
@@ -230,44 +229,6 @@ theorem EnvSameShapeStrengthening.dropLifetime {source result : Env}
           have hne : resultSlot.lifetime ≠ lifetime := by rw [← hlife]; exact hlt
           simp [hne]
 
-/--
-Runtime-grounded borrow safety: the store is realised by *some* borrow-safe
-environment `envBS` that same-shape-strengthens the (possibly join-merged, hence
-borrow-unsafe) typing environment `env`.
-
-Because strengthening preserves the mutable bit and the shape (W-Bor), `envBS`
-pins down the real per-borrow mutabilities — unlike a bare
-`∃ env, store ∼ₛ env ∧ BorrowSafeEnv env`, which is vacuous (V-Borrow leaves
-`mutable` free, so the runtime store alone cannot witness borrow safety).
-
-This is the invariant threaded by preservation in place of static
-`BorrowSafeEnv env`: after a `T-If` join the typing env is `env₅` (unsafe) but
-the runtime store still realises the executed branch's borrow-safe `env₃`. -/
-def BorrowSafeRealized (store : ProgramStore) (env : Env) : Prop :=
-  ∃ envBS,
-    store ∼ₛ envBS ∧ BorrowSafeEnv envBS ∧ EnvSameShapeStrengthening envBS env
-
-/-- A genuinely borrow-safe environment realises itself. -/
-theorem BorrowSafeRealized.of_borrowSafeEnv {store : ProgramStore} {env : Env} :
-    store ∼ₛ env → BorrowSafeEnv env → BorrowSafeRealized store env :=
-  fun hsafe hbs => ⟨env, hsafe, hbs, EnvSameShapeStrengthening.refl env⟩
-
-/-- Runtime-grounded borrow safety still abstracts the typing environment. -/
-theorem BorrowSafeRealized.safeAbstraction {store : ProgramStore} {env : Env} :
-    BorrowSafeRealized store env → store ∼ₛ env := by
-  rintro ⟨_envBS, hsafeBS, _hbs, hstr⟩
-  exact EnvSameShapeStrengthening.safe hstr hsafeBS
-
-/-- Runtime-grounded borrow safety transports forward along a further same-shape
-strengthening of the typing environment: the same witness still strengthens the
-coarser env by transitivity. -/
-theorem BorrowSafeRealized.weaken {store : ProgramStore} {env env' : Env} :
-    BorrowSafeRealized store env →
-    EnvSameShapeStrengthening env env' →
-    BorrowSafeRealized store env' := by
-  rintro ⟨envBS, hsafeBS, hbs, hstr⟩ hstr'
-  exact ⟨envBS, hsafeBS, hbs, EnvSameShapeStrengthening.trans hstr hstr'⟩
-
 /-- `t` is the live target a stored borrow value actually points to: some store
 cell holds a (non-owning) reference to a location that `t` resolves to.  Unlike
 mere resolvability, a *stale* merged-join target — one no current borrow points
@@ -299,50 +260,6 @@ theorem SelectedTarget.targetPointedTo {store : ProgramStore} {x : Name}
     {t : LVal} : SelectedTarget store x t → TargetPointedTo store t := by
   rintro ⟨cell, cellSlot, loc, _hprot, hslot, hval, hloc⟩
   exact ⟨cell, cellSlot, loc, hslot, hval, hloc⟩
-
-/-- The borrow-safety invariant threaded by preservation in place of the static
-`BorrowSafeEnv env`: a witness env `env_w` is genuinely borrow safe,
-same-shape-strengthens the typing env `env`, and *keeps every selected
-target* (`SelectedTarget`) of `env`'s borrows.  For a borrow-safe `env` the
-witness is `env` itself; after a `T-If` join the witness is the executed branch's
-borrow-safe env₃.  This is exactly what `collapse_kill_realized` consumes. -/
-def BorrowSafeWitness (store : ProgramStore) (env : Env) : Prop :=
-  ∃ env_w,
-    BorrowSafeEnv env_w ∧
-      EnvSameShapeStrengthening env_w env ∧
-      (∀ x mutable targets s, env ⊢ x ↝ (.borrow mutable targets) →
-        s ∈ targets → SelectedTarget store x s →
-        ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
-
-/-- A genuinely borrow-safe environment is its own selected-target witness. -/
-theorem BorrowSafeWitness.of_borrowSafeEnv {store : ProgramStore} {env : Env} :
-    store ∼ₛ env → BorrowSafeEnv env → BorrowSafeWitness store env :=
-  fun _hsafe hbs =>
-    ⟨env, hbs, EnvSameShapeStrengthening.refl env,
-      fun _x _mutable targets _s hnode hmem _ => ⟨targets, hnode, hmem⟩⟩
-
-/-- Weaken the witness invariant along a same-shape strengthening of the typing
-env (the `T-If` join `env ⊢ env₃`, `env' ⊢ env₅`).  The same borrow-safe witness
-serves the coarser env; its `hkept` transports because every selected
-(`SelectedTarget`) target of the coarser env's borrows is already a target of
-the finer env's borrow (`hlive`).  That side condition is exactly "a join's
-merged target list introduces no *new selected* targets" — true because a target
-present only in the non-executed branch is not selected by the current store's
-root, and genuine aliasing of distinct-base lvals under a live mutable borrow is
-excluded by borrow checking at creation. -/
-theorem BorrowSafeWitness.weaken {store : ProgramStore} {env env' : Env} :
-    BorrowSafeWitness store env →
-    EnvSameShapeStrengthening env env' →
-    (∀ x mutable targets s, env' ⊢ x ↝ (.borrow mutable targets) →
-      s ∈ targets → SelectedTarget store x s →
-      ∃ targets₀, env ⊢ x ↝ (.borrow mutable targets₀) ∧ s ∈ targets₀) →
-    BorrowSafeWitness store env' := by
-  rintro ⟨env_w, hbs_w, hstr_w, hkept_w⟩ hstr hlive
-  refine ⟨env_w, hbs_w,
-    EnvSameShapeStrengthening.trans hstr_w hstr, ?_⟩
-  intro x mutable targets s hnode' hmem' hsel
-  rcases hlive x mutable targets s hnode' hmem' hsel with ⟨targets₀, hnode, hmem⟩
-  exact hkept_w x mutable targets₀ s hnode hmem hsel
 
 /-- Inversion: the storage of a valid `value` owns (directly) `owned` iff
 `value` is a `box`/`boxFull` whose pointee is exactly `owned`.  For non-box
@@ -539,74 +456,6 @@ def LocMutExcl (store : ProgramStore) (env₃ env₅ : Env) : Prop :=
       SelectedTarget store x t₃ →
       store.loc t₃ = store.loc s →
       mutable₃ = mutable
-
-/-- The keystone `T-If` join `hlive` side condition, now premise-clean modulo the
-honest store-level `&mut` location-exclusivity invariant `LocMutExcl` (replacing
-the opaque `hbridge`).
-
-The keep-contract is stated as **location coverage**: the witness `env_w`'s
-`x`-borrow keeps, at the *same location*, *some* target `t_w` co-resolving with
-the selected env₅ target `s` (`store.loc t_w = store.loc s`).  This is the
-correct contract for the §4.5.1 deviation — an env₄-only join target `s` is not
-syntactically in the env₃-derived witness, but the env₃ target `t₃` it
-co-resolves with *is* kept, and `LocMutExcl` pins the two nodes to the same
-mutability so the kept node has the env₅ borrow's mutable bit.
-
-* (A) env₃ side: `s` is a genuine env₃ target → `hkept₃` keeps it directly.
-* (B) env₄-only side: the realized store selects `s` (`hsel`); the realization
-  bridge `envBorrow_of_selectedTarget` recovers a genuine env₃ node at `x` with
-  a *co-located* realized target `t₃`; `LocMutExcl` makes that node's mutability
-  the env₅ borrow's, and `hkept₃` keeps `t₃` at `s`'s location. -/
-theorem borrowSafeWitness_ite_hlive
-    {store : ProgramStore} {env₃ env₄ env₅ env_w : Env} {lifetime : Lifetime}
-    (hjoin : EnvJoin env₃ env₄ env₅)
-    (hrealize : store ∼ₛ env₃)
-    (hwf : WellFormedEnv env₃ lifetime)
-    (hbs_w : BorrowSafeEnv env_w) (hstr_w : EnvSameShapeStrengthening env_w env₃)
-    (hlocMutExcl : LocMutExcl store env₃ env₅)
-    (hkept₃ : ∀ x mutable targets s, env₃ ⊢ x ↝ (.borrow mutable targets) →
-        s ∈ targets → SelectedTarget store x s →
-        ∃ Tw t_w, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ t_w ∈ Tw ∧
-          store.loc t_w = store.loc s) :
-    ∀ x mutable targets s, env₅ ⊢ x ↝ (.borrow mutable targets) →
-      s ∈ targets → SelectedTarget store x s →
-      ∃ Tw t_w, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ t_w ∈ Tw ∧
-        store.loc t_w = store.loc s := by
-  intro x mutable targets s hnode₅ hmem hsel
-  rcases hnode₅ with ⟨joinSlot, hjoinSlot, hcontains⟩
-  -- Split the env₅ join borrow target `s` into its env₃ / env₄ origin (W-Bor).
-  rcases EnvJoin.contained_borrow_member hjoin hjoinSlot hcontains hmem with
-    hleft | hright
-  · -- (A) env₃ side: `s` is a genuine env₃ borrow target → `hkept₃` directly.
-    rcases hleft with ⟨leftSlot, leftTargets, hleftSlot, hleftContains, hleftMem⟩
-    exact hkept₃ x mutable leftTargets s ⟨leftSlot, hleftSlot, hleftContains⟩
-      hleftMem hsel
-  · -- (B) env₄-only side: discharged from `LocMutExcl` + the realization bridge.
-    -- Recover a genuine env₃ borrow node at `x` co-resolving with `s`.
-    rcases envBorrow_of_selectedTarget hrealize hsel with
-      ⟨mutable₃, targets₃, t₃, hnode₃, hmem₃, hsel₃, hloc₃⟩
-    -- `LocMutExcl` pins the env₃ node's mutability to the env₅ borrow's.
-    have hmutEq : mutable₃ = mutable :=
-      hlocMutExcl x mutable targets s ⟨joinSlot, hjoinSlot, hcontains⟩ hmem hsel
-        mutable₃ targets₃ t₃ hnode₃ hmem₃ hsel₃ hloc₃
-    subst hmutEq
-    -- The witness keeps `t₃` at `t₃`'s location = `s`'s location.
-    rcases hkept₃ x mutable₃ targets₃ t₃ hnode₃ hmem₃ hsel₃ with
-      ⟨Tw, t_w, hnode_w, hmem_w, hloc_w⟩
-    exact ⟨Tw, t_w, hnode_w, hmem_w, by rw [hloc_w, hloc₃]⟩
-
-/-- The empty environment is vacuously borrow safe (it has no slots, so no
-borrow node resolves). -/
-theorem borrowSafeEnv_empty_env : BorrowSafeEnv Env.empty := by
-  intro x y mutable tsM tsO tM tO hx _hy _htMmem _htOmem _hconf
-  rcases hx with ⟨slot, hslot, _hcontains⟩
-  simp [Env.empty] at hslot
-
-/-- The empty initial state is its own borrow-safety witness — the base of the
-preservation threading. -/
-theorem BorrowSafeWitness.empty :
-    BorrowSafeWitness ProgramStore.empty Env.empty :=
-  BorrowSafeWitness.of_borrowSafeEnv safeAbstraction_empty borrowSafeEnv_empty_env
 
 /-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
 strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
@@ -7646,8 +7495,8 @@ theorem RuntimeFrame.locReads_below {store : ProgramStore} {env : Env}
 Resolving into (or reading from) a guard-protected owner tree forces the
 resolving lvalue's base into the guard set, provided the guard set absorbs the
 container of any borrow node that targets a guarded base.  At the assignment
-use-site the guard set is the write's authority chain and absorption is exactly
-borrow safety (`BorrowSafeEnv`) against the chain's mutable-borrow records.
+use-site the guard set is the write's authority chain and absorption is supplied
+by assignment-local `BorrowSafeRoot` obligations.
 -/
 
 theorem RuntimeFrame.loc_protected_guarded_base {store : ProgramStore}
@@ -7848,8 +7697,7 @@ def SlotDepKill (store : ProgramStore) (env : Env) (leaf : Location)
 /-- **Location-based `&mut` leaf exclusivity.**
 
 The honest store-level runtime invariant that discharges the deref-write frame's
-cross-variable kill obligation *pointwise*, replacing the `collapse_kill` /
-`BorrowSafeWitness` borrow-graph chase.
+cross-variable kill obligation *pointwise*.
 
 `MutLeafExclusive store env owner leaf` says: `leaf` is the runtime location a
 live `&mut` (held by the lval `owner`) currently points to, and *no other*
@@ -8263,42 +8111,7 @@ theorem WriteGuarded.authorityGuard {store : ProgramStore} {env : Env}
   | step hcontainer hnode hmem _hbase _hkill _hlive ih =>
       simpa [_hbase] using BorrowAuthorityGuard.step ih hnode hmem
 
-/-- Borrow safety collapses any borrow node targeting a guarded base onto a
-guarded container carrying a dependency kill. -/
-theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
-    {leaf : Location} {base₀ : Name}
-    (hborrowSafe : BorrowSafeEnv env)
-    (hnotWP : ¬ WriteProhibited env (.var base₀)) :
-    ∀ {c : Name} {mutable : Bool} {ts : List LVal} {t : LVal},
-      env ⊢ c ↝ (.borrow mutable ts) →
-      t ∈ ts →
-      WriteGuarded store env leaf base₀ (LVal.base t) →
-      WriteGuarded store env leaf base₀ c ∧ SlotDepKill store env leaf c := by
-  intro c mutable ts t hnode hmem hG
-  generalize hz : LVal.base t = z at hG
-  cases hG with
-  | base _hkill =>
-      exfalso
-      apply hnotWP
-      cases mutable with
-      | true =>
-          exact Or.inl ⟨c, ts, t, hnode, hmem,
-            by simpa [PathConflicts, LVal.base] using hz⟩
-      | false =>
-          exact Or.inr ⟨c, ts, t, hnode, hmem,
-            by simpa [PathConflicts, LVal.base] using hz⟩
-  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' _hlive' =>
-      have hconflict : t' ⋈ t := by
-        simpa [PathConflicts, hbase'] using hz.symm
-      have hceq : container = c :=
-        hborrowSafe container c mutable targets' ts t' t hnode' hnode hmem'
-          hmem hconflict
-      subst hceq
-      exact ⟨hGc, hkill'⟩
-
 /--
-Authority-local version of `WriteGuarded.collapse_kill`.
-
 Only roots in the write's authority closure need to be borrow-safe against the
 rest of the environment.  Unrelated conflicts elsewhere in a joined environment
 are irrelevant to this collapse.
@@ -8334,52 +8147,6 @@ theorem WriteGuarded.collapse_kill_authority {store : ProgramStore} {env : Env}
       have hceq : container = c :=
         hcontainerSafe c mutable targets' ts t' t hnode' hnode hmem'
           hmem hconflict
-      subst hceq
-      exact ⟨hGc, hkill'⟩
-
-/-- Runtime-grounded `collapse_kill`: borrow-node uniqueness is supplied by a
-witness environment `env_w` that the store realises (`store ∼ₛ env_w`), that is
-genuinely borrow safe, and that *keeps every resolvable target* of `env`'s
-borrows (`hkept`).  Because the guard chase only ever uses live targets (tagged
-on `WriteGuarded.step`), the witness's borrow safety replaces the static `env`'s
-— which is exactly what lets the merged, borrow-unsafe `T-If` join `env₅` be the
-typing environment while the borrow-safe executed-branch env₃ witnesses safety. -/
-theorem WriteGuarded.collapse_kill_realized {store : ProgramStore}
-    {env env_w : Env} {leaf : Location} {base₀ : Name}
-    (hbs_w : BorrowSafeEnv env_w)
-    (hkept : ∀ x mutable targets s, env ⊢ x ↝ (.borrow mutable targets) →
-      s ∈ targets → SelectedTarget store x s →
-      ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
-    (hnotWP : ¬ WriteProhibited env (.var base₀)) :
-    ∀ {c : Name} {mutable : Bool} {ts : List LVal} {t : LVal},
-      env ⊢ c ↝ (.borrow mutable ts) →
-      t ∈ ts →
-      SelectedTarget store c t →
-      WriteGuarded store env leaf base₀ (LVal.base t) →
-      WriteGuarded store env leaf base₀ c ∧ SlotDepKill store env leaf c := by
-  intro c mutable ts t hnode hmem htlive hG
-  generalize hz : LVal.base t = z at hG
-  cases hG with
-  | base _hkill =>
-      exfalso
-      apply hnotWP
-      cases mutable with
-      | true =>
-          exact Or.inl ⟨c, ts, t, hnode, hmem,
-            by simpa [PathConflicts, LVal.base] using hz⟩
-      | false =>
-          exact Or.inr ⟨c, ts, t, hnode, hmem,
-            by simpa [PathConflicts, LVal.base] using hz⟩
-  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' hlive' =>
-      have hconflict : t' ⋈ t := by
-        simpa [PathConflicts, hbase'] using hz.symm
-      rcases hkept container true targets' t' hnode' hmem' hlive' with
-        ⟨Tw', hnode_w', hmem_w'⟩
-      rcases hkept c mutable ts t hnode hmem htlive with
-        ⟨Tw, hnode_w, hmem_w⟩
-      have hceq : container = c :=
-        hbs_w container c mutable Tw' Tw t' t hnode_w' hnode_w hmem_w'
-          hmem_w hconflict
       subst hceq
       exact ⟨hGc, hkill'⟩
 
@@ -9100,8 +8867,7 @@ theorem RuntimeFrame.borrowDependency_witness {store : ProgramStore}
 /-- The borrow-resolution dependency's target is a *live* target: the leaf borrow
 value (reached through any owning boxes from a cell holding `value`) is a
 reference to the location that `target` resolves to.  So `TargetPointedTo` holds
-for the dependency target, which is what lets `collapse_kill_realized` discharge
-the deref-write frame from the live-target witness. -/
+for the dependency target. -/
 theorem RuntimeFrame.borrowDependency_targetPointedTo {store : ProgramStore}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
     {cell : Location} {cellSlot : StoreSlot} :
@@ -9133,8 +8899,7 @@ theorem RuntimeFrame.borrowDependency_targetPointedTo {store : ProgramStore}
 cell crossed by the borrow-resolution descent is owned by `x` (the descent only
 follows owning boxes), so the leaf borrow cell holding the reference to the
 target's location is `ProtectedByBase store x`.  This is exactly the
-`SelectedTarget` that the `BorrowSafeWitness`/`collapse_kill_realized` machinery
-consumes after the move onto selected targets. -/
+`SelectedTarget` used by selected-target frame lemmas. -/
 theorem RuntimeFrame.borrowDependency_selectedTarget {store : ProgramStore}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
     {cell : Location} {cellSlot : StoreSlot} {x : Name} :
