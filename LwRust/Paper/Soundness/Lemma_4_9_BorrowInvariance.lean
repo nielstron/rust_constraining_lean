@@ -301,54 +301,48 @@ theorem SelectedTarget.targetPointedTo {store : ProgramStore} {x : Name}
   exact ⟨cell, cellSlot, loc, hslot, hval, hloc⟩
 
 /-- The borrow-safety invariant threaded by preservation in place of the static
-`BorrowSafeEnv env`: a witness env `env_w` realises the store, is genuinely
-borrow safe, same-shape-strengthens the typing env `env`, and *keeps every live
-target* (`TargetPointedTo`) of `env`'s borrows.  For a borrow-safe `env` the
+`BorrowSafeEnv env`: a witness env `env_w` is genuinely borrow safe,
+same-shape-strengthens the typing env `env`, and *keeps every selected
+target* (`SelectedTarget`) of `env`'s borrows.  For a borrow-safe `env` the
 witness is `env` itself; after a `T-If` join the witness is the executed branch's
 borrow-safe env₃.  This is exactly what `collapse_kill_realized` consumes. -/
 def BorrowSafeWitness (store : ProgramStore) (env : Env) : Prop :=
   ∃ env_w,
-    store ∼ₛ env_w ∧ BorrowSafeEnv env_w ∧
+    BorrowSafeEnv env_w ∧
       EnvSameShapeStrengthening env_w env ∧
       (∀ x mutable targets s, env ⊢ x ↝ (.borrow mutable targets) →
-        s ∈ targets → TargetPointedTo store s →
+        s ∈ targets → SelectedTarget store x s →
         ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
 
-/-- A genuinely borrow-safe environment is its own live-target witness. -/
+/-- A genuinely borrow-safe environment is its own selected-target witness. -/
 theorem BorrowSafeWitness.of_borrowSafeEnv {store : ProgramStore} {env : Env} :
     store ∼ₛ env → BorrowSafeEnv env → BorrowSafeWitness store env :=
-  fun hsafe hbs =>
-    ⟨env, hsafe, hbs, EnvSameShapeStrengthening.refl env,
+  fun _hsafe hbs =>
+    ⟨env, hbs, EnvSameShapeStrengthening.refl env,
       fun _x _mutable targets _s hnode hmem _ => ⟨targets, hnode, hmem⟩⟩
-
-/-- The witness invariant still abstracts the typing environment. -/
-theorem BorrowSafeWitness.safeAbstraction {store : ProgramStore} {env : Env} :
-    BorrowSafeWitness store env → store ∼ₛ env := by
-  rintro ⟨_env_w, hsafe_w, _hbs, hstr, _hkept⟩
-  exact EnvSameShapeStrengthening.safe hstr hsafe_w
 
 /-- Weaken the witness invariant along a same-shape strengthening of the typing
 env (the `T-If` join `env ⊢ env₃`, `env' ⊢ env₅`).  The same borrow-safe witness
-serves the coarser env; its `hkept` transports because every live
-(`TargetPointedTo`) target of the coarser env's borrows is already a target of
+serves the coarser env; its `hkept` transports because every selected
+(`SelectedTarget`) target of the coarser env's borrows is already a target of
 the finer env's borrow (`hlive`).  That side condition is exactly "a join's
-merged target list introduces no *new live* targets" — true because a target
-present only in the non-executed branch is not pointed to by the current store,
-and genuine aliasing of distinct-base lvals under a live mutable borrow is
+merged target list introduces no *new selected* targets" — true because a target
+present only in the non-executed branch is not selected by the current store's
+root, and genuine aliasing of distinct-base lvals under a live mutable borrow is
 excluded by borrow checking at creation. -/
 theorem BorrowSafeWitness.weaken {store : ProgramStore} {env env' : Env} :
     BorrowSafeWitness store env →
     EnvSameShapeStrengthening env env' →
     (∀ x mutable targets s, env' ⊢ x ↝ (.borrow mutable targets) →
-      s ∈ targets → TargetPointedTo store s →
+      s ∈ targets → SelectedTarget store x s →
       ∃ targets₀, env ⊢ x ↝ (.borrow mutable targets₀) ∧ s ∈ targets₀) →
     BorrowSafeWitness store env' := by
-  rintro ⟨env_w, hsafe_w, hbs_w, hstr_w, hkept_w⟩ hstr hlive
-  refine ⟨env_w, hsafe_w, hbs_w,
+  rintro ⟨env_w, hbs_w, hstr_w, hkept_w⟩ hstr hlive
+  refine ⟨env_w, hbs_w,
     EnvSameShapeStrengthening.trans hstr_w hstr, ?_⟩
-  intro x mutable targets s hnode' hmem' htpt
-  rcases hlive x mutable targets s hnode' hmem' htpt with ⟨targets₀, hnode, hmem⟩
-  exact hkept_w x mutable targets₀ s hnode hmem htpt
+  intro x mutable targets s hnode' hmem' hsel
+  rcases hlive x mutable targets s hnode' hmem' hsel with ⟨targets₀, hnode, hmem⟩
+  exact hkept_w x mutable targets₀ s hnode hmem hsel
 
 /-- The empty environment is vacuously borrow safe (it has no slots, so no
 borrow node resolves). -/
@@ -7415,7 +7409,7 @@ theorem RuntimeFrame.loc_protected_guarded_base {store : ProgramStore}
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
-      t ∈ ts → TargetPointedTo store t → G (LVal.base t) → G container) →
+      t ∈ ts → SelectedTarget store container t → G (LVal.base t) → G container) →
     LValTyping env lv pt lifetime →
     store.loc lv = some location →
     ProtectedByBase store r location →
@@ -7433,7 +7427,7 @@ where
       (hheap : StoreOwnerTargetsHeap store)
       (hcollapse : ∀ container mutable ts t,
         env ⊢ container ↝ (.borrow mutable ts) →
-        t ∈ ts → TargetPointedTo store t → G (LVal.base t) → G container)
+        t ∈ ts → SelectedTarget store container t → G (LVal.base t) → G container)
       (htyping : LValTyping env lv pt lifetime)
       (hloc : store.loc lv = some location)
       (hprot : ProtectedByBase store r location) (hG : G r) :
@@ -7514,7 +7508,7 @@ where
             have hGrootM : G rootM :=
               hcollapse rootM mutable' targets' witness
                 (hcontainsM PartialTyContains.here) hmemW
-                ⟨M, _, location, hslotM, rfl, hlocW⟩ hGwitness
+                ⟨M, _, location, hprotM, hslotM, rfl, hlocW⟩ hGwitness
             have hres :=
               go hφ hwellFormed hsafe hvalidStore hheap hcollapse hsource
                 hMloc hprotM hGrootM
@@ -7566,7 +7560,7 @@ theorem RuntimeFrame.locReads_protected_guarded_base {store : ProgramStore}
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
-      t ∈ ts → TargetPointedTo store t → G (LVal.base t) → G container) →
+      t ∈ ts → SelectedTarget store container t → G (LVal.base t) → G container) →
     LValTyping env lv pt lifetime →
     RuntimeFrame.LocReads store lv location →
     ProtectedByBase store r location →
@@ -7612,7 +7606,7 @@ inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
       t ∈ targets →
       LVal.base t = z →
       SlotDepKill store env leaf container →
-      TargetPointedTo store t →
+      SelectedTarget store container t →
       WriteGuarded store env leaf base₀ z
 
 /-- Borrow safety collapses any borrow node targeting a guarded base onto a
@@ -7659,13 +7653,13 @@ theorem WriteGuarded.collapse_kill_realized {store : ProgramStore}
     {env env_w : Env} {leaf : Location} {base₀ : Name}
     (hbs_w : BorrowSafeEnv env_w)
     (hkept : ∀ x mutable targets s, env ⊢ x ↝ (.borrow mutable targets) →
-      s ∈ targets → TargetPointedTo store s →
+      s ∈ targets → SelectedTarget store x s →
       ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
     (hnotWP : ¬ WriteProhibited env (.var base₀)) :
     ∀ {c : Name} {mutable : Bool} {ts : List LVal} {t : LVal},
       env ⊢ c ↝ (.borrow mutable ts) →
       t ∈ ts →
-      TargetPointedTo store t →
+      SelectedTarget store c t →
       WriteGuarded store env leaf base₀ (LVal.base t) →
       WriteGuarded store env leaf base₀ c ∧ SlotDepKill store env leaf c := by
   intro c mutable ts t hnode hmem htlive hG
@@ -8141,10 +8135,13 @@ where
                     have hcontains : PartialTyContains envSlot.ty
                         (.borrow true ts) :=
                       StoreOwnerSpine.contains_leafTy h6 rfl
+                    have hcellProt : ProtectedByBase store (LVal.base u) cell :=
+                      StoreOwnerSpine.protectedByBase h6 rfl
                     have hGtarget :
                         WriteGuarded store env leaf base₀ (LVal.base tSel) :=
                       WriteGuarded.step hGbase ⟨envSlot, h1, hcontains⟩
-                        hmemSel rfl hkill ⟨cell, cellSlot, L, h3, h4, hlocSel⟩
+                        hmemSel rfl hkill
+                        ⟨cell, cellSlot, L, hcellProt, h3, h4, hlocSel⟩
                     rcases WriteBorrowTargets.selected_branch_to_result_exists
                         (Nat.succ_pos rank) hfanout
                         (WriteBorrowTargets.initialized_leaves_of_typed
@@ -8435,6 +8432,50 @@ theorem RuntimeFrame.borrowDependency_targetPointedTo {store : ProgramStore}
       intro _hcell _hval
       rcases ih hslot rfl with ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
       exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads, htpt⟩
+
+/-- The same as `borrowDependency_targetPointedTo`, but the dependency's target is
+*selected* by the root variable `x` that owns the dependency-bearing cell: every
+cell crossed by the borrow-resolution descent is owned by `x` (the descent only
+follows owning boxes), so the leaf borrow cell holding the reference to the
+target's location is `ProtectedByBase store x`.  This is exactly the
+`SelectedTarget` that the `BorrowSafeWitness`/`collapse_kill_realized` machinery
+consumes after the move onto selected targets. -/
+theorem RuntimeFrame.borrowDependency_selectedTarget {store : ProgramStore}
+    {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
+    {cell : Location} {cellSlot : StoreSlot} {x : Name} :
+    RuntimeFrame.BorrowDependency store value partialTy dependency →
+    store.slotAt cell = some cellSlot →
+    cellSlot.value = value →
+    ProtectedByBase store x cell →
+    ∃ mutable targets target,
+      PartialTyContains partialTy (.borrow mutable targets) ∧
+      target ∈ targets ∧
+      RuntimeFrame.LocReads store target dependency ∧
+      SelectedTarget store x target := by
+  intro hdep
+  induction hdep generalizing cell cellSlot with
+  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+      intro hcell hval hprot
+      exact ⟨mutable, targets, target, PartialTyContains.here, hmem, hreads,
+        ⟨cell, cellSlot, location, hprot, hcell, hval, hloc⟩⟩
+  | @boxInner location slot inner dep hslot _hinner ih =>
+      intro hcell hval hprot
+      have howns : ProgramStore.OwnsAt store location cell :=
+        ⟨cellSlot.lifetime, by
+          rw [hcell]; cases cellSlot; simp [owningRef] at hval ⊢; exact hval⟩
+      have hprotInner : ProtectedByBase store x location :=
+        ProtectedByBase.trans_owned hprot howns
+      rcases ih hslot rfl hprotInner with ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
+      exact ⟨m, ts, t, PartialTyContains.box hcontains, hmem, hreads, hsel⟩
+  | @boxFullInner location slot innerTy dep hslot _hinner ih =>
+      intro hcell hval hprot
+      have howns : ProgramStore.OwnsAt store location cell :=
+        ⟨cellSlot.lifetime, by
+          rw [hcell]; cases cellSlot; simp [owningRef] at hval ⊢; exact hval⟩
+      have hprotInner : ProtectedByBase store x location :=
+        ProtectedByBase.trans_owned hprot howns
+      rcases ih hslot rfl hprotInner with ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
+      exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads, hsel⟩
 
 /-- A contained borrow survives same-shape strengthening, with a grown target
 list. -/

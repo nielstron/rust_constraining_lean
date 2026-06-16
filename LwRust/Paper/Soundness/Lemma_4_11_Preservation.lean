@@ -2282,7 +2282,7 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
     store' ∼ₛ env' := by
   intro hwellFormed hwitness hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
     hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot holdSlotValid hwriteStore hdrops
-  obtain ⟨env_w, hsafe_w, hbs_w, _hstr_w, hkept_w⟩ := hwitness
+  obtain ⟨env_w, hbs_w, _hstr_w, hkept_w⟩ := hwitness
   have hsafeWrite : writtenStore ∼ₛ env' := by
     have hwriteEq :
         writtenStore =
@@ -2847,9 +2847,9 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     hvalidStore hheap hlhsSlot holdSelectedValid hLhsTyping
                     hlhsLoc hwrite (WriteGuarded.base hkill₀) with
                   ⟨r, hprotR, hGr⟩
-                rcases RuntimeFrame.borrowDependency_targetPointedTo hdep
-                    hstoreSlot rfl with
-                  ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
+                rcases RuntimeFrame.borrowDependency_selectedTarget hdep
+                    hstoreSlot rfl (Or.inl rfl) with
+                  ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
                 have hborrowsX :
                     PartialTyBorrowsWellFormedInSlot env sourceSlot.lifetime
                       sourceSlot.ty := by
@@ -2861,7 +2861,7 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                 have hcollapse :
                     ∀ container mutable' ts' t',
                       env ⊢ container ↝ (.borrow mutable' ts') → t' ∈ ts' →
-                      TargetPointedTo store t' →
+                      SelectedTarget store container t' →
                       WriteGuarded store env lhsLocation (LVal.base source)
                         (LVal.base t') →
                       WriteGuarded store env lhsLocation (LVal.base source)
@@ -2877,7 +2877,7 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     hGr
                 have hkillX :=
                   (WriteGuarded.collapse_kill_realized hbs_w hkept_w hnotWPbase
-                    ⟨sourceSlot, hsourceSlot, hcontains⟩ hmem htpt hGt).2
+                    ⟨sourceSlot, hsourceSlot, hcontains⟩ hmem hsel hGt).2
                 exact hkillX sourceSlot oldValue hsourceSlot hstoreSlot hdep
               have holdValid :
                   ValidPartialValue
