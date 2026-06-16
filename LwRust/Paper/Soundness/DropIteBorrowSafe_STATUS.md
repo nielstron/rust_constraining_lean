@@ -95,3 +95,53 @@ runtime borrow-safety-across-joins property §4.5.1 concedes is not established.
 - **F. Existing store invariants.** Re-audit `ValidState` / `ValidStoreTyping` /
   `ValidPartialValue` for any borrow-provenance constraint strong enough to yield
   location-exclusivity without a new threaded invariant.
+
+## RESOLUTION OF THE ATTACK ANGLES + the definitive characterization (after 13 runs)
+
+All three angles above are **closed** (A/C Lean-verified): A — realization gives
+co-location, never membership; F — no existing invariant constrains borrow (`owner:=false`)
+refs (runtime `Value.ref` has no mutability bit; ownership invariants cover only
+owning refs); C — the deref-kill cross-variable `LocationBelow` cycle provably does
+not close (`slotDepKill_of_firstNode`'s UP direction needs `LocReads (.deref source) loc_t`,
+unavailable cross-variable).
+
+**The TRILEMMA (the precise obstruction).** Any `&mut`-exclusivity predicate the
+deref-write needs must be one of: (1) **type-free / store-realized** — makes the `ite`
+join a genuine pass-through, but is **unestablishable at `&mut` creation** (no
+`LValTyping` handle on the realized target); (2) **all-targets `BorrowDependency`** —
+establishable but **anti-monotone** under the join's W-Bor target-list coarsening;
+(3) **one-selected-target `SelectedBorrowDependency`** — establishable and almost
+join-stable, but the join can **re-pick a phantom env₄ target** co-resolving
+(non-injective `store.loc`) to the executed pointee. No formulation is simultaneously
+establishable-at-creation AND join-stable. Horn (3)'s gap **is** the §4.5.1 deviation.
+
+**Registry escape (commit `c47dd63`).** A threaded, env-type-free live-`&mut` registry
+`MutRegistryExclusive store R` (keyed on the type-free `RealizedBorrowReads`) provably
+escapes horns (1)/(2): the `ite` join is a **definitional pass-through** and consumption
+discharges, both `#print axioms`-clean (`[propext]` only, no `sorryAx`). But the trilemma
+**resurfaces at creation** (`creation_mut_exclusive`): keying on store-only
+`RealizedBorrowReads` strips the typed handle, and the borrow rule's only premises
+(`LValTyping`, `Mutable`, syntactic `¬WriteProhibited`) cannot exclude a cross-variable
+realized read of the new pointee.
+
+**Root cause, at the Lean inductive level.** `RealizedBorrowReads.borrow` (`Frame.lean:331`)
+is `BorrowDependency.borrow` with the `target ∈ targets` premise **deleted**.
+`ValidPartialValue.borrow` (V-Borrow) requires only `∃ target ∈ targets, store.loc target
+= location`, so the validity witness and the realized-read target are independent — V-Borrow
+pins no read structure on the realized target. Hence `RealizedBorrowReads → BorrowDependency`
+is underivable (only the weakening exists, `Frame.lean:349`), the ownership chase
+(`root_unique`/`loc_intrinsicRootView`) can't fire on the untyped realized target, and no
+propagation-completeness invariant exists (adding one **is** the omitted type-level borrow
+safety). **This is the genuine §4.5.1 wall — no shortcut found across 13 runs.**
+
+**Banked green, reusable lemmas** (sound, `[propext]`-only): consumption side off
+borrow-safety (`bac4389`), weakened `ValidPartialValue`-update frame on realized reads
+(`5d82f22`), join-trivial realized-conclusion transfer (`53ceb84`), registry corners A+B
+(`c47dd63`). The single `Corollary_4_14` sorry remains the stated §4.5.1 deviation; the
+T-If premise is removed and every runtime-safety theorem compiles without it.
+
+**Only remaining path to zero sorries:** the multi-week reformulation — carry the
+`target ∈ targets` handle through a new store invariant that pins each live `&mut` to a
+**unique typed** selected target, and prove the join introduces no co-resolving phantom
+(trilemma horn 3). This is mechanizing the conceded §4.5.1 deviation itself; no guarantee
+of closure.
