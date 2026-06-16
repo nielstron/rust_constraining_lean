@@ -344,6 +344,219 @@ theorem BorrowSafeWitness.weaken {store : ProgramStore} {env env' : Env} :
   rcases hlive x mutable targets s hnode' hmem' hsel with ⟨targets₀, hnode, hmem⟩
   exact hkept_w x mutable targets₀ s hnode hmem hsel
 
+/-- Inversion: the storage of a valid `value` owns (directly) `owned` iff
+`value` is a `box`/`boxFull` whose pointee is exactly `owned`.  For non-box
+valid values there is no owning edge. -/
+theorem ownsAt_storage_inv {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {storage owned : Location}
+    {stoLt : Lifetime} :
+    ValidPartialValue store value ty →
+    store.slotAt storage = some { value := value, lifetime := stoLt } →
+    ProgramStore.OwnsAt store owned storage →
+    (∃ inner, ty = .box inner ∧
+        value = .value (.ref { location := owned, owner := true })) ∨
+    (∃ innerTy, ty = .ty (.box innerTy) ∧
+        value = .value (.ref { location := owned, owner := true })) := by
+  intro hvalid hsto howns
+  rcases howns with ⟨lt, hslot⟩
+  rw [hsto] at hslot
+  have hval : value = .value (owningRef owned) := by
+    have := Option.some.inj hslot
+    simpa using congrArg StoreSlot.value this
+  cases hvalid with
+  | unit => simp [owningRef] at hval
+  | int => simp [owningRef] at hval
+  | bool => simp [owningRef] at hval
+  | undef => simp [owningRef] at hval
+  | @borrow location mutable targets target hmem hloc =>
+      simp [owningRef] at hval
+  | @box ownerLocation ownerSlot inner hownerSlot hinnerValid =>
+      left
+      refine ⟨inner, rfl, ?_⟩
+      have : ownerLocation = owned := by
+        simpa [owningRef] using hval
+      subst this
+      simp [owningRef] at hval ⊢
+  | @boxFull ownerLocation ownerSlot innerTy hownerSlot hinnerValid =>
+      right
+      refine ⟨innerTy, rfl, ?_⟩
+      have : ownerLocation = owned := by
+        simpa [owningRef] using hval
+      subst this
+      simp [owningRef] at hval ⊢
+
+/-- Reverse-descent.  `value` valid at `ty` is stored at `storage`; `storage`
+owns (directly or transitively) `cell`, which holds a *borrow* (non-owning)
+reference to `loc`.  Then `ty` contains a borrow type one of whose static
+targets resolves (`store.loc`) to `loc`.  This is the structural inverse of the
+forward `Reaches`/`BorrowDependency` chases: instead of walking a value down to
+a dependency, it climbs an ownership chain back up to the env borrow node whose
+realization explains the cell. -/
+theorem borrowContains_of_owned_borrowCell {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {storage cell loc : Location}
+    {cellSlot : StoreSlot} {stoLt : Lifetime} :
+    ValidPartialValue store value ty →
+    store.slotAt storage = some { value := value, lifetime := stoLt } →
+    ProgramStore.OwnsTransitively store storage cell →
+    store.slotAt cell = some cellSlot →
+    cellSlot.value = .value (.ref { location := loc, owner := false }) →
+    ∃ mutable targets target,
+      PartialTyContains ty (.borrow mutable targets) ∧
+      target ∈ targets ∧ store.loc target = some loc := by
+  intro hvalid hsto howns
+  induction howns generalizing value ty stoLt with
+  | @direct storage owned hownsEdge =>
+      intro hcell hcellval
+      rcases ownsAt_storage_inv hvalid hsto hownsEdge with
+        ⟨inner, htyEq, hvalEq⟩ | ⟨innerTy, htyEq, hvalEq⟩
+      · subst htyEq
+        cases hvalid with
+        | @box ol os _ hos hinner =>
+            have holEq : ol = owned := by simpa using hvalEq
+            subst holEq
+            have hosEq : os = cellSlot := Option.some.inj (hos.symm.trans hcell)
+            subst hosEq
+            rw [hcellval] at hinner
+            cases hinner with
+            | @borrow location mutable targets target hmem hloc =>
+                exact ⟨mutable, targets, target,
+                  PartialTyContains.box PartialTyContains.here, hmem, hloc⟩
+      · subst htyEq
+        cases hvalid with
+        | @boxFull ol os _ hos hinner =>
+            have holEq : ol = owned := by simpa using hvalEq
+            subst holEq
+            have hosEq : os = cellSlot := Option.some.inj (hos.symm.trans hcell)
+            subst hosEq
+            rw [hcellval] at hinner
+            cases hinner with
+            | @borrow location mutable targets target hmem hloc =>
+                exact ⟨mutable, targets, target,
+                  PartialTyContains.tyBox PartialTyContains.here, hmem, hloc⟩
+  | @trans storage middle owned hownsEdge htail ih =>
+      intro hcell hcellval
+      rcases ownsAt_storage_inv hvalid hsto hownsEdge with
+        ⟨inner, htyEq, hvalEq⟩ | ⟨innerTy, htyEq, hvalEq⟩
+      · subst htyEq
+        cases hvalid with
+        | @box ol os _ hos hinner =>
+            have holEq : ol = middle := by simpa using hvalEq
+            subst holEq
+            rcases ih hinner hos hcell hcellval with ⟨m, ts, t, hcontains, hmem, hloc⟩
+            exact ⟨m, ts, t, PartialTyContains.box hcontains, hmem, hloc⟩
+      · subst htyEq
+        cases hvalid with
+        | @boxFull ol os _ hos hinner =>
+            have holEq : ol = middle := by simpa using hvalEq
+            subst holEq
+            rcases ih hinner hos hcell hcellval with ⟨m, ts, t, hcontains, hmem, hloc⟩
+            exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hloc⟩
+
+/-- A value that is a *borrow* (non-owning) reference, valid at `ty`, forces `ty`
+to be a plain borrow type whose static targets contain one resolving to the
+pointee. -/
+theorem borrowContains_of_valid_borrowRef {store : ProgramStore}
+    {ty : PartialTy} {loc : Location} :
+    ValidPartialValue store (.value (.ref { location := loc, owner := false })) ty →
+    ∃ mutable targets target,
+      ty = .ty (.borrow mutable targets) ∧
+      target ∈ targets ∧ store.loc target = some loc := by
+  intro hvalid
+  cases hvalid with
+  | @borrow location mutable targets target hmem hloc =>
+      exact ⟨mutable, targets, target, rfl, hmem, hloc⟩
+
+/-- From a `SelectedTarget store x s` (a cell owned by `x` holding a borrow ref
+to `loc`, with `store.loc s = some loc`) and a store that realizes `env`,
+recover the genuine `env` borrow node at `x` together with a *realized* env
+target `t₃` (`store.loc t₃ = some loc`).  `t₃` is in particular itself a
+selected target of `x`, co-located with the original cell.  This is the
+realization bridge from a runtime selected target to a static branch borrow
+node. -/
+theorem envBorrow_of_selectedTarget {store : ProgramStore} {env : Env}
+    {x : Name} {s : LVal} :
+    store ∼ₛ env →
+    SelectedTarget store x s →
+    ∃ mutable targets t₃,
+      env ⊢ x ↝ (.borrow mutable targets) ∧ t₃ ∈ targets ∧
+      SelectedTarget store x t₃ := by
+  intro hrealize hsel
+  rcases hsel with ⟨cell, cellSlot, loc, hprot, hcellSlot, hcellval, hsloc⟩
+  obtain ⟨xEnvSlot, hxEnvSlot⟩ : ∃ es, env.slotAt x = some es := by
+    have hdom := (hrealize.1 x).1
+    have hxStore : ∃ slot, store.slotAt (VariableProjection x) = some slot := by
+      rcases hprot with hvar | howns
+      · exact ⟨cellSlot, by rw [← hvar]; exact hcellSlot⟩
+      · cases howns with
+        | direct hedge => rcases hedge with ⟨lt, hslot⟩; exact ⟨_, hslot⟩
+        | trans hedge _ => rcases hedge with ⟨lt, hslot⟩; exact ⟨_, hslot⟩
+    exact hdom hxStore
+  rcases hrealize.2 x xEnvSlot hxEnvSlot with ⟨xValue, hxStoreSlot, hxValid⟩
+  rcases hprot with hvar | howns
+  · subst hvar
+    have hvalEq : xValue = .value (.ref { location := loc, owner := false }) := by
+      have heq : some (StoreSlot.mk xValue xEnvSlot.lifetime) = some cellSlot :=
+        hxStoreSlot.symm.trans hcellSlot
+      have hvv := congrArg StoreSlot.value (Option.some.inj heq)
+      simpa [hcellval] using hvv
+    rw [hvalEq] at hxValid
+    rcases borrowContains_of_valid_borrowRef hxValid with
+      ⟨mutable, targets, target, htyEq, hmem, hloc⟩
+    refine ⟨mutable, targets, target, ⟨xEnvSlot, hxEnvSlot,
+      htyEq ▸ PartialTyContains.here⟩, hmem, ?_⟩
+    exact ⟨VariableProjection x, cellSlot, loc, Or.inl rfl, hcellSlot,
+      hcellval, hloc⟩
+  · rcases borrowContains_of_owned_borrowCell hxValid hxStoreSlot howns
+        hcellSlot hcellval with ⟨mutable, targets, target, hcontains, hmem, hloc⟩
+    refine ⟨mutable, targets, target,
+      ⟨xEnvSlot, hxEnvSlot, hcontains⟩, hmem, ?_⟩
+    exact ⟨cell, cellSlot, loc, Or.inr howns, hcellSlot, hcellval, hloc⟩
+
+/-- The keystone `T-If` join `hlive` side condition, discharging the env₃ side
+(A) of the split fully, and isolating the genuinely hard env₄-only co-located
+case (B) as an explicit obligation `hbridge`.
+
+`hbridge` is exactly: an env₄-only join borrow target `s` that is selected by
+the executed-branch store (`SelectedTarget store x s`) is already covered by the
+witness `env_w`'s `x`-borrow target list.  See the module note on
+`borrowSafeWitness_ite_hlive_bridge_blocked` for why this cannot be discharged
+from the per-target syntactic `BorrowSafeEnv` invariant alone (the §4.5.1
+syntactic-vs-location deviation): `s` and the realized env₃ target `t₃` it
+co-resolves with need not be path-conflicting (`⋈`), so `BorrowSafeEnv`'s
+mutable-borrow *root* uniqueness yields no membership relation between them. -/
+theorem borrowSafeWitness_ite_hlive
+    {store : ProgramStore} {env₃ env₄ env₅ env_w : Env} {lifetime : Lifetime}
+    (hjoin : EnvJoin env₃ env₄ env₅)
+    (hrealize : store ∼ₛ env₃)
+    (hwf : WellFormedEnv env₃ lifetime)
+    (hbs_w : BorrowSafeEnv env_w) (hstr_w : EnvSameShapeStrengthening env_w env₃)
+    (hkept₃ : ∀ x mutable targets s, env₃ ⊢ x ↝ (.borrow mutable targets) →
+        s ∈ targets → SelectedTarget store x s →
+        ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw)
+    (hbridge : ∀ x mutable targets s rightSlot rightTargets,
+        env₅ ⊢ x ↝ (.borrow mutable targets) → s ∈ targets →
+        SelectedTarget store x s →
+        env₄.slotAt x = some rightSlot →
+        PartialTyContains rightSlot.ty (.borrow mutable rightTargets) →
+        s ∈ rightTargets →
+        ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw) :
+    ∀ x mutable targets s, env₅ ⊢ x ↝ (.borrow mutable targets) →
+      s ∈ targets → SelectedTarget store x s →
+      ∃ Tw, env_w ⊢ x ↝ (.borrow mutable Tw) ∧ s ∈ Tw := by
+  intro x mutable targets s hnode₅ hmem hsel
+  rcases hnode₅ with ⟨joinSlot, hjoinSlot, hcontains⟩
+  -- Split the env₅ join borrow target `s` into its env₃ / env₄ origin (W-Bor).
+  rcases EnvJoin.contained_borrow_member hjoin hjoinSlot hcontains hmem with
+    hleft | hright
+  · -- (A) env₃ side: `s` is a genuine env₃ borrow target → `hkept₃` directly.
+    rcases hleft with ⟨leftSlot, leftTargets, hleftSlot, hleftContains, hleftMem⟩
+    exact hkept₃ x mutable leftTargets s ⟨leftSlot, hleftSlot, hleftContains⟩
+      hleftMem hsel
+  · -- (B) env₄-only side: delegated to the explicit bridge obligation.
+    rcases hright with ⟨rightSlot, rightTargets, hrightSlot, hrightContains, hrightMem⟩
+    exact hbridge x mutable targets s rightSlot rightTargets
+      ⟨joinSlot, hjoinSlot, hcontains⟩ hmem hsel hrightSlot hrightContains hrightMem
+
 /-- The empty environment is vacuously borrow safe (it has no slots, so no
 borrow node resolves). -/
 theorem borrowSafeEnv_empty_env : BorrowSafeEnv Env.empty := by
