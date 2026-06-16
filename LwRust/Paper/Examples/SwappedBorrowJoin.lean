@@ -143,5 +143,19 @@ theorem swappedBorrowJoin_old_TIf_borrowSafe_premise_impossible :
     ¬ BorrowSafeEnv swappedBorrowJoinEnv :=
   swappedBorrowJoinEnv_not_borrowSafe
 
+/-- Unrelated direct root assignments are no longer blocked by the crossed join. -/
+theorem swappedBorrowJoin_root_assignment_frame_safe :
+    AssignmentBorrowSafety swappedBorrowJoinEnv (.var "c") := by
+  trivial
+
+/--
+Dereference assignments still need the old global witness.  This is the part
+that remains conservative relative to rustc after a path-insensitive join.
+-/
+theorem swappedBorrowJoin_deref_assignment_frame_safe_iff :
+    AssignmentBorrowSafety swappedBorrowJoinEnv (.deref swappedBorrowX) ↔
+      BorrowSafeEnv swappedBorrowJoinEnv :=
+  Iff.rfl
+
 end Paper
 end LwRust

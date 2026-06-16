@@ -865,7 +865,7 @@ theorem pointerRetargetBranch_typing :
     pointerIf_p_typing
     (TermTyping.mutBorrow pointerIf_y_typing pointerIf_y_mutable
       pointerIf_not_writeProhibited_y)
-    pointerIfEnv_borrowSafe
+    (by trivial)
     pointerIf_p_typing
     pointerIf_shape_px_py
     pointerIf_borrow_y_wellFormed

@@ -3261,7 +3261,7 @@ theorem preservation_assign_step_terminal_of_wellFormed
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {lhs : LVal}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeEnv env →
+    AssignmentBorrowSafety env lhs →
     store ∼ₛ env →
     ValidRuntimeState store (.assign lhs (.val value)) →
     LValTyping env lhs oldTy targetLifetime →
@@ -3274,7 +3274,7 @@ theorem preservation_assign_step_terminal_of_wellFormed
     ValidValue store value rhsTy →
     Step store lifetime (.assign lhs (.val value)) store' (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  intro hwellFormed hborrowSafe hsafe hvalidRuntime hLhs hshape hwellTy hwrite hranked
+  intro hwellFormed hassignSafe hsafe hvalidRuntime hLhs hshape hwellTy hwrite hranked
     hnotWrite hwellOut hvalidValue hstep
   cases lhs with
   | var x =>
@@ -3282,6 +3282,8 @@ theorem preservation_assign_step_terminal_of_wellFormed
         hwellFormed hsafe hvalidRuntime hLhs hshape hwellTy hwrite
         hnotWrite hwellOut hvalidValue hstep
   | deref source =>
+      have hborrowSafe : BorrowSafeEnv env := by
+        simpa [AssignmentBorrowSafety] using hassignSafe
       exact preservation_assign_deref_step_runtime_of_wellFormed
         hwellFormed hborrowSafe
         hsafe hvalidRuntime hLhs hshape hwellTy hwrite
@@ -3943,11 +3945,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
       (typingPreservesWellFormed_of_sourceTerm hsource
         (ValidRuntimeState.validState hvalidRuntime)
         hwellFormed hsafe htermTyping).1
-    have hborrowSafeInner : BorrowSafeEnv _env₂ :=
-      hRhsBorrowSafe
     have hterminal : TerminalStateSafe finalStore finalValue _env₃ .unit := by
       exact preservation_assign_step_terminal_of_wellFormed
-        hwellInner hborrowSafeInner hsafeInner
+        hwellInner hRhsBorrowSafe hsafeInner
         (validRuntimeState_assign_value_of_value hvalidInner)
         hLhsPost hshape hwellTy hwrite hranked hnotWrite hwellOut
         hvalidValue hassignStep

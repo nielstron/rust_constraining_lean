@@ -659,6 +659,19 @@ def BorrowSafeEnv (env : Env) : Prop :=
     targetMutable ⋈ targetOther →
     x = y
 
+/--
+Assignment-level borrow-safety frame.
+
+Direct root writes do not need the whole post-RHS environment to be globally
+borrow-safe: the ordinary `WriteProhibited` and write/coherence obligations
+control the written root.  Writes through a dereference still need the existing
+global witness, because preservation has to justify that the selected mutable
+borrow target is exclusive in the concrete store.
+-/
+def AssignmentBorrowSafety (env : Env) : LVal → Prop
+  | .var _ => True
+  | .deref _ => BorrowSafeEnv env
+
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/
 def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
@@ -966,7 +979,7 @@ mutual
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
         LValTyping env₁ lhs oldTy targetLifetime →
         TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-        BorrowSafeEnv env₂ →
+        AssignmentBorrowSafety env₂ lhs →
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →

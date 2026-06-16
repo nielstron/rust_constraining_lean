@@ -13,8 +13,10 @@ Current branch status:
   Theorem 4.12 keeps terminal runtime safety and well-formed result extension,
   but deliberately omits the false static `BorrowSafeEnv` conclusion.
 - Preservation and reachable progress no longer thread static `BorrowSafeEnv`
-  through recursive subterm states.  Assignment keeps a local `BorrowSafeEnv`
-  premise after the RHS, where the write frame actually consumes it.
+  through recursive subterm states.  Assignment now uses
+  `AssignmentBorrowSafety`: direct root writes need no global borrow-safe
+  environment, while dereference writes still require the existing witness where
+  the write frame consumes it.
 
 Validated locally:
 
