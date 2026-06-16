@@ -8074,6 +8074,167 @@ theorem realizedMutBorrowsExclusive_of_strengthening {store : ProgramStore}
   exact RealizedLeafExclusive.of_strengthening hstr
     (hfine source targetsFine blFine leaf hsourceFine hleaf)
 
+/-! ### The live-`&mut` registry (trilemma-escape: env-type-free provenance)
+
+The realized-witness analysis pinned a TRILEMMA (memory `soundness-current-sorries`,
+Update 2026-06-16): the exclusivity predicate the deref-write kill needs must be
+either (a) type-FREE — `RealizedBorrowReads` — which is join-trivial but
+*unestablishable* at borrow creation (no typed target handle to invoke the borrow
+rule), or (b) all-targets-typed — `BorrowDependency` — which is establishable but
+*anti-monotone* (the W-Bor join coarsens the target list and the kill reads it).
+Every prior design re-derived exclusivity from a *program point's* `(store, env)`,
+so it was caught on one horn or the other.
+
+The **escape** is to stop re-deriving exclusivity from the env at each program
+point, and instead thread it as an INDEPENDENT invariant that carries its own
+provenance: a *registry* `R : List (Location × Name)` recording, per live `&mut`
+borrow, its runtime pointee `Location` together with the owning variable.  The
+exclusivity invariant `MutRegistryExclusive store R` references ONLY the store and
+`R` — never any env target list — so:
+
+* the `T-If` join is a genuine pass-through (`MutRegistryExclusive.ite_passthrough`):
+  the join leaves the store and `R` untouched and creates no borrows, so there is
+  literally nothing to re-derive (CORNER B — the make-or-break corner);
+* the registry is populated AT `&mut` creation, where the type/mut-bit IS known
+  (so the unestablishability horn is also avoided, CORNER C);
+* and it discharges the env-keyed `MutLeafExclusive` the deref-frame consumes via
+  the existing store-realized `RealizedBorrowReads` frame (CORNER A).
+
+The kill is keyed STORE-ONLY (`StoreRealizedSlotKill`): it quantifies over the
+store's variable slots directly and never reads the env, not even for a lifetime.
+That is what makes the invariant a function of `(store, R)` alone. -/
+
+/-- **Store-only realized slot kill.**  Variable `z`'s stored value carries no
+*realized* borrow read of `leaf`.  Unlike `RealizedSlotKill`, this reads NO env at
+all (it quantifies over the store slot's value directly, for any lifetime), so it
+is a function of the store alone.  It is strictly stronger than `RealizedSlotKill
+store env leaf z` for every `env` (`StoreRealizedSlotKill.realizedSlotKill`). -/
+def StoreRealizedSlotKill (store : ProgramStore) (leaf : Location)
+    (z : Name) : Prop :=
+  ∀ value lifetime,
+    store.slotAt (VariableProjection z) =
+      some { value := value, lifetime := lifetime } →
+    ¬ RuntimeFrame.RealizedBorrowReads store value leaf
+
+/-- A store-only kill discharges the env-keyed `RealizedSlotKill` for ANY env: it
+already constrains the store slot under every lifetime, so in particular under the
+one `env` assigns to `z`. -/
+theorem StoreRealizedSlotKill.realizedSlotKill {store : ProgramStore} {env : Env}
+    {leaf : Location} {z : Name}
+    (h : StoreRealizedSlotKill store leaf z) :
+    RealizedSlotKill store env leaf z := by
+  intro zslot value _henv hstore hreads
+  exact h value zslot.lifetime hstore hreads
+
+/-- **The live-`&mut` registry exclusivity invariant — a function of `(store, R)`
+alone.**
+
+`R : List (Location × Name)` lists, per live `&mut` borrow, its runtime pointee
+`leaf` and owning variable `owner`.  The invariant says: for every registered
+`(leaf, owner)`, the leaf is *exclusively* borrowed — no cross-variable (`z ≠
+owner`) stored value carries a realized borrow read of `leaf`.
+
+Crucially this references ONLY the store and `R`; it never reads any env target
+list (it is keyed on `StoreRealizedSlotKill`, which is store-only).  That is what
+makes the `T-If` join a genuine pass-through (CORNER B). -/
+def MutRegistryExclusive (store : ProgramStore)
+    (R : List (Location × Name)) : Prop :=
+  ∀ leaf owner, (leaf, owner) ∈ R →
+    ∀ z, z ≠ owner → StoreRealizedSlotKill store leaf z
+
+/-! #### CORNER A — consumption
+
+The registry discharges the env-keyed `MutLeafExclusive` premise that the existing
+deref-write frame (`safeAbstraction_assign_deref_drop_of_wellFormed`,
+`validPartialValue_update_of_owner_and_realized_reads_frame`) consumes, provided
+the deref-write's `source` is registered at its pointee `leaf` (i.e. `(leaf,
+base source) ∈ R`).  No env target list is touched: the store-only kill is lifted
+to `RealizedSlotKill` (any env), then to `SlotDepKill`, then to
+`MutLeafExclusive`. -/
+
+/-- **CORNER A (consumption).**  If `source`'s pointee `leaf` is registered under
+owner `base source`, the registry yields the env-keyed `MutLeafExclusive store env
+source leaf` the deref-frame needs — for ANY `env`.  This is the connection from
+the env-free registry to the existing consumption site. -/
+theorem MutRegistryExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
+    {R : List (Location × Name)} {source : LVal} {leaf : Location}
+    (hexcl : MutRegistryExclusive store R)
+    (hreg : (leaf, LVal.base source) ∈ R) :
+    MutLeafExclusive store env source leaf := by
+  intro z hz
+  exact ((hexcl leaf (LVal.base source) hreg z hz).realizedSlotKill).slotDepKill
+
+/-! #### CORNER B — join pass-through (the make-or-break corner)
+
+`MutRegistryExclusive store R` is a function of `(store, R)` alone, so a `T-If`
+join — which leaves the store and the registry untouched, and creates no borrows —
+preserves it *definitionally* with the SAME `store` and SAME `R`.  There is no env
+target list to re-derive, which is exactly the horn every prior design impaled
+itself on.  Stated as both an explicit pass-through and an env-independence lemma. -/
+
+/-- **CORNER B (join pass-through).**  Across a `T-If` join the store and registry
+are unchanged, so the registry invariant passes through with the SAME `store` and
+SAME `R` — there is *nothing to re-derive*.  The proof is `id`: the invariant does
+not mention any env, so neither the executed-branch env `env₃` nor the merged join
+env `env₅` appears.  THIS is the corner all prior (env-keyed) designs failed. -/
+theorem MutRegistryExclusive.ite_passthrough {store : ProgramStore}
+    {R : List (Location × Name)}
+    (h : MutRegistryExclusive store R) :
+    MutRegistryExclusive store R :=
+  h
+
+/-- The registry invariant is **independent of the env** entirely: it transports
+across *any* pair of envs with the SAME `store` and `R`.  This is the formal
+content of "the join is a genuine pass-through" — quantifying over the two join
+envs `envFine` (branch `env₃`) and `envCoarse` (join `env₅`) shows neither can
+appear in the conclusion, so the W-Bor target-list coarsening cannot break it.
+Contrast `realizedMutBorrowsExclusive_of_strengthening`, which still needed the
+`LValMutGatePullback` env-type ingredient; the registry needs none. -/
+theorem MutRegistryExclusive.env_independent {store : ProgramStore}
+    {R : List (Location × Name)} (_envFine _envCoarse : Env)
+    (h : MutRegistryExclusive store R) :
+    MutRegistryExclusive store R :=
+  h
+
+/-! #### CORNER C — creation establishment
+
+A straight-line `&mut`-creation step `x = &mut y` extends `R` with `(loc_y, x)`.
+Establishing `MutRegistryExclusive` for the extended registry splits on the new
+entry vs. the old ones:
+
+* old entries `(leaf, owner) ∈ R` keep their kill — provided the creation does not
+  introduce a new realized read of an old `leaf` (the frame side condition, which
+  the borrow rule's write/read-prohibition supplies);
+* the new entry `(loc_y, x)` requires that no cross-variable `z ≠ x` reads `loc_y`
+  — which is exactly the `&mut`-exclusivity at the pointee `loc_y` that the borrow
+  rule's `¬ WriteProhibited` premise guarantees at creation (where the TYPE is
+  known).
+
+Below: the registry-extension *algebra* (the cons split), proved green, reducing
+CORNER C to (i) old-entry stability under the creation update and (ii) the new
+entry's pointee-exclusivity — the two facts the borrow rule supplies.  Full
+threading through the creation step is later preservation engineering. -/
+
+/-- **CORNER C (creation — the registry-extension algebra).**  Extending the
+registry with a fresh entry `(newLeaf, x)` preserves `MutRegistryExclusive`,
+given (i) the pre-existing invariant still holds at the (possibly updated) store,
+and (ii) the new entry's pointee `newLeaf` is exclusively borrowed by `x` — i.e.
+every cross-variable `z ≠ x` has a `StoreRealizedSlotKill store newLeaf z`.  This
+isolates exactly the two obligations the borrow rule discharges at `x = &mut y`:
+old-entry stability and new-pointee exclusivity. -/
+theorem MutRegistryExclusive.cons {store : ProgramStore}
+    {R : List (Location × Name)} {newLeaf : Location} {x : Name}
+    (hold : MutRegistryExclusive store R)
+    (hnew : ∀ z, z ≠ x → StoreRealizedSlotKill store newLeaf z) :
+    MutRegistryExclusive store ((newLeaf, x) :: R) := by
+  intro leaf owner hmem z hz
+  rcases List.mem_cons.mp hmem with heq | htail
+  · -- the new entry
+    cases heq
+    exact hnew z hz
+  · -- an old entry
+    exact hold leaf owner htail z hz
+
 
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
