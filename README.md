@@ -68,11 +68,26 @@ stated; the deviation then documents the corrected claim).
   formalised admissibility proof (essentially follow-up Section 6 plus
   coherence propagation) and the two benign tightenings above.
 
- - For ITE, we enforce BorrowSafeEnv for the resulting merged environment, and that inserting the merged type of the returned value
-   into the merged environment remains borrow safe (TyBorrowSafeAgainstEnv, e.g. relevant if a borrow type is returned)..
-   This removes the edge case outlined in the paper that merging type- and borrow-safe
-   branches can result in an unsafe environment explicitly.
-   The type system thus rejects a few more programs.
+- **Global `BorrowSafeEnv` is removed and replaced by local authority
+  checks.**  The printed paper treats borrow-safety as a whole-environment
+  property, and the original Corollary 4.14 suggests that this global property
+  should survive typing.  That is too strong for path-insensitive joins:
+  `T-If` and `T-WhileJoin` can merge branch-exclusive mutable borrows into a
+  well-formed environment whose target lists are not globally borrow-safe.  The
+  mechanisation therefore deletes `BorrowSafeEnv` rather than carrying it as a
+  premise on `T-If`, `T-WhileJoin`, progress, preservation, or extractor
+  correctness.
+
+  The replacement is deliberately tighter and more local.  `T-Assign` carries
+  `AssignmentBorrowSafety env lhs`: direct root writes need no global borrow
+  safety, while dereference writes require `BorrowSafeRoot` only for roots in
+  the written lvalue's `BorrowAuthorityGuard` closure.  Unrelated conflicts
+  elsewhere in a joined environment no longer block unrelated assignments or
+  dereferences.  This accepts more realistic Rust-shaped code, such as
+  conditionals that swap two distinct mutable borrows across branches, while
+  still rejecting operations that actually need ambiguous dereference
+  authority.  Corollary 4.14 is correspondingly weakened to the true global
+  result: output environments remain well-formed, not globally borrow-safe.
 
 ## Improvements
 
@@ -147,15 +162,15 @@ These deviations from the paper should be kept.
   a truncated branch the way `ast_copier` does
   (`LwRust/Extractor/Extractors/NestedBlocks.lean`).
 
-- **Lemma 4.11 (Preservation) carries a premises the paper does not
-  have.**
-   `BorrowSafeEnv Γ₁` — *likely paper bug:* the printed lemma appears false
-     without it.  Counterexample sketch: `x : Box(Box int)`,
-     `p ↦ &mut [*x]`, `q ↦ &mut [**x]` is well-formed with `S ∼ Γ` but not
-     borrow safe (`*x ⋈ **x`); `*p = box 5` is typeable (`q`'s target is
-     based at `x`, not `p`, so it does not write-prohibit `*p`) yet leaves
-     `q`'s stored reference dangling into the dropped old box, breaking
-     `S₂ ∼ Γ₂`.
+- **Lemma 4.11 (Preservation) uses the assignment-local borrow frame, not
+  `BorrowSafeEnv`.**  The old global premise was enough to rule out dangling
+  dereference-write counterexamples, but it also rejected valid joined
+  environments whose conflicts are irrelevant to the write being performed.
+  Preservation now gets the needed fact from `AssignmentBorrowSafety`: for a
+  dereference assignment, only the roots that can supply authority for that
+  dereference must be borrow-safe against the rest of the environment.  This is
+  the local condition used to prove the `&mut` leaf-exclusivity bridge in the
+  assignment case.
 
 - **Runtime validity is stronger than Definition 4.3.**  `ValidRuntimeState`
   contains the paper's `ValidState`, plus explicit invariants for the abstract
@@ -269,7 +284,8 @@ These deviations from the paper should be kept.
   it is the Lean interface for the paper's finite/well-behaved store model, and
   is discharged by concrete finite stores.
 
-- **General runtime safety exposes an initial borrow-safety premise.**  For
-  arbitrary nonempty runtime store typings, the terminal-safety wrappers carry
-  `BorrowSafeEnv` for the input environment.  Source-initial empty-store
-  wrappers discharge this premise from the empty environment.
+- **General runtime safety has no global borrow-safety premise.**  Arbitrary
+  nonempty runtime wrappers still require source syntax, runtime validity,
+  store typing, well-formed environments, safe abstraction, and the finite-store
+  operational assumptions, but not `BorrowSafeEnv`.  The typing derivation
+  itself supplies the local borrow-safety facts needed by assignments.
