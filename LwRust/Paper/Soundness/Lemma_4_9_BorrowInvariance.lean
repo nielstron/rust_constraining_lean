@@ -7845,6 +7845,37 @@ def SlotDepKill (store : ProgramStore) (env : Env) (leaf : Location)
       some { value := value, lifetime := zslot.lifetime } →
     ¬ RuntimeFrame.BorrowDependency store value zslot.ty leaf
 
+/-- **Location-based `&mut` leaf exclusivity.**
+
+The honest store-level runtime invariant that discharges the deref-write frame's
+cross-variable kill obligation *pointwise*, replacing the `collapse_kill` /
+`BorrowSafeWitness` borrow-graph chase.
+
+`MutLeafExclusive store env owner leaf` says: `leaf` is the runtime location a
+live `&mut` (held by the lval `owner`) currently points to, and *no other*
+variable's stored borrow resolves through it.  Concretely, for every variable
+`z` distinct from `owner`'s base, `z`'s stored value carries **no** borrow
+dependency reading `leaf` (`SlotDepKill store env leaf z`) — `z`'s borrow
+back-edges never resolve through the written `&mut` leaf.
+
+This is exactly the missing fact pinned down by "angle C": the `LocationBelow`
+cycle in the deref-assign kill closes its DOWN direction for any borrow target
+(`locReads_below`) but its UP direction only for `owner` itself (the firstNode,
+whose deref chain *is* the write chain).  For a cross-variable `z` the UP
+direction is unavailable, and the only contradiction is that `z` must not read
+the written `&mut` leaf at all — i.e. `SlotDepKill` for that `z`.
+
+`BorrowDependency` (hence `SlotDepKill`) is defined through `LocReads` and
+`store.loc`, so this is a genuinely location-based store/env-level invariant —
+keyed on actual store locations and realized pointees, never on a syntactic
+merged target list — and the `T-If` join therefore preserves it for free.  The
+owner's *own* dependency through `leaf` is handled separately by location
+well-foundedness (`slotDepKill_of_firstNode`), so `MutLeafExclusive` only
+constrains the genuinely cross-variable aliases. -/
+def MutLeafExclusive (store : ProgramStore) (env : Env) (owner : LVal)
+    (leaf : Location) : Prop :=
+  ∀ z, z ≠ LVal.base owner → SlotDepKill store env leaf z
+
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
     (base₀ : Name) : Name → Prop where

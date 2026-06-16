@@ -2239,6 +2239,141 @@ where
       try simp [LVal.base]
       exact Prod.Lex.left _ _ (by assumption)
 
+/-- A single `source` lval cannot be simultaneously owned-box typed and
+borrow typed: both abstractions resolve `source` to the same store slot, whose
+single value would have to be an owning reference (`owner := true`, V-Box) and a
+non-owning reference (`owner := false`, V-Bor) at once.  Used to discharge the
+borrow-only `MutLeafExclusive` side condition vacuously in the owned-box write
+case. -/
+theorem lvalTyping_box_borrow_false {store : ProgramStore} {env : Env}
+    {current : Lifetime} {source : LVal} {inner : PartialTy}
+    {mutBit : Bool} {targets : List LVal} {bl boxLifetime : Lifetime} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    LValTyping env source (.box inner) boxLifetime →
+    LValTyping env source (.ty (.borrow mutBit targets)) bl →
+    False := by
+  intro hwellFormed hsafe hbox hborrow
+  have habsBox : LValLocationAbstraction store source (.box inner) :=
+    lvalTyping_defined_location hwellFormed hsafe hbox
+  have habsBorrow :
+      LValLocationAbstraction store source (.ty (.borrow mutBit targets)) :=
+    lvalTyping_defined_location hwellFormed hsafe hborrow
+  rcases habsBox with ⟨loc₁, slot₁, hloc₁, hslot₁, hvalidBox⟩
+  rcases habsBorrow with ⟨loc₂, slot₂, hloc₂, hslot₂, hvalidBorrow⟩
+  have hlocEq : loc₁ = loc₂ := Option.some.inj (hloc₁.symm.trans hloc₂)
+  subst hlocEq
+  have hslotEq : slot₁ = slot₂ := Option.some.inj (hslot₁.symm.trans hslot₂)
+  subst hslotEq
+  -- The single stored value would be both an owning (V-Box) and a non-owning
+  -- (V-Bor) reference.
+  rcases slot₁ with ⟨slotValue, slotLifetime⟩
+  cases hvalidBox with
+  | box _ _ => cases hvalidBorrow
+
+/--
+The location-based `&mut` leaf-exclusivity invariant `MutLeafExclusive` for a
+mutable-borrow write target, established from the runtime borrow-safety witness
+`BorrowSafeWitness`.
+
+This is the bridge that lets the deref-assign frame run *purely* on
+`MutLeafExclusive` (a clean store/env-level invariant) while the surrounding
+preservation callers keep supplying the existing borrow-safety witness.  It
+re-runs the borrow-graph guard chase: the firstNode kill
+(`slotDepKill_of_firstNode`) seeds the guard set at the write base, the
+resolution chase (`writeGuarded_of_resolution`) lifts it to a `ProtectedByBase`
+root, `locReads_protected_guarded_base` carries it to the cross-variable target
+`t`, and `collapse_kill_realized` collapses `t`'s borrow node onto a guarded
+container whose `SlotDepKill` contradicts the assumed `BorrowDependency` reading
+`leaf`.  All borrow uniqueness is supplied by the witness, never by the typing
+env — exactly as before, just relocated out of the safe-abstraction frame. -/
+theorem mutLeafExclusive_of_witness {store : ProgramStore} {env : Env}
+    {current borrowLifetime targetLifetime : Lifetime} {φ : Name → Nat}
+    {source : LVal} {mutable : Bool} {targets : List LVal} {targetTy : PartialTy}
+    {leaf : Location} {leafSlot : StoreSlot} {leafView : PartialTy}
+    {rhsTy : Ty} {result : Env} :
+    LinearizedBy φ env →
+    WellFormedEnv env current →
+    BorrowSafeWitness store env →
+    store ∼ₛ env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    LValTyping env source (.ty (.borrow mutable targets)) borrowLifetime →
+    LValTargetsTyping env targets targetTy targetLifetime →
+    store.loc (.deref source) = some leaf →
+    store.slotAt leaf = some leafSlot →
+    ValidPartialValue store leafSlot.value leafView →
+    EnvWrite 0 env (.deref source) rhsTy result →
+    ¬ WriteProhibited result (.deref source) →
+    MutLeafExclusive store env source leaf := by
+  intro hφ hwellFormed hwitness hsafe hvalidStore hheap hsourceBorrow htargets
+    hlhsLoc hlhsSlot hleafValid hwrite hnotWrite
+  obtain ⟨env_w, hbs_w, _hstr_w, hkept_w⟩ := hwitness
+  intro z _hzSource zslot value hzslot hzstore hdep
+  -- Transport the post-write `¬WriteProhibited` to the pre-write base via the
+  -- write's same-shape strengthening (`env ⊑ result`).
+  have hglobalMap : EnvSameShapeStrengthening env result := by
+    cases hwrite with
+    | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
+        hwriteSlot hupdate =>
+        have hwriteSlotBase :
+            env.slotAt (LVal.base source) = some writeSlot := by
+          simpa [LVal.base] using hwriteSlot
+        have hthrough :
+            PathThroughBorrow writeSlot.ty (LVal.path (.deref source)) := by
+          simpa [LVal.path] using
+            LValTyping.pathThroughBorrow_append hsourceBorrow
+              hwriteSlotBase [()] PathThroughBorrow.borrowHere
+        rcases UpdateAtPath.sameShapeStrengthening_of_throughBorrow
+            hthrough hupdate with ⟨hmap, hstrength, hshape⟩
+        have hfinal :=
+          EnvSameShapeStrengthening.update_result_strengthening
+            (resultSlot := { writeSlot with ty := updatedTy })
+            hmap hwriteSlotBase rfl hstrength hshape
+        simpa [LVal.base] using hfinal
+  have hnotWPbase :
+      ¬ WriteProhibited env (.var (LVal.base source)) := by
+    intro hWP
+    exact hnotWrite (writeProhibited_var_transport hglobalMap rfl hWP)
+  have hkill₀ :
+      SlotDepKill store env leaf (LVal.base source) :=
+    slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore hheap hsourceBorrow
+      (LValTyping.borrow hsourceBorrow htargets) hlhsLoc hlhsSlot hleafValid
+  rcases LValTargetsTyping.output_full htargets with ⟨lhsTy₂, hOldTyFull₂⟩
+  have hLhsTyping :
+      LValTyping env (.deref source) (.ty lhsTy₂) targetLifetime := by
+    rw [← hOldTyFull₂]
+    exact LValTyping.borrow hsourceBorrow htargets
+  rcases writeGuarded_of_resolution hφ hwellFormed hsafe hvalidStore hheap
+      hlhsSlot hleafValid hLhsTyping hlhsLoc hwrite (WriteGuarded.base hkill₀) with
+    ⟨r, hprotR, hGr⟩
+  rcases RuntimeFrame.borrowDependency_selectedTarget hdep hzstore rfl
+      (Or.inl rfl) with ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
+  have hborrowsZ :
+      PartialTyBorrowsWellFormedInSlot env zslot.lifetime zslot.ty := by
+    intro mutable' targets' hcontains'
+    exact hwellFormed.1 z zslot mutable' targets'
+      hzslot ⟨zslot, hzslot, hcontains'⟩
+  rcases hborrowsZ hcontains t hmem with
+    ⟨tTy, tLt, htTyping, _houtlives, _hbase⟩
+  have hcollapse :
+      ∀ container mutable' ts' t',
+        env ⊢ container ↝ (.borrow mutable' ts') → t' ∈ ts' →
+        SelectedTarget store container t' →
+        WriteGuarded store env leaf (LVal.base source) (LVal.base t') →
+        WriteGuarded store env leaf (LVal.base source) container :=
+    fun c m' ts' t' hn hm hlive hG =>
+      (WriteGuarded.collapse_kill_realized hbs_w hkept_w
+        hnotWPbase hn hm hlive hG).1
+  have hGt :
+      WriteGuarded store env leaf (LVal.base source) (LVal.base t) :=
+    RuntimeFrame.locReads_protected_guarded_base hφ hwellFormed
+      hsafe hvalidStore hheap hcollapse htTyping hreads hprotR hGr
+  have hkillZ :=
+    (WriteGuarded.collapse_kill_realized hbs_w hkept_w hnotWPbase
+      ⟨zslot, hzslot, hcontains⟩ hmem hsel hGt).2
+  exact hkillZ zslot value hzslot hzstore hdep
+
 /--
 GRAPH LEMMA A — safe abstraction survives a write through `*source`.
 
@@ -2262,7 +2397,9 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
     {lhsLocation : Location} {oldSlot : StoreSlot} {oldTy oldSlotTy : PartialTy}
     {value : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeWitness store env →
+    (∀ mutBit targets bl,
+      LValTyping env source (.ty (.borrow mutBit targets)) bl →
+      MutLeafExclusive store env source lhsLocation) →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env (.deref source) oldTy targetLifetime →
@@ -2280,9 +2417,8 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
     store.write (.deref source) (.value value) = some writtenStore →
     Drops writtenStore [oldSlot.value] store' →
     store' ∼ₛ env' := by
-  intro hwellFormed hwitness hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
+  intro hwellFormed hmutLeafExclOf hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
     hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot holdSlotValid hwriteStore hdrops
-  obtain ⟨env_w, hbs_w, _hstr_w, hkept_w⟩ := hwitness
   have hsafeWrite : writtenStore ∼ₛ env' := by
     have hwriteEq :
         writtenStore =
@@ -2825,60 +2961,23 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     location ≠ lhsLocation := by
                 intro location hdep heq
                 rw [heq] at hdep
-                have hnotWPbase :
-                    ¬ WriteProhibited env (.var (LVal.base source)) := by
-                  intro hWP
-                  exact hnotWrite
-                    (writeProhibited_var_transport hglobalMap rfl hWP)
-                have hkill₀ :
-                    SlotDepKill store env lhsLocation (LVal.base source) :=
-                  slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore
-                    hheap hsourceBorrow
-                    (LValTyping.borrow hsourceBorrow htargets) hlhsLoc
-                    hlhsSlot holdSelectedValid
-                rcases LValTargetsTyping.output_full htargets with
-                  ⟨lhsTy₂, hOldTyFull₂⟩
-                have hLhsTyping :
-                    LValTyping env (.deref source) (.ty lhsTy₂)
-                      targetLifetime := by
-                  rw [← hOldTyFull₂]
-                  exact LValTyping.borrow hsourceBorrow htargets
-                rcases writeGuarded_of_resolution hφ hwellFormed hsafe
-                    hvalidStore hheap hlhsSlot holdSelectedValid hLhsTyping
-                    hlhsLoc hwrite (WriteGuarded.base hkill₀) with
-                  ⟨r, hprotR, hGr⟩
-                rcases RuntimeFrame.borrowDependency_selectedTarget hdep
-                    hstoreSlot rfl (Or.inl rfl) with
-                  ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
-                have hborrowsX :
-                    PartialTyBorrowsWellFormedInSlot env sourceSlot.lifetime
-                      sourceSlot.ty := by
-                  intro mutable' targets' hcontains'
-                  exact hwellFormed.1 x sourceSlot mutable' targets'
-                    hsourceSlot ⟨sourceSlot, hsourceSlot, hcontains'⟩
-                rcases hborrowsX hcontains t hmem with
-                  ⟨tTy, tLt, htTyping, _houtlives, _hbase⟩
-                have hcollapse :
-                    ∀ container mutable' ts' t',
-                      env ⊢ container ↝ (.borrow mutable' ts') → t' ∈ ts' →
-                      SelectedTarget store container t' →
-                      WriteGuarded store env lhsLocation (LVal.base source)
-                        (LVal.base t') →
-                      WriteGuarded store env lhsLocation (LVal.base source)
-                        container :=
-                  fun c m' ts' t' hn hm hlive hG =>
-                    (WriteGuarded.collapse_kill_realized hbs_w hkept_w
-                      hnotWPbase hn hm hlive hG).1
-                have hGt :
-                    WriteGuarded store env lhsLocation (LVal.base source)
-                      (LVal.base t) :=
-                  RuntimeFrame.locReads_protected_guarded_base hφ hwellFormed
-                    hsafe hvalidStore hheap hcollapse htTyping hreads hprotR
-                    hGr
-                have hkillX :=
-                  (WriteGuarded.collapse_kill_realized hbs_w hkept_w hnotWPbase
-                    ⟨sourceSlot, hsourceSlot, hcontains⟩ hmem hsel hGt).2
-                exact hkillX sourceSlot oldValue hsourceSlot hstoreSlot hdep
+                by_cases hxSource : x = LVal.base source
+                · -- `x` IS the borrow's base: the firstNode kill closes the
+                  -- dependency by location well-foundedness (no exclusivity
+                  -- invariant needed — the write chain *is* `x`'s deref chain).
+                  subst hxSource
+                  have hkill₀ :
+                      SlotDepKill store env lhsLocation (LVal.base source) :=
+                    slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore
+                      hheap hsourceBorrow
+                      (LValTyping.borrow hsourceBorrow htargets) hlhsLoc
+                      hlhsSlot holdSelectedValid
+                  exact hkill₀ sourceSlot oldValue hsourceSlot hstoreSlot hdep
+                · -- `x` is a genuinely cross-variable borrow: the location-based
+                  -- `&mut` leaf-exclusivity invariant kills any dependency of
+                  -- `x`'s slot through the written `&mut` leaf `lhsLocation`.
+                  exact hmutLeafExclOf _ _ _ hsourceBorrow x hxSource
+                    sourceSlot oldValue hsourceSlot hstoreSlot hdep
               have holdValid :
                   ValidPartialValue
                     (store.update lhsLocation
@@ -2936,7 +3035,9 @@ theorem preservation_assign_deref_envWrite_terminal_of_wellFormed
     {lhsLocation : Location} {oldSlot : StoreSlot} {oldTy oldSlotTy : PartialTy}
     {value : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    BorrowSafeWitness store env →
+    (∀ mutBit targets bl,
+      LValTyping env source (.ty (.borrow mutBit targets)) bl →
+      MutLeafExclusive store env source lhsLocation) →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env (.deref source) oldTy targetLifetime →
@@ -2954,7 +3055,7 @@ theorem preservation_assign_deref_envWrite_terminal_of_wellFormed
     store.write (.deref source) (.value value) = some writtenStore →
     Drops writtenStore [oldSlot.value] store' →
     TerminalStateSafe store' .unit env' .unit := by
-  intro hwellFormed hborrowSafe hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
+  intro hwellFormed hmutLeafExclOf hsafe hvalidRuntime hLhs hshape hwellTy hvalidValue hwrite
     hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot holdSlotValid hwriteStore hdrops
   -- Owner/heap/root invariants of the post-write store.
   have hvalueHeap : ValueOwnerTargetsHeap value :=
@@ -2994,7 +3095,7 @@ theorem preservation_assign_deref_envWrite_terminal_of_wellFormed
   refine ⟨validRuntimeState_assign_step_of_postWriteDrop_invariants
       (lifetime := lifetime)
       hvalidRuntime hstoreAllocated hstoreHeap hstoreRoot hread hwriteStore hdrops,
-    safeAbstraction_assign_deref_drop_of_wellFormed hwellFormed hborrowSafe hsafe hvalidRuntime
+    safeAbstraction_assign_deref_drop_of_wellFormed hwellFormed hmutLeafExclOf hsafe hvalidRuntime
       hLhs hshape hwellTy hvalidValue hwrite hranked hnotWrite hwellOut hread
       hlhsLoc hlhsSlot holdSlotValid hwriteStore hdrops,
     ValidPartialValue.unit⟩
@@ -3038,8 +3139,13 @@ theorem preservation_assign_deref_box_step_runtime_of_wellFormed
     exact (Option.some.inj htypedSlot).symm
   have holdSlotValid : ValidPartialValue store oldSlot.value oldTy := by
     simpa [htypedSlotEq] using htypedValid
+  -- The owned-box write never needs `&mut` leaf exclusivity: `source` cannot be
+  -- borrow-typed, so the side condition is vacuous.
   exact preservation_assign_deref_envWrite_terminal_of_wellFormed
-    hwellFormed (BorrowSafeWitness.of_borrowSafeEnv hsafe hborrowSafe) hsafe
+    hwellFormed
+    (fun _ _ _ hborrow =>
+      (lvalTyping_box_borrow_false hwellFormed hsafe hsourceBox hborrow).elim)
+    hsafe
     hvalidRuntime (LValTyping.box hsourceBox) hshape hwellTy
     hvalidValue hwrite hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot holdSlotValid
     hwriteStore hdrops
@@ -3098,8 +3204,22 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
     exact (Option.some.inj htypedSlot).symm
   have holdSlotValid : ValidPartialValue store oldSlot.value (.ty selectedTy) := by
     simpa [htypedSlotEq] using htypedValid
+  rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
+  -- The `&mut` leaf-exclusivity invariant for this write, established from the
+  -- runtime borrow-safety witness (the only remaining consumer of borrow safety
+  -- in the deref-assign frame, now isolated to this bridge).
+  have hmutLeafExclOf :
+      ∀ mutBit targets' bl,
+        LValTyping env source (.ty (.borrow mutBit targets')) bl →
+        MutLeafExclusive store env source typedLocation :=
+    fun _ _ _ _ =>
+      mutLeafExclusive_of_witness hφ hwellFormed
+        (BorrowSafeWitness.of_borrowSafeEnv hsafe hborrowSafe) hsafe
+        (ValidRuntimeState.validStore hvalidRuntime)
+        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+        hsourceBorrow htargets hlhsLoc hlhsSlot holdSlotValid hwrite hnotWrite
   exact preservation_assign_deref_envWrite_terminal_of_wellFormed
-    hwellFormed (BorrowSafeWitness.of_borrowSafeEnv hsafe hborrowSafe) hsafe
+    hwellFormed hmutLeafExclOf hsafe
     hvalidRuntime (LValTyping.borrow hsourceBorrow htargets)
     hshape hwellTy hvalidValue hwrite hranked hnotWrite hwellOut hread hlhsLoc hlhsSlot
     holdSlotValid hwriteStore hdrops
@@ -3163,7 +3283,8 @@ theorem preservation_assign_step_terminal_of_wellFormed
         hnotWrite hwellOut hvalidValue hstep
   | deref source =>
       exact preservation_assign_deref_step_runtime_of_wellFormed
-        hwellFormed hborrowSafe hsafe hvalidRuntime hLhs hshape hwellTy hwrite
+        hwellFormed hborrowSafe
+        hsafe hvalidRuntime hLhs hshape hwellTy hwrite
         hranked hnotWrite hwellOut hvalidValue hstep
 
 /-- Singleton value block preservation for `R-BlockB` using recursive drop preservation. -/
