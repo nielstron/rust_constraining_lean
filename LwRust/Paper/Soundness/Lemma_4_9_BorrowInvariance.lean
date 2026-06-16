@@ -7911,6 +7911,170 @@ theorem MutBorrowsExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
     MutLeafExclusive store env source leaf :=
   hexcl source targets bl leaf hsource hleaf
 
+/-! ### Realized-witness `&mut` leaf exclusivity (join-trivial reformulation)
+
+The `MutLeafExclusive`/`SlotDepKill` family above is keyed on
+`RuntimeFrame.BorrowDependency store value zslot.ty leaf`, which reads `zslot.ty`
+(the env type) — so it is ANTI-MONOTONE under the W-Bor target-list union and the
+`T-If` join coarsens it, making establishment at the join impossible (the
+§4.5.1 deviation, verified in Lean over many runs).
+
+`RuntimeFrame.RealizedBorrowReads` (Frame.lean) is the TYPE-FREE realization: it
+follows only the borrow target that resolves to the stored reference's OWN pointee
+location, never a static target-list member.  Keying the kill on it removes the
+env-type from the conclusion entirely, so the invariant below is invariant under
+any env coarsening and the `T-If` join preserves it for free (the post-join store
+is the executed branch's store). -/
+
+/-- Type-free, store-realized version of `SlotDepKill`: variable `z`'s stored
+value carries no *realized* borrow read of `leaf`.  Reads `env` only for the slot
+lifetime (a store-realized quantity); the stored value's TYPE is never inspected,
+so this predicate is unchanged by any env-type coarsening. -/
+def RealizedSlotKill (store : ProgramStore) (env : Env) (leaf : Location)
+    (z : Name) : Prop :=
+  ∀ zslot value,
+    env.slotAt z = some zslot →
+    store.slotAt (VariableProjection z) =
+      some { value := value, lifetime := zslot.lifetime } →
+    ¬ RuntimeFrame.RealizedBorrowReads store value leaf
+
+/-- A `RealizedSlotKill` discharges the `SlotDepKill` obligation: any
+`BorrowDependency` is in particular a `RealizedBorrowReads`. -/
+theorem RealizedSlotKill.slotDepKill {store : ProgramStore} {env : Env}
+    {leaf : Location} {z : Name}
+    (h : RealizedSlotKill store env leaf z) :
+    SlotDepKill store env leaf z := by
+  intro zslot value henv hstore hdep
+  exact h zslot value henv hstore hdep.realizedBorrowReads
+
+/-- Type-free version of `MutLeafExclusive`. -/
+def RealizedLeafExclusive (store : ProgramStore) (env : Env) (owner : LVal)
+    (leaf : Location) : Prop :=
+  ∀ z, z ≠ LVal.base owner → RealizedSlotKill store env leaf z
+
+/-- A `RealizedLeafExclusive` discharges the `MutLeafExclusive` obligation. -/
+theorem RealizedLeafExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
+    {owner : LVal} {leaf : Location}
+    (h : RealizedLeafExclusive store env owner leaf) :
+    MutLeafExclusive store env owner leaf :=
+  fun z hz => (h z hz).slotDepKill
+
+/-- **The join-trivial store-realized `&mut`-exclusivity invariant.**
+
+Identical in shape to `MutBorrowsExclusive`, but its conclusion is the type-free
+`RealizedLeafExclusive`.  The only env-dependence is the gate (`source` is
+`&mut`-typed; `leaf` is its runtime pointee) — both store-realized facts that the
+`T-If` join preserves — while the conclusion never reads any stored value's type.
+This is what makes the join preserve it for free. -/
+def RealizedMutBorrowsExclusive (store : ProgramStore) (env : Env) : Prop :=
+  ∀ (source : LVal) (targets : List LVal) (bl : Lifetime) (leaf : Location),
+    LValTyping env source (.ty (.borrow true targets)) bl →
+    store.loc (.deref source) = some leaf →
+    RealizedLeafExclusive store env source leaf
+
+/-- The realized invariant instantiates to the deref-write frame's
+`MutLeafExclusive` obligation. -/
+theorem RealizedMutBorrowsExclusive.mutLeafExclusive {store : ProgramStore}
+    {env : Env} {source : LVal} {targets : List LVal} {bl : Lifetime}
+    {leaf : Location}
+    (hexcl : RealizedMutBorrowsExclusive store env)
+    (hsource : LValTyping env source (.ty (.borrow true targets)) bl)
+    (hleaf : store.loc (.deref source) = some leaf) :
+    MutLeafExclusive store env source leaf :=
+  (hexcl source targets bl leaf hsource hleaf).mutLeafExclusive
+
+/-- **Conclusion-transfer (the join-trivial core).**  `RealizedSlotKill` transfers
+along *any* env relation that preserves the slot lifetime of `z`, because its
+conclusion (`¬ RealizedBorrowReads store value leaf`) is entirely store-keyed and
+never inspects the slot type.  In particular it transfers from a finer env to its
+same-shape strengthening (`EnvSameShapeStrengthening fine coarse`), which is what
+makes the `T-If` join preserve the realized invariant for free — the prior
+type-keyed `SlotDepKill` was anti-monotone here. -/
+theorem RealizedSlotKill.transfer_lifetime {store : ProgramStore}
+    {envFine envCoarse : Env} {leaf : Location} {z : Name}
+    (hfine : RealizedSlotKill store envFine leaf z)
+    (hlife : ∀ coarseSlot, envCoarse.slotAt z = some coarseSlot →
+      ∃ fineSlot, envFine.slotAt z = some fineSlot ∧
+        fineSlot.lifetime = coarseSlot.lifetime) :
+    RealizedSlotKill store envCoarse leaf z := by
+  intro coarseSlot value hcoarse hstore hreads
+  rcases hlife coarseSlot hcoarse with ⟨fineSlot, hfineSlot, hlifeEq⟩
+  refine hfine fineSlot value hfineSlot ?_ hreads
+  rw [hlifeEq]; exact hstore
+
+/-- **`RealizedLeafExclusive` transfers from a finer env to its same-shape
+strengthening.**  The `owner` base is unchanged; for every other variable, the
+conclusion transfers by `RealizedSlotKill.transfer_lifetime` using the lifetime
+agreement built into `EnvSameShapeStrengthening`. -/
+theorem RealizedLeafExclusive.of_strengthening {store : ProgramStore}
+    {envFine envCoarse : Env} {owner : LVal} {leaf : Location}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hfine : RealizedLeafExclusive store envFine owner leaf) :
+    RealizedLeafExclusive store envCoarse owner leaf := by
+  intro z hz
+  refine (hfine z hz).transfer_lifetime ?_
+  intro coarseSlot hcoarse
+  rcases hstr.1 z coarseSlot hcoarse with
+    ⟨fineSlot, hfineSlot, hlifeEq, _hstrength, _hshape⟩
+  exact ⟨fineSlot, hfineSlot, hlifeEq⟩
+
+/-- The `&mut`-gate pullback: a `&mut`-typing valid against the coarser (join)
+env also holds — over a possibly *finer* target list, hence the same `owner`
+base — against the finer (branch) env.  This is the dual of the borrow-invariance
+transport (`partialTyContains_borrow_transport_strengthens` /
+`not_writeProhibited_of_sameShapeStrengthening` run fine→coarse): it is the one
+genuinely recursive `LValTyping` metatheorem the join establishment still needs
+(see `realizedMutBorrowsExclusive_of_strengthening`).  Stated as a relation so the
+join lemma is parametric over it and stays sorry-free while it is being built. -/
+def LValMutGatePullback (envFine envCoarse : Env) : Prop :=
+  ∀ source targets bl,
+    LValTyping envCoarse source (.ty (.borrow true targets)) bl →
+    ∃ targetsFine blFine,
+      LValTyping envFine source (.ty (.borrow true targetsFine)) blFine
+
+/-- The **variable case** of the gate pullback is discharged outright by
+`EnvSameShapeStrengthening`: a `&mut`-typed variable slot in the coarse (join) env
+corresponds to a slot in the finer env whose type strengthens into it, and
+same-shape forces that finer type to also be `&mut` (over a subset target list,
+hence the same `.var` base).  This covers the practically dominant case — and in
+particular every borrow created by `x = &mut y` (Step 3) — leaving only nested
+`*p`-shaped `&mut` lvals to the deeper recursive `LValTyping` transport. -/
+theorem lvalMutVar_pullback_of_strengthening {envFine envCoarse : Env} {x : Name}
+    {targets : List LVal} {bl : Lifetime}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hcoarseSlot : envCoarse.slotAt x = some ⟨.ty (.borrow true targets), bl⟩) :
+    ∃ targetsFine blFine,
+      LValTyping envFine (.var x) (.ty (.borrow true targetsFine)) blFine := by
+  rcases hstr.1 x ⟨.ty (.borrow true targets), bl⟩ hcoarseSlot with
+    ⟨fineSlot, hfineSlot, _hlife, hstrength, hshape⟩
+  cases fineSlot with
+  | mk fty flt =>
+    simp only at hstrength hshape
+    cases hstrength with
+    | reflex => exact ⟨targets, flt, LValTyping.var hfineSlot⟩
+    | borrow _hsub => exact ⟨_, flt, LValTyping.var hfineSlot⟩
+
+/-- **The join-trivial monotonicity of the realized `&mut`-exclusivity invariant.**
+
+Given the `&mut`-gate pullback, `RealizedMutBorrowsExclusive` transports from the
+finer branch env `env₃` to its same-shape strengthening `env₅` (the `T-If` join).
+The conclusion side is fully store-keyed and transports for free
+(`RealizedLeafExclusive.of_strengthening`); the only env-type-sensitive ingredient
+is the gate, supplied by `LValMutGatePullback`.  This is the join establishment
+that was *impossible* for the type-keyed `MutBorrowsExclusive` (whose conclusion
+read the join-coarsened slot type and was anti-monotone). -/
+theorem realizedMutBorrowsExclusive_of_strengthening {store : ProgramStore}
+    {envFine envCoarse : Env}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hgate : LValMutGatePullback envFine envCoarse)
+    (hfine : RealizedMutBorrowsExclusive store envFine) :
+    RealizedMutBorrowsExclusive store envCoarse := by
+  intro source targets bl leaf hsource hleaf
+  rcases hgate source targets bl hsource with ⟨targetsFine, blFine, hsourceFine⟩
+  exact RealizedLeafExclusive.of_strengthening hstr
+    (hfine source targetsFine blFine leaf hsourceFine hleaf)
+
+
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
     (base₀ : Name) : Name → Prop where
