@@ -7876,6 +7876,41 @@ def MutLeafExclusive (store : ProgramStore) (env : Env) (owner : LVal)
     (leaf : Location) : Prop :=
   ∀ z, z ≠ LVal.base owner → SlotDepKill store env leaf z
 
+/-- **The general store/env-level `&mut`-exclusivity invariant.**
+
+`MutBorrowsExclusive store env` is the write-agnostic invariant threaded through
+preservation that discharges the deref-write frame's `MutLeafExclusive`
+obligation.  It says: every live mutable borrow's runtime pointee location is
+*exclusive* — no other variable's stored borrow resolves through it.
+
+Concretely, for every lval `source` whose env type is `&mut targets` and whose
+dereference resolves at runtime to a leaf location `leaf`
+(`store.loc (.deref source) = some leaf`), the leaf is `MutLeafExclusive`: no
+cross-variable borrow back-edge carries a `BorrowDependency` reading `leaf`.
+
+This is a genuinely store-level / location-based invariant (keyed on
+`store.loc` and `BorrowDependency`, never on a syntactic merged target list), so
+the `T-If` *join* preserves it for free — the post-`ite` store is the executed
+branch's store and `&mut`-ness is store-keyed.  Its real preservation crux is
+straight-line borrow creation (`x = &mut y`), discharged by the borrow rule's
+write-prohibition check. -/
+def MutBorrowsExclusive (store : ProgramStore) (env : Env) : Prop :=
+  ∀ (source : LVal) (targets : List LVal) (bl : Lifetime) (leaf : Location),
+    LValTyping env source (.ty (.borrow true targets)) bl →
+    store.loc (.deref source) = some leaf →
+    MutLeafExclusive store env source leaf
+
+/-- The general invariant instantiates to the deref-write frame's
+`MutLeafExclusive` obligation for any `&mut`-typed `source` whose deref resolves
+to `leaf`. -/
+theorem MutBorrowsExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
+    {source : LVal} {targets : List LVal} {bl : Lifetime} {leaf : Location}
+    (hexcl : MutBorrowsExclusive store env)
+    (hsource : LValTyping env source (.ty (.borrow true targets)) bl)
+    (hleaf : store.loc (.deref source) = some leaf) :
+    MutLeafExclusive store env source leaf :=
+  hexcl source targets bl leaf hsource hleaf
+
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
     (base₀ : Name) : Name → Prop where
