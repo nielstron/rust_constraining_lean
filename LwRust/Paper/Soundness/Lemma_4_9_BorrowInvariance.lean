@@ -1635,9 +1635,9 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
       TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
         hfreshOut hcoh henv)
-    (fun hLhs _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
+    (fun hLhs _hRhs hRhsSafe hLhsPost hshape hwf hwrite hranked hcoh hcontained
         hnotWrite ih hsource =>
-      TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hLhsPost
+      TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hRhsSafe hLhsPost
         hshape hwf hwrite hranked hcoh hcontained hnotWrite)
     (fun _hLhs hfresh _hghostRhs _hRhs hcopyL hcopyR hshape ihL ihGhost ihR
         hsource =>
@@ -3318,7 +3318,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+        hLhs hRhs _hRhsSafe _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
         hnotWrite ih
         htypingEq hwellFormed =>
       by
@@ -8025,7 +8025,7 @@ transport (`partialTyContains_borrow_transport_strengthens` /
 `not_writeProhibited_of_sameShapeStrengthening` run fine→coarse): it is the one
 genuinely recursive `LValTyping` metatheorem the join establishment still needs
 (see `realizedMutBorrowsExclusive_of_strengthening`).  Stated as a relation so the
-join lemma is parametric over it and stays sorry-free while it is being built. -/
+join lemma is parametric over it and stays placeholder-free while it is being built. -/
 def LValMutGatePullback (envFine envCoarse : Env) : Prop :=
   ∀ source targets bl,
     LValTyping envCoarse source (.ty (.borrow true targets)) bl →

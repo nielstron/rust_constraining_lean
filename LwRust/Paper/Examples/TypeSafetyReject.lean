@@ -99,8 +99,9 @@ theorem invalidBorrowExample_rejected :
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   cases hassign with
-                                  | assign _hLhs _hRhs _hLhsPost _hshape _hwell
-                                      hwrite _hranked _hcoh _hcontained hnotWrite =>
+                                  | assign _hLhs _hRhs _hRhsSafe _hLhsPost _hshape
+                                      _hwell hwrite _hranked _hcoh _hcontained
+                                      hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue
@@ -150,8 +151,8 @@ def paperRejectedIfElse : Term :=
 /--
 The paper notes that the Section 6.1.3 conditional join is not borrow safe:
 `p` and `q` may both contain mutable borrows whose target lists include `a`.
-Our `T-If` rule rejects this by requiring `BorrowSafeEnv` for the joined
-environment of `paperRejectedIfElse`.
+This is the counterexample to the old strengthened Corollary 4.14 conclusion
+that every joined static output environment is globally `BorrowSafeEnv`.
 -/
 theorem paperConditionalJoinEnv_not_borrowSafe :
     ¬ BorrowSafeEnv paperConditionalJoinEnv := by

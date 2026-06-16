@@ -34,7 +34,7 @@ theorem lemma_9_9_valuePreservation
     ValidValue finalStore finalValue ty := by
     intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hborrowSafe hsafe htyping hmulti).2.2
+      hwellFormed hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

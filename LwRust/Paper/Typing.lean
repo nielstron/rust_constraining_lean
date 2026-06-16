@@ -645,9 +645,10 @@ The paper phrases this over variables in `dom(Γ)` and borrowed lvalues inside
 contained borrow types.  The containment premises already imply the relevant
 variables are present in the environment.
 
-This lives here (rather than with the Section 4.3 helpers) because the
-control-flow extension's `T-If` rule carries it as an obligation for the
-joined result environment; see `TermTyping.ite`.
+This lives here (rather than with the Section 4.3 helpers) because later typing
+rules and soundness lemmas use it as a static side condition.  It is deliberately
+not a premise of `TermTyping.ite`: joined branch environments can be
+well-formed without being globally borrow-safe.
 -/
 def BorrowSafeEnv (env : Env) : Prop :=
   ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
@@ -965,6 +966,7 @@ mutual
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
         LValTyping env₁ lhs oldTy targetLifetime →
         TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+        BorrowSafeEnv env₂ →
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
@@ -1021,15 +1023,9 @@ mutual
       target lists, so these do not follow from the branch invariants by a
       local argument; they are carried, as the corresponding `T-Assign`
       obligations are;
-    * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
-      variables into one target list, in which case the joined environment
-      is genuinely not borrow safe even though each branch is (the paper
-      concedes the corresponding weakening of Corollary 4.14 for this
-      extension in Section 4.5.1).  The preservation architecture threads
-      borrow safety through sequencing, so the mechanised rule only accepts
-      conditionals whose join remains borrow safe;
     * `TyBorrowSafeAgainstEnv` for the result type — this is the
-      root-independent result-extension invariant used by Corollary 4.14.
+      root-independent result-extension invariant used by the weakened
+      Corollary 4.14 interface.
       It does not follow from branch-local result safety because the joined
       result can be installed in the joined environment. -/
     | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
@@ -1118,11 +1114,13 @@ mutual
     that widen borrow target lists across iterations (e.g. re-pointing an
     outer `&mut` inside the body), which the strict rule `T-While` rejects.
 
-    Obligations follow the `T-If` convention: joins merge borrow target
-    lists, so shape agreement and the well-formedness/borrow-safety kit for
-    the join are rule-carried.  Runtime entry/back-edge states transport
-    into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
-    the `T-If` preservation argument.
+    Obligations follow the join convention used by `T-If`: joins merge borrow
+    target lists, so shape agreement and the well-formedness kit for the join
+    are rule-carried.  This loop rule additionally carries `BorrowSafeEnv` for
+    the invariant, because the back edge re-enters the loop through that static
+    environment.  Runtime entry/back-edge states transport into the invariant
+    via `EnvSameShapeStrengthening.safe`, exactly as in the `T-If` preservation
+    argument.
 
     The final two premises re-type the condition and body from the
     *entry-side* environments.  In real Rust this is implied: per-code

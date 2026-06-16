@@ -47,7 +47,7 @@ theorem lemma_9_10_storePreservation
     finalStore ∼ₛ env₂ := by
     intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hborrowSafe hsafe htyping hmulti).2.1
+      hwellFormed hsafe htyping hmulti).2.1
 
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete

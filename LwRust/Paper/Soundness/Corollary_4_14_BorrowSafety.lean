@@ -11,19 +11,17 @@ Paper statement (Section 4.5.1):
 > then, for arbitrary `γ ∈ fresh`, a well-formed and borrow safe typing
 > environment `Γ₃[γ ↦ T₂^l] ⊑ Γ₂[γ ↦ T₁^l]` exists where `S₂ ∼ Γ₃`.
 
-For the calculus core this strengthens to `Γ₂ = Γ₃`, which is the mechanized
-form below: typing from a well-formed borrow-safe environment yields a
-well-formed *and* borrow-safe result environment.
+For the control-flow calculus this does **not** strengthen to `Γ₂ = Γ₃` with a
+borrow-safe result environment: `T-If` joins can merge borrow target lists in a
+well-formed but not globally borrow-safe way.  The mechanized global wrapper at
+the end of this file therefore records the part that remains true for every
+typing derivation: the static output environment is well-formed.
 
-Status: the core output-environment statement is proved for the strengthened
-rule-carried formulation.  The borrow-safety `EnvWrite` frame obligation is now
-proved constructively with the root-independent RHS `TyBorrowSafeAgainstEnv`
-invariant and the strengthened RHS/RHS fan-out side condition carried by
-`T-Assign`.  The global mutual term/list induction is source-scoped: `T-Const`
-only handles source values, whose types are borrow-free.  Move result-extension
-is proved constructively from the `LValTyping`/`Strike` origin lemma.  Blocks are
-handled by the global term/list induction, which carries that same
-root-independent result-type invariant through `dropLifetime`.
+Status: the assignment-local borrow-safety `EnvWrite` frame obligation is proved
+constructively with the root-independent RHS `TyBorrowSafeAgainstEnv` invariant
+and the strengthened RHS/RHS fan-out side condition carried by `T-Assign`.
+Source-initial and constructor-specific result-extension lemmas remain available
+below, but there is intentionally no global `BorrowSafeEnv Γ₂` theorem.
 -/
 
 namespace LwRust
@@ -1700,230 +1698,13 @@ theorem borrowSafeResult_of_borrowFree {env : Env} {lifetime : Lifetime}
     fun _gamma _hfresh => borrowSafeEnv_update_fresh_borrowFree hsafe hfree⟩
 
 /--
-Main borrow-safety induction behind Corollary 4.14.
-
-The result binding is included in the statement because the paper's corollary
-checks borrow-safety after extending the output environment with `γ ↦ <T>^l`.
+The former strengthened Corollary 4.14 induction claimed
+`BorrowSafeEnv env₂` for every typing derivation.  That statement is false once
+`T-If` is allowed to join branch environments without a borrow-safety premise:
+joins may merge borrow target lists in a way that is still well-formed for
+preservation, but not globally borrow-safe.  The public corollary wrappers below
+therefore expose only the output well-formedness guaranteed by Lemma 4.9.
 -/
-theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-    {ty : Ty} :
-    SourceTerm term →
-    BorrowSafeEnv env₁ →
-    TermTyping env₁ typing lifetime term ty env₂ →
-    BorrowSafeEnv env₂ ∧
-      TyBorrowSafeAgainstEnv env₂ ty ∧
-      ∀ gamma,
-        env₂.fresh gamma →
-        BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsource hborrowSafe htyping
-  let hobligations := borrowSafetyPreservationObligations_proved
-  refine TermTyping.rec
-    (motive_1 := fun env typing lifetime term ty env₂ _ =>
-      SourceTerm term →
-        BorrowSafeEnv env →
-        BorrowSafeEnv env₂ ∧
-          TyBorrowSafeAgainstEnv env₂ ty ∧
-          ∀ gamma,
-            env₂.fresh gamma →
-            BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }))
-    (motive_2 := fun env _typing lifetime terms _ty env₂ _ =>
-      SourceTerm (.block lifetime terms) →
-        BorrowSafeEnv env →
-        BorrowSafeEnv env₂ ∧
-          TyBorrowSafeAgainstEnv env₂ _ty)
-    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging ?whileLoop
-    ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
-    htyping hsource hborrowSafe
-  case const =>
-    intro _env _typing _lifetime _value _ty hvalueTyping hsource hborrowSafe
-    have hborrowFree : TyBorrowFree _ty :=
-      sourceValue_valueTyping_borrowFree
-        (hsource _value (by simp [termValues])) hvalueTyping
-    refine ⟨hborrowSafe, tyBorrowSafeAgainstEnv_borrowFree hborrowFree, ?_⟩
-    intro gamma hfresh
-    exact borrowSafe_value_result_extension_borrowFree
-      (TermTyping.const hvalueTyping) hborrowSafe
-      hborrowFree
-      hfresh
-  case missing =>
-    intro _env _typing _lifetime _ty _hwellTy hloanFree _hsource hborrowSafe
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_loanFree hloanFree, fun _gamma
-      _hfresh => borrowSafeEnv_update_fresh_loanFree hborrowSafe hloanFree⟩
-  case copy =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
-      _hsource hborrowSafe
-    refine ⟨hborrowSafe, ?_,
-      fun gamma hfresh =>
-        typingPreservesBorrowSafeResult_copy_case hborrowSafe
-          (TermTyping.copy (typing := _typing) hLv hcopy hnotRead) hfresh⟩
-    cases hcopy with
-    | unit =>
-        exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit
-    | int =>
-        exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int
-    | bool =>
-        exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_bool
-    | immBorrow =>
-        rename_i targets
-        exact tyBorrowSafeAgainstEnv_immBorrowMany
-          (by
-            intro target htarget
-            exact (LValTyping.no_readProhibited_targets_of_immBorrow hborrowSafe).1
-              hLv PartialTyContains.here target htarget)
-  case move =>
-    intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty hLv hnotWrite
-      hmove _hsource hborrowSafe
-    have hcore : BorrowSafeEnv _env₂ :=
-      borrowSafeEnv_move hborrowSafe hmove
-    have hsafeTy : TyBorrowSafeAgainstEnv _env₂ _ty := by
-      rcases hmove with ⟨slot, struck, hslot, hstrike, henv₂⟩
-      subst henv₂
-      exact tyBorrowSafeAgainstEnv_move_of_base_contains
-        hborrowSafe
-        ⟨slot, struck, hslot, hstrike, rfl⟩
-        (by
-          intro mutable targets hcontains
-          exact LValTyping.contains_base_of_strike hLv hslot hstrike hcontains)
-    refine ⟨hcore, hsafeTy, ?_⟩
-    intro gamma hfresh
-    cases _lv with
-    | var x =>
-        exact borrowSafety_move_var_result_extension hborrowSafe
-          (TermTyping.move (typing := _typing) hLv hnotWrite hmove) hfresh
-    | deref lv =>
-        by_cases hborrowFree : TyBorrowFree _ty
-        · exact borrowSafety_move_borrowFree_result_extension
-            (typing := _typing) hborrowSafe
-            (TermTyping.move (typing := _typing) hLv hnotWrite hmove)
-            hborrowFree
-        · exact borrowSafetyPreservation_move (typing := _typing) hborrowSafe
-            (TermTyping.move (typing := _typing) hLv hnotWrite hmove)
-            (by
-              intro x hvar
-              cases hvar)
-            hborrowFree
-            hfresh
-  case mutBorrow =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hmutable hnotWrite
-      _hsource hborrowSafe
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_mutBorrow hnotWrite, fun gamma
-      hfresh => typingPreservesBorrowSafeResult_mutBorrow_case hborrowSafe
-      (TermTyping.mutBorrow (typing := _typing) hLv hmutable hnotWrite)
-      hfresh⟩
-  case immBorrow =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead _hsource
-      hborrowSafe
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_immBorrow hnotRead, fun gamma
-      hfresh => typingPreservesBorrowSafeResult_immBorrow_case hborrowSafe
-      (TermTyping.immBorrow (typing := _typing) hLv hnotRead) hfresh⟩
-  case box =>
-    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hsource hborrowSafe
-    have hinner := ih (SourceTerm.box_inner hsource) hborrowSafe
-    exact ⟨hinner.1, TyBorrowSafeAgainstEnv.box hinner.2.1, by
-      intro gamma hfresh
-      exact borrowSafeEnv_update_box_of_update_inner (hinner.2.2 gamma hfresh)⟩
-  case block =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
-      hblockChild hterms hwellTy hdrop _ih hsource hborrowSafe
-    have hbody := _ih hsource hborrowSafe
-    have hbodySafe : BorrowSafeEnv _env₂ :=
-      hbody.1
-    have hbodyTySafe : TyBorrowSafeAgainstEnv _env₂ _ty :=
-      hbody.2
-    have hblockTySafe : TyBorrowSafeAgainstEnv _env₃ _ty := by
-      rw [hdrop]
-      exact TyBorrowSafeAgainstEnv.dropLifetime hbodyTySafe
-    have hblockCore :
-        BorrowSafeEnv _env₃ :=
-      borrowSafety_block_drop hbodySafe hdrop
-    refine ⟨hblockCore, hblockTySafe, ?_⟩
-    intro gamma _hfresh
-    exact borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hblockCore hblockTySafe
-  case declare =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfreshX hterm
-      hfreshOut _hcoh henv₃ _ih hsource hborrowSafe
-    have hinner := _ih (SourceTerm.declare_inner hsource) hborrowSafe
-    have hdeclaredSafe :
-        BorrowSafeEnv
-          (_env₂.update _x { ty := .ty _ty, lifetime := _lifetime }) := by
-      exact hinner.2.2 _x hfreshOut
-    rw [henv₃]
-    exact borrowSafeResult_of_borrowFree hdeclaredSafe tyBorrowFree_unit
-  case assign =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hLhs hRhs _hLhsPost hshape hwellTy hwrite hranked hcoh
-      _hcontained hnotWrite _ih hsource hborrowSafe
-    have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe
-    have hwriteSafe :
-        BorrowSafeEnv _env₃ :=
-      hobligations.envWrite hRhsSafe.1 hRhsSafe.2.1 hLhs hRhs hshape hwellTy
-        hwrite hranked hcoh hnotWrite
-    exact borrowSafeResult_of_borrowFree hwriteSafe tyBorrowFree_unit
-  case eq =>
-    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy _ghostRhsTy _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR
-      _hshape ihL _ihGhost ihR hsource hborrowSafe
-    have hleft := ihL (SourceTerm.eq_lhs hsource) hborrowSafe
-    have hright := ihR (SourceTerm.eq_rhs hsource) hleft.1
-    exact borrowSafeResult_of_borrowFree hright.1 tyBorrowFree_bool
-  case ite =>
-    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin _hcontained
-      _hcoherent _hlinear hresultSafe ihCondition ihTrue
-      ihFalse hsource hborrowSafe
-    have hconditionSafe := ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
-    have _htrueSafe := ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
-    have _hfalseSafe := ihFalse (SourceTerm.ite_falseBranch hsource) hconditionSafe.1
-    -- SCAFFOLD (chunk 1): `BorrowSafeEnv env₅` is no longer a rule premise and is
-    -- genuinely false for the merged join (W-Bor unions target lists).  This is the
-    -- single obligation the dropped premise was buying.  The real fix re-threads
-    -- borrow-safety as a runtime-store property, dropping this static corollary.
-    have hborrowSafeJoin : BorrowSafeEnv _env₅ := by sorry
-    exact ⟨hborrowSafeJoin, hresultSafe, fun _gamma _hfresh =>
-      borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hborrowSafeJoin hresultSafe⟩
-  case iteDiverging =>
-    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
-      ihCondition ihTrue _ihFalse hsource hborrowSafe
-    have hconditionSafe :=
-      ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
-    exact ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
-  case whileLoop =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy _hchild _hcond _hbody _hwellTy _hdrop ihCond _ihBody hsource
-      hborrowSafe
-    exact borrowSafeResult_of_borrowFree
-      (ihCond (SourceTerm.while_condition hsource) hborrowSafe).1
-      tyBorrowFree_unit
-  case whileLoopDiverging =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy _hchild _hcond _hbody _hdiverges ihCond _ihBody hsource
-      hborrowSafe
-    exact borrowSafeResult_of_borrowFree
-      (ihCond (SourceTerm.while_condition hsource) hborrowSafe).1
-      tyBorrowFree_unit
-  case whileLoopJoin =>
-    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-      _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy _hchild
-      _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hcondInv _hbodyInv _hwellTy
-      _hdrop _hcondEntry _hbodyEntry ihCondInv _ihBodyInv _ihCondEntry
-      _ihBodyEntry hsource _hborrowSafe
-    exact borrowSafeResult_of_borrowFree
-      (ihCondInv (SourceTerm.while_condition hsource) hbse).1
-      tyBorrowFree_unit
-  case singleton =>
-    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm _ih hsource
-      hborrowSafe
-    have h := _ih (SourceTerm.block_head hsource) hborrowSafe
-    exact ⟨h.1, h.2.1⟩
-  case cons =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-      _hterm _hrest _ihHead _ihRest hsource hborrowSafe
-    have hhead := _ihHead (SourceTerm.block_head hsource) hborrowSafe
-    exact _ihRest (SourceTerm.block_tail hsource) hhead.1
 
 theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
     {store : ProgramStore} {env₁ env₂ : Env}
@@ -1940,22 +1721,19 @@ theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
     BorrowSafeEnv env₁ →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
-    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
+    WellFormedEnv env₂ lifetime := by
   intro hrankedAssign hwriteCoherent
-    hdeclFresh hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
+    hdeclFresh _hsource hrefs hvalidState hvalidStoreTyping hwellFormed _hborrowSafe hsafe
     htyping
-  exact ⟨
-    borrowInvariance_of_rankedAssign_and_declFreshCoherence
-      hrankedAssign hwriteCoherent hdeclFresh hrefs hvalidState
-      hvalidStoreTyping hwellFormed hsafe htyping,
-    (typingPreservesBorrowSafeResult_global hsource hborrowSafe htyping).1⟩
+  exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
+    hrankedAssign hwriteCoherent hdeclFresh hrefs hvalidState
+    hvalidStoreTyping hwellFormed hsafe htyping
 
 /--
-Borrow safety through the rule-carried borrow-invariance route.
+Output well-formedness through the rule-carried borrow-invariance route.
 
-The well-formedness half avoids the legacy write/fresh shortcuts and does not
-require global assignment/declaration side predicates; those facts are attached
-to the typing derivation.
+This is the surviving global form after dropping the false static
+`BorrowSafeEnv` conclusion for joined conditionals.
 -/
 theorem borrowSafety_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
@@ -1968,13 +1746,11 @@ theorem borrowSafety_of_ruleCarriedObligations
     BorrowSafeEnv env₁ →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
-    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
+    WellFormedEnv env₂ lifetime := by
   intro hsource hvalidState _hvalidStoreTyping
-    hwellFormed hborrowSafe hsafe htyping
-  exact ⟨
-    borrowInvariance_of_sourceTerm hsource hvalidState hwellFormed hsafe
-      htyping,
-    (typingPreservesBorrowSafeResult_global hsource hborrowSafe htyping).1⟩
+    hwellFormed _hborrowSafe hsafe htyping
+  exact borrowInvariance_of_sourceTerm hsource hvalidState hwellFormed hsafe
+    htyping
 
 end Paper
 end LwRust
@@ -1983,7 +1759,7 @@ namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Corollary 4.14, Borrow Safety (core/strengthened form `Γ₂ = Γ₃`). -/
+/-- Corollary 4.14, weakened form: the static output remains well-formed. -/
 theorem corollary_4_14_borrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
@@ -1994,7 +1770,7 @@ theorem corollary_4_14_borrowSafety
     (hsafe : store ∼ₛ env₁)
     (hsource : SourceTerm term)
     (htyping : TermTyping env₁ typing lifetime term ty env₂) :
-    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ :=
+    WellFormedEnv env₂ lifetime :=
   borrowSafety_of_ruleCarriedObligations
     hsource hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
 

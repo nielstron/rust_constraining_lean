@@ -274,7 +274,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-      _rhs _rhsTy _hLhs _hRhs _hLhsPost _hshape _hwellTy _hwrite _hranked
+      _rhs _rhsTy _hLhs _hRhs _hRhsSafe _hLhsPost _hshape _hwellTy _hwrite _hranked
       _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case eq =>
@@ -502,11 +502,11 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     TerminalStateSafe finalStore finalValue env₂ ty := by
   intro htyping hmulti
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
-    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, hborrowSafe,
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hborrowSafe,
       _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact preservation hsource hvalidRuntime hvalidStoreTyping
-    (wellFormedEnv_empty lifetime) hborrowSafe hsafe htyping hmulti
+    (wellFormedEnv_empty lifetime) hsafe htyping hmulti
 
 /--
 **Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.
@@ -909,7 +909,7 @@ theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     DeclarationFreshUpdateCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
+    WellFormedEnv env₂ lifetime := by
   intro hrankedAssign hwriteCoherent hdeclFresh hsource htyping
   exact borrowSafety_of_rankedAssign_and_declFreshCoherence
     hrankedAssign
@@ -974,7 +974,7 @@ theorem sourceInitial_borrowSafety_of_ruleCarriedObligations
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
+    WellFormedEnv env₂ lifetime := by
   intro hsource htyping
   exact borrowSafety_of_ruleCarriedObligations
     hsource

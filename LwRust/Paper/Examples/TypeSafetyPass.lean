@@ -618,6 +618,60 @@ theorem pointerIfEnv_contained :
         rw [hslot] at hnone
         cases hnone
 
+theorem pointerIfEnv_borrowSafe :
+    BorrowSafeEnv pointerIfEnv := by
+  intro x y mutable targetsMutable targetsOther targetMutable targetOther
+    hmutable hother _htargetMutable _htargetOther _hconflict
+  have hxRoot : x = "p" := by
+    rcases hmutable with ⟨slot, hslot, hcontains⟩
+    by_cases hp : x = "p"
+    · exact hp
+    · by_cases hy : x = "y"
+      · subst hy
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hcontains
+        cases hcontains
+      · by_cases hx : x = "x"
+        · subst hx
+          have hslotTy : slot.ty = .ty .int := by
+            simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+              Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          rw [hslotTy] at hcontains
+          cases hcontains
+        · have hnone : pointerIfEnv.slotAt x = none := by
+            simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+              Env.update, Env.empty, hp, hy, hx]
+          rw [hslot] at hnone
+          cases hnone
+  have hyRoot : y = "p" := by
+    rcases hother with ⟨slot, hslot, hcontains⟩
+    by_cases hp : y = "p"
+    · exact hp
+    · by_cases hy : y = "y"
+      · subst hy
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hcontains
+        cases hcontains
+      · by_cases hx : y = "x"
+        · subst hx
+          have hslotTy : slot.ty = .ty .int := by
+            simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+              Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          rw [hslotTy] at hcontains
+          cases hcontains
+        · have hnone : pointerIfEnv.slotAt y = none := by
+            simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+              Env.update, Env.empty, hp, hy, hx]
+          rw [hslot] at hnone
+          cases hnone
+  rw [hxRoot, hyRoot]
+
 theorem pointerIfRetarget_slot_borrows_wellFormed :
     PartialTyBorrowsWellFormedInSlot pointerIfRetargetEnv
       pointerIfPYSlot.lifetime pointerIfPYSlot.ty := by
@@ -811,6 +865,7 @@ theorem pointerRetargetBranch_typing :
     pointerIf_p_typing
     (TermTyping.mutBorrow pointerIf_y_typing pointerIf_y_mutable
       pointerIf_not_writeProhibited_y)
+    pointerIfEnv_borrowSafe
     pointerIf_p_typing
     pointerIf_shape_px_py
     pointerIf_borrow_y_wellFormed
@@ -1085,6 +1140,7 @@ theorem pointerWriteBranch_typing :
   exact TermTyping.assign
     pointerIf_deref_p_typing
     (TermTyping.const ValueTyping.int)
+    pointerIfEnv_borrowSafe
     pointerIf_deref_p_typing
     ShapeCompatible.int
     WellFormedTy.int
