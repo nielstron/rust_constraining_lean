@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.InitialStates
+import LwRust.Paper.Typing
 
 /-!
 Build-checked conditional-join example for the crossed mutable-borrow pattern:
@@ -62,6 +62,42 @@ def swappedBorrowJoinEnv : Env :=
   swappedBorrowEnv [swappedBorrowA, swappedBorrowB]
     [swappedBorrowB, swappedBorrowA]
 
+private theorem swappedBorrowEnv_sameShape {xTargets yTargets xTargets' yTargets' :
+    List LVal} :
+    EnvJoinSameShape (swappedBorrowEnv xTargets yTargets)
+      (swappedBorrowEnv xTargets' yTargets') := by
+  intro x branchSlot joinSlot hbranch hjoinSlot
+  by_cases hy : x = "y"
+  · subst hy
+    simp [swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+      Env.update] at hbranch hjoinSlot
+    cases hbranch
+    cases hjoinSlot
+    simp [PartialTy.sameShape, Ty.sameShape]
+  · by_cases hx : x = "x"
+    · subst hx
+      simp [swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+        Env.update] at hbranch hjoinSlot
+      cases hbranch
+      cases hjoinSlot
+      simp [PartialTy.sameShape, Ty.sameShape]
+    · by_cases hb : x = "b"
+      · subst hb
+        simp [swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+          Env.update] at hbranch hjoinSlot
+        cases hbranch
+        cases hjoinSlot
+        simp [PartialTy.sameShape, Ty.sameShape]
+      · by_cases ha : x = "a"
+        · subst ha
+          simp [swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+            Env.update] at hbranch hjoinSlot
+          cases hbranch
+          cases hjoinSlot
+          simp [PartialTy.sameShape, Ty.sameShape]
+        · simp [swappedBorrowEnv, swappedBorrowSlot, swappedBorrowIntSlot,
+            Env.update, Env.empty, hy, hx, hb, ha] at hbranch
+
 def swappedBorrowCondition : Term :=
   .eq (.copy swappedBorrowA) (.copy swappedBorrowB)
 
@@ -98,14 +134,16 @@ theorem swappedBorrowIf_typing_from_branch_derivations
         swappedBorrowElseBranch .unit swappedBorrowElseEnv)
     (hjoin : EnvJoin swappedBorrowThenEnv swappedBorrowElseEnv
       swappedBorrowJoinEnv)
-    (hthenShape : EnvJoinSameShape swappedBorrowThenEnv swappedBorrowJoinEnv)
-    (helseShape : EnvJoinSameShape swappedBorrowElseEnv swappedBorrowJoinEnv)
     (hcontained : ContainedBorrowsWellFormed swappedBorrowJoinEnv)
     (hcoherent : Coherent swappedBorrowJoinEnv)
     (hlinear : Linearizable swappedBorrowJoinEnv) :
     TermTyping swappedBorrowPreIfEnv typing Lifetime.root
       swappedBorrowIf .unit swappedBorrowJoinEnv := by
   unfold swappedBorrowIf
+  have hthenShape : EnvJoinSameShape swappedBorrowThenEnv swappedBorrowJoinEnv :=
+    swappedBorrowEnv_sameShape
+  have helseShape : EnvJoinSameShape swappedBorrowElseEnv swappedBorrowJoinEnv :=
+    swappedBorrowEnv_sameShape
   exact TermTyping.ite
     hcondition
     hthen
@@ -118,7 +156,16 @@ theorem swappedBorrowIf_typing_from_branch_derivations
     hcontained
     hcoherent
     hlinear
-    (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit)
+    (by
+      constructor
+      · intro _targetsMutable _mutable _targetsOther _x _targetMutable
+          _targetOther hcontains _hborrow _htargetMutable _htargetOther
+          _hconflict
+        cases hcontains
+      · intro _x _targetsMutable _mutable _targetsOther _targetMutable
+          _targetOther _hborrow hcontains _htargetMutable _htargetOther
+          _hconflict
+        cases hcontains)
 
 theorem swappedBorrowJoinEnv_not_borrowSafe :
     ¬ BorrowSafeEnv swappedBorrowJoinEnv := by

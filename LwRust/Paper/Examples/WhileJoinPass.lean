@@ -871,7 +871,6 @@ theorem whileRetargetLoop_typing :
       ⟨.int, Lifetime.root, whileJoinInv_targets_typing⟩)
     ⟨fun name => if name = "q" then 1 else 0,
       whileJoin_linearizedBy [.var "x", .var "y"] whileJoinInv_goodTargets⟩
-    (whileJoin_borrowSafe [.var "x", .var "y"])
     (whileJoinCondition_typing [.var "x", .var "y"] whileJoinInv_deref_q_typing)
     (whileJoinBody_typing [.var "x", .var "y"] whileJoinInv_goodTargets)
     WellFormedTy.unit

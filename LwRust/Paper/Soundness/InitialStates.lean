@@ -328,7 +328,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
   case whileLoopJoin =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin
       _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq candidate hmem
     simp [termValues] at hmem

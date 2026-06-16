@@ -913,7 +913,7 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   case whileLoopJoin =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      hjoin hss1 hss2 hcbwf hcoh hlin _hbse _hcondInv _hbodyInv _hwellTyBody
+      hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv _hwellTyBody
       hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
       _ihBodyEntry htypingEq hsource store store' term' hvalid hvst hwf
       hsafe hfs hmulti

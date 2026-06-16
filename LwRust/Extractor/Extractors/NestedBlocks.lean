@@ -490,7 +490,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           exact extractTermStmts_typed hcondition hcondition'
       | whileLoopDiverging hchild hcondition' hbody hdiverges =>
           exact extractTermStmts_typed hcondition hcondition'
-      | whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse hcondInv
+      | whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin hcondInv
           hbodyInv hwellTy hdropEq hcondEntry hbodyEntry =>
           exact extractTermStmts_typed hcondition hcondEntry
   case ctermWhile_whileBody bodyLifetime condition body bodyCompletion
@@ -507,7 +507,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
             exact ⟨_, hchild, hcondition', _, _, hbody'⟩
         | whileLoopDiverging hchild hcondition' hbody' _ =>
             exact ⟨_, hchild, hcondition', _, _, hbody'⟩
-        | whileLoopJoin hchild _ _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
+        | whileLoopJoin hchild _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
             exact ⟨_, hchild, hcondEntry, _, _, hbodyEntry⟩
       simp only [extractTermStmts]
       cases body

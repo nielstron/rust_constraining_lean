@@ -1175,10 +1175,10 @@ mutual
 
     Obligations follow the join convention used by `T-If`: joins merge borrow
     target lists, so shape agreement and the well-formedness kit for the join
-    are rule-carried.  This loop rule additionally carries `BorrowSafeEnv` for
-    the invariant, because the back edge re-enters the loop through that static
-    environment.  Runtime entry/back-edge states transport into the invariant
-    via `EnvSameShapeStrengthening.safe`, exactly as in the `T-If` preservation
+    are rule-carried.  The invariant is not required to be globally
+    `BorrowSafeEnv`; assignment carries the local borrow-safety frame it needs.
+    Runtime entry/back-edge states transport into the invariant via
+    `EnvSameShapeStrengthening.safe`, exactly as in the `T-If` preservation
     argument.
 
     The final two premises re-type the condition and body from the
@@ -1203,7 +1203,6 @@ mutual
         ContainedBorrowsWellFormed envInv →
         Coherent envInv →
         Linearizable envInv →
-        BorrowSafeEnv envInv →
         TermTyping envInv typing lifetime condition .bool env₂ →
         TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
         WellFormedTy env₃ bodyTy lifetime →
