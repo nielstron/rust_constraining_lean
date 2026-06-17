@@ -1772,12 +1772,6 @@ private theorem swappedBorrowElse_not_writeProhibited_y :
         subst target
         simp [LVal.base]))
 
-private def swappedBorrow_borrow_a_certified :
-    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
-      ([0] : Lifetime) (.borrow true swappedBorrowA)
-      (.borrow true [swappedBorrowA]) swappedBorrowFinitePreIfEnv :=
-  by borrow_cert
-
 private theorem swappedBorrow_assign_x_a_checker_matches :
     checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
       ([0] : Lifetime) (.assign swappedBorrowX (.borrow true swappedBorrowA))
@@ -1793,7 +1787,7 @@ private def swappedBorrow_assign_x_a_certified :
     (by
       rw [swappedBorrowFinitePreIfEnv_toEnv]
       exact swappedBorrow_x_typing)
-    swappedBorrow_borrow_a_certified
+    (by borrow_cert)
     (by trivial)
     (by
       rw [swappedBorrowFinitePreIfEnv_toEnv]
@@ -1831,12 +1825,6 @@ private theorem swappedBorrow_assign_x_a_typing :
   simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteThenXEnv_toEnv]
     using CertifiedTermCheck.sound swappedBorrow_assign_x_a_certified
 
-private def swappedBorrow_borrow_b_thenX_certified :
-    CertifiedTermCheck 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
-      ([0] : Lifetime) (.borrow true swappedBorrowB)
-      (.borrow true [swappedBorrowB]) swappedBorrowFiniteThenXEnv :=
-  by borrow_cert
-
 private theorem swappedBorrow_assign_y_b_checker_matches :
     checkTermMatches? 128 swappedBorrowFiniteThenXEnv StoreTyping.empty
       ([0] : Lifetime) (.assign swappedBorrowY (.borrow true swappedBorrowB))
@@ -1855,7 +1843,7 @@ private def swappedBorrow_assign_y_b_certified :
         (swappedBorrow_y_typing :
           LValTyping (swappedBorrowEnv [swappedBorrowA] []) swappedBorrowY
             (.ty (.borrow true [])) Lifetime.root))
-    swappedBorrow_borrow_b_thenX_certified
+    (by borrow_cert)
     (by trivial)
     (by
       rw [swappedBorrowFiniteThenXEnv_toEnv]
@@ -1901,12 +1889,6 @@ private theorem swappedBorrow_assign_y_b_typing :
   simpa [swappedBorrowFiniteThenXEnv_toEnv, swappedBorrowFiniteThenEnv_toEnv]
     using CertifiedTermCheck.sound swappedBorrow_assign_y_b_certified
 
-private def swappedBorrow_borrow_b_certified :
-    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
-      ([0] : Lifetime) (.borrow true swappedBorrowB)
-      (.borrow true [swappedBorrowB]) swappedBorrowFinitePreIfEnv :=
-  by borrow_cert
-
 private theorem swappedBorrow_assign_x_b_checker_matches :
     checkTermMatches? 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
       ([0] : Lifetime) (.assign swappedBorrowX (.borrow true swappedBorrowB))
@@ -1922,7 +1904,7 @@ private def swappedBorrow_assign_x_b_certified :
     (by
       rw [swappedBorrowFinitePreIfEnv_toEnv]
       exact swappedBorrow_x_typing)
-    swappedBorrow_borrow_b_certified
+    (by borrow_cert)
     (by trivial)
     (by
       rw [swappedBorrowFinitePreIfEnv_toEnv]
@@ -1960,12 +1942,6 @@ private theorem swappedBorrow_assign_x_b_typing :
   simpa [swappedBorrowFinitePreIfEnv_toEnv, swappedBorrowFiniteElseXEnv_toEnv]
     using CertifiedTermCheck.sound swappedBorrow_assign_x_b_certified
 
-private def swappedBorrow_borrow_a_elseX_certified :
-    CertifiedTermCheck 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
-      ([0] : Lifetime) (.borrow true swappedBorrowA)
-      (.borrow true [swappedBorrowA]) swappedBorrowFiniteElseXEnv :=
-  by borrow_cert
-
 private theorem swappedBorrow_assign_y_a_checker_matches :
     checkTermMatches? 128 swappedBorrowFiniteElseXEnv StoreTyping.empty
       ([0] : Lifetime) (.assign swappedBorrowY (.borrow true swappedBorrowA))
@@ -1984,7 +1960,7 @@ private def swappedBorrow_assign_y_a_certified :
         (swappedBorrow_y_typing :
           LValTyping (swappedBorrowEnv [swappedBorrowB] []) swappedBorrowY
             (.ty (.borrow true [])) Lifetime.root))
-    swappedBorrow_borrow_a_elseX_certified
+    (by borrow_cert)
     (by trivial)
     (by
       rw [swappedBorrowFiniteElseXEnv_toEnv]
@@ -2162,33 +2138,25 @@ private theorem swappedBorrowCondition_checker_matches :
       swappedBorrowCondition .bool swappedBorrowFinitePreIfEnv = true := by
   borrow_run
 
-private def swappedBorrow_copy_a_certified :
-    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
-      Lifetime.root (.copy swappedBorrowA) .int swappedBorrowFinitePreIfEnv :=
-  by borrow_cert
-
-private def swappedBorrow_copy_b_certified :
-    CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
-      Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFinitePreIfEnv :=
-  by borrow_cert
-
-private def swappedBorrow_copy_b_ghost_certified :
-    CertifiedTermCheck 128 swappedBorrowFiniteEqGhostEnv StoreTyping.empty
-      Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFiniteEqGhostEnv :=
-  by borrow_cert
-
 private def swappedBorrowCondition_certified :
     CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty Lifetime.root
       swappedBorrowCondition .bool swappedBorrowFinitePreIfEnv :=
   CertifiedTermCheck.equal
+    (ghost := "γ")
     swappedBorrowCondition_checker_matches
-    swappedBorrow_copy_a_certified
+    (show CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+        Lifetime.root (.copy swappedBorrowA) .int swappedBorrowFinitePreIfEnv from
+      by borrow_cert)
     (by
       rw [swappedBorrowFinitePreIfEnv_toEnv]
       simp [Env.fresh, swappedBorrowPreIfEnv, swappedBorrowEnv,
         swappedBorrowSlot, swappedBorrowIntSlot, Env.update, Env.empty])
-    swappedBorrow_copy_b_ghost_certified
-    swappedBorrow_copy_b_certified
+    (show CertifiedTermCheck 128 swappedBorrowFiniteEqGhostEnv StoreTyping.empty
+        Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFiniteEqGhostEnv from
+      by borrow_cert)
+    (show CertifiedTermCheck 128 swappedBorrowFinitePreIfEnv StoreTyping.empty
+        Lifetime.root (.copy swappedBorrowB) .int swappedBorrowFinitePreIfEnv from
+      by borrow_cert)
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
