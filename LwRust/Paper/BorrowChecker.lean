@@ -39,7 +39,9 @@ def lookup (env : FiniteEnv) (name : Name) : Option EnvSlot :=
   lookupEntries env.entries name
 
 def fresh (env : FiniteEnv) (name : Name) : Bool :=
-  env.lookup name == none
+  match env.lookup name with
+  | none => true
+  | some _ => false
 
 def update (env : FiniteEnv) (name : Name) (slot : EnvSlot) : FiniteEnv :=
   { entries := (name, slot) :: env.entries.filter (fun entry => entry.1 != name) }
@@ -74,6 +76,15 @@ def support (env : FiniteEnv) : List Name :=
 
 def toEnv (env : FiniteEnv) : Env :=
   { slotAt := env.lookup }
+
+theorem fresh_sound {env : FiniteEnv} {name : Name} :
+    env.fresh name = true → env.toEnv.fresh name := by
+  intro h
+  cases hlookup : env.lookup name with
+  | none =>
+      simp [Env.fresh, toEnv, hlookup]
+  | some slot =>
+      simp [fresh, hlookup] at h
 
 @[simp] theorem toEnv_empty :
     (FiniteEnv.empty).toEnv = Env.empty := by
@@ -427,12 +438,28 @@ private def containedBorrowsWellFormed (fuel : Nat) (env : FiniteEnv) : Bool :=
     (partialTyBorrows entry.2.ty).all (fun borrow =>
       borrowTargetsWellFormed fuel env borrow.2 entry.2.lifetime))
 
+mutual
+  private def tyCoherent : Nat → FiniteEnv → Ty → Bool
+    | _, _, .unit => true
+    | _, _, .int => true
+    | _, _, .bool => true
+    | 0, _, .box _ => false
+    | fuel + 1, env, .box inner => tyCoherent fuel env inner
+    | 0, _, .borrow _ _ => false
+    | fuel + 1, env, .borrow _ targets =>
+        match lvalTargetsType? fuel env targets with
+        | some (.ty targetTy, _) => tyCoherent fuel env targetTy
+        | _ => false
+
+  private def partialTyCoherent : Nat → FiniteEnv → PartialTy → Bool
+    | fuel, env, .ty ty => tyCoherent fuel env ty
+    | 0, _, .box _ => false
+    | fuel + 1, env, .box inner => partialTyCoherent fuel env inner
+    | _, _, .undef _ => true
+end
+
 private def coherent (fuel : Nat) (env : FiniteEnv) : Bool :=
-  env.entries.all (fun entry =>
-    (partialTyBorrows entry.2.ty).all (fun borrow =>
-      match lvalTargetsType? fuel env borrow.2 with
-      | some (.ty _, _) => true
-      | _ => false))
+  env.entries.all (fun entry => partialTyCoherent fuel env entry.2.ty)
 
 private def rankOf? : Nat → FiniteEnv → Name → Option Nat
   | 0, _, _ => none
@@ -1021,6 +1048,28 @@ def immBorrow {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
   { checked := checked
     typing := TermTyping.immBorrow lvalTyping notReadProhibited }
 
+def declare {fuel : Nat} {env initEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {name : Name}
+    {initialiser : Term} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.letMut name initialiser)
+        .unit outEnv = true)
+    (freshIn : env.toEnv.fresh name)
+    (initialiserCert :
+      CertifiedTermCheck fuel env typing lifetime initialiser ty initEnv)
+    (freshOut : initEnv.toEnv.fresh name)
+    (coherence :
+      FreshUpdateCoherenceObligations initEnv.toEnv name ty lifetime)
+    (outEq :
+      outEnv.toEnv =
+        initEnv.toEnv.update name { ty := .ty ty, lifetime := lifetime }) :
+    CertifiedTermCheck fuel env typing lifetime (.letMut name initialiser)
+      .unit outEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.declare freshIn initialiserCert.typing freshOut coherence
+        outEq }
+
 def assign {fuel : Nat} {env rhsEnv outEnv : FiniteEnv}
     {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
     {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
@@ -1232,6 +1281,12 @@ macro_rules
   | `(tactic| borrow_check using $certificate) =>
       `(tactic|
         first
+        | exact CertifiedBorrowCheck.borrowCheck $certificate
+        | exact CertifiedBorrowCheck.checked $certificate
+        | exact CertifiedBorrowCheck.borrowCheck_of_found?
+            (certificate? := $certificate) (by native_decide)
+        | exact CertifiedBorrowCheck.checked_of_found?
+            (certificate? := $certificate) (by native_decide)
         | exact CertifiedTermCheck.sound $certificate
         | exact CertifiedTermCheck.toWitness $certificate
         | exact CertifiedTermCheck.check_matches $certificate
@@ -1247,6 +1302,115 @@ def borrowCheck? (fuel : Nat) (term : Term) : Bool :=
 
 def borrowReject? (fuel : Nat) (term : Term) : Bool :=
   !(checkProgram? fuel term).isOk
+
+/--
+Proof-facing closed-program borrow/type check.
+
+This is the inductive property that a closed source term has some declarative
+typing derivation from the empty environment and empty store typing.  The
+executable boolean is `borrowCheck?`; a checker soundness theorem should bridge
+from `borrowCheck? fuel term = true` to `borrowCheck term`.
+-/
+def borrowCheck (term : Term) : Prop :=
+  ∃ ty env, TermTyping Env.empty StoreTyping.empty Lifetime.root term ty env
+
+theorem borrowCheck_of_typing {term : Term} {ty : Ty} {env : Env}
+    (typing : TermTyping Env.empty StoreTyping.empty Lifetime.root term ty env) :
+    borrowCheck term :=
+  ⟨ty, env, typing⟩
+
+namespace CheckedTermTypingWitness
+
+theorem borrowCheck {fuel : Nat} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (witness :
+      CheckedTermTypingWitness fuel FiniteEnv.empty StoreTyping.empty
+        Lifetime.root term expectedTy expectedEnv) :
+    LwRust.Paper.borrowCheck term :=
+  ⟨expectedTy, expectedEnv.toEnv, witness.typing⟩
+
+end CheckedTermTypingWitness
+
+namespace CertifiedTermCheck
+
+theorem borrowCheck {fuel : Nat} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+        term expectedTy expectedEnv) :
+    LwRust.Paper.borrowCheck term :=
+  ⟨expectedTy, expectedEnv.toEnv, certificate.typing⟩
+
+end CertifiedTermCheck
+
+/--
+Closed proof-carrying checker result.
+
+This is the certificate-shaped counterpart of `borrowCheck? fuel term`: a value
+of this type records the executable successful run and the corresponding
+declarative typing derivation from the empty environment.
+-/
+structure CertifiedBorrowCheck (fuel : Nat) (term : Term) : Type where
+  ty : Ty
+  env : FiniteEnv
+  certificate :
+    CertifiedTermCheck fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+      term ty env
+
+namespace CertifiedBorrowCheck
+
+def ofTermCheck {fuel : Nat} {term : Term} {ty : Ty} {env : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+        term ty env) : CertifiedBorrowCheck fuel term :=
+  { ty := ty
+    env := env
+    certificate := certificate }
+
+def found? {fuel : Nat} {term : Term}
+    (certificate? : Option (CertifiedBorrowCheck fuel term)) : Bool :=
+  certificate?.isSome
+
+theorem checked {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowCheck fuel term) :
+    borrowCheck? fuel term = true := by
+  rcases certificate with ⟨ty, env, termCertificate⟩
+  have hmatches := termCertificate.checked
+  unfold borrowCheck? checkProgram?
+  unfold checkTermMatches? at hmatches
+  cases hcheck :
+      checkTerm? fuel FiniteEnv.empty StoreTyping.empty Lifetime.root term with
+  | error message =>
+      simp [hcheck] at hmatches
+  | ok result =>
+      rfl
+
+theorem borrowCheck {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowCheck fuel term) :
+    LwRust.Paper.borrowCheck term :=
+  ⟨certificate.ty, certificate.env.toEnv, certificate.certificate.typing⟩
+
+theorem borrowCheck_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowCheck fuel term)} :
+    found? certificate? = true → LwRust.Paper.borrowCheck term := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.borrowCheck
+
+theorem checked_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowCheck fuel term)} :
+    found? certificate? = true → borrowCheck? fuel term = true := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.checked
+
+end CertifiedBorrowCheck
 
 def checkProgramAs? (fuel : Nat) (term : Term) (expected : Ty) :
     Except String CheckResult :=
@@ -1574,6 +1738,61 @@ mutual
                     simp [lvalTargetsType?, htarget] at h
 end
 
+private theorem lifetimeOutlives_sound {outer inner : Lifetime} :
+    lifetimeOutlives outer inner = true → LifetimeOutlives outer inner := by
+  intro h
+  simpa [lifetimeOutlives, LifetimeOutlives] using h
+
+private theorem lvalBaseOutlives_sound {env : FiniteEnv} {lv : LVal}
+    {lifetime : Lifetime} :
+    lvalBaseOutlives env lv lifetime = true →
+      LValBaseOutlives env.toEnv lv lifetime := by
+  intro h
+  unfold lvalBaseOutlives at h
+  cases hlookup : env.lookup (LVal.base lv) with
+  | none =>
+      simp [hlookup] at h
+  | some slot =>
+      exact ⟨slot, hlookup, lifetimeOutlives_sound (by
+        simpa [hlookup] using h)⟩
+
+private theorem borrowTargetsWellFormed_sound {fuel : Nat} {env : FiniteEnv}
+    {targets : List LVal} {lifetime : Lifetime} :
+    borrowTargetsWellFormed fuel env targets lifetime = true →
+      BorrowTargetsWellFormed env.toEnv targets lifetime := by
+  intro h
+  refine BorrowTargetsWellFormed.intro ?_
+  intro target htarget
+  unfold borrowTargetsWellFormed at h
+  have htargetCheck := (List.all_eq_true.mp h) target htarget
+  cases htype : lvalType? fuel env target with
+  | none =>
+      simp [htype] at htargetCheck
+  | some result =>
+      rcases result with ⟨partialTy, targetLifetime⟩
+      cases partialTy with
+      | ty targetTy =>
+          simp [htype] at htargetCheck
+          exact ⟨targetTy, targetLifetime, lvalType?_sound htype,
+            lifetimeOutlives_sound htargetCheck.1,
+            lvalBaseOutlives_sound htargetCheck.2⟩
+      | box _ =>
+          simp [htype] at htargetCheck
+      | undef _ =>
+          simp [htype] at htargetCheck
+
+private theorem wellFormedTy_sound :
+    ∀ {fuel : Nat} {env : FiniteEnv} {ty : Ty} {lifetime : Lifetime},
+      wellFormedTy fuel env ty lifetime = true →
+        WellFormedTy env.toEnv ty lifetime
+  | _fuel, _env, .unit, _lifetime, _h => WellFormedTy.unit
+  | _fuel, _env, .int, _lifetime, _h => WellFormedTy.int
+  | _fuel, _env, .bool, _lifetime, _h => WellFormedTy.bool
+  | _fuel, _env, .borrow _ _, _lifetime, h =>
+      WellFormedTy.borrow (borrowTargetsWellFormed_sound h)
+  | _fuel, _env, .box _, _lifetime, h =>
+      WellFormedTy.box (wellFormedTy_sound h)
+
 private theorem lookupEntries_mem {entries : List (Name × EnvSlot)}
     {name : Name} {slot : EnvSlot} :
     FiniteEnv.lookupEntries entries name = some slot →
@@ -1617,6 +1836,29 @@ private theorem partialTyContainsBorrow_mem {partialTy : PartialTy}
       (mutable, targets) ∈ partialTyBorrows partialTy := by
   intro hcontains
   exact partialTyContainsBorrow_mem_aux hcontains rfl
+
+private theorem containedBorrowsWellFormed_sound {fuel : Nat}
+    {env : FiniteEnv} :
+    containedBorrowsWellFormed fuel env = true →
+      ContainedBorrowsWellFormed env.toEnv := by
+  intro h x slot mutable targets hslot hcontains
+  rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+  have hcontainedEq : containedSlot = slot :=
+    Option.some.inj (hcontainedSlot.symm.trans hslot)
+  subst containedSlot
+  cases env with
+  | mk entries =>
+      have hentry : (x, slot) ∈ entries :=
+        lookupEntries_mem hslot
+      unfold containedBorrowsWellFormed at h
+      have hentryCheck := (List.all_eq_true.mp h) (x, slot) hentry
+      have hborrowMem :
+          (mutable, targets) ∈ partialTyBorrows slot.ty :=
+        partialTyContainsBorrow_mem hcontainsTy
+      have htargetsCheck :=
+        (List.all_eq_true.mp hentryCheck) (mutable, targets) hborrowMem
+      exact BorrowTargetsWellFormed.inSlot
+        (borrowTargetsWellFormed_sound htargetsCheck)
 
 private theorem envBorrowEdges_mem_of_entry {entries : List (Name × EnvSlot)}
     {entry : Name × EnvSlot} {borrow : Bool × List LVal} :

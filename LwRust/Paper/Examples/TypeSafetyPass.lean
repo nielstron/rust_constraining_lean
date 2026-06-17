@@ -8,8 +8,10 @@ This module keeps each public example in the same shape:
 
 * the complete example code, with each Lean line annotated by the intended
   Rust source line;
-* one final theorem stating that the executable type/borrow checker accepts
-  the complete example.
+* final theorems for the closed scalar/control-flow examples state the
+  inductive type/borrow-checking property via proof-carrying checker
+  certificates; the effectful pointer example still exposes the raw executable
+  checker verdict until a closed certificate is added for its setup block.
 -/
 
 namespace LwRust
@@ -24,9 +26,19 @@ def scalarCopyComparisonExample : Term :=
     (.val (.int 1)) -- Rust: 1
     (.val (.int 1)) -- Rust: == 1
 
+private def scalarCopyComparisonExample_certified :
+    CertifiedBorrowCheck 32 scalarCopyComparisonExample :=
+  CertifiedBorrowCheck.ofTermCheck
+    ({ checked := by native_decide
+       typing := by
+        simpa [scalarCopyComparisonExample, scalarCopyComparison] using
+          scalarCopyComparison_typing } :
+      CertifiedTermCheck 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
+        scalarCopyComparisonExample .bool FiniteEnv.empty)
+
 theorem scalarCopyComparisonExample_accepted :
-    borrowCheck? 32 scalarCopyComparisonExample = true := by
-  native_decide
+    borrowCheck scalarCopyComparisonExample := by
+  exact scalarCopyComparisonExample_certified.borrowCheck
 
 /-! ## Closed if/else returning integers -/
 
@@ -36,9 +48,19 @@ def ifThenElseIntExample : Term :=
     (.val (.int 1))     -- Rust: { 1 }
     (.val (.int 2))     -- Rust: else { 2 }
 
+private def ifThenElseIntExample_certified :
+    CertifiedBorrowCheck 32 ifThenElseIntExample :=
+  CertifiedBorrowCheck.ofTermCheck
+    ({ checked := by native_decide
+       typing := by
+        simpa [ifThenElseIntExample, ifThenElseInt] using
+          ifThenElseInt_typing } :
+      CertifiedTermCheck 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
+        ifThenElseIntExample .int FiniteEnv.empty)
+
 theorem ifThenElseIntExample_accepted :
-    borrowCheck? 32 ifThenElseIntExample = true := by
-  native_decide
+    borrowCheck ifThenElseIntExample := by
+  exact ifThenElseIntExample_certified.borrowCheck
 
 /-! ## Closed if/else with a nontrivial condition -/
 
@@ -50,9 +72,19 @@ def ifEqThenElseIntExample : Term :=
     (.val (.int 1))    -- Rust: { 1 }
     (.val (.int 2))    -- Rust: else { 2 }
 
+private def ifEqThenElseIntExample_certified :
+    CertifiedBorrowCheck 64 ifEqThenElseIntExample :=
+  CertifiedBorrowCheck.ofTermCheck
+    ({ checked := by native_decide
+       typing := by
+        simpa [ifEqThenElseIntExample, ifEqThenElseInt, scalarCopyComparison]
+          using ifEqThenElseInt_typing } :
+      CertifiedTermCheck 64 FiniteEnv.empty StoreTyping.empty Lifetime.root
+        ifEqThenElseIntExample .int FiniteEnv.empty)
+
 theorem ifEqThenElseIntExample_accepted :
-    borrowCheck? 64 ifEqThenElseIntExample = true := by
-  native_decide
+    borrowCheck ifEqThenElseIntExample := by
+  exact ifEqThenElseIntExample_certified.borrowCheck
 
 /-! ## Pointer retarget/write if -/
 

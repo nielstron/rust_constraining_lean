@@ -64,5 +64,24 @@ theorem invalidEscapingBorrowExampleProgram_rejected :
     borrowReject? 128 invalidEscapingBorrowExampleProgram = true := by
   native_decide
 
+/-! ## Joined reborrow with incoherent nested targets -/
+
+def nestedIncoherentJoinProgram : Term :=
+  .block [0] [                                      -- Rust: {
+    .letMut "c" (.val (.int 0)),                    -- Rust: let mut c = 0;
+    .letMut "d" (.val (.bool true)),                -- Rust: let mut d = true;
+    .letMut "a" (.borrow true (.var "c")),          -- Rust: let mut a = &mut c;
+    .letMut "b" (.borrow true (.var "d")),          -- Rust: let mut b = &mut d;
+    .letMut "z"                                    -- Rust: let mut z =
+      (.ite
+        (.val (.bool true))                         -- Rust: if true
+        (.borrow true (.var "a"))                   -- Rust: { &mut a }
+        (.borrow true (.var "b")))                  -- Rust: else { &mut b };
+  ]                                                 -- Rust: }
+
+theorem nestedIncoherentJoinProgram_rejected :
+    borrowReject? 256 nestedIncoherentJoinProgram = true := by
+  native_decide
+
 end Paper
 end LwRust
