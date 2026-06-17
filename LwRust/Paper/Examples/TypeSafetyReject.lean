@@ -1,13 +1,11 @@
-import LwRust.Paper.BorrowChecker
-import LwRust.Paper.Examples.Operational
-import LwRust.Paper.Soundness.InitialStates
+import LwRust.Paper.Examples.Internal.TypeSafetyReject
 
 /-!
-Build-checked rejected examples.
+Rejected examples, written as readable checker inputs.
 
-These files state rejection as negated typing derivations.  That keeps the
-Lean build green while showing that the type-and-borrow safety theorem cannot
-be applied to the program.
+The internal module keeps the proof-carrying rejection certificates and
+operational stuck-state witnesses.  This module shows each complete program and
+ends with the executable checker rejecting it.
 -/
 
 namespace LwRust
@@ -15,164 +13,56 @@ namespace Paper
 
 open Core
 
-def invalidBorrowIntSlot : EnvSlot :=
-  { ty := .ty .int, lifetime := InvalidBorrowExample.l }
+/-! ## Runtime reference constants are not source programs -/
 
-def invalidBorrowYSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [InvalidBorrowExample.x]),
-    lifetime := InvalidBorrowExample.l }
-
-/--
-Runtime references are not source-level constants over the empty store typing.
-This is the small closed-form version of the paper's distinction between
-source programs and values created by the operational semantics.
--/
-def rawBorrowedReferenceConstant : Term :=
+def rawBorrowedReferenceConstantExample : Term :=
   .val (.ref { location := .var "x", owner := false })
+    -- Rust: no source expression; this is a runtime reference value.
 
-private theorem rawBorrowedReferenceConstant_no_types :
-    ¬ ∃ ty env,
-      TermTyping Env.empty StoreTyping.empty Lifetime.root
-        rawBorrowedReferenceConstant ty env := by
-  rintro ⟨ty, env, htyping⟩
-  unfold rawBorrowedReferenceConstant at htyping
-  cases htyping with
-  | const hvalue =>
-      cases hvalue with
-      | ref hlookup =>
-          simp [StoreTyping.empty] at hlookup
+theorem rawBorrowedReferenceConstantExample_rejected :
+    borrowReject? 32 rawBorrowedReferenceConstantExample = true := by
+  native_decide
 
-def rawBorrowedReferenceConstant_rejection :
-    CertifiedTermReject 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
-      rawBorrowedReferenceConstant :=
-  { checked := by borrow_run
-    notyping := by simpa using rawBorrowedReferenceConstant_no_types }
+def boxedRawBorrowedReferenceConstantExample : Term :=
+  .box
+    (.val (.ref { location := .var "x", owner := false }))
+    -- Rust: box <runtime-only borrowed reference>
 
-theorem rawBorrowedReferenceConstant_rejected :
-    ¬ ∃ ty env,
-      TermTyping Env.empty StoreTyping.empty Lifetime.root
-        rawBorrowedReferenceConstant ty env := by
-  borrow_check using rawBorrowedReferenceConstant_rejection
+theorem boxedRawBorrowedReferenceConstantExample_rejected :
+    borrowReject? 32 boxedRawBorrowedReferenceConstantExample = true := by
+  native_decide
 
-theorem rawBorrowedReferenceConstant_checker_rejects :
-    borrowReject? 32 rawBorrowedReferenceConstant = true := by
-  borrow_run
+/-! ## Assigning through a mutably borrowed place -/
 
-def boxedRawBorrowedReferenceConstant : Term :=
-  .box rawBorrowedReferenceConstant
+def invalidBorrowExampleProgram : Term :=
+  .block InvalidBorrowExample.l [
+    .letMut "x" (.val (.int 0)),       -- Rust: let mut x = 0;
+    .letMut "y" (.borrow true (.var "x")), -- Rust: let mut y = &mut x;
+    .assign (.var "x") (.val (.int 1)) -- Rust: x = 1;
+  ]
 
-private theorem boxedRawBorrowedReferenceConstant_no_types :
-    ¬ ∃ ty env,
-      TermTyping Env.empty StoreTyping.empty Lifetime.root
-        boxedRawBorrowedReferenceConstant ty env := by
-  rintro ⟨ty, env, htyping⟩
-  unfold boxedRawBorrowedReferenceConstant rawBorrowedReferenceConstant at htyping
-  cases htyping with
-  | box hinner =>
-      cases hinner with
-      | const hvalue =>
-          cases hvalue with
-          | ref hlookup =>
-              simp [StoreTyping.empty] at hlookup
+theorem invalidBorrowExampleProgram_rejected :
+    borrowReject? 128 invalidBorrowExampleProgram = true := by
+  native_decide
 
-def boxedRawBorrowedReferenceConstant_rejection :
-    CertifiedTermReject 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
-      boxedRawBorrowedReferenceConstant :=
-  { checked := by borrow_run
-    notyping := by simpa using boxedRawBorrowedReferenceConstant_no_types }
+/-! ## Letting a borrow escape its source lifetime -/
 
-theorem boxedRawBorrowedReferenceConstant_rejected :
-    ¬ ∃ ty env,
-      TermTyping Env.empty StoreTyping.empty Lifetime.root
-        boxedRawBorrowedReferenceConstant ty env := by
-  borrow_check using boxedRawBorrowedReferenceConstant_rejection
+def invalidEscapingBorrowExampleProgram : Term :=
+  .block InvalidEscapingBorrowExample.l [
+    .letMut "x" (.val (.int 0)),             -- Rust: let mut x = 0;
+    .letMut "y" (.borrow true (.var "x")),   -- Rust: let mut y = &mut x;
+    .block InvalidEscapingBorrowExample.m [
+      .letMut "z" (.val (.int 0)),           -- Rust: let mut z = 0;
+      .assign
+        (.var "y")                           -- Rust: y
+        (.borrow true (.var "z"))            -- Rust: = &mut z;
+    ],
+    .letMut "w" (.move (.var "y"))           -- Rust: let mut w = y;
+  ]
 
-theorem boxedRawBorrowedReferenceConstant_checker_rejects :
-    borrowReject? 32 boxedRawBorrowedReferenceConstant = true := by
-  borrow_run
-
-/--
-Paper Section 3.3 example (10), after the invalid borrow has escaped its inner
-block: dereferencing `w` is neither terminal nor step-able.
--/
-theorem escapingBorrow_stuck_after_inner_drop :
-    ¬ ProgressResult InvalidEscapingBorrowExample.Sw
-      InvalidEscapingBorrowExample.l
-      (.move (.deref (.var "w"))) := by
-  intro hprogress
-  rcases hprogress with hterminal | ⟨store', term', hstep⟩
-  · simp [Terminal] at hterminal
-  · exact InvalidEscapingBorrowExample.deref_w_after_z_dropped_is_stuck
-      ⟨store', term', hstep⟩
-
-/--
-Paper Section 3.3 example (9).  This is the exact program
-`{ let mut x = 0; let mut y = &mut x; x = 1; }`.
--/
-private theorem invalidBorrowExample_no_types :
-    ¬ ∃ ty env,
-      TermTyping Env.empty StoreTyping.empty InvalidBorrowExample.l
-        InvalidBorrowExample.invalidProgram ty env := by
-  rintro ⟨ty, env, htyping⟩
-  unfold InvalidBorrowExample.invalidProgram at htyping
-  cases htyping with
-  | block _hchild hbody _hwellTy _hdrop =>
-      cases hbody with
-      | cons hdeclareX htail =>
-          cases htail with
-          | cons hdeclareY htail2 =>
-              cases htail2 with
-              | singleton hassign =>
-                  cases hdeclareX with
-                  | declare _freshX hinitX _freshXOut _cohX hxEnv =>
-                      cases hinitX with
-                      | const _ =>
-                          cases hdeclareY with
-                          | declare _freshY hinitY _freshYOut _cohY hyEnv =>
-                              cases hinitY with
-                              | mutBorrow _hLvY _mutableY _notWriteY =>
-                                  cases hassign with
-                                  | assign _hLhs _hRhs _hRhsSafe _hLhsPost _hshape
-                                      _hwell hwrite _hranked _hcoh _hcontained
-                                      hnotWrite =>
-                                      cases _hRhs with
-                                      | const hvalue =>
-                                      cases hvalue
-                                      cases hwrite with
-                                      | intro hslot hupdate =>
-                                          subst hxEnv
-                                          subst hyEnv
-                                          cases hupdate with
-                                          | strong =>
-                                          exact hnotWrite (by
-                                            left
-                                            refine ⟨"y", [InvalidBorrowExample.x],
-                                              InvalidBorrowExample.x, ?_, by simp,
-                                              by simp [PathConflicts]⟩
-                                            refine ⟨invalidBorrowYSlot, ?_,
-                                              PartialTyContains.here⟩
-                                            rw [Env.update_slotAt_ne]
-                                            · simp [Env.update, invalidBorrowYSlot,
-                                                InvalidBorrowExample.x,
-                                                InvalidBorrowExample.l]
-                                            · simp [InvalidBorrowExample.x, LVal.base])
-              | cons _hhead htail => cases htail
-
-def invalidBorrowExample_rejection :
-    CertifiedTermReject 128 FiniteEnv.empty StoreTyping.empty
-      InvalidBorrowExample.l InvalidBorrowExample.invalidProgram :=
-  { checked := by borrow_run
-    notyping := by simpa using invalidBorrowExample_no_types }
-
-theorem invalidBorrowExample_rejected :
-    ¬ ∃ ty env,
-      TermTyping Env.empty StoreTyping.empty InvalidBorrowExample.l
-        InvalidBorrowExample.invalidProgram ty env := by
-  borrow_check using invalidBorrowExample_rejection
-
-theorem invalidBorrowExample_checker_rejects :
-    borrowReject? 128 InvalidBorrowExample.invalidProgram = true := by
-  borrow_run
+theorem invalidEscapingBorrowExampleProgram_rejected :
+    borrowReject? 128 invalidEscapingBorrowExampleProgram = true := by
+  native_decide
 
 end Paper
 end LwRust
