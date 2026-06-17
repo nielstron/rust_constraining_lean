@@ -1,4 +1,4 @@
-import LwRust.Paper.Typing
+import LwRust.Paper.Soundness.Helpers.AppendixPrelim
 
 /-!
 Executable borrow/type checker for the finite fragment used by examples.
@@ -23,7 +23,7 @@ open Core
 
 structure FiniteEnv where
   entries : List (Name × EnvSlot)
-  deriving BEq, Repr
+  deriving BEq, DecidableEq, Repr
 
 namespace FiniteEnv
 
@@ -75,6 +75,12 @@ def support (env : FiniteEnv) : List Name :=
 def toEnv (env : FiniteEnv) : Env :=
   { slotAt := env.lookup }
 
+@[simp] theorem toEnv_empty :
+    (FiniteEnv.empty).toEnv = Env.empty := by
+  apply congrArg Env.mk
+  funext _name
+  rfl
+
 @[simp] theorem toEnv_update (env : FiniteEnv) (name : Name)
     (slot : EnvSlot) :
     (env.update name slot).toEnv = env.toEnv.update name slot := by
@@ -96,7 +102,7 @@ end FiniteEnv
 structure CheckResult where
   ty : Ty
   env : FiniteEnv
-  deriving BEq, Repr
+  deriving BEq, DecidableEq, Repr
 
 private def ensure (condition : Bool) (message : String) : Except String Unit :=
   if condition then .ok () else .error message
@@ -123,7 +129,7 @@ private def insertLVal (targets : List LVal) (target : LVal) : List LVal :=
   if targets.contains target then targets else targets ++ [target]
 
 private def unionLVals (left right : List LVal) : List LVal :=
-  right.foldl insertLVal left
+  left ++ right
 
 private def lvalNames : LVal → List Name
   | .var name => [name]
@@ -1097,6 +1103,42 @@ def ite {fuel : Nat} {env conditionEnv trueEnv falseEnv joinEnv : FiniteEnv}
 
 end CertifiedTermCheck
 
+/--
+Proof-carrying rejection certificate.
+
+This is intentionally separate from `checkTermRejects?`: the boolean says the
+executable search found no witness, while `notyping` is the logical
+non-typability proof.  A failed checker run alone is not used as a completeness
+theorem.
+-/
+structure CertifiedTermReject (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (term : Term) : Type where
+  checked : checkTermRejects? fuel env typing lifetime term = true
+  notyping :
+    ¬ ∃ ty outEnv, TermTyping env.toEnv typing lifetime term ty outEnv
+
+namespace CertifiedTermReject
+
+def found? {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (certificate? :
+      Option (CertifiedTermReject fuel env typing lifetime term)) : Bool :=
+  certificate?.isSome
+
+theorem rejected {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (certificate : CertifiedTermReject fuel env typing lifetime term) :
+    checkTermRejects? fuel env typing lifetime term = true :=
+  certificate.checked
+
+theorem sound {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (certificate : CertifiedTermReject fuel env typing lifetime term) :
+    ¬ ∃ ty outEnv, TermTyping env.toEnv typing lifetime term ty outEnv :=
+  certificate.notyping
+
+end CertifiedTermReject
+
 /-- Proof-carrying counterpart of `checkTermList?` for block bodies. -/
 structure CertifiedTermListCheck (fuel : Nat) (env : FiniteEnv)
     (typing : StoreTyping) (lifetime : Lifetime) (terms : List Term)
@@ -1163,6 +1205,42 @@ def block {fuel : Nat} {env bodyEnv outEnv : FiniteEnv}
     typing := TermTyping.block child bodyCert.typing wellFormed dropEq }
 
 end CertifiedTermCheck
+
+/--
+Run the executable checker on decidable computation goals.
+
+This tactic is deliberately narrow: it does not search for declarative typing
+side conditions or project from proof-carrying certificates.  It is the tactic
+to use when the goal is the checker verdict itself, for example
+`checkTermMatches? ... = true` or `borrowReject? ... = true`.
+-/
+syntax (name := borrow_run_tactic) "borrow_run" : tactic
+
+macro_rules
+  | `(tactic| borrow_run) => `(tactic| native_decide)
+
+/--
+Project facts from a proof-carrying borrow-checking certificate.
+
+Bare `borrow_check` is kept as a compatibility alias for `borrow_run`.
+`borrow_check using cert` is not a reflection theorem from a boolean checker
+result; it only exposes the proof stored in `cert`.
+-/
+syntax (name := borrow_check_tactic) "borrow_check" (" using " term)? : tactic
+
+macro_rules
+  | `(tactic| borrow_check using $certificate) =>
+      `(tactic|
+        first
+        | exact CertifiedTermCheck.sound $certificate
+        | exact CertifiedTermCheck.toWitness $certificate
+        | exact CertifiedTermCheck.check_matches $certificate
+        | exact CertifiedTermCheck.typable $certificate
+        | exact CertifiedTermListCheck.sound $certificate
+        | exact CertifiedTermReject.sound $certificate
+        | exact CertifiedTermReject.rejected $certificate
+        | exact $certificate)
+  | `(tactic| borrow_check) => `(tactic| borrow_run)
 
 def borrowCheck? (fuel : Nat) (term : Term) : Bool :=
   (checkProgram? fuel term).isOk
@@ -1268,6 +1346,496 @@ private theorem isLifetimeChild_sound {parent child : Lifetime} :
             (List.prefix_iff_eq_append.mp hprefix)
           rw [hdrop] at happ
           exact happ.symm
+
+private theorem partialTyStrengthens_borrow_append {mutable : Bool}
+    {leftTargets rightTargets : List LVal}
+    {joined : PartialTy}
+    (hleft : PartialTyStrengthens (.ty (.borrow mutable leftTargets)) joined)
+    (hright : PartialTyStrengthens (.ty (.borrow mutable rightTargets)) joined) :
+    PartialTyStrengthens
+      (.ty (.borrow mutable (leftTargets ++ rightTargets))) joined := by
+  cases hleft with
+  | reflex =>
+      have hsubRight := PartialTyStrengthens.borrow_subset hright
+      exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        rcases List.mem_append.mp htarget with hmem | hmem
+        · exact hmem
+        · exact hsubRight hmem)
+  | borrow hsubLeft =>
+      have hsubRight := PartialTyStrengthens.borrow_subset hright
+      exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        rcases List.mem_append.mp htarget with hmem | hmem
+        · exact hsubLeft hmem
+        · exact hsubRight hmem)
+  | intoUndef hinner =>
+      rcases PartialTyStrengthens.from_borrow_inv hinner with
+        ⟨targetTargets, rfl, hsubLeft⟩
+      have hsubRight : rightTargets ⊆ targetTargets := by
+        cases hright with
+        | intoUndef hinner' =>
+            exact PartialTyStrengthens.borrow_subset hinner'
+      exact PartialTyStrengthens.intoUndef (PartialTyStrengthens.borrow (by
+        intro target htarget
+        rcases List.mem_append.mp htarget with hmem | hmem
+        · exact hsubLeft hmem
+        · exact hsubRight hmem))
+
+mutual
+  private theorem tyJoin?_sound :
+      ∀ {left right join : Ty},
+        tyJoin? left right = some join →
+          PartialTyJoin (.ty left) (.ty right) (.ty join) := by
+    intro left
+    cases left with
+    | unit =>
+        intro right join h
+        cases right <;> simp [tyJoin?] at h
+        subst h
+        exact PartialTyJoin.self (.ty .unit)
+    | int =>
+        intro right join h
+        cases right <;> simp [tyJoin?] at h
+        subst h
+        exact PartialTyJoin.self (.ty .int)
+    | bool =>
+        intro right join h
+        cases right <;> simp [tyJoin?] at h
+        subst h
+        exact PartialTyJoin.self (.ty .bool)
+    | borrow mutable leftTargets =>
+        intro right join h
+        cases right <;> simp [tyJoin?] at h
+        next mutable' rightTargets =>
+          by_cases hmutable : mutable = mutable'
+          · subst hmutable
+            simp at h
+            cases h
+            constructor
+            · intro candidate hcandidate
+              simp at hcandidate
+              rcases hcandidate with hcandidate | hcandidate
+              · subst hcandidate
+                exact PartialTyStrengthens.borrow
+                  (by intro target htarget; exact List.mem_append_left _ htarget)
+              · subst hcandidate
+                exact PartialTyStrengthens.borrow
+                  (by intro target htarget; exact List.mem_append_right _ htarget)
+            · intro upper hupper
+              exact partialTyStrengthens_borrow_append
+                (hupper (by simp)) (hupper (by simp))
+          · simp [hmutable] at h
+    | box leftInner =>
+        intro right join h
+        cases right <;> simp [tyJoin?] at h
+        next rightInner =>
+          cases hinner : tyJoin? leftInner rightInner with
+          | none =>
+              simp [hinner] at h
+          | some inner =>
+              simp [hinner] at h
+              cases h
+              exact PartialTyUnion.tyBox (tyJoin?_sound hinner)
+
+end
+
+mutual
+  private theorem lvalType?_sound :
+      ∀ {fuel : Nat} {env : FiniteEnv} {lv : LVal}
+        {partialTy : PartialTy} {lifetime : Lifetime},
+        lvalType? fuel env lv = some (partialTy, lifetime) →
+          LValTyping env.toEnv lv partialTy lifetime := by
+    intro fuel
+    cases fuel with
+    | zero =>
+        intro env lv partialTy lifetime h
+        cases lv <;> simp [lvalType?] at h
+    | succ fuel =>
+        intro env lv partialTy lifetime h
+        cases lv with
+        | var name =>
+            simp [lvalType?] at h
+            cases hlookup : env.lookup name with
+            | none =>
+                simp [hlookup] at h
+            | some slot =>
+                simp [hlookup] at h
+                rcases h with ⟨rfl, rfl⟩
+                exact LValTyping.var (show env.toEnv.slotAt name = some slot from hlookup)
+        | deref inner =>
+            cases hinner : lvalType? fuel env inner with
+            | none =>
+                simp [lvalType?, hinner] at h
+            | some result =>
+                rcases result with ⟨innerTy, innerLifetime⟩
+                cases innerTy with
+                | ty ty =>
+                    cases ty with
+                    | borrow mutable targets =>
+                        simp [lvalType?, hinner] at h
+                        exact LValTyping.borrow
+                          (lvalType?_sound hinner)
+                          (lvalTargetsType?_sound h)
+                    | unit =>
+                        simp [lvalType?, hinner] at h
+                    | int =>
+                        simp [lvalType?, hinner] at h
+                    | bool =>
+                        simp [lvalType?, hinner] at h
+                    | box _ =>
+                        simp [lvalType?, hinner] at h
+                | box innerPartial =>
+                    simp [lvalType?, hinner] at h
+                    rcases h with ⟨rfl, rfl⟩
+                    exact LValTyping.box
+                      (lvalType?_sound
+                        (partialTy := .box innerPartial)
+                        (lifetime := innerLifetime) hinner)
+                | undef _ =>
+                    simp [lvalType?, hinner] at h
+
+  private theorem lvalTargetsType?_sound :
+      ∀ {fuel : Nat} {env : FiniteEnv} {targets : List LVal}
+        {partialTy : PartialTy} {lifetime : Lifetime},
+        lvalTargetsType? fuel env targets = some (partialTy, lifetime) →
+          LValTargetsTyping env.toEnv targets partialTy lifetime := by
+    intro fuel env targets
+    cases targets with
+    | nil =>
+        intro partialTy lifetime h
+        simp [lvalTargetsType?] at h
+    | cons target rest =>
+        cases rest with
+        | nil =>
+            intro partialTy lifetime h
+            cases htarget : lvalType? fuel env target with
+            | none =>
+                simp [lvalTargetsType?, htarget] at h
+            | some result =>
+                rcases result with ⟨targetTy, targetLifetime⟩
+                cases targetTy with
+                | ty ty =>
+                    simp [lvalTargetsType?, htarget] at h
+                    rcases h with ⟨rfl, rfl⟩
+                    exact LValTargetsTyping.singleton
+                      (lvalType?_sound
+                        (partialTy := .ty ty)
+                        (lifetime := targetLifetime) htarget)
+                | box _ =>
+                    simp [lvalTargetsType?, htarget] at h
+                | undef _ =>
+                    simp [lvalTargetsType?, htarget] at h
+        | cons restHead restTail =>
+            intro partialTy lifetime h
+            cases htarget : lvalType? fuel env target with
+            | none =>
+                simp [lvalTargetsType?, htarget] at h
+            | some targetResult =>
+                rcases targetResult with ⟨targetTy, targetLifetime⟩
+                cases targetTy with
+                | ty headTy =>
+                    cases hrest :
+                        lvalTargetsType? fuel env (restHead :: restTail) with
+                    | none =>
+                        simp [lvalTargetsType?, htarget, hrest] at h
+                    | some restResult =>
+                        rcases restResult with ⟨restTy, restLifetime⟩
+                        have restTyping :
+                            LValTargetsTyping env.toEnv (restHead :: restTail)
+                              restTy restLifetime :=
+                          lvalTargetsType?_sound hrest
+                        rcases LValTargetsTyping.output_full restTyping with
+                          ⟨restFullTy, hrestFull⟩
+                        subst hrestFull
+                        cases hjoin : tyJoin? headTy restFullTy with
+                        | none =>
+                            simp [lvalTargetsType?, htarget, hrest,
+                              partialTyJoin?, hjoin] at h
+                        | some joinTy =>
+                            cases hlifetime :
+                                lifetimeIntersection? targetLifetime
+                                  restLifetime with
+                            | none =>
+                                simp [lvalTargetsType?, htarget, hrest,
+                                  partialTyJoin?, hjoin, hlifetime] at h
+                            | some lifetime' =>
+                                simp [lvalTargetsType?, htarget, hrest,
+                                  partialTyJoin?, hjoin, hlifetime] at h
+                                rcases h with ⟨rfl, rfl⟩
+                                exact LValTargetsTyping.cons
+                                  (lvalType?_sound htarget)
+                                  restTyping
+                                  (tyJoin?_sound hjoin)
+                                  (lifetimeIntersection?_sound hlifetime)
+                | box _ =>
+                    simp [lvalTargetsType?, htarget] at h
+                | undef _ =>
+                    simp [lvalTargetsType?, htarget] at h
+end
+
+private theorem lookupEntries_mem {entries : List (Name × EnvSlot)}
+    {name : Name} {slot : EnvSlot} :
+    FiniteEnv.lookupEntries entries name = some slot →
+      (name, slot) ∈ entries := by
+  induction entries with
+  | nil =>
+      intro h
+      simp [FiniteEnv.lookupEntries] at h
+  | cons entry rest ih =>
+      intro h
+      rcases entry with ⟨entryName, entrySlot⟩
+      by_cases hname : name = entryName
+      · subst hname
+        simp [FiniteEnv.lookupEntries] at h
+        cases h
+        exact List.mem_cons_self
+      · simp [FiniteEnv.lookupEntries, hname] at h
+        exact List.mem_cons_of_mem _ (ih h)
+
+private theorem partialTyContainsBorrow_mem_aux {partialTy : PartialTy}
+    {needle : Ty}
+    (hcontains : PartialTyContains partialTy needle) :
+    ∀ {mutable : Bool} {targets : List LVal},
+      needle = .borrow mutable targets →
+        (mutable, targets) ∈ partialTyBorrows partialTy := by
+  induction hcontains with
+  | here =>
+      intro mutable targets hneedle
+      cases hneedle
+      simp [partialTyBorrows, tyBorrows]
+  | tyBox _ ih =>
+      intro mutable targets hneedle
+      simpa [partialTyBorrows, tyBorrows] using ih hneedle
+  | box _ ih =>
+      intro mutable targets hneedle
+      simpa [partialTyBorrows] using ih hneedle
+
+private theorem partialTyContainsBorrow_mem {partialTy : PartialTy}
+    {mutable : Bool} {targets : List LVal} :
+    PartialTyContains partialTy (.borrow mutable targets) →
+      (mutable, targets) ∈ partialTyBorrows partialTy := by
+  intro hcontains
+  exact partialTyContainsBorrow_mem_aux hcontains rfl
+
+private theorem envBorrowEdges_mem_of_entry {entries : List (Name × EnvSlot)}
+    {entry : Name × EnvSlot} {borrow : Bool × List LVal} :
+    entry ∈ entries →
+      borrow ∈ partialTyBorrows entry.2.ty →
+        (entry.1, borrow.1, borrow.2) ∈
+          entries.foldr
+            (fun entry edges =>
+              (partialTyBorrows entry.2.ty).map
+                  (fun borrow => (entry.1, borrow.1, borrow.2)) ++ edges)
+            [] := by
+  intro hentry hborrow
+  induction entries with
+  | nil =>
+      cases hentry
+  | cons head rest ih =>
+      cases hentry with
+      | head =>
+          apply List.mem_append_left
+          exact List.mem_map.mpr ⟨borrow, hborrow, rfl⟩
+      | tail _ hrest =>
+          exact List.mem_append_right _ (ih hrest)
+
+private theorem envBorrowEdges_of_contains {env : FiniteEnv}
+    {root : Name} {mutable : Bool} {targets : List LVal} :
+    env.toEnv ⊢ root ↝ Ty.borrow mutable targets →
+      (root, mutable, targets) ∈ envBorrowEdges env := by
+  intro hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  cases env with
+  | mk entries =>
+      have hentry : (root, slot) ∈ entries :=
+        lookupEntries_mem hslot
+      exact envBorrowEdges_mem_of_entry hentry
+        (partialTyContainsBorrow_mem hcontainsTy)
+
+private theorem readProhibited_false_sound {env : FiniteEnv} {lv : LVal} :
+    readProhibited env lv = false →
+      ¬ ReadProhibited env.toEnv lv := by
+  intro hfalse hread
+  rcases hread with ⟨root, targets, target, hcontains, htarget, hconflict⟩
+  have hedge :
+      (root, true, targets) ∈ envBorrowEdges env :=
+    envBorrowEdges_of_contains hcontains
+  have htargetConflict : pathConflicts target lv = true := by
+    simpa [pathConflicts, PathConflicts] using hconflict
+  have hany : readProhibited env lv = true := by
+    rw [readProhibited, List.any_eq_true]
+    refine ⟨(root, true, targets), hedge, ?_⟩
+    simp [List.any_eq_true]
+    exact ⟨target, htarget, htargetConflict⟩
+  rw [hfalse] at hany
+  cases hany
+
+private theorem writeProhibited_false_sound {env : FiniteEnv} {lv : LVal} :
+    writeProhibited env lv = false →
+      ¬ WriteProhibited env.toEnv lv := by
+  intro hfalse hwrite
+  simp [writeProhibited] at hfalse
+  rcases hfalse with ⟨hreadFalse, himmFalse⟩
+  cases hwrite with
+  | inl hread =>
+      exact readProhibited_false_sound hreadFalse hread
+  | inr himm =>
+      rcases himm with
+        ⟨root, targets, target, hcontains, htarget, hconflict⟩
+      have hedge :
+          (root, false, targets) ∈ envBorrowEdges env :=
+        envBorrowEdges_of_contains hcontains
+      have htargetConflict : pathConflicts target lv = true := by
+        simpa [pathConflicts, PathConflicts] using hconflict
+      have htargetFalse :=
+        (himmFalse root).1 targets hedge target htarget
+      rw [htargetConflict] at htargetFalse
+      cases htargetFalse
+
+mutual
+  private theorem mutableLVal_sound :
+      ∀ {fuel : Nat} {env : FiniteEnv} {lv : LVal},
+        mutableLVal fuel env lv = true →
+          Mutable env.toEnv lv := by
+    intro fuel env lv
+    cases lv with
+    | var name =>
+        intro h
+        simp [mutableLVal] at h
+        cases hlookup : env.lookup name with
+        | none =>
+            simp [hlookup] at h
+        | some slot =>
+            exact Mutable.var
+              (show env.toEnv.slotAt name = some slot from hlookup)
+    | deref inner =>
+        intro h
+        cases fuel with
+        | zero =>
+            simp [mutableLVal] at h
+        | succ fuel =>
+            cases htype : lvalType? fuel env inner with
+            | none =>
+                simp [mutableLVal, htype] at h
+            | some result =>
+                rcases result with ⟨partialTy, lifetime⟩
+                cases partialTy with
+                | box innerTy =>
+                    simp [mutableLVal, htype] at h
+                    exact Mutable.box
+                      (lvalType?_sound htype)
+                      (mutableLVal_sound h)
+                | ty ty =>
+                    cases ty with
+                    | borrow mutable targets =>
+                        cases mutable <;> simp [mutableLVal, htype] at h
+                        exact Mutable.borrow
+                          (lvalType?_sound htype)
+                          (by
+                            intro target htarget
+                            exact mutableLVal_sound
+                              (h target htarget))
+                    | unit =>
+                        simp [mutableLVal, htype] at h
+                    | int =>
+                        simp [mutableLVal, htype] at h
+                    | bool =>
+                        simp [mutableLVal, htype] at h
+                    | box _ =>
+                        simp [mutableLVal, htype] at h
+                | undef _ =>
+                    simp [mutableLVal, htype] at h
+end
+
+structure CertifiedLValFullType (fuel : Nat) (env : FiniteEnv)
+    (lv : LVal) : Type where
+  ty : Ty
+  lifetime : Lifetime
+  checked : lvalType? fuel env lv = some (.ty ty, lifetime)
+
+namespace CertifiedLValFullType
+
+theorem typing {fuel : Nat} {env : FiniteEnv} {lv : LVal}
+    (certificate : CertifiedLValFullType fuel env lv) :
+    LValTyping env.toEnv lv (.ty certificate.ty) certificate.lifetime :=
+  lvalType?_sound certificate.checked
+
+end CertifiedLValFullType
+
+def certifyLValFullType? (fuel : Nat) (env : FiniteEnv) (lv : LVal) :
+    Option (CertifiedLValFullType fuel env lv) :=
+  match h : lvalType? fuel env lv with
+  | some (.ty ty, lifetime) =>
+      some { ty := ty, lifetime := lifetime, checked := h }
+  | _ => none
+
+namespace CertifiedTermCheck
+
+def copyFromChecker {fuel : Nat} {env : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    (lvalCert : CertifiedLValFullType fuel env lv)
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.copy lv)
+        lvalCert.ty env = true)
+    (copyChecked : copyTy lvalCert.ty = true)
+    (notReadChecked : readProhibited env lv = false) :
+    CertifiedTermCheck fuel env typing lifetime (.copy lv) lvalCert.ty env :=
+  { checked := by
+      simpa using checked
+    typing :=
+      TermTyping.copy lvalCert.typing (copyTy_sound copyChecked)
+        (readProhibited_false_sound notReadChecked) }
+
+def copyFromCheckerAs {fuel : Nat} {env : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {expectedTy : Ty}
+    (lvalCert : CertifiedLValFullType fuel env lv)
+    (typeEq : lvalCert.ty = expectedTy)
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.copy lv) expectedTy env =
+        true)
+    (copyChecked : copyTy expectedTy = true)
+    (notReadChecked : readProhibited env lv = false) :
+    CertifiedTermCheck fuel env typing lifetime (.copy lv) expectedTy env := by
+  subst typeEq
+  exact copyFromChecker lvalCert checked copyChecked notReadChecked
+
+def mutBorrowFromChecker {fuel : Nat} {env : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    (lvalCert : CertifiedLValFullType fuel env lv)
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.borrow true lv)
+        (.borrow true [lv]) env = true)
+    (mutableChecked : mutableLVal fuel env lv = true)
+    (notWriteChecked : writeProhibited env lv = false) :
+    CertifiedTermCheck fuel env typing lifetime (.borrow true lv)
+      (.borrow true [lv]) env :=
+  { checked := checked
+    typing :=
+      TermTyping.mutBorrow lvalCert.typing
+        (mutableLVal_sound mutableChecked)
+        (writeProhibited_false_sound notWriteChecked) }
+
+end CertifiedTermCheck
+
+syntax (name := borrow_cert_tactic) "borrow_cert" : tactic
+
+macro_rules
+  | `(tactic| borrow_cert) =>
+      `(tactic|
+        first
+        | exact CertifiedTermCheck.mutBorrowFromChecker
+            ((certifyLValFullType? _ _ _).get (by native_decide))
+            (by borrow_run)
+            (by native_decide)
+            (by native_decide)
+        | exact CertifiedTermCheck.copyFromCheckerAs
+            ((certifyLValFullType? _ _ _).get (by native_decide))
+            (by native_decide)
+            (by borrow_run)
+            (by native_decide)
+            (by native_decide))
 
 end Paper
 end LwRust

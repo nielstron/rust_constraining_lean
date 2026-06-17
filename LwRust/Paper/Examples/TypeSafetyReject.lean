@@ -30,7 +30,7 @@ source programs and values created by the operational semantics.
 def rawBorrowedReferenceConstant : Term :=
   .val (.ref { location := .var "x", owner := false })
 
-theorem rawBorrowedReferenceConstant_rejected :
+private theorem rawBorrowedReferenceConstant_no_types :
     ¬ ∃ ty env,
       TermTyping Env.empty StoreTyping.empty Lifetime.root
         rawBorrowedReferenceConstant ty env := by
@@ -42,14 +42,26 @@ theorem rawBorrowedReferenceConstant_rejected :
       | ref hlookup =>
           simp [StoreTyping.empty] at hlookup
 
+def rawBorrowedReferenceConstant_rejection :
+    CertifiedTermReject 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
+      rawBorrowedReferenceConstant :=
+  { checked := by borrow_run
+    notyping := by simpa using rawBorrowedReferenceConstant_no_types }
+
+theorem rawBorrowedReferenceConstant_rejected :
+    ¬ ∃ ty env,
+      TermTyping Env.empty StoreTyping.empty Lifetime.root
+        rawBorrowedReferenceConstant ty env := by
+  borrow_check using rawBorrowedReferenceConstant_rejection
+
 theorem rawBorrowedReferenceConstant_checker_rejects :
     borrowReject? 32 rawBorrowedReferenceConstant = true := by
-  native_decide
+  borrow_run
 
 def boxedRawBorrowedReferenceConstant : Term :=
   .box rawBorrowedReferenceConstant
 
-theorem boxedRawBorrowedReferenceConstant_rejected :
+private theorem boxedRawBorrowedReferenceConstant_no_types :
     ¬ ∃ ty env,
       TermTyping Env.empty StoreTyping.empty Lifetime.root
         boxedRawBorrowedReferenceConstant ty env := by
@@ -63,9 +75,21 @@ theorem boxedRawBorrowedReferenceConstant_rejected :
           | ref hlookup =>
               simp [StoreTyping.empty] at hlookup
 
+def boxedRawBorrowedReferenceConstant_rejection :
+    CertifiedTermReject 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
+      boxedRawBorrowedReferenceConstant :=
+  { checked := by borrow_run
+    notyping := by simpa using boxedRawBorrowedReferenceConstant_no_types }
+
+theorem boxedRawBorrowedReferenceConstant_rejected :
+    ¬ ∃ ty env,
+      TermTyping Env.empty StoreTyping.empty Lifetime.root
+        boxedRawBorrowedReferenceConstant ty env := by
+  borrow_check using boxedRawBorrowedReferenceConstant_rejection
+
 theorem boxedRawBorrowedReferenceConstant_checker_rejects :
     borrowReject? 32 boxedRawBorrowedReferenceConstant = true := by
-  native_decide
+  borrow_run
 
 /--
 Paper Section 3.3 example (10), after the invalid borrow has escaped its inner
@@ -85,7 +109,7 @@ theorem escapingBorrow_stuck_after_inner_drop :
 Paper Section 3.3 example (9).  This is the exact program
 `{ let mut x = 0; let mut y = &mut x; x = 1; }`.
 -/
-theorem invalidBorrowExample_rejected :
+private theorem invalidBorrowExample_no_types :
     ¬ ∃ ty env,
       TermTyping Env.empty StoreTyping.empty InvalidBorrowExample.l
         InvalidBorrowExample.invalidProgram ty env := by
@@ -134,9 +158,21 @@ theorem invalidBorrowExample_rejected :
                                             · simp [InvalidBorrowExample.x, LVal.base])
               | cons _hhead htail => cases htail
 
+def invalidBorrowExample_rejection :
+    CertifiedTermReject 128 FiniteEnv.empty StoreTyping.empty
+      InvalidBorrowExample.l InvalidBorrowExample.invalidProgram :=
+  { checked := by borrow_run
+    notyping := by simpa using invalidBorrowExample_no_types }
+
+theorem invalidBorrowExample_rejected :
+    ¬ ∃ ty env,
+      TermTyping Env.empty StoreTyping.empty InvalidBorrowExample.l
+        InvalidBorrowExample.invalidProgram ty env := by
+  borrow_check using invalidBorrowExample_rejection
+
 theorem invalidBorrowExample_checker_rejects :
     borrowReject? 128 InvalidBorrowExample.invalidProgram = true := by
-  native_decide
+  borrow_run
 
 end Paper
 end LwRust
