@@ -120,6 +120,23 @@ theorem borrowReject_of_certifyBorrowRejectOfNonSource?
       borrowReject term :=
   CertifiedBorrowReject.borrowReject_of_found?
 
+theorem borrowReject_of_certifyBorrowRejectOfNonSource?_fuelBound
+    {term : Term} :
+    CertifiedBorrowReject.found?
+        (certifyBorrowRejectOfNonSource? (termCheckerFuelBound term) term) =
+          true →
+      borrowReject term :=
+  borrowReject_of_certifyBorrowRejectOfNonSource?
+    (fuel := termCheckerFuelBound term)
+
+syntax (name := borrow_reject_tactic) "borrow_reject" : tactic
+
+macro_rules
+  | `(tactic| borrow_reject) =>
+      `(tactic|
+        exact LwRust.Paper.borrowReject_of_certifyBorrowRejectOfNonSource?_fuelBound
+          (by native_decide))
+
 theorem borrowOutcomeWitness_of_certifyBorrowRejectOfNonSource?
     {fuel : Nat} {term : Term} :
     CertifiedBorrowReject.found?

@@ -6,11 +6,10 @@ import LwRust.Paper.Examples.Operational
 Examples not accepted by the executable checker, written as readable checker
 inputs.
 
-Certified logical rejections state the inductive `borrowReject` property and
-include a proof-carrying executable `borrowOutcomeWitness`.  Finite checker
-failure is still shown for examples that do not yet have a non-typability
-certificate; `borrowUnknownWitness` records cases where the current finite
-checker cannot classify the program.
+Certified logical rejections state the inductive `borrowReject` property.
+Finite checker failure is still shown for examples that do not yet have a
+non-typability certificate; `borrowUnknownWitness` records cases where the
+current finite checker cannot classify the program.
 -/
 
 namespace LwRust
@@ -26,14 +25,7 @@ def rawBorrowedReferenceConstantExample : Term :=
 
 theorem rawBorrowedReferenceConstantExample_rejected :
     borrowReject rawBorrowedReferenceConstantExample := by
-  exact borrowReject_of_certifyBorrowRejectOfNonSource? (fuel := 32)
-    (by native_decide)
-
-theorem rawBorrowedReferenceConstantExample_outcomeWitness :
-    borrowOutcomeWitness 32 rawBorrowedReferenceConstantExample
-      (certifyBorrowRejectOfNonSource? 32 rawBorrowedReferenceConstantExample) := by
-  exact borrowOutcomeWitness_of_certifyBorrowRejectOfNonSource?
-    (by native_decide)
+  borrow_reject
 
 def boxedRawBorrowedReferenceConstantExample : Term :=
   .box
@@ -42,15 +34,7 @@ def boxedRawBorrowedReferenceConstantExample : Term :=
 
 theorem boxedRawBorrowedReferenceConstantExample_rejected :
     borrowReject boxedRawBorrowedReferenceConstantExample := by
-  exact borrowReject_of_certifyBorrowRejectOfNonSource? (fuel := 32)
-    (by native_decide)
-
-theorem boxedRawBorrowedReferenceConstantExample_outcomeWitness :
-    borrowOutcomeWitness 32 boxedRawBorrowedReferenceConstantExample
-      (certifyBorrowRejectOfNonSource? 32
-        boxedRawBorrowedReferenceConstantExample) := by
-  exact borrowOutcomeWitness_of_certifyBorrowRejectOfNonSource?
-    (by native_decide)
+  borrow_reject
 
 /-! ## Assigning through a mutably borrowed place -/
 
@@ -68,17 +52,6 @@ theorem invalidBorrowExampleProgram_rejected :
     InvalidBorrowExample.assignX, InvalidBorrowExample.x, InvalidBorrowExample.l]
     using
       (show borrowReject InvalidBorrowExample.invalidProgram from by
-        borrow_check using invalidBorrowExample_borrowRejection)
-
-theorem invalidBorrowExampleProgram_outcomeWitness :
-    borrowOutcomeWitness 128 invalidBorrowExampleProgram
-      (some invalidBorrowExample_borrowRejection) := by
-  simpa [invalidBorrowExampleProgram, InvalidBorrowExample.invalidProgram,
-    InvalidBorrowExample.declareX, InvalidBorrowExample.declareY,
-    InvalidBorrowExample.assignX, InvalidBorrowExample.x, InvalidBorrowExample.l]
-    using
-      (show borrowOutcomeWitness 128 InvalidBorrowExample.invalidProgram
-        (some invalidBorrowExample_borrowRejection) from by
         borrow_check using invalidBorrowExample_borrowRejection)
 
 /-! ## Letting a borrow escape its source lifetime -/
@@ -113,28 +86,6 @@ theorem invalidEscapingBorrowExampleProgram_rejected :
     InvalidEscapingBorrowExample.m]
     using
       (show borrowReject InvalidEscapingBorrowExample.invalidProgram from by
-        borrow_check using invalidEscapingBorrowExample_borrowRejection)
-
-theorem invalidEscapingBorrowExampleProgram_outcomeWitness :
-    borrowOutcomeWitness 128 invalidEscapingBorrowExampleProgram
-      (some invalidEscapingBorrowExample_borrowRejection) := by
-  simpa [invalidEscapingBorrowExampleProgram,
-    InvalidEscapingBorrowExample.invalidProgram,
-    InvalidEscapingBorrowExample.declareX,
-    InvalidEscapingBorrowExample.declareY,
-    InvalidEscapingBorrowExample.declareZ,
-    InvalidEscapingBorrowExample.assignYBorrowZ,
-    InvalidEscapingBorrowExample.innerBlock,
-    InvalidEscapingBorrowExample.declareW,
-    InvalidEscapingBorrowExample.x,
-    InvalidEscapingBorrowExample.y,
-    InvalidEscapingBorrowExample.z,
-    InvalidEscapingBorrowExample.l,
-    InvalidEscapingBorrowExample.m]
-    using
-      (show borrowOutcomeWitness 128
-        InvalidEscapingBorrowExample.invalidProgram
-        (some invalidEscapingBorrowExample_borrowRejection) from by
         borrow_check using invalidEscapingBorrowExample_borrowRejection)
 
 /-! ## Joined reborrow with incoherent nested targets -/
