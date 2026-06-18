@@ -381,7 +381,7 @@ theorem rejected :
 
 theorem borrowRejected :
     borrowReject derefXAfterIfProgram := by
-  borrow_reject using borrowRejection
+  exact CertifiedBorrowReject.borrowReject borrowRejection
 
 theorem noBorrowCheckWitness (fuel : Nat) :
     ¬ borrowCheckWitness fuel derefXAfterIfProgram := by

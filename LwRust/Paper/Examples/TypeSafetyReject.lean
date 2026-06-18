@@ -25,7 +25,12 @@ def rawBorrowedReferenceConstantExample : Term :=
 
 theorem rawBorrowedReferenceConstantExample_rejected :
     borrowReject rawBorrowedReferenceConstantExample := by
-  borrow_reject
+  simpa [rawBorrowedReferenceConstantExample, rawBorrowedReferenceConstant]
+    using rawBorrowedReferenceConstant_borrowRejected
+
+theorem rawBorrowedReferenceConstantExample_notAcceptedByChecker :
+    borrowCheck? 64 rawBorrowedReferenceConstantExample = false := by
+  native_decide
 
 def boxedRawBorrowedReferenceConstantExample : Term :=
   .box
@@ -34,7 +39,13 @@ def boxedRawBorrowedReferenceConstantExample : Term :=
 
 theorem boxedRawBorrowedReferenceConstantExample_rejected :
     borrowReject boxedRawBorrowedReferenceConstantExample := by
-  borrow_reject
+  simpa [boxedRawBorrowedReferenceConstantExample,
+    boxedRawBorrowedReferenceConstant, rawBorrowedReferenceConstant]
+    using boxedRawBorrowedReferenceConstant_borrowRejected
+
+theorem boxedRawBorrowedReferenceConstantExample_notAcceptedByChecker :
+    borrowCheck? 64 boxedRawBorrowedReferenceConstantExample = false := by
+  native_decide
 
 /-! ## Assigning through a mutably borrowed place -/
 
@@ -50,9 +61,11 @@ theorem invalidBorrowExampleProgram_rejected :
   simpa [invalidBorrowExampleProgram, InvalidBorrowExample.invalidProgram,
     InvalidBorrowExample.declareX, InvalidBorrowExample.declareY,
     InvalidBorrowExample.assignX, InvalidBorrowExample.x, InvalidBorrowExample.l]
-    using
-      (show borrowReject InvalidBorrowExample.invalidProgram from by
-        borrow_reject using invalidBorrowExample_borrowRejection)
+    using invalidBorrowExample_borrowRejected
+
+theorem invalidBorrowExampleProgram_notAcceptedByChecker :
+    borrowCheck? 256 invalidBorrowExampleProgram = false := by
+  native_decide
 
 /-! ## Letting a borrow escape its source lifetime -/
 
@@ -84,9 +97,11 @@ theorem invalidEscapingBorrowExampleProgram_rejected :
     InvalidEscapingBorrowExample.z,
     InvalidEscapingBorrowExample.l,
     InvalidEscapingBorrowExample.m]
-    using
-      (show borrowReject InvalidEscapingBorrowExample.invalidProgram from by
-        borrow_reject using invalidEscapingBorrowExample_borrowRejection)
+    using invalidEscapingBorrowExample_borrowRejected
+
+theorem invalidEscapingBorrowExampleProgram_notAcceptedByChecker :
+    borrowCheck? 256 invalidEscapingBorrowExampleProgram = false := by
+  native_decide
 
 /-! ## Joined reborrow with incoherent nested targets -/
 
@@ -106,6 +121,10 @@ def nestedIncoherentJoinProgram : Term :=
 theorem nestedIncoherentJoinProgram_failedByChecker :
     borrowCheckFailureWitness 256 nestedIncoherentJoinProgram := by
   borrow_check
+
+theorem nestedIncoherentJoinProgram_notAcceptedByChecker :
+    borrowCheck? 256 nestedIncoherentJoinProgram = false := by
+  native_decide
 
 /-! ## Assignment after a non-uniform nested borrow join -/
 
@@ -129,6 +148,10 @@ theorem nestedBorrowShapeMismatchProgram_unknownByChecker :
     borrowUnknownWitness 256 nestedBorrowShapeMismatchProgram := by
   borrow_check
 
+theorem nestedBorrowShapeMismatchProgram_notAcceptedByChecker :
+    borrowCheck? 256 nestedBorrowShapeMismatchProgram = false := by
+  native_decide
+
 /-! ## Reborrow assignment through a dereference changes the wrong frame -/
 
 def derefBorrowReassignmentProgram : Term :=
@@ -145,6 +168,10 @@ def derefBorrowReassignmentProgram : Term :=
 theorem derefBorrowReassignmentProgram_failedByChecker :
     borrowCheckFailureWitness 256 derefBorrowReassignmentProgram := by
   borrow_check
+
+theorem derefBorrowReassignmentProgram_notAcceptedByChecker :
+    borrowCheck? 256 derefBorrowReassignmentProgram = false := by
+  native_decide
 
 end Paper
 end LwRust

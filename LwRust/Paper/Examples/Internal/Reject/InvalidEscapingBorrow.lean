@@ -193,6 +193,10 @@ def invalidEscapingBorrowExample_borrowRejection :
   CertifiedBorrowReject.ofTermReject
     invalidEscapingBorrowExample_root_rejection
 
+theorem invalidEscapingBorrowExample_notAcceptedByExecutableChecker :
+    borrowCheck? 256 InvalidEscapingBorrowExample.invalidProgram = false := by
+  native_decide
+
 theorem invalidEscapingBorrowExample_rejected :
     ¬ ∃ ty env,
       TermTyping Env.empty StoreTyping.empty InvalidEscapingBorrowExample.l
@@ -201,7 +205,8 @@ theorem invalidEscapingBorrowExample_rejected :
 
 theorem invalidEscapingBorrowExample_borrowRejected :
     borrowReject InvalidEscapingBorrowExample.invalidProgram := by
-  borrow_reject using invalidEscapingBorrowExample_borrowRejection
+  exact CertifiedBorrowReject.borrowReject
+    invalidEscapingBorrowExample_borrowRejection
 
 end Paper
 end LwRust

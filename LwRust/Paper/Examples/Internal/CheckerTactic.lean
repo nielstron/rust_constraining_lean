@@ -1,4 +1,4 @@
-import LwRust.Paper.BorrowCheckerSoundness
+import LwRust.Paper.BorrowChecker
 
 /-!
 Small build-checked coverage for the executable-checker tactic surface.
@@ -39,10 +39,6 @@ example :
     (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
     (by simp [FiniteEnv.toEnv_empty, wellFormedEnv_empty])
     (by native_decide)
-
-example (hcomplete : borrowCheckCompleteOnFuelBoundCheckableTerms) :
-    borrowReject (.copy (.var "x")) := by
-  borrow_reject[hcomplete]
 
 end Paper
 end LwRust
