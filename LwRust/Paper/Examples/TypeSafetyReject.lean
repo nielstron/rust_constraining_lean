@@ -52,7 +52,7 @@ theorem invalidBorrowExampleProgram_rejected :
     InvalidBorrowExample.assignX, InvalidBorrowExample.x, InvalidBorrowExample.l]
     using
       (show borrowReject InvalidBorrowExample.invalidProgram from by
-        borrow_check using invalidBorrowExample_borrowRejection)
+        borrow_reject using invalidBorrowExample_borrowRejection)
 
 /-! ## Letting a borrow escape its source lifetime -/
 
@@ -86,7 +86,7 @@ theorem invalidEscapingBorrowExampleProgram_rejected :
     InvalidEscapingBorrowExample.m]
     using
       (show borrowReject InvalidEscapingBorrowExample.invalidProgram from by
-        borrow_check using invalidEscapingBorrowExample_borrowRejection)
+        borrow_reject using invalidEscapingBorrowExample_borrowRejection)
 
 /-! ## Joined reborrow with incoherent nested targets -/
 

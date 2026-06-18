@@ -134,7 +134,7 @@ theorem invalidBorrowExample_rejected :
 
 theorem invalidBorrowExample_borrowRejected :
     borrowReject InvalidBorrowExample.invalidProgram := by
-  borrow_check using invalidBorrowExample_borrowRejection
+  borrow_reject using invalidBorrowExample_borrowRejection
 
 end Paper
 end LwRust

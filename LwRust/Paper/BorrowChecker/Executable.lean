@@ -767,12 +767,19 @@ def envEqOutside (left right : FiniteEnv) (exceptName : Name) : Bool :=
     if name = exceptName then true
     else if left.lookup name = right.lookup name then true else false)
 
-private partial def freshNameFrom (used : List Name) (fuel : Nat) : Name :=
-  let candidate := "_γ" ++ toString fuel
-  if used.contains candidate then freshNameFrom used (fuel + 1) else candidate
+def maxNameLength : List Name → Nat
+  | [] => 0
+  | name :: rest => Nat.max name.length (maxNameLength rest)
+
+def freshNameOfLength : Nat → Name
+  | 0 => ""
+  | fuel + 1 => "_" ++ freshNameOfLength fuel
+
+def freshNameFrom (used : List Name) : Name :=
+  freshNameOfLength (maxNameLength used + 1)
 
 def freshGhostName (env : FiniteEnv) (term : Term) : Name :=
-  freshNameFrom (unionNames (envNames env) (termNames term)) 0
+  freshNameFrom (unionNames (envNames env) (termNames term))
 
 def copyTy : Ty → Bool
   | .unit => true

@@ -92,7 +92,9 @@ theorem swappedBorrowDerefXAfterIfProgram_rejected :
     SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
     SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
     SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using SwappedBorrowJoinReject.borrowRejected
+    using
+      (show borrowReject SwappedBorrowJoinReject.derefXAfterIfProgram from by
+        borrow_reject using SwappedBorrowJoinReject.borrowRejection)
 
 theorem swappedBorrowDerefXAfterIfProgram_outcomeWitness :
     borrowOutcomeWitness 256 swappedBorrowDerefXAfterIfProgram

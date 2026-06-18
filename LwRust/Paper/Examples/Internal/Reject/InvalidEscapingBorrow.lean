@@ -201,7 +201,7 @@ theorem invalidEscapingBorrowExample_rejected :
 
 theorem invalidEscapingBorrowExample_borrowRejected :
     borrowReject InvalidEscapingBorrowExample.invalidProgram := by
-  borrow_check using invalidEscapingBorrowExample_borrowRejection
+  borrow_reject using invalidEscapingBorrowExample_borrowRejection
 
 end Paper
 end LwRust
