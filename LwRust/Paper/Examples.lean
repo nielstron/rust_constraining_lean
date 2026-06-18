@@ -11,10 +11,11 @@ Build-checked paper examples.
 
 The public checker-example modules are structured as readable programs ending
 in checker-backed accepted, failed, unknown, or certified-rejected statements.
-Accepted examples state the inductive `borrowCheck` property; finite failed and
-unknown executable verdicts are exposed through proof-carrying witness Props.
-Certified logical rejections are exposed only when backed by a reusable
-proof-carrying certifier.
+Accepted examples state the inductive `borrowCheck` property.  Certified
+logical rejections state the inductive `borrowReject` property and include a
+proof-carrying executable outcome witness.  Finite failed and unknown
+executable verdicts are exposed through witness Props only when no logical
+rejection certificate is available.
 
 * `Operational` contains reduction witnesses for the operational examples.
 * `TypeSafetyPass` contains accepted checker examples.

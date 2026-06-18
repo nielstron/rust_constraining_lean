@@ -6,12 +6,11 @@ import LwRust.Paper.Examples.Operational
 Examples not accepted by the executable checker, written as readable checker
 inputs.
 
-These final statements intentionally expose proof-carrying executable verdict
-witnesses: finite checker failure is an executable result, not a general
-non-typability theorem, and `borrowUnknownWitness` records cases where the
-current finite checker cannot classify the program.  Where the examples have
-proof-carrying rejection certificates, they also include a `borrowOutcomeWitness`,
-whose soundness theorem yields the inductive `borrowReject` side of the outcome.
+Certified logical rejections state the inductive `borrowReject` property and
+include a proof-carrying executable `borrowOutcomeWitness`.  Finite checker
+failure is still shown for examples that do not yet have a non-typability
+certificate; `borrowUnknownWitness` records cases where the current finite
+checker cannot classify the program.
 -/
 
 namespace LwRust
@@ -24,10 +23,6 @@ open Core
 def rawBorrowedReferenceConstantExample : Term :=
   .val (.ref { location := .var "x", owner := false })
     -- Rust: no source expression; this is a runtime reference value.
-
-theorem rawBorrowedReferenceConstantExample_failedByChecker :
-    borrowCheckFailureWitness 32 rawBorrowedReferenceConstantExample := by
-  borrow_check[32]
 
 theorem rawBorrowedReferenceConstantExample_rejected :
     borrowReject rawBorrowedReferenceConstantExample := by
@@ -44,10 +39,6 @@ def boxedRawBorrowedReferenceConstantExample : Term :=
   .box
     (.val (.ref { location := .var "x", owner := false }))
     -- Rust: box <runtime-only borrowed reference>
-
-theorem boxedRawBorrowedReferenceConstantExample_failedByChecker :
-    borrowCheckFailureWitness 32 boxedRawBorrowedReferenceConstantExample := by
-  borrow_check[32]
 
 theorem boxedRawBorrowedReferenceConstantExample_rejected :
     borrowReject boxedRawBorrowedReferenceConstantExample := by
@@ -69,14 +60,6 @@ def invalidBorrowExampleProgram : Term :=
     .letMut "y" (.borrow true (.var "x")), -- Rust: let mut y = &mut x;
     .assign (.var "x") (.val (.int 1)) -- Rust: x = 1;
   ]
-
-theorem invalidBorrowExampleProgram_failedByChecker :
-    borrowCheckFailureWitness 128 invalidBorrowExampleProgram := by
-  borrow_check[128]
-
-theorem invalidBorrowExampleProgram_notAcceptedByChecker :
-    ¬ borrowCheckWitness 128 invalidBorrowExampleProgram := by
-  borrow_check[128]
 
 theorem invalidBorrowExampleProgram_rejected :
     borrowReject invalidBorrowExampleProgram := by
