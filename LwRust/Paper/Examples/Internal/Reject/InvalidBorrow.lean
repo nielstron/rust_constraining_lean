@@ -126,6 +126,10 @@ theorem invalidBorrowExample_notAcceptedByChecker :
     ¬ borrowCheckWitness 128 InvalidBorrowExample.invalidProgram := by
   borrow_check[128]
 
+theorem invalidBorrowExample_notAcceptedByExecutableChecker :
+    borrowCheck? 256 InvalidBorrowExample.invalidProgram = false := by
+  native_decide
+
 theorem invalidBorrowExample_rejected :
     ¬ ∃ ty env,
       TermTyping Env.empty StoreTyping.empty InvalidBorrowExample.l
@@ -134,7 +138,7 @@ theorem invalidBorrowExample_rejected :
 
 theorem invalidBorrowExample_borrowRejected :
     borrowReject InvalidBorrowExample.invalidProgram := by
-  borrow_reject using invalidBorrowExample_borrowRejection
+  exact CertifiedBorrowReject.borrowReject invalidBorrowExample_borrowRejection
 
 end Paper
 end LwRust

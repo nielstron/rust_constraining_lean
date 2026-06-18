@@ -1,5 +1,4 @@
 import LwRust.Paper.BorrowChecker.ExecutableSoundness
-import LwRust.Paper.BorrowChecker.ExecutableCompleteness
 import LwRust.Paper.Soundness.InitialStates
 
 /-!
@@ -130,29 +129,7 @@ theorem borrowReject_of_certifyBorrowRejectOfNonSource?_fuelBound
   borrowReject_of_certifyBorrowRejectOfNonSource?
     (fuel := termCheckerFuelBound term)
 
-syntax (name := borrow_reject_complete_tactic)
-  "borrow_reject" "[" term "]" : tactic
-syntax (name := borrow_reject_tactic)
-  "borrow_reject" (" using " term)? : tactic
-
-macro_rules
-  | `(tactic| borrow_reject[$complete]) =>
-      `(tactic|
-        exact
-          LwRust.Paper.borrowReject_of_borrowCheck?_eq_false_fuelBound_of_checkableComplete
-            $complete (by native_decide) (by native_decide) (by native_decide))
-
-macro_rules
-  | `(tactic| borrow_reject using $certificate) =>
-      `(tactic|
-        first
-        | exact LwRust.Paper.CertifiedBorrowReject.borrowReject $certificate
-        | exact LwRust.Paper.CertifiedBorrowReject.borrowReject_of_found?
-            (certificate? := $certificate) (by native_decide)
-        | exact LwRust.Paper.CertifiedBorrowOutcome.sound $certificate
-        | exact LwRust.Paper.CertifiedBorrowOutcome.sound_of_found?
-            (outcome? := $certificate) (by native_decide)
-        | exact $certificate)
+syntax (name := borrow_reject_tactic) "borrow_reject" : tactic
 
 macro_rules
   | `(tactic| borrow_reject) =>

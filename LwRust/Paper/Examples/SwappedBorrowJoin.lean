@@ -92,9 +92,7 @@ theorem swappedBorrowDerefXAfterIfProgram_rejected :
     SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
     SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
     SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using
-      (show borrowReject SwappedBorrowJoinReject.derefXAfterIfProgram from by
-        borrow_reject using SwappedBorrowJoinReject.borrowRejection)
+    using SwappedBorrowJoinReject.borrowRejected
 
 theorem swappedBorrowDerefXAfterIfProgram_outcomeWitness :
     borrowOutcomeWitness 256 swappedBorrowDerefXAfterIfProgram
@@ -139,6 +137,19 @@ theorem swappedBorrowDerefXAfterIfProgram_checkerFalse (fuel : Nat) :
     SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
     SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
     using SwappedBorrowJoinReject.checkerFalse fuel
+
+theorem swappedBorrowDerefXAfterIfProgram_notAcceptedByChecker :
+    borrowCheck? 256 swappedBorrowDerefXAfterIfProgram = false := by
+  simpa [swappedBorrowDerefXAfterIfProgram,
+    SwappedBorrowJoinReject.derefXAfterIfProgram,
+    SwappedBorrowJoinReject.condition,
+    SwappedBorrowJoinReject.trueBranch,
+    SwappedBorrowJoinReject.falseBranch,
+    SwappedBorrowJoinReject.l, SwappedBorrowJoinReject.m,
+    SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
+    SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
+    SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
+    using SwappedBorrowJoinReject.checkerFalse 256
 
 /-! ## Appending an unrelated root assignment is accepted -/
 

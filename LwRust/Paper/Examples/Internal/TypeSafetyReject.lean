@@ -41,7 +41,8 @@ theorem rawBorrowedReferenceConstant_rejected :
 
 theorem rawBorrowedReferenceConstant_borrowRejected :
     borrowReject rawBorrowedReferenceConstant := by
-  borrow_check using rawBorrowedReferenceConstant_borrowRejection
+  exact CertifiedBorrowReject.borrowReject
+    rawBorrowedReferenceConstant_borrowRejection
 
 theorem rawBorrowedReferenceConstant_borrowOutcome_witness :
     borrowOutcomeWitness 32 rawBorrowedReferenceConstant
@@ -68,7 +69,8 @@ theorem boxedRawBorrowedReferenceConstant_rejected :
 
 theorem boxedRawBorrowedReferenceConstant_borrowRejected :
     borrowReject boxedRawBorrowedReferenceConstant := by
-  borrow_check using boxedRawBorrowedReferenceConstant_borrowRejection
+  exact CertifiedBorrowReject.borrowReject
+    boxedRawBorrowedReferenceConstant_borrowRejection
 
 end Paper
 end LwRust
