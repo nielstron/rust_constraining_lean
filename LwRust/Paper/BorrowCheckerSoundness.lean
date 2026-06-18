@@ -1,4 +1,4 @@
-import LwRust.Paper.BorrowChecker
+import LwRust.Paper.BorrowChecker.ExecutableSoundness
 import LwRust.Paper.Soundness.InitialStates
 
 /-!

@@ -9,6 +9,755 @@ namespace Paper
 
 open Core
 
+/--
+Proof-facing bridge for a particular checker run: the executable checker
+computes the expected type and finite output environment, and the same input
+and output environments support the declarative `TermTyping` judgment consumed
+by progress and preservation.
+-/
+def CheckedTermTypingWitness (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (term : Term)
+    (expectedTy : Ty) (expectedEnv : FiniteEnv) : Prop :=
+  checkTermMatches? fuel env typing lifetime term expectedTy expectedEnv = true ∧
+    TermTyping env.toEnv typing lifetime term expectedTy expectedEnv.toEnv
+
+namespace CheckedTermTypingWitness
+
+theorem checked {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv} :
+    CheckedTermTypingWitness fuel env typing lifetime term expectedTy expectedEnv →
+      checkTermMatches? fuel env typing lifetime term expectedTy expectedEnv = true :=
+  And.left
+
+theorem typing {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv} :
+    CheckedTermTypingWitness fuel env typing lifetime term expectedTy expectedEnv →
+      TermTyping env.toEnv typing lifetime term expectedTy expectedEnv.toEnv :=
+  And.right
+
+theorem typable {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv} :
+    CheckedTermTypingWitness fuel env typing lifetime term expectedTy expectedEnv →
+      ∃ env₂ ty, TermTyping env.toEnv typing lifetime term ty env₂ := by
+  intro h
+  exact ⟨expectedEnv.toEnv, expectedTy, h.typing⟩
+
+end CheckedTermTypingWitness
+
+/--
+Type-level certificate form of `CheckedTermTypingWitness`.
+
+Unlike the proposition above, this can be returned under `Option`: the executable
+boolean at that boundary is simply whether a certified witness was constructed.
+-/
+structure CertifiedTermCheck (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (term : Term)
+    (expectedTy : Ty) (expectedEnv : FiniteEnv) : Type where
+  checked :
+    checkTermMatches? fuel env typing lifetime term expectedTy expectedEnv = true
+  typing :
+    TermTyping env.toEnv typing lifetime term expectedTy expectedEnv.toEnv
+
+namespace CertifiedTermCheck
+
+def ofWitness {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (witness :
+      CheckedTermTypingWitness fuel env typing lifetime term expectedTy expectedEnv) :
+    CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv :=
+  { checked := witness.checked
+    typing := witness.typing }
+
+def toWitness {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv) :
+    CheckedTermTypingWitness fuel env typing lifetime term expectedTy expectedEnv :=
+  ⟨certificate.checked, certificate.typing⟩
+
+def found? {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate? :
+      Option (CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv)) :
+    Bool :=
+  certificate?.isSome
+
+theorem sound {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv) :
+    TermTyping env.toEnv typing lifetime term expectedTy expectedEnv.toEnv :=
+  certificate.typing
+
+theorem check_matches {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv) :
+    checkTermMatches? fuel env typing lifetime term expectedTy expectedEnv = true :=
+  certificate.checked
+
+theorem typable {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel env typing lifetime term expectedTy expectedEnv) :
+    ∃ env₂ ty, TermTyping env.toEnv typing lifetime term ty env₂ := by
+  exact ⟨expectedEnv.toEnv, expectedTy, certificate.typing⟩
+
+def const {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {value : Value} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.val value) ty env = true)
+    (valueTyping : ValueTyping typing value ty) :
+    CertifiedTermCheck fuel env typing lifetime (.val value) ty env :=
+  { checked := checked
+    typing := TermTyping.const valueTyping }
+
+def copy {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.copy lv) ty env = true)
+    (lvalTyping : LValTyping env.toEnv lv (.ty ty) valueLifetime)
+    (copyTy : CopyTy ty)
+    (notReadProhibited : ¬ ReadProhibited env.toEnv lv) :
+    CertifiedTermCheck fuel env typing lifetime (.copy lv) ty env :=
+  { checked := checked
+    typing := TermTyping.copy lvalTyping copyTy notReadProhibited }
+
+def mutBorrow {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.borrow true lv)
+        (.borrow true [lv]) env = true)
+    (lvalTyping : LValTyping env.toEnv lv (.ty ty) valueLifetime)
+    (mutable : Mutable env.toEnv lv)
+    (notWriteProhibited : ¬ WriteProhibited env.toEnv lv) :
+    CertifiedTermCheck fuel env typing lifetime (.borrow true lv)
+      (.borrow true [lv]) env :=
+  { checked := checked
+    typing := TermTyping.mutBorrow lvalTyping mutable notWriteProhibited }
+
+def immBorrow {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.borrow false lv)
+        (.borrow false [lv]) env = true)
+    (lvalTyping : LValTyping env.toEnv lv (.ty ty) valueLifetime)
+    (notReadProhibited : ¬ ReadProhibited env.toEnv lv) :
+    CertifiedTermCheck fuel env typing lifetime (.borrow false lv)
+      (.borrow false [lv]) env :=
+  { checked := checked
+    typing := TermTyping.immBorrow lvalTyping notReadProhibited }
+
+def declare {fuel : Nat} {env initEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {name : Name}
+    {initialiser : Term} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.letMut name initialiser)
+        .unit outEnv = true)
+    (freshIn : env.toEnv.fresh name)
+    (initialiserCert :
+      CertifiedTermCheck fuel env typing lifetime initialiser ty initEnv)
+    (freshOut : initEnv.toEnv.fresh name)
+    (coherence :
+      FreshUpdateCoherenceObligations initEnv.toEnv name ty lifetime)
+    (outEq :
+      outEnv.toEnv =
+        initEnv.toEnv.update name { ty := .ty ty, lifetime := lifetime }) :
+    CertifiedTermCheck fuel env typing lifetime (.letMut name initialiser)
+      .unit outEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.declare freshIn initialiserCert.typing freshOut coherence
+        outEq }
+
+def assign {fuel : Nat} {env rhsEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
+    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.assign lhs rhs) .unit
+        outEnv = true)
+    (lhsBefore : LValTyping env.toEnv lhs oldTy targetLifetime)
+    (rhsCert : CertifiedTermCheck fuel env typing lifetime rhs rhsTy rhsEnv)
+    (assignmentSafe : AssignmentBorrowSafety rhsEnv.toEnv lhs)
+    (lhsAfter : LValTyping rhsEnv.toEnv lhs oldTy targetLifetime)
+    (shape : ShapeCompatible rhsEnv.toEnv oldTy (.ty rhsTy))
+    (wellFormed : WellFormedTy rhsEnv.toEnv rhsTy targetLifetime)
+    (write : EnvWrite 0 rhsEnv.toEnv lhs rhsTy outEnv.toEnv)
+    (below :
+      ∃ φ, LinearizedBy φ rhsEnv.toEnv ∧
+        EnvWriteRhsBorrowTargetsBelow φ outEnv.toEnv rhsTy)
+    (coherence :
+      EnvWriteCoherenceObligations rhsEnv.toEnv outEnv.toEnv (LVal.base lhs))
+    (contained : ContainedBorrowsWellFormed outEnv.toEnv)
+    (notWriteProhibited : ¬ WriteProhibited outEnv.toEnv lhs) :
+    CertifiedTermCheck fuel env typing lifetime (.assign lhs rhs) .unit outEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.assign lhsBefore rhsCert.typing assignmentSafe lhsAfter shape
+        wellFormed write below coherence contained notWriteProhibited }
+
+def equal {fuel : Nat} {env lhsEnv rhsEnv ghostEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime} {lhs rhs : Term}
+    {lhsTy rhsTy ghostRhsTy : Ty} {ghost : Name}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.eq lhs rhs) .bool
+        rhsEnv = true)
+    (lhsCert : CertifiedTermCheck fuel env typing lifetime lhs lhsTy lhsEnv)
+    (freshGhost : lhsEnv.toEnv.fresh ghost)
+    (ghostCert :
+      CertifiedTermCheck fuel
+        (lhsEnv.update ghost { ty := .ty lhsTy, lifetime := lifetime })
+        typing lifetime rhs ghostRhsTy ghostEnv)
+    (rhsCert : CertifiedTermCheck fuel lhsEnv typing lifetime rhs rhsTy rhsEnv)
+    (lhsCopy : CopyTy lhsTy)
+    (rhsCopy : CopyTy rhsTy)
+    (shape : ShapeCompatible rhsEnv.toEnv (.ty lhsTy) (.ty rhsTy)) :
+    CertifiedTermCheck fuel env typing lifetime (.eq lhs rhs) .bool rhsEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.eq (ghost := ghost) lhsCert.typing freshGhost
+        (by simpa [FiniteEnv.toEnv_update] using ghostCert.typing)
+        rhsCert.typing lhsCopy rhsCopy shape }
+
+def ite {fuel : Nat} {env conditionEnv trueEnv falseEnv joinEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {condition trueBranch falseBranch : Term} {trueTy falseTy joinTy : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime
+        (.ite condition trueBranch falseBranch) joinTy joinEnv = true)
+    (conditionCert :
+      CertifiedTermCheck fuel env typing lifetime condition .bool conditionEnv)
+    (trueCert :
+      CertifiedTermCheck fuel conditionEnv typing lifetime trueBranch trueTy
+        trueEnv)
+    (falseCert :
+      CertifiedTermCheck fuel conditionEnv typing lifetime falseBranch falseTy
+        falseEnv)
+    (typeJoin : PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy))
+    (envJoin : EnvJoin trueEnv.toEnv falseEnv.toEnv joinEnv.toEnv)
+    (trueSameShape : EnvJoinSameShape trueEnv.toEnv joinEnv.toEnv)
+    (falseSameShape : EnvJoinSameShape falseEnv.toEnv joinEnv.toEnv)
+    (wellFormed : WellFormedTy joinEnv.toEnv joinTy lifetime)
+    (contained : ContainedBorrowsWellFormed joinEnv.toEnv)
+    (coherent : Coherent joinEnv.toEnv)
+    (linearizable : Linearizable joinEnv.toEnv)
+    (typeBorrowSafe : TyBorrowSafeAgainstEnv joinEnv.toEnv joinTy) :
+    CertifiedTermCheck fuel env typing lifetime
+      (.ite condition trueBranch falseBranch) joinTy joinEnv :=
+  { checked := checked
+    typing :=
+      TermTyping.ite conditionCert.typing trueCert.typing falseCert.typing
+        typeJoin envJoin trueSameShape falseSameShape wellFormed contained
+        coherent linearizable typeBorrowSafe }
+
+end CertifiedTermCheck
+
+/--
+Proof-carrying rejection certificate.
+
+This is intentionally separate from `checkTermFails?`: the boolean says the
+executable checker produced a finite rule-premise failure rather than an
+unknown result, while `notyping` is the logical non-typability proof.  A failed
+checker run alone is not used as a completeness theorem.
+-/
+structure CertifiedTermReject (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (term : Term) : Type where
+  checked : checkTermFails? fuel env typing lifetime term = true
+  notyping :
+    ¬ ∃ ty outEnv, TermTyping env.toEnv typing lifetime term ty outEnv
+
+namespace CertifiedTermReject
+
+def found? {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (certificate? :
+      Option (CertifiedTermReject fuel env typing lifetime term)) : Bool :=
+  certificate?.isSome
+
+theorem checkedFailure {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (certificate : CertifiedTermReject fuel env typing lifetime term) :
+    checkTermFails? fuel env typing lifetime term = true :=
+  certificate.checked
+
+theorem sound {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+    (certificate : CertifiedTermReject fuel env typing lifetime term) :
+    ¬ ∃ ty outEnv, TermTyping env.toEnv typing lifetime term ty outEnv :=
+  certificate.notyping
+
+end CertifiedTermReject
+
+/-- Proof-carrying counterpart of `checkTermList?` for block bodies. -/
+structure CertifiedTermListCheck (fuel : Nat) (env : FiniteEnv)
+    (typing : StoreTyping) (lifetime : Lifetime) (terms : List Term)
+    (expectedTy : Ty) (expectedEnv : FiniteEnv) : Type where
+  checked :
+    checkTermListMatches? fuel env typing lifetime terms expectedTy expectedEnv =
+      true
+  typing :
+    TermListTyping env.toEnv typing lifetime terms expectedTy expectedEnv.toEnv
+
+namespace CertifiedTermListCheck
+
+def singleton {fuel : Nat} {env outEnv : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty}
+    (checked :
+      checkTermListMatches? fuel env typing lifetime [term] ty outEnv = true)
+    (termCert : CertifiedTermCheck fuel env typing lifetime term ty outEnv) :
+    CertifiedTermListCheck fuel env typing lifetime [term] ty outEnv :=
+  { checked := checked
+    typing := TermListTyping.singleton termCert.typing }
+
+def cons {fuel : Nat} {env midEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {rest : List Term} {termTy finalTy : Ty}
+    (checked :
+      checkTermListMatches? fuel env typing lifetime (term :: rest) finalTy
+        outEnv = true)
+    (headCert : CertifiedTermCheck fuel env typing lifetime term termTy midEnv)
+    (restCert :
+      CertifiedTermListCheck fuel midEnv typing lifetime rest finalTy outEnv) :
+    CertifiedTermListCheck fuel env typing lifetime (term :: rest) finalTy
+      outEnv :=
+  { checked := checked
+    typing := TermListTyping.cons headCert.typing restCert.typing }
+
+theorem sound {fuel : Nat} {env : FiniteEnv} {typing : StoreTyping}
+    {lifetime : Lifetime} {terms : List Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermListCheck fuel env typing lifetime terms expectedTy
+        expectedEnv) :
+    TermListTyping env.toEnv typing lifetime terms expectedTy
+      expectedEnv.toEnv :=
+  certificate.typing
+
+end CertifiedTermListCheck
+
+namespace CertifiedTermCheck
+
+def block {fuel : Nat} {env bodyEnv outEnv : FiniteEnv}
+    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
+    {terms : List Term} {ty : Ty}
+    (checked :
+      checkTermMatches? fuel env typing lifetime (.block blockLifetime terms)
+        ty outEnv = true)
+    (child : LifetimeChild lifetime blockLifetime)
+    (bodyCert :
+      CertifiedTermListCheck fuel env typing blockLifetime terms ty bodyEnv)
+    (wellFormed : WellFormedTy bodyEnv.toEnv ty lifetime)
+    (dropEq : outEnv.toEnv = bodyEnv.toEnv.dropLifetime blockLifetime) :
+    CertifiedTermCheck fuel env typing lifetime (.block blockLifetime terms) ty
+      outEnv :=
+  { checked := checked
+    typing := TermTyping.block child bodyCert.typing wellFormed dropEq }
+
+end CertifiedTermCheck
+
+/--
+Project facts from a proof-carrying borrow-checking certificate.
+
+Bare `borrow_check` proves closed `borrowCheck` goals by running the executable
+checker with the default public-example fuel and applying its soundness bridge.
+It also proves proof-carrying accepted, failed, and unknown witness goals from
+the corresponding executable booleans.  `borrow_check[n]` uses explicit fuel.
+`borrow_check[n, result]` proves exact closed `TermTyping` goals from a
+computed `CheckResult`.  `borrow_check[n, inEnv, outEnv]` proves exact
+term-level `TermTyping` or `TermListTyping` goals by running
+`checkTermMatches?` or `checkTermListMatches?` from the finite input
+environment to the finite output environment, for empty store typings and
+goals whose environments are written as `inEnv.toEnv` and `outEnv.toEnv`.
+`borrow_check using cert` exposes the proof stored in a proof-carrying
+certificate.
+-/
+syntax (name := borrow_check_tactic) "borrow_check" (" using " term)? : tactic
+syntax (name := borrow_check_fuel_tactic) "borrow_check" "[" term "]" : tactic
+syntax (name := borrow_check_result_tactic)
+  "borrow_check" "[" term ", " term "]" : tactic
+syntax (name := borrow_check_term_result_tactic)
+  "borrow_check" "[" term ", " term ", " term "]" : tactic
+
+/--
+Proof-carrying finite checker failure.
+
+This records only the executable failure classification: the program checker
+returned a non-unknown error message.  It deliberately does not contain a
+non-typability proof; use `CertifiedBorrowReject` for logical rejection.
+-/
+structure CertifiedBorrowFailure (fuel : Nat) (term : Term) : Type where
+  checked : borrowCheckFailed? fuel term = true
+
+namespace CertifiedBorrowFailure
+
+def found? {fuel : Nat} {term : Term}
+    (certificate? : Option (CertifiedBorrowFailure fuel term)) : Bool :=
+  certificate?.isSome
+
+theorem checkedFailure {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowFailure fuel term) :
+    borrowCheckFailed? fuel term = true :=
+  certificate.checked
+
+theorem checkerError {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowFailure fuel term) :
+    ∃ message,
+      checkProgram? fuel term = .error message ∧
+        checkerErrorUnknown? message = false := by
+  have h := certificate.checked
+  unfold borrowCheckFailed? borrowCheckVerdict? at h
+  cases hcheck : checkProgram? fuel term with
+  | ok result =>
+      simp [hcheck] at h
+  | error message =>
+      cases hunknown : checkerErrorUnknown? message
+      · exact ⟨message, rfl, hunknown⟩
+      · simp [hcheck, hunknown] at h
+
+theorem checkedFailure_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowFailure fuel term)} :
+    found? certificate? = true → borrowCheckFailed? fuel term = true := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.checkedFailure
+
+end CertifiedBorrowFailure
+
+/--
+Proof-carrying unknown checker result.
+
+This records that the executable checker returned an error classified as
+unknown, such as fuel exhaustion or an inference limitation.
+-/
+structure CertifiedBorrowUnknown (fuel : Nat) (term : Term) : Type where
+  checked : borrowUnknown? fuel term = true
+
+namespace CertifiedBorrowUnknown
+
+def found? {fuel : Nat} {term : Term}
+    (certificate? : Option (CertifiedBorrowUnknown fuel term)) : Bool :=
+  certificate?.isSome
+
+theorem checkedUnknown {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowUnknown fuel term) :
+    borrowUnknown? fuel term = true :=
+  certificate.checked
+
+theorem checkerError {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowUnknown fuel term) :
+    ∃ message,
+      checkProgram? fuel term = .error message ∧
+        checkerErrorUnknown? message = true := by
+  have h := certificate.checked
+  unfold borrowUnknown? borrowCheckVerdict? at h
+  cases hcheck : checkProgram? fuel term with
+  | ok result =>
+      simp [hcheck] at h
+  | error message =>
+      cases hunknown : checkerErrorUnknown? message
+      · simp [hcheck, hunknown] at h
+      · exact ⟨message, rfl, hunknown⟩
+
+theorem checkedUnknown_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowUnknown fuel term)} :
+    found? certificate? = true → borrowUnknown? fuel term = true := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.checkedUnknown
+
+end CertifiedBorrowUnknown
+
+def certifyBorrowFailure? (fuel : Nat) (term : Term) :
+    Option (CertifiedBorrowFailure fuel term) :=
+  if hchecked : borrowCheckFailed? fuel term = true then
+    some { checked := hchecked }
+  else
+    none
+
+theorem certifyBorrowFailure?_found_iff {fuel : Nat} {term : Term} :
+    CertifiedBorrowFailure.found? (certifyBorrowFailure? fuel term) = true ↔
+      borrowCheckFailed? fuel term = true := by
+  unfold CertifiedBorrowFailure.found? certifyBorrowFailure?
+  by_cases hchecked : borrowCheckFailed? fuel term = true <;> simp [hchecked]
+
+/--
+Proof-level reflection target for finite checker failures.
+
+This is the failed-verdict analogue of `borrowCheckWitness`: it says the
+checker produced a non-unknown failure witness, not that the program is
+logically untypable.
+-/
+def borrowCheckFailureWitness (fuel : Nat) (term : Term) : Prop :=
+  Nonempty (CertifiedBorrowFailure fuel term)
+
+theorem borrowCheckFailed?_eq_true_iff_witness {fuel : Nat} {term : Term} :
+    borrowCheckFailed? fuel term = true ↔
+      borrowCheckFailureWitness fuel term := by
+  constructor
+  · intro hfailed
+    exact ⟨{ checked := hfailed }⟩
+  · intro hwitness
+    rcases hwitness with ⟨certificate⟩
+    exact certificate.checkedFailure
+
+theorem borrowCheckFailureWitness_checked {fuel : Nat} {term : Term} :
+    borrowCheckFailureWitness fuel term →
+      borrowCheckFailed? fuel term = true := by
+  intro hwitness
+  exact (borrowCheckFailed?_eq_true_iff_witness).2 hwitness
+
+theorem borrowCheckFailureWitness_of_certifyBorrowFailure?
+    {fuel : Nat} {term : Term} :
+    CertifiedBorrowFailure.found? (certifyBorrowFailure? fuel term) = true →
+      borrowCheckFailureWitness fuel term := by
+  intro hfound
+  exact (borrowCheckFailed?_eq_true_iff_witness).1
+    ((certifyBorrowFailure?_found_iff).1 hfound)
+
+def certifyBorrowUnknown? (fuel : Nat) (term : Term) :
+    Option (CertifiedBorrowUnknown fuel term) :=
+  if hchecked : borrowUnknown? fuel term = true then
+    some { checked := hchecked }
+  else
+    none
+
+theorem certifyBorrowUnknown?_found_iff {fuel : Nat} {term : Term} :
+    CertifiedBorrowUnknown.found? (certifyBorrowUnknown? fuel term) = true ↔
+      borrowUnknown? fuel term = true := by
+  unfold CertifiedBorrowUnknown.found? certifyBorrowUnknown?
+  by_cases hchecked : borrowUnknown? fuel term = true <;> simp [hchecked]
+
+/--
+Proof-level reflection target for unknown checker results.
+-/
+def borrowUnknownWitness (fuel : Nat) (term : Term) : Prop :=
+  Nonempty (CertifiedBorrowUnknown fuel term)
+
+theorem borrowUnknown?_eq_true_iff_witness {fuel : Nat} {term : Term} :
+    borrowUnknown? fuel term = true ↔ borrowUnknownWitness fuel term := by
+  constructor
+  · intro hunknown
+    exact ⟨{ checked := hunknown }⟩
+  · intro hwitness
+    rcases hwitness with ⟨certificate⟩
+    exact certificate.checkedUnknown
+
+theorem borrowUnknownWitness_checked {fuel : Nat} {term : Term} :
+    borrowUnknownWitness fuel term → borrowUnknown? fuel term = true := by
+  intro hwitness
+  exact (borrowUnknown?_eq_true_iff_witness).2 hwitness
+
+theorem borrowUnknownWitness_of_certifyBorrowUnknown?
+    {fuel : Nat} {term : Term} :
+    CertifiedBorrowUnknown.found? (certifyBorrowUnknown? fuel term) = true →
+      borrowUnknownWitness fuel term := by
+  intro hfound
+  exact (borrowUnknown?_eq_true_iff_witness).1
+    ((certifyBorrowUnknown?_found_iff).1 hfound)
+
+namespace CertifiedTermReject
+
+theorem borrowReject {fuel : Nat} {term : Term}
+    (certificate :
+      CertifiedTermReject fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+        term) :
+    LwRust.Paper.borrowReject term :=
+  borrowReject_of_no_typing certificate.notyping
+
+end CertifiedTermReject
+
+/--
+Closed proof-carrying rejection result.
+
+This is the rejection-shaped counterpart of `CertifiedBorrowCheck`: a value of
+this type records both a finite executable checker failure and a proof that the
+closed source term has no declarative typing derivation.
+-/
+structure CertifiedBorrowReject (fuel : Nat) (term : Term) : Type where
+  certificate :
+    CertifiedTermReject fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+      term
+
+namespace CertifiedBorrowReject
+
+def ofTermReject {fuel : Nat} {term : Term}
+    (certificate :
+      CertifiedTermReject fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+        term) : CertifiedBorrowReject fuel term :=
+  { certificate := certificate }
+
+def found? {fuel : Nat} {term : Term}
+    (certificate? : Option (CertifiedBorrowReject fuel term)) : Bool :=
+  certificate?.isSome
+
+theorem checkedFailure {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowReject fuel term) :
+    borrowCheckFailed? fuel term = true := by
+  have hchecked := certificate.certificate.checked
+  unfold borrowCheckFailed? borrowCheckVerdict? checkProgram?
+  unfold checkTermFails? at hchecked
+  cases hcheck :
+      checkTerm? fuel FiniteEnv.empty StoreTyping.empty Lifetime.root term with
+  | ok result =>
+      simp [hcheck] at hchecked
+  | error message =>
+      cases hunknown : checkerErrorUnknown? message
+      · simp [hunknown]
+      · simp [hcheck, hunknown] at hchecked
+
+theorem borrowReject {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowReject fuel term) :
+    LwRust.Paper.borrowReject term :=
+  CertifiedTermReject.borrowReject certificate.certificate
+
+theorem checkedFailure_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowReject fuel term)} :
+    found? certificate? = true → borrowCheckFailed? fuel term = true := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.checkedFailure
+
+theorem borrowReject_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowReject fuel term)} :
+    found? certificate? = true → LwRust.Paper.borrowReject term := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.borrowReject
+
+end CertifiedBorrowReject
+
+theorem borrowUnknown?_zero_on_typable_unit :
+    borrowUnknown? 0 (.val .unit) = true ∧ borrowCheck (.val .unit) := by
+  constructor
+  · native_decide
+  · exact borrowCheck_of_typing (TermTyping.const ValueTyping.unit)
+
+/--
+Fixed-fuel `borrowCheck? = false` is not a sound logical rejection criterion:
+fuel exhaustion can make a typable program unknown, and `borrowCheck?` maps
+unknown to false.
+-/
+theorem borrowCheck?_false_not_rejection_complete :
+    ¬ (∀ fuel term, borrowCheck? fuel term = false → borrowReject term) := by
+  intro hreject
+  rcases borrowUnknown?_zero_on_typable_unit with ⟨hunknown, htyped⟩
+  exact hreject 0 (.val .unit)
+    (borrowCheck?_false_of_borrowUnknown? hunknown) htyped
+
+namespace CheckedTermTypingWitness
+
+theorem borrowCheck {fuel : Nat} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (witness :
+      CheckedTermTypingWitness fuel FiniteEnv.empty StoreTyping.empty
+        Lifetime.root term expectedTy expectedEnv) :
+    LwRust.Paper.borrowCheck term :=
+  ⟨expectedTy, expectedEnv.toEnv, witness.typing⟩
+
+end CheckedTermTypingWitness
+
+namespace CertifiedTermCheck
+
+theorem borrowCheck {fuel : Nat} {term : Term} {expectedTy : Ty}
+    {expectedEnv : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+        term expectedTy expectedEnv) :
+    LwRust.Paper.borrowCheck term :=
+  ⟨expectedTy, expectedEnv.toEnv, certificate.typing⟩
+
+end CertifiedTermCheck
+
+/--
+Closed proof-carrying checker result.
+
+This is the certificate-shaped counterpart of `borrowCheck? fuel term`: a value
+of this type records the executable successful run and the corresponding
+declarative typing derivation from the empty environment.
+-/
+structure CertifiedBorrowCheck (fuel : Nat) (term : Term) : Type where
+  ty : Ty
+  env : FiniteEnv
+  certificate :
+    CertifiedTermCheck fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+      term ty env
+
+namespace CertifiedBorrowCheck
+
+def ofTermCheck {fuel : Nat} {term : Term} {ty : Ty} {env : FiniteEnv}
+    (certificate :
+      CertifiedTermCheck fuel FiniteEnv.empty StoreTyping.empty Lifetime.root
+        term ty env) : CertifiedBorrowCheck fuel term :=
+  { ty := ty
+    env := env
+    certificate := certificate }
+
+def found? {fuel : Nat} {term : Term}
+    (certificate? : Option (CertifiedBorrowCheck fuel term)) : Bool :=
+  certificate?.isSome
+
+theorem checked {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowCheck fuel term) :
+    borrowCheck? fuel term = true := by
+  rcases certificate with ⟨ty, env, termCertificate⟩
+  have hmatches := termCertificate.checked
+  unfold borrowCheck? borrowCheckVerdict? checkProgram?
+  unfold checkTermMatches? at hmatches
+  cases hcheck :
+      checkTerm? fuel FiniteEnv.empty StoreTyping.empty Lifetime.root term with
+  | error message =>
+      simp [hcheck] at hmatches
+  | ok result =>
+      simp
+
+theorem borrowCheck {fuel : Nat} {term : Term}
+    (certificate : CertifiedBorrowCheck fuel term) :
+    LwRust.Paper.borrowCheck term :=
+  ⟨certificate.ty, certificate.env.toEnv, certificate.certificate.typing⟩
+
+theorem borrowCheck_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowCheck fuel term)} :
+    found? certificate? = true → LwRust.Paper.borrowCheck term := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.borrowCheck
+
+theorem checked_of_found? {fuel : Nat} {term : Term}
+    {certificate? : Option (CertifiedBorrowCheck fuel term)} :
+    found? certificate? = true → borrowCheck? fuel term = true := by
+  cases certificate? with
+  | none =>
+      simp [found?]
+  | some certificate =>
+      intro _h
+      exact certificate.checked
+
+end CertifiedBorrowCheck
+
 theorem borrowCheck_of_checkProgram?_sound {fuel : Nat} {term : Term}
     (sound :
       ∀ result,
@@ -91,116 +840,6 @@ private theorem tyLoanFree_sound : ∀ {ty : Ty},
       cases hcontains with
       | tyBox hinner =>
           exact tyLoanFree_sound h mutable targets hinner
-
-private theorem tySameShape_sound_aux (left : Ty) :
-    ∀ right, tySameShape left right = true → Ty.sameShape left right := by
-  refine Ty.rec
-    (motive_1 := fun left =>
-      ∀ right, tySameShape left right = true → Ty.sameShape left right)
-    (motive_2 := fun _ => True)
-    ?unit ?int ?borrow ?box ?bool ?partialTy ?partialBox ?partialUndef left
-  · intro right h
-    cases right <;> simp [tySameShape, Ty.sameShape] at h ⊢
-  · intro right h
-    cases right <;> simp [tySameShape, Ty.sameShape] at h ⊢
-  · intro mutable targets right h
-    cases right <;> simp [tySameShape, Ty.sameShape] at h ⊢
-    exact h
-  · intro inner ih right h
-    cases right <;> simp [tySameShape, Ty.sameShape] at h ⊢
-    exact ih _ h
-  · intro right h
-    cases right <;> simp [tySameShape, Ty.sameShape] at h ⊢
-  · intro _ _; trivial
-  · intro _ _; trivial
-  · intro _ _; trivial
-
-private theorem tySameShape_sound {left right : Ty} :
-    tySameShape left right = true → Ty.sameShape left right :=
-  tySameShape_sound_aux left right
-
-private theorem tySameShape_complete_aux (left : Ty) :
-    ∀ right, Ty.sameShape left right → tySameShape left right = true := by
-  refine Ty.rec
-    (motive_1 := fun left =>
-      ∀ right, Ty.sameShape left right → tySameShape left right = true)
-    (motive_2 := fun _ => True)
-    ?unit ?int ?borrow ?box ?bool ?partialTy ?partialBox ?partialUndef left
-  · intro right h
-    cases right <;> simp [Ty.sameShape, tySameShape] at h ⊢
-  · intro right h
-    cases right <;> simp [Ty.sameShape, tySameShape] at h ⊢
-  · intro mutable targets right h
-    cases right <;> simp [Ty.sameShape, tySameShape] at h ⊢
-    exact h
-  · intro inner ih right h
-    cases right <;> simp [Ty.sameShape, tySameShape] at h ⊢
-    exact ih _ h
-  · intro right h
-    cases right <;> simp [Ty.sameShape, tySameShape] at h ⊢
-  · intro _ _; trivial
-  · intro _ _; trivial
-  · intro _ _; trivial
-
-private theorem tySameShape_complete {left right : Ty} :
-    Ty.sameShape left right → tySameShape left right = true :=
-  tySameShape_complete_aux left right
-
-private theorem partialTySameShape_sound_aux (left : PartialTy) :
-    ∀ right,
-      partialTySameShape left right = true → PartialTy.sameShape left right := by
-  refine PartialTy.rec
-    (motive_1 := fun _ => True)
-    (motive_2 := fun left =>
-      ∀ right,
-        partialTySameShape left right = true → PartialTy.sameShape left right)
-    ?unit ?int ?borrow ?boxTy ?bool ?ty ?box ?undef left
-  · trivial
-  · trivial
-  · intro _ _; trivial
-  · intro _ _; trivial
-  · trivial
-  · intro ty _ right h
-    cases right <;> simp [partialTySameShape, PartialTy.sameShape] at h ⊢
-    exact tySameShape_sound h
-  · intro inner ih right h
-    cases right <;> simp [partialTySameShape, PartialTy.sameShape] at h ⊢
-    exact ih _ h
-  · intro ty _ right h
-    cases right <;> simp [partialTySameShape, PartialTy.sameShape] at h ⊢
-    exact tySameShape_sound h
-
-private theorem partialTySameShape_sound {left right : PartialTy} :
-    partialTySameShape left right = true → PartialTy.sameShape left right :=
-  partialTySameShape_sound_aux left right
-
-private theorem partialTySameShape_complete_aux (left : PartialTy) :
-    ∀ right,
-      PartialTy.sameShape left right → partialTySameShape left right = true := by
-  refine PartialTy.rec
-    (motive_1 := fun _ => True)
-    (motive_2 := fun left =>
-      ∀ right,
-        PartialTy.sameShape left right → partialTySameShape left right = true)
-    ?unit ?int ?borrow ?boxTy ?bool ?ty ?box ?undef left
-  · trivial
-  · trivial
-  · intro _ _; trivial
-  · intro _ _; trivial
-  · trivial
-  · intro ty _ right h
-    cases right <;> simp [PartialTy.sameShape, partialTySameShape] at h ⊢
-    exact tySameShape_complete h
-  · intro inner ih right h
-    cases right <;> simp [PartialTy.sameShape, partialTySameShape] at h ⊢
-    exact ih _ h
-  · intro ty _ right h
-    cases right <;> simp [PartialTy.sameShape, partialTySameShape] at h ⊢
-    exact tySameShape_complete h
-
-private theorem partialTySameShape_complete {left right : PartialTy} :
-    PartialTy.sameShape left right → partialTySameShape left right = true :=
-  partialTySameShape_complete_aux left right
 
 mutual
   private theorem tyEqv_sameShape {left right : Ty} :
@@ -361,244 +1000,6 @@ private theorem partialTyStrengthens_borrow_append {mutable : Bool}
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hsubLeft hmem
         · exact hsubRight hmem))
-
-private theorem partialTyStrengthens_undef_to_undef_inv {left right : Ty} :
-    PartialTyStrengthens (.undef left) (.undef right) →
-      PartialTyStrengthens (.ty left) (.ty right) := by
-  intro h
-  cases h with
-  | reflex =>
-      exact PartialTyStrengthens.reflex
-  | undefLeft hinner =>
-      exact hinner
-
-private theorem partialTyJoin_ty_undef {left right join : Ty} :
-    PartialTyJoin (.ty left) (.ty right) (.ty join) →
-      PartialTyJoin (.ty left) (.undef right) (.undef join) := by
-  intro hjoin
-  constructor
-  · intro candidate hcandidate
-    simp at hcandidate
-    rcases hcandidate with hcandidate | hcandidate
-    · subst hcandidate
-      exact PartialTyStrengthens.intoUndef
-        (PartialTyUnion.left_strengthens hjoin)
-    · subst hcandidate
-      exact PartialTyStrengthens.undefLeft
-        (PartialTyUnion.right_strengthens hjoin)
-  · intro upper hupper
-    have hleftUpper : PartialTyStrengthens (.ty left) upper :=
-      hupper (by simp)
-    have hrightUpper : PartialTyStrengthens (.undef right) upper :=
-      hupper (by simp)
-    cases upper with
-    | ty upperTy =>
-        exact False.elim (PartialTyStrengthens.not_undef_to_ty hrightUpper)
-    | box upperInner =>
-        exact False.elim (PartialTyStrengthens.not_undef_to_box hrightUpper)
-    | undef upperTy =>
-        exact PartialTyStrengthens.undefLeft
-          (hjoin.2 (by
-            intro candidate hcandidate
-            simp at hcandidate
-            rcases hcandidate with hcandidate | hcandidate
-            · subst hcandidate
-              exact PartialTyStrengthens.ty_to_undef_inv hleftUpper
-            · subst hcandidate
-              exact partialTyStrengthens_undef_to_undef_inv hrightUpper))
-
-private theorem partialTyJoin_undef_ty {left right join : Ty} :
-    PartialTyJoin (.ty left) (.ty right) (.ty join) →
-      PartialTyJoin (.undef left) (.ty right) (.undef join) := by
-  intro hjoin
-  exact PartialTyUnion.symm
-    (partialTyJoin_ty_undef (PartialTyUnion.symm hjoin))
-
-private theorem partialTyJoin_undef_undef {left right join : Ty} :
-    PartialTyJoin (.ty left) (.ty right) (.ty join) →
-      PartialTyJoin (.undef left) (.undef right) (.undef join) := by
-  intro hjoin
-  constructor
-  · intro candidate hcandidate
-    simp at hcandidate
-    rcases hcandidate with hcandidate | hcandidate
-    · subst hcandidate
-      exact PartialTyStrengthens.undefLeft
-        (PartialTyUnion.left_strengthens hjoin)
-    · subst hcandidate
-      exact PartialTyStrengthens.undefLeft
-        (PartialTyUnion.right_strengthens hjoin)
-  · intro upper hupper
-    have hleftUpper : PartialTyStrengthens (.undef left) upper :=
-      hupper (by simp)
-    have hrightUpper : PartialTyStrengthens (.undef right) upper :=
-      hupper (by simp)
-    cases upper with
-    | ty upperTy =>
-        exact False.elim (PartialTyStrengthens.not_undef_to_ty hleftUpper)
-    | box upperInner =>
-        exact False.elim (PartialTyStrengthens.not_undef_to_box hleftUpper)
-    | undef upperTy =>
-        exact PartialTyStrengthens.undefLeft
-          (hjoin.2 (by
-            intro candidate hcandidate
-            simp at hcandidate
-            rcases hcandidate with hcandidate | hcandidate
-            · subst hcandidate
-              exact partialTyStrengthens_undef_to_undef_inv hleftUpper
-            · subst hcandidate
-              exact partialTyStrengthens_undef_to_undef_inv hrightUpper))
-
-mutual
-  private theorem tyJoin?_sound :
-      ∀ {left right join : Ty},
-        tyJoin? left right = some join →
-          PartialTyJoin (.ty left) (.ty right) (.ty join) := by
-    intro left
-    cases left with
-    | unit =>
-        intro right join h
-        cases right <;> simp [tyJoin?] at h
-        subst h
-        exact PartialTyJoin.self (.ty .unit)
-    | int =>
-        intro right join h
-        cases right <;> simp [tyJoin?] at h
-        subst h
-        exact PartialTyJoin.self (.ty .int)
-    | bool =>
-        intro right join h
-        cases right <;> simp [tyJoin?] at h
-        subst h
-        exact PartialTyJoin.self (.ty .bool)
-    | borrow mutable leftTargets =>
-        intro right join h
-        cases right <;> simp [tyJoin?] at h
-        next mutable' rightTargets =>
-          by_cases hmutable : mutable = mutable'
-          · subst hmutable
-            simp at h
-            cases h
-            constructor
-            · intro candidate hcandidate
-              simp at hcandidate
-              rcases hcandidate with hcandidate | hcandidate
-              · subst hcandidate
-                exact PartialTyStrengthens.borrow
-                  (by
-                    intro target htarget
-                    exact mem_unionLVals.mpr (Or.inl htarget))
-              · subst hcandidate
-                exact PartialTyStrengthens.borrow
-                  (by
-                    intro target htarget
-                    exact mem_unionLVals.mpr (Or.inr htarget))
-            · intro upper hupper
-              have hleftUpper :
-                  PartialTyStrengthens
-                    (.ty (.borrow mutable leftTargets)) upper :=
-                hupper (by simp)
-              have hrightUpper :
-                  PartialTyStrengthens
-                    (.ty (.borrow mutable rightTargets)) upper :=
-                hupper (by simp)
-              cases hleftUpper with
-              | reflex =>
-                  have hsubRight :=
-                    PartialTyStrengthens.borrow_subset hrightUpper
-                  exact PartialTyStrengthens.borrow (by
-                    intro target htarget
-                    rcases mem_unionLVals.mp htarget with hmem | hmem
-                    · exact hmem
-                    · exact hsubRight hmem)
-              | borrow hsubLeft =>
-                  have hsubRight :=
-                    PartialTyStrengthens.borrow_subset hrightUpper
-                  exact PartialTyStrengthens.borrow (by
-                    intro target htarget
-                    rcases mem_unionLVals.mp htarget with hmem | hmem
-                    · exact hsubLeft hmem
-                    · exact hsubRight hmem)
-              | intoUndef hinner =>
-                  rcases PartialTyStrengthens.from_borrow_inv hinner with
-                    ⟨targetTargets, rfl, hsubLeft⟩
-                  have hsubRight : rightTargets ⊆ targetTargets := by
-                    cases hrightUpper with
-                    | intoUndef hinner' =>
-                        exact PartialTyStrengthens.borrow_subset hinner'
-                  exact PartialTyStrengthens.intoUndef
-                    (PartialTyStrengthens.borrow (by
-                      intro target htarget
-                      rcases mem_unionLVals.mp htarget with hmem | hmem
-                      · exact hsubLeft hmem
-                      · exact hsubRight hmem))
-          · simp [hmutable] at h
-    | box leftInner =>
-        intro right join h
-        cases right <;> simp [tyJoin?] at h
-        next rightInner =>
-          cases hinner : tyJoin? leftInner rightInner with
-          | none =>
-              simp [hinner] at h
-          | some inner =>
-              simp [hinner] at h
-              cases h
-              exact PartialTyUnion.tyBox (tyJoin?_sound hinner)
-
-end
-
-private theorem partialTyJoin?_sound :
-    ∀ {left right join : PartialTy},
-      partialTyJoin? left right = some join →
-        PartialTyJoin left right join
-  | .ty left, .ty right, join, h => by
-      cases hty : tyJoin? left right with
-      | none =>
-          simp [partialTyJoin?, hty] at h
-      | some ty =>
-          simp [partialTyJoin?, hty] at h
-          cases h
-          exact tyJoin?_sound hty
-  | .ty left, .box right, join, h => by
-      simp [partialTyJoin?] at h
-  | .ty left, .undef right, join, h => by
-      cases hty : tyJoin? left right with
-      | none =>
-          simp [partialTyJoin?, hty] at h
-      | some ty =>
-          simp [partialTyJoin?, hty] at h
-          cases h
-          exact partialTyJoin_ty_undef (tyJoin?_sound hty)
-  | .box left, .ty right, join, h => by
-      simp [partialTyJoin?] at h
-  | .box left, .box right, join, h => by
-      cases hinner : partialTyJoin? left right with
-      | none =>
-          simp [partialTyJoin?, hinner] at h
-      | some inner =>
-          simp [partialTyJoin?, hinner] at h
-          cases h
-          exact PartialTyUnion.box (partialTyJoin?_sound hinner)
-  | .box left, .undef right, join, h => by
-      simp [partialTyJoin?] at h
-  | .undef left, .ty right, join, h => by
-      cases hty : tyJoin? left right with
-      | none =>
-          simp [partialTyJoin?, hty] at h
-      | some ty =>
-          simp [partialTyJoin?, hty] at h
-          cases h
-          exact partialTyJoin_undef_ty (tyJoin?_sound hty)
-  | .undef left, .box right, join, h => by
-      simp [partialTyJoin?] at h
-  | .undef left, .undef right, join, h => by
-      cases hty : tyJoin? left right with
-      | none =>
-          simp [partialTyJoin?, hty] at h
-      | some ty =>
-          simp [partialTyJoin?, hty] at h
-          cases h
-          exact partialTyJoin_undef_undef (tyJoin?_sound hty)
 
 private theorem partialTyUnion_borrow_mem_iff {mutable : Bool}
     {leftTargets rightTargets unionTargets : List LVal} {target : LVal} :
@@ -2322,36 +2723,6 @@ private theorem lookup_update_ne (env : FiniteEnv) {updated name : Name}
     (FiniteEnv.toEnv_update env updated slot)
   simpa [FiniteEnv.toEnv, Env.update, hne] using h
 
-private theorem envBorrowTargetsFuelBounded_empty (fuel : Nat) :
-    envBorrowTargetsFuelBounded fuel FiniteEnv.empty := by
-  intro name slot hlookup
-  simp [FiniteEnv.empty, FiniteEnv.lookup, FiniteEnv.lookupEntries] at hlookup
-
-private theorem envBorrowTargetsFuelBounded_update {fuel : Nat}
-    {env : FiniteEnv} {name : Name} {slot : EnvSlot} :
-    envBorrowTargetsFuelBounded fuel env →
-      partialTyBorrowTargetsFuelBounded fuel slot.ty →
-        envBorrowTargetsFuelBounded fuel (env.update name slot) := by
-  intro henv hslot candidate candidateSlot hlookup
-  by_cases hcandidate : candidate = name
-  · subst hcandidate
-    rw [lookup_update_eq] at hlookup
-    cases hlookup
-    exact hslot
-  · rw [lookup_update_ne env slot hcandidate] at hlookup
-    exact henv hlookup
-
-private theorem envBorrowTargetsFuelBounded_contains {fuel : Nat}
-    {env : FiniteEnv} {name : Name} {slot : EnvSlot}
-    {mutable : Bool} {targets : List LVal} :
-    envBorrowTargetsFuelBounded fuel env →
-      env.lookup name = some slot →
-        PartialTyContains slot.ty (.borrow mutable targets) →
-          ∀ target, target ∈ targets → lvalCheckerFuelBound target < fuel := by
-  intro henv hslot hcontains
-  exact partialTyBorrowTargetsFuelBounded_contains
-    (henv hslot) hcontains rfl
-
 private theorem support_foldl_mem_iff
     {entries : List (Name × EnvSlot)} {acc : List Name} {name : Name} :
     name ∈ entries.foldl
@@ -2473,57 +2844,6 @@ private theorem lookup_none_of_not_mem_support {env : FiniteEnv}
   | some slot =>
       exact False.elim (hnot (lookup_mem_support hlookup))
 
-private theorem mem_insertName {names : List Name} {candidate name : Name} :
-    candidate ∈ insertName names name ↔ candidate ∈ names ∨ candidate = name := by
-  unfold insertName
-  by_cases hnameMem : name ∈ names
-  · have hif : (if names.contains name then names else names ++ [name]) =
-        names := by
-      simp [hnameMem]
-    rw [hif]
-    constructor
-    · intro hmem
-      exact Or.inl hmem
-    · intro hmem
-      rcases hmem with hmem | hmem
-      · exact hmem
-      · subst hmem
-        exact hnameMem
-  · constructor
-    · intro hmem
-      have hif : (if names.contains name then names else names ++ [name]) =
-          names ++ [name] := by
-        simp [hnameMem]
-      rw [hif] at hmem
-      rcases List.mem_append.mp hmem with hmemNames | hmemSingle
-      · exact Or.inl hmemNames
-      · simp at hmemSingle
-        exact Or.inr hmemSingle
-    · intro hmem
-      have hif : (if names.contains name then names else names ++ [name]) =
-          names ++ [name] := by
-        simp [hnameMem]
-      rw [hif]
-      rcases hmem with hmem | hmem
-      · exact List.mem_append_left [name] hmem
-      · subst hmem
-        exact List.mem_append_right names (by simp)
-
-private theorem mem_unionNames {left right : List Name} {candidate : Name} :
-    candidate ∈ unionNames left right ↔
-      candidate ∈ left ∨ candidate ∈ right := by
-  unfold unionNames
-  induction right generalizing left with
-  | nil =>
-      simp
-  | cons name rest ih =>
-      rw [List.foldl_cons, ih]
-      rw [mem_insertName]
-      by_cases hleft : candidate ∈ left <;>
-        by_cases hname : candidate = name <;>
-          by_cases hrest : candidate ∈ rest <;>
-            simp [List.mem_cons, hleft, hname, hrest]
-
 private theorem sameBindings_lookup_eq {left right : FiniteEnv} :
     left.sameBindings right = true →
       ∀ name, left.lookup name = right.lookup name := by
@@ -2586,311 +2906,6 @@ private theorem checkResult_matches_sound {result : CheckResult}
   · simp [hty] at h
     exact ⟨hty, sameBindings_toEnv_eq h⟩
   · simp [hty] at h
-
-private def EnvJoinSlotSpec
-    (left right join : Option EnvSlot) : Prop :=
-  match left, right, join with
-  | none, none, none => True
-  | some leftSlot, some rightSlot, some joinSlot =>
-      leftSlot.lifetime = rightSlot.lifetime ∧
-        joinSlot.lifetime = leftSlot.lifetime ∧
-          PartialTyJoin leftSlot.ty rightSlot.ty joinSlot.ty
-  | _, _, _ => False
-
-private theorem envJoinStep?_lookup_eq_of_ne {left right result result' : FiniteEnv}
-    {stepName name : Name} :
-    envJoinStep? left right result stepName = some result' →
-      name ≠ stepName →
-        result'.lookup name = result.lookup name := by
-  intro hstep hne
-  unfold envJoinStep? at hstep
-  cases hleft : left.lookup stepName <;>
-    cases hright : right.lookup stepName <;> simp [hleft, hright] at hstep
-  · cases hstep
-    rfl
-  · rename_i leftSlot rightSlot
-    by_cases hlife : leftSlot.lifetime = rightSlot.lifetime
-    · cases hjoin : partialTyJoin? leftSlot.ty rightSlot.ty with
-      | none =>
-          simp [hlife, hjoin] at hstep
-      | some joinedTy =>
-          simp [hlife, hjoin] at hstep
-          have hstepEq :
-              result.update stepName
-                  { ty := joinedTy, lifetime := rightSlot.lifetime } =
-                result' :=
-            hstep
-          rw [← hstepEq]
-          exact lookup_update_ne result
-            { ty := joinedTy, lifetime := rightSlot.lifetime } hne
-    · simp [hlife] at hstep
-
-private theorem envJoinNames?_lookup_eq_of_not_mem
-    {left right result out : FiniteEnv} {names : List Name} {name : Name} :
-    envJoinNames? left right names result = some out →
-      name ∉ names →
-        out.lookup name = result.lookup name := by
-  induction names generalizing result with
-  | nil =>
-      intro hrun _hnot
-      simp [envJoinNames?] at hrun
-      cases hrun
-      rfl
-  | cons head rest ih =>
-      intro hrun hnot
-      simp [envJoinNames?] at hrun
-      cases hstep : envJoinStep? left right result head with
-      | none =>
-          simp [hstep] at hrun
-      | some result' =>
-          simp [hstep] at hrun
-          have hne : name ≠ head := by
-            intro h
-            apply hnot
-            simp [h]
-          have hnotRest : name ∉ rest := by
-            intro hmem
-            apply hnot
-            exact List.mem_cons_of_mem _ hmem
-          rw [ih hrun hnotRest]
-          exact envJoinStep?_lookup_eq_of_ne hstep hne
-
-private theorem envJoinNames?_impossible_of_left_only
-    {left right result out : FiniteEnv} {names : List Name}
-    {name : Name} {leftSlot : EnvSlot} :
-    name ∈ names →
-      left.lookup name = some leftSlot →
-        right.lookup name = none →
-          envJoinNames? left right names result = some out →
-            False := by
-  induction names generalizing result with
-  | nil =>
-      intro hmem _ _ _
-      cases hmem
-  | cons head rest ih =>
-      intro hmem hleft hright hrun
-      simp [envJoinNames?] at hrun
-      cases hmem with
-      | head =>
-          simp [envJoinStep?, hleft, hright] at hrun
-      | tail _ htail =>
-          cases hstep : envJoinStep? left right result head with
-          | none =>
-              simp [hstep] at hrun
-          | some result' =>
-              simp [hstep] at hrun
-              exact ih htail hleft hright hrun
-
-private theorem envJoinNames?_impossible_of_right_only
-    {left right result out : FiniteEnv} {names : List Name}
-    {name : Name} {rightSlot : EnvSlot} :
-    name ∈ names →
-      left.lookup name = none →
-        right.lookup name = some rightSlot →
-          envJoinNames? left right names result = some out →
-            False := by
-  induction names generalizing result with
-  | nil =>
-      intro hmem _ _ _
-      cases hmem
-  | cons head rest ih =>
-      intro hmem hleft hright hrun
-      simp [envJoinNames?] at hrun
-      cases hmem with
-      | head =>
-          simp [envJoinStep?, hleft, hright] at hrun
-      | tail _ htail =>
-          cases hstep : envJoinStep? left right result head with
-          | none =>
-              simp [hstep] at hrun
-          | some result' =>
-              simp [hstep] at hrun
-              exact ih htail hleft hright hrun
-
-private theorem envJoinNames?_lookup_join_of_mem
-    {left right result out : FiniteEnv} {names : List Name}
-    {name : Name} {leftSlot rightSlot : EnvSlot} :
-    name ∈ names →
-      left.lookup name = some leftSlot →
-        right.lookup name = some rightSlot →
-          envJoinNames? left right names result = some out →
-            ∃ joinTy,
-              leftSlot.lifetime = rightSlot.lifetime ∧
-                partialTyJoin? leftSlot.ty rightSlot.ty = some joinTy ∧
-                  out.lookup name =
-                    some { ty := joinTy, lifetime := leftSlot.lifetime } := by
-  induction names generalizing result with
-  | nil =>
-      intro hmem _ _ _
-      cases hmem
-  | cons head rest ih =>
-      intro hmem hleft hright hrun
-      simp [envJoinNames?] at hrun
-      cases hstep : envJoinStep? left right result head with
-      | none =>
-          simp [hstep] at hrun
-      | some result' =>
-          simp [hstep] at hrun
-          cases hmem with
-          | head =>
-              unfold envJoinStep? at hstep
-              simp [hleft, hright] at hstep
-              by_cases hlife : leftSlot.lifetime = rightSlot.lifetime
-              · cases hjoin : partialTyJoin? leftSlot.ty rightSlot.ty with
-                | none =>
-                    simp [hlife, hjoin] at hstep
-                | some joinTy =>
-                    simp [hlife, hjoin] at hstep
-                    have hstepEq :
-                        result' =
-                          result.update name
-                            { ty := joinTy, lifetime := rightSlot.lifetime } :=
-                      hstep.symm
-                    by_cases hmemRest : name ∈ rest
-                    · rcases ih hmemRest hleft hright hrun with
-                        ⟨joinTy', hlife', hjoin', hlookup'⟩
-                      have hjoinEq : joinTy' = joinTy :=
-                        Option.some.inj (hjoin'.symm.trans hjoin)
-                      subst joinTy'
-                      refine ⟨joinTy, hlife, ?_, hlookup'⟩
-                      simpa [hjoin]
-                    · have hpreserve :=
-                        envJoinNames?_lookup_eq_of_not_mem hrun hmemRest
-                      rw [hpreserve, hstepEq]
-                      refine ⟨joinTy, hlife, ?_, ?_⟩
-                      · simpa [hjoin]
-                      · simpa [hlife] using
-                          (lookup_update_eq result name
-                            { ty := joinTy, lifetime := rightSlot.lifetime })
-              · simp [hlife] at hstep
-          | tail _ htail =>
-              exact ih htail hleft hright hrun
-
-private theorem envJoin?_slotSpec {left right join : FiniteEnv} :
-    envJoin? left right = some join →
-      ∀ name,
-        EnvJoinSlotSpec (left.lookup name) (right.lookup name)
-          (join.lookup name) := by
-  intro hjoin name
-  unfold envJoin? at hjoin
-  let names := unionNames left.support right.support
-  cases hleft : left.lookup name with
-  | none =>
-      cases hright : right.lookup name with
-      | none =>
-          have hnot : name ∉ names := by
-            intro hmem
-            rcases (mem_unionNames.mp hmem) with hmemLeft | hmemRight
-            · rcases (mem_support_iff_lookup_isSome.mp hmemLeft) with
-                ⟨slot, hslot⟩
-              rw [hleft] at hslot
-              cases hslot
-            · rcases (mem_support_iff_lookup_isSome.mp hmemRight) with
-                ⟨slot, hslot⟩
-              rw [hright] at hslot
-              cases hslot
-          have hlookup :
-              join.lookup name = (FiniteEnv.empty).lookup name :=
-            envJoinNames?_lookup_eq_of_not_mem (left := left) (right := right)
-              (result := FiniteEnv.empty) hjoin hnot
-          rw [hlookup]
-          simp [EnvJoinSlotSpec, hleft, hright, FiniteEnv.empty,
-            FiniteEnv.lookup, FiniteEnv.lookupEntries]
-      | some rightSlot =>
-          have hmemNames : name ∈ names := by
-            apply mem_unionNames.mpr
-            exact Or.inr (lookup_mem_support hright)
-          exact False.elim
-            (envJoinNames?_impossible_of_right_only hmemNames hleft hright
-              hjoin)
-  | some leftSlot =>
-      cases hright : right.lookup name with
-      | none =>
-          have hmemNames : name ∈ names := by
-            apply mem_unionNames.mpr
-            exact Or.inl (lookup_mem_support hleft)
-          exact False.elim
-            (envJoinNames?_impossible_of_left_only hmemNames hleft hright
-              hjoin)
-      | some rightSlot =>
-          have hmemNames : name ∈ names := by
-            apply mem_unionNames.mpr
-            exact Or.inl (lookup_mem_support hleft)
-          rcases envJoinNames?_lookup_join_of_mem hmemNames hleft hright
-              hjoin with
-            ⟨joinTy, hlife, htyJoin, hlookup⟩
-          simp [hleft, hright, EnvJoinSlotSpec]
-          rw [hlookup]
-          exact ⟨hlife, rfl, partialTyJoin?_sound htyJoin⟩
-
-private theorem envJoinSlotSpec_sound {left right join : FiniteEnv}
-    (hspec :
-      ∀ name,
-        EnvJoinSlotSpec (left.lookup name) (right.lookup name)
-          (join.lookup name)) :
-    EnvJoin left.toEnv right.toEnv join.toEnv := by
-  constructor
-  · intro candidate hcandidate name
-    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
-    rcases hcandidate with hcandidate | hcandidate <;> subst hcandidate
-    · specialize hspec name
-      cases hleft : left.lookup name <;>
-        cases hright : right.lookup name <;>
-        cases hjoin : join.lookup name <;>
-        simp [EnvJoinSlotSpec, FiniteEnv.toEnv, hleft, hright, hjoin] at hspec ⊢
-      rename_i leftSlot rightSlot joinSlot
-      rcases hspec with ⟨_hlifeRight, hlifeJoin, htyJoin⟩
-      exact ⟨hlifeJoin.symm, PartialTyUnion.left_strengthens htyJoin⟩
-    · specialize hspec name
-      cases hleft : left.lookup name <;>
-        cases hright : right.lookup name <;>
-        cases hjoin : join.lookup name <;>
-        simp [EnvJoinSlotSpec, FiniteEnv.toEnv, hleft, hright, hjoin] at hspec ⊢
-      rename_i leftSlot rightSlot joinSlot
-      rcases hspec with ⟨hlifeRight, hlifeJoin, htyJoin⟩
-      exact ⟨hlifeRight.symm.trans hlifeJoin.symm,
-        PartialTyUnion.right_strengthens htyJoin⟩
-  · intro upper hupper name
-    have hleftUpper : left.toEnv ≤ upper :=
-      hupper (by simp)
-    have hrightUpper : right.toEnv ≤ upper :=
-      hupper (by simp)
-    specialize hspec name
-    cases hleft : left.lookup name <;>
-      cases hright : right.lookup name <;>
-      cases hjoin : join.lookup name <;>
-      simp [EnvJoinSlotSpec, FiniteEnv.toEnv, hleft, hright, hjoin] at hspec ⊢
-    · cases hupperSlot : upper.slotAt name with
-      | none =>
-          simp [FiniteEnv.toEnv, hjoin, hupperSlot]
-      | some upperSlot =>
-          have hleftAt := hleftUpper name
-          simp [FiniteEnv.toEnv, hleft, hupperSlot] at hleftAt
-    · rcases hspec with ⟨hlifeRight, hlifeJoin, htyJoin⟩
-      cases hupperSlot : upper.slotAt name with
-      | none =>
-          have hleftAt := hleftUpper name
-          simp [FiniteEnv.toEnv, hleft, hupperSlot] at hleftAt
-      | some upperSlot =>
-          have hleftAt := hleftUpper name
-          have hrightAt := hrightUpper name
-          simp [FiniteEnv.toEnv, hleft, hright, hupperSlot] at hleftAt hrightAt
-          rcases hleftAt with ⟨hlifeLeftUpper, hleftLeUpper⟩
-          rcases hrightAt with ⟨_hlifeRightUpper, hrightLeUpper⟩
-          exact ⟨hlifeJoin.trans hlifeLeftUpper, htyJoin.2 (by
-            intro candidate hcandidate
-            simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
-            rcases hcandidate with hcandidate | hcandidate
-            · subst hcandidate
-              exact hleftLeUpper
-            · subst hcandidate
-              exact hrightLeUpper)⟩
-
-private theorem envJoin?_sound {left right join : FiniteEnv} :
-    envJoin? left right = some join →
-      EnvJoin left.toEnv right.toEnv join.toEnv := by
-  intro h
-  exact envJoinSlotSpec_sound (envJoin?_slotSpec h)
 
 mutual
   private theorem updateAtPath?_sound :
@@ -3100,18 +3115,6 @@ mutual
       | exact Prod.Lex.right _ (Prod.Lex.left _ _ (by omega))
       | exact Prod.Lex.right _ (Prod.Lex.right _ (by simp))
 end
-
-private theorem envJoinSameShape_sound {branch join : FiniteEnv} :
-    envJoinSameShape branch join = true →
-      EnvJoinSameShape branch.toEnv join.toEnv := by
-  intro h x branchSlot joinSlot hbranch hjoin
-  unfold envJoinSameShape at h
-  change branch.lookup x = some branchSlot at hbranch
-  change join.lookup x = some joinSlot at hjoin
-  have hmem : x ∈ branch.support := lookup_mem_support hbranch
-  have hcheck := (List.all_eq_true.mp h) x hmem
-  simp [hbranch, hjoin] at hcheck
-  exact partialTySameShape_sound hcheck
 
 private theorem linearizable_rankOf_sound {env : FiniteEnv} :
     linearizable env = true →
