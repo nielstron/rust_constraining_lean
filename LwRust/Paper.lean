@@ -4,5 +4,6 @@ import LwRust.Paper.InductiveSemantics
 import LwRust.Paper.Typing
 import LwRust.Paper.BorrowChecker
 import LwRust.Paper.Soundness
+import LwRust.Paper.BorrowCheckerSoundness
 import LwRust.Paper.Soundness.Index
 import LwRust.Paper.Examples

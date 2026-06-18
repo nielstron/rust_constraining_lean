@@ -1,10 +1,10 @@
-import LwRust.Paper.Examples.Internal.WhileJoinPass
+import LwRust.Paper.BorrowChecker
 
 /-!
 Accepted `while` example for the join-based loop rule.
 
-The derivation details are hidden in `Examples.Internal.WhileJoinPass`.  The
-public example is a closed source program whose setup lines are ordinary
+The final theorem proves the inductive `borrowCheck` property by running the
+executable checker on a closed source program whose setup lines are ordinary
 `letMut`s in the outer block.
 -/
 
@@ -29,8 +29,8 @@ def whileJoinRetargetLoopExample : Term :=
   ]
 
 theorem whileJoinRetargetLoopExample_accepted :
-    borrowCheck? 256 whileJoinRetargetLoopExample = true := by
-  native_decide
+    borrowCheck whileJoinRetargetLoopExample := by
+  borrow_check
 
 end Paper
 end LwRust

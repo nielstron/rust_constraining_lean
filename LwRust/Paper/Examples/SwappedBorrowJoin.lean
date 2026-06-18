@@ -1,12 +1,11 @@
-import LwRust.Paper.Examples.Internal.SwappedBorrowJoin
+import LwRust.Paper.BorrowChecker
 
 /-!
 Crossed mutable-borrow examples for the local assignment authority check.
 
-The proof-carrying derivations and frame-safety lemmas live in
-`Examples.Internal.SwappedBorrowJoin`.  The public examples below are closed
-checker inputs: the late-initialized Rust locals `x` and `y` are represented by
-ordinary dummy initializers, then overwritten in both branches.
+The examples below are closed checker inputs: the late-initialized Rust locals
+`x` and `y` are represented by ordinary dummy initializers, then overwritten in
+both branches.
 -/
 
 namespace LwRust
@@ -43,10 +42,10 @@ def swappedBorrowCrossedIfProgram : Term :=
   ]                                           -- Rust: }
 
 theorem swappedBorrowCrossedIfProgram_accepted :
-    borrowCheck? 256 swappedBorrowCrossedIfProgram = true := by
-  native_decide
+    borrowCheck swappedBorrowCrossedIfProgram := by
+  borrow_check
 
-/-! ## Appending `*x = 1` is rejected -/
+/-! ## Appending `*x = 1` produces a finite checker failure -/
 
 def swappedBorrowDerefXAfterIfProgram : Term :=
   .block [0] [                                -- Rust: {
@@ -77,9 +76,9 @@ def swappedBorrowDerefXAfterIfProgram : Term :=
       (.val (.int 1))                         -- Rust: = 1;
   ]                                           -- Rust: }
 
-theorem swappedBorrowDerefXAfterIfProgram_rejected :
-    borrowReject? 256 swappedBorrowDerefXAfterIfProgram = true := by
-  native_decide
+theorem swappedBorrowDerefXAfterIfProgram_failedByChecker :
+    borrowCheckFailureWitness 256 swappedBorrowDerefXAfterIfProgram := by
+  borrow_check
 
 /-! ## Appending an unrelated root assignment is accepted -/
 
@@ -114,8 +113,8 @@ def swappedBorrowUnrelatedRootAssignmentProgram : Term :=
   ]                                           -- Rust: }
 
 theorem swappedBorrowUnrelatedRootAssignmentProgram_accepted :
-    borrowCheck? 256 swappedBorrowUnrelatedRootAssignmentProgram = true := by
-  native_decide
+    borrowCheck swappedBorrowUnrelatedRootAssignmentProgram := by
+  borrow_check
 
 /-! ## Appending an unrelated dereference assignment is accepted -/
 
@@ -151,8 +150,8 @@ def swappedBorrowUnrelatedDerefAssignmentProgram : Term :=
   ]                                           -- Rust: }
 
 theorem swappedBorrowUnrelatedDerefAssignmentProgram_accepted :
-    borrowCheck? 256 swappedBorrowUnrelatedDerefAssignmentProgram = true := by
-  native_decide
+    borrowCheck swappedBorrowUnrelatedDerefAssignmentProgram := by
+  borrow_check
 
 end Paper
 end LwRust
