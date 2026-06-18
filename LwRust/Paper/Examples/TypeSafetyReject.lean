@@ -96,9 +96,46 @@ def invalidEscapingBorrowExampleProgram : Term :=
     .letMut "w" (.move (.var "y"))           -- Rust: let mut w = y;
   ]
 
-theorem invalidEscapingBorrowExampleProgram_failedByChecker :
-    borrowCheckFailureWitness 128 invalidEscapingBorrowExampleProgram := by
-  borrow_check[128]
+theorem invalidEscapingBorrowExampleProgram_rejected :
+    borrowReject invalidEscapingBorrowExampleProgram := by
+  simpa [invalidEscapingBorrowExampleProgram,
+    InvalidEscapingBorrowExample.invalidProgram,
+    InvalidEscapingBorrowExample.declareX,
+    InvalidEscapingBorrowExample.declareY,
+    InvalidEscapingBorrowExample.declareZ,
+    InvalidEscapingBorrowExample.assignYBorrowZ,
+    InvalidEscapingBorrowExample.innerBlock,
+    InvalidEscapingBorrowExample.declareW,
+    InvalidEscapingBorrowExample.x,
+    InvalidEscapingBorrowExample.y,
+    InvalidEscapingBorrowExample.z,
+    InvalidEscapingBorrowExample.l,
+    InvalidEscapingBorrowExample.m]
+    using
+      (show borrowReject InvalidEscapingBorrowExample.invalidProgram from by
+        borrow_check using invalidEscapingBorrowExample_borrowRejection)
+
+theorem invalidEscapingBorrowExampleProgram_outcomeWitness :
+    borrowOutcomeWitness 128 invalidEscapingBorrowExampleProgram
+      (some invalidEscapingBorrowExample_borrowRejection) := by
+  simpa [invalidEscapingBorrowExampleProgram,
+    InvalidEscapingBorrowExample.invalidProgram,
+    InvalidEscapingBorrowExample.declareX,
+    InvalidEscapingBorrowExample.declareY,
+    InvalidEscapingBorrowExample.declareZ,
+    InvalidEscapingBorrowExample.assignYBorrowZ,
+    InvalidEscapingBorrowExample.innerBlock,
+    InvalidEscapingBorrowExample.declareW,
+    InvalidEscapingBorrowExample.x,
+    InvalidEscapingBorrowExample.y,
+    InvalidEscapingBorrowExample.z,
+    InvalidEscapingBorrowExample.l,
+    InvalidEscapingBorrowExample.m]
+    using
+      (show borrowOutcomeWitness 128
+        InvalidEscapingBorrowExample.invalidProgram
+        (some invalidEscapingBorrowExample_borrowRejection) from by
+        borrow_check using invalidEscapingBorrowExample_borrowRejection)
 
 /-! ## Joined reborrow with incoherent nested targets -/
 

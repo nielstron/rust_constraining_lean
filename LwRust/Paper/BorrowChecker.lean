@@ -7599,6 +7599,22 @@ theorem borrowCheckWitness_sound {fuel : Nat} {term : Term} :
   rcases hwitness with ⟨certificate⟩
   exact certificate.borrowCheck
 
+theorem borrowReject_no_borrowCheckWitness {fuel : Nat} {term : Term} :
+    borrowReject term → ¬ borrowCheckWitness fuel term := by
+  intro hreject hwitness
+  exact hreject (borrowCheckWitness_sound hwitness)
+
+theorem borrowReject_no_borrowCheckWitness_anyFuel {term : Term} :
+    borrowReject term → ∀ fuel, ¬ borrowCheckWitness fuel term := by
+  intro hreject fuel
+  exact borrowReject_no_borrowCheckWitness (fuel := fuel) hreject
+
+theorem borrowCheck?_eq_false_of_borrowReject {fuel : Nat} {term : Term} :
+    borrowReject term → borrowCheck? fuel term = false := by
+  intro hreject
+  exact (borrowCheck?_eq_false_iff_no_witness).2
+    (borrowReject_no_borrowCheckWitness (fuel := fuel) hreject)
+
 theorem borrowCheckWitness_checked {fuel : Nat} {term : Term} :
     borrowCheckWitness fuel term → borrowCheck? fuel term = true := by
   intro hwitness

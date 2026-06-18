@@ -24,6 +24,8 @@ rejection certificate is available.
 * `WhileJoinPass` contains the accepted join-based loop example.
 * `SwappedBorrowJoin` contains the crossed-borrow join examples and the local
   assignment follow-ups as complete programs.
+* `Internal.Reject.*` contains proof scripts backing public rejection
+  certificates.
 * `Internal.CheckerTactic` contains anonymous build-checked coverage for the
   lower-level finite-environment checker tactic.
 -/
