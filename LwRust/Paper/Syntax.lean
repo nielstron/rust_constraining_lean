@@ -46,13 +46,13 @@ mutual
     | box (element : Ty)
     /-- Section 6.1 control-flow extension (Figure 5): Boolean type. -/
     | bool
-    deriving BEq, Repr
+    deriving BEq, DecidableEq, Repr
 
   inductive PartialTy where
     | ty (type : Ty)
     | box (element : PartialTy)
     | undef (shape : Ty)
-    deriving BEq, Repr
+    deriving BEq, DecidableEq, Repr
 end
 
 instance : Coe Ty PartialTy where
