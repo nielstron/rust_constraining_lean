@@ -16,7 +16,6 @@ Index of the Section 4 definitions and their mechanized counterparts in
 | Def 4.6 | Variable Projection (`Θ`) | `VariableProjection` |
 | Def 4.7 | Safe Abstraction (`S ∼ Γ`) | `SafeAbstraction` (notation `∼ₛ`) |
 | Def 4.8 | Well-formed Environment | `WellFormedEnv` (`ContainedBorrowsWellFormed` ∧ `EnvSlotsOutlive`) |
-| Def 4.13 | Borrow Safe Environment | `BorrowSafeEnv` |
 
 These are re-exported here so downstream files can `open LwRust.Paper.Soundness`
 and refer to the definitions by their paper name.
@@ -30,6 +29,6 @@ open LwRust.Paper
 export LwRust.Paper
   (ValidTerm ValidStore ValidState ValidRuntimeState ValidPartialValue ValidValue
    ValidStoreTyping VariableProjection SafeAbstraction WellFormedEnv
-   ContainedBorrowsWellFormed EnvSlotsOutlive BorrowSafeEnv)
+   ContainedBorrowsWellFormed EnvSlotsOutlive)
 
 end LwRust.Paper.Soundness

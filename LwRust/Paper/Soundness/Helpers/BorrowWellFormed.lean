@@ -11,10 +11,7 @@ namespace Paper
 
 open Core
 
-/-! ## Section 4.3: Borrow Invariance
-
-`BorrowSafeEnv` (Definition 4.13) itself lives in `LwRust.Paper.Typing`, since
-the control-flow extension's `T-If` rule carries it as a join obligation. -/
+/-! ## Section 4.3: Borrow Invariance -/
 
 theorem PathConflicts.symm {left right : LVal} :
     left ⋈ right →

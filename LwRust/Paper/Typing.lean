@@ -18,7 +18,7 @@ open Core
 structure EnvSlot where
   ty : PartialTy
   lifetime : Lifetime
-  deriving BEq, Repr
+  deriving BEq, DecidableEq, Repr
 
 /-- Paper typing environment `Γ`, as a finite partial map abstracted by lookup. -/
 structure Env where
@@ -638,25 +638,48 @@ def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
   ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
     Coherent env ∧ Linearizable env
 
-/--
-Definition 4.13, borrow-safe environment.
-
-The paper phrases this over variables in `dom(Γ)` and borrowed lvalues inside
-contained borrow types.  The containment premises already imply the relevant
-variables are present in the environment.
-
-This lives here (rather than with the Section 4.3 helpers) because the
-control-flow extension's `T-If` rule carries it as an obligation for the
-joined result environment; see `TermTyping.ite`.
--/
-def BorrowSafeEnv (env : Env) : Prop :=
-  ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
-    env ⊢ x ↝ (&mut targetsMutable) →
+/-- Borrow safety for one mutable-borrow root against the rest of an environment. -/
+def BorrowSafeRoot (env : Env) (root : Name) : Prop :=
+  ∀ y mutable targetsMutable targetsOther targetMutable targetOther,
+    env ⊢ root ↝ (&mut targetsMutable) →
     env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
     targetMutable ∈ targetsMutable →
     targetOther ∈ targetsOther →
     targetMutable ⋈ targetOther →
-    x = y
+    root = y
+
+/--
+Static over-approximation of the roots whose mutable-borrow slots can act as
+write authority for a dereference rooted at `base`.
+
+The guard starts at the written lvalue's base.  If a guarded root contains a
+mutable borrow to a target, the target's base is also guarded, matching the
+authority chase used by dereference-assignment preservation.
+-/
+inductive BorrowAuthorityGuard (env : Env) (base : Name) : Name → Prop where
+  | base :
+      BorrowAuthorityGuard env base base
+  | step {container : Name} {targets : List LVal} {target : LVal} :
+      BorrowAuthorityGuard env base container →
+      env ⊢ container ↝ (&mut targets) →
+      target ∈ targets →
+      BorrowAuthorityGuard env base (LVal.base target)
+
+/--
+Assignment-level borrow-safety frame.
+
+Direct root writes do not need the whole post-RHS environment to be globally
+borrow-safe: the ordinary `WriteProhibited` and write/coherence obligations
+control the written root.  Writes through a dereference only require borrow
+safety for the roots in that dereference's authority closure, so unrelated
+conflicts elsewhere in a path-insensitive join do not block the assignment.
+-/
+def AssignmentBorrowSafety (env : Env) : LVal → Prop
+  | .var _ => True
+  | .deref source =>
+      ∀ root,
+        BorrowAuthorityGuard env (LVal.base source) root →
+        BorrowSafeRoot env root
 
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/
@@ -965,6 +988,7 @@ mutual
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
         LValTyping env₁ lhs oldTy targetLifetime →
         TermTyping env₁ typing lifetime rhs rhsTy env₂ →
+        AssignmentBorrowSafety env₂ lhs →
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
@@ -1021,15 +1045,9 @@ mutual
       target lists, so these do not follow from the branch invariants by a
       local argument; they are carried, as the corresponding `T-Assign`
       obligations are;
-    * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
-      variables into one target list, in which case the joined environment
-      is genuinely not borrow safe even though each branch is (the paper
-      concedes the corresponding weakening of Corollary 4.14 for this
-      extension in Section 4.5.1).  The preservation architecture threads
-      borrow safety through sequencing, so the mechanised rule only accepts
-      conditionals whose join remains borrow safe;
     * `TyBorrowSafeAgainstEnv` for the result type — this is the
-      root-independent result-extension invariant used by Corollary 4.14.
+      root-independent result-extension invariant used by the weakened
+      Corollary 4.14 interface.
       It does not follow from branch-local result safety because the joined
       result can be installed in the joined environment. -/
     | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
@@ -1046,7 +1064,6 @@ mutual
         ContainedBorrowsWellFormed env₅ →
         Coherent env₅ →
         Linearizable env₅ →
-        BorrowSafeEnv env₅ →
         TyBorrowSafeAgainstEnv env₅ joinTy →
         TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
           joinTy env₅
@@ -1119,11 +1136,12 @@ mutual
     that widen borrow target lists across iterations (e.g. re-pointing an
     outer `&mut` inside the body), which the strict rule `T-While` rejects.
 
-    Obligations follow the `T-If` convention: joins merge borrow target
-    lists, so shape agreement and the well-formedness/borrow-safety kit for
-    the join are rule-carried.  Runtime entry/back-edge states transport
-    into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
-    the `T-If` preservation argument.
+    Obligations follow the join convention used by `T-If`: joins merge borrow
+    target lists, so shape agreement and the well-formedness kit for the join
+    are rule-carried.  Assignment carries the local borrow-safety frame it needs.
+    Runtime entry/back-edge states transport into the invariant via
+    `EnvSameShapeStrengthening.safe`, exactly as in the `T-If` preservation
+    argument.
 
     The final two premises re-type the condition and body from the
     *entry-side* environments.  In real Rust this is implied: per-code
@@ -1147,7 +1165,6 @@ mutual
         ContainedBorrowsWellFormed envInv →
         Coherent envInv →
         Linearizable envInv →
-        BorrowSafeEnv envInv →
         TermTyping envInv typing lifetime condition .bool env₂ →
         TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
         WellFormedTy env₃ bodyTy lifetime →

@@ -311,6 +311,125 @@ theorem SelectedBorrowDependency.borrowDependency {store : ProgramStore}
   | @boxFullInner location slot innerTy hslot hinner dependency _hdependency ih =>
       exact BorrowDependency.boxFullInner hslot ih
 
+/--
+**Store-realized borrow read.**
+
+The purely store-level (type-free) realization of a borrow-resolution dependency:
+descending through *owning* boxes from `value`, there is a borrow reference
+`ref{loc, false}` whose **realized** target — a target `t` actually resolving to
+the reference's stored pointee location `loc` (`store.loc t = some loc`) — reads
+`dependency` during its lval resolution (`LocReads store t dependency`).
+
+Unlike `BorrowDependency`, this carries **no static target list**: the only
+target it ever speaks about is one that resolves to the value's *actual* runtime
+pointee.  It is therefore keyed entirely on the store (`store.loc`,
+`store.slotAt`, `LocReads`) and is invariant under any change to the env type's
+target lists — in particular it is unchanged by a `T-If` join, which only
+coarsens the type.  This is the realized-witness predicate the deref-write frame
+truly needs (see `validPartialValue_update_of_owner_and_realized_reads_frame`).
+-/
+inductive RealizedBorrowReads (store : ProgramStore) :
+    PartialValue → Location → Prop where
+  | borrow {location dependency : Location} {target : LVal} :
+      store.loc target = some location →
+      LocReads store target dependency →
+      RealizedBorrowReads store
+        (.value (.ref { location := location, owner := false })) dependency
+  | box {location : Location} {slot : StoreSlot} {dependency : Location} :
+      store.slotAt location = some slot →
+      RealizedBorrowReads store slot.value dependency →
+      RealizedBorrowReads store
+        (.value (.ref { location := location, owner := true })) dependency
+
+/-- A borrow-resolution dependency is in particular a store-realized borrow read:
+its `borrow` head already pins the target to the reference's own pointee location
+(`store.loc target = some location`), and its box descent crosses owning boxes.
+The static target list is discarded.  (Hence `SelectedBorrowDependency` — which
+factors through `BorrowDependency` — also yields a `RealizedBorrowReads`.) -/
+theorem BorrowDependency.realizedBorrowReads {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {dependency : Location} :
+    BorrowDependency store value ty dependency →
+    RealizedBorrowReads store value dependency := by
+  intro hdependency
+  induction hdependency with
+  | borrow _hmem hloc hreads =>
+      exact RealizedBorrowReads.borrow hloc hreads
+  | boxInner hslot _hdependency ih =>
+      exact RealizedBorrowReads.box hslot ih
+  | boxFullInner hslot _hdependency ih =>
+      exact RealizedBorrowReads.box hslot ih
+
+/-- A validity proof's *selected* borrow dependency is in particular a
+store-realized borrow read. -/
+theorem SelectedBorrowDependency.realizedBorrowReads {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {hvalid : ValidPartialValue store value ty} {dependency : Location} :
+    SelectedBorrowDependency store hvalid dependency →
+    RealizedBorrowReads store value dependency :=
+  fun h => h.borrowDependency.realizedBorrowReads
+
+/--
+**The make-or-break realized-witness frame lemma.**
+
+Updating a location `updated` preserves `ValidPartialValue` provided no
+*owner-reachable* location and no *store-realized borrow read* of the value
+resolves through `updated`.  This is strictly weaker than
+`validPartialValue_update_of_owner_and_borrow_dependency_frame` and
+`..._selected_dependency_frame`: it only constrains the borrow target that
+actually witnesses the value's V-Borrow existential (the realized pointee), never
+the full static target list.  V-Borrow survives the update via the *same*
+realized target, because that target's resolution does not touch `updated`. -/
+theorem validPartialValue_update_of_owner_and_realized_reads_frame
+    {store : ProgramStore} {updated : Location} {newSlot : StoreSlot} :
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (_hvalid : ValidPartialValue store value ty),
+      (∀ location,
+        OwnerReaches store value ty location →
+        location ≠ updated) →
+      (∀ location,
+        RealizedBorrowReads store value location →
+        location ≠ updated) →
+      ValidPartialValue (store.update updated newSlot) value ty := by
+  intro value ty hvalid
+  induction hvalid with
+  | unit | int | bool | undef =>
+      intro _howners _hreads
+      constructor
+  | @borrow location mutable targets target hmem hloc =>
+      intro _howners hreads
+      refine ValidPartialValue.borrow hmem ?_
+      exact loc_update_of_not_locReads hloc (by
+        intro mid hmidReads
+        exact hreads mid (RealizedBorrowReads.borrow hloc hmidReads))
+  | @box location slot inner hslot _hinner ih =>
+      intro howners hreads
+      have hlocationNe : location ≠ updated :=
+        howners location (OwnerReaches.boxHere hslot)
+      refine ValidPartialValue.box (location := location) (slot := slot) ?_ ?_
+      · rw [ProgramStore.slotAt_update_ne hlocationNe]
+        exact hslot
+      · exact ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hreads dependency (RealizedBorrowReads.box hslot hdependency))
+  | @boxFull location slot innerTy hslot _hinner ih =>
+      intro howners hreads
+      have hlocationNe : location ≠ updated :=
+        howners location (OwnerReaches.boxFullHere hslot)
+      refine ValidPartialValue.boxFull (location := location) (slot := slot) ?_ ?_
+      · rw [ProgramStore.slotAt_update_ne hlocationNe]
+        exact hslot
+      · exact ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxFullInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hreads dependency (RealizedBorrowReads.box hslot hdependency))
+
 /-- Frame lemma for `ValidPartialValue`: updating an uninspected location preserves validity. -/
 theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
     {updated : Location} {newSlot : StoreSlot} :

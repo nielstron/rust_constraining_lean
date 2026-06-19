@@ -24,17 +24,16 @@ theorem lemma_9_9_valuePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
     SourceTerm term →
-      ValidRuntimeState store term →
-      ValidStoreTyping store term typing →
-      WellFormedEnv env₁ lifetime →
-      BorrowSafeEnv env₁ →
-      store ∼ₛ env₁ →
+        ValidRuntimeState store term →
+        ValidStoreTyping store term typing →
+        WellFormedEnv env₁ lifetime →
+        store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ValidValue finalStore finalValue ty := by
-    intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
-    exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hborrowSafe hsafe htyping hmulti).2.2
+  intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+  exact (preservation hsource hvalid hstoreTyping
+    hwellFormed hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

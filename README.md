@@ -71,11 +71,26 @@ stated; the deviation then documents the corrected claim).
   formalised admissibility proof (essentially follow-up Section 6 plus
   coherence propagation) and the two benign tightenings above.
 
- - For ITE, we enforce BorrowSafeEnv for the resulting merged environment, and that inserting the merged type of the returned value
-   into the merged environment remains borrow safe (TyBorrowSafeAgainstEnv, e.g. relevant if a borrow type is returned)..
-   This removes the edge case outlined in the paper that merging type- and borrow-safe
-   branches can result in an unsafe environment explicitly.
-   The type system thus rejects a few more programs.
+- **Global `BorrowSafeEnv` is removed and replaced by local authority
+  checks.**  The printed paper treats borrow-safety as a whole-environment
+  property, and the original Corollary 4.14 suggests that this global property
+  should survive typing.  That is too strong for path-insensitive joins:
+  `T-If` and `T-WhileJoin` can merge branch-exclusive mutable borrows into a
+  well-formed environment whose target lists are not globally borrow-safe.  The
+  mechanisation therefore deletes `BorrowSafeEnv` rather than carrying it as a
+  premise on `T-If`, `T-WhileJoin`, progress, preservation, or extractor
+  correctness.
+
+  The replacement is deliberately tighter and more local.  `T-Assign` carries
+  `AssignmentBorrowSafety env lhs`: direct root writes need no global borrow
+  safety, while dereference writes require `BorrowSafeRoot` only for roots in
+  the written lvalue's `BorrowAuthorityGuard` closure.  Unrelated conflicts
+  elsewhere in a joined environment no longer block unrelated assignments or
+  dereferences.  This accepts more realistic Rust-shaped code, such as
+  conditionals that swap two distinct mutable borrows across branches, while
+  still rejecting operations that actually need ambiguous dereference
+  authority.  Corollary 4.14 is correspondingly weakened to the true global
+  result: output environments remain well-formed, not globally borrow-safe.
 
 ## Improvements
 
@@ -150,15 +165,93 @@ These deviations from the paper should be kept.
   a truncated branch the way `ast_copier` does
   (`LwRust/Extractor/Extractors/NestedBlocks.lean`).
 
-- **Lemma 4.11 (Preservation) carries a premises the paper does not
-  have.**
-   `BorrowSafeEnv Γ₁` — *likely paper bug:* the printed lemma appears false
-     without it.  Counterexample sketch: `x : Box(Box int)`,
-     `p ↦ &mut [*x]`, `q ↦ &mut [**x]` is well-formed with `S ∼ Γ` but not
-     borrow safe (`*x ⋈ **x`); `*p = box 5` is typeable (`q`'s target is
-     based at `x`, not `p`, so it does not write-prohibit `*p`) yet leaves
-     `q`'s stored reference dangling into the dropped old box, breaking
-     `S₂ ∼ Γ₂`.
+- **The executable checker has an explicit three-way verdict.**
+  `borrowCheckVerdict? fuel term = .accepted` and the boolean wrapper
+  `borrowCheck? fuel term = true` both imply the inductive closed-program
+  property `borrowCheck term` (`borrowCheck_of_borrowCheck?`,
+  `borrowCheck?_sound`, and
+  `borrowCheck_of_borrowCheckVerdict?_accepted`).  The `.failed` verdict,
+  exposed as `borrowCheckFailed?`, records an executable rule-premise failure,
+  not a completeness theorem for logical non-typability; the reflection lemma
+  `borrowCheckFailed?_eq_true_iff` characterizes it exactly as a checker error
+  not classified as unknown, while
+  `borrowCheckFailed?_eq_true_iff_witness` packages the same executable result
+  as a `CertifiedBorrowFailure` witness.  The executable certifier bit is
+  characterized by `certifyBorrowFailure?_found_iff`, and
+  `borrowCheckFailureWitness_of_certifyBorrowFailure?` projects that bit to
+  the proof-facing witness.  A failure witness also rules out an accepted
+  checker witness at the same fuel
+  (`borrowCheckFailureWitness_no_borrowCheckWitness`), without claiming
+  logical non-typability.  The `.unknown` verdict, exposed as
+  `borrowUnknown?`, records fuel exhaustion, non-converged invariant iteration,
+  or an inference limitation, including failures from fuel-bounded helper
+  inference that should not be reported as finite rejection
+  (`borrowUnknown?_eq_true_iff` and `borrowUnknown?_eq_true_iff_witness`);
+  `certifyBorrowUnknown?_found_iff` and
+  `borrowUnknownWitness_of_certifyBorrowUnknown?` provide the matching
+  proof-carrying found-bit projection, and
+  `borrowUnknownWitness_no_borrowCheckWitness` similarly rules out a same-fuel
+  accepted checker witness.
+  The theorem `borrowCheck?_eq_true_iff` characterizes successful executable
+  runs, and `borrowCheck?_eq_true_iff_witness` states the proof-carrying
+  reflection: `borrowCheck? fuel term = true` exactly when a
+  `CertifiedBorrowCheck` witness exists.  In examples, `borrow_check` runs the
+  default-fuel checker and proves the proof-facing statement; `borrow_check[n]`
+  uses explicit fuel.  When an exact closed typing premise is needed,
+  `borrow_check[n, result]` checks the expected `CheckResult` and proves the
+  corresponding `TermTyping` derivation.  Term-level successful runs are
+  exposed by `termTyping_of_checkTermMatches?` and
+  `termListTyping_of_checkTermListMatches?`: given the maintained
+  `WellFormedEnv` and store-reference invariant, a true executable
+  `checkTermMatches?` or `checkTermListMatches?` result yields the inductive
+  `TermTyping` or `TermListTyping` premise.  The matching proof-carrying
+  bridges are `checkedTermTypingWitness_of_checkTermMatches?` and
+  `certifiedTermCheck_of_checkTermMatches?`; the tactic form
+  `borrow_check[n, inEnv, outEnv]` runs these term-level checks for goals whose
+  environments are already written as finite `inEnv.toEnv`/`outEnv.toEnv`
+  boundaries.  For accepted programs these tactics prove `borrowCheck term`
+  via `borrowCheck?_sound`, not merely the boolean
+  `borrowCheck? fuel term = true`.  `BorrowCheckerSoundness` then composes
+  that bridge with the source-initial soundness wrappers:
+  `borrowCheck?_emptyInitial_progress`,
+  `borrowCheck?_emptyInitial_preservation`, and
+  `borrowCheck?_emptyInitial_no_stuck_states` expose the progress,
+  preservation, and no-stuckness consequences of an accepted executable run.
+  `CertifiedBorrowOutcome` packages the
+  proof-carrying surface used by clients: `certifyBorrowOutcome?` first runs
+  the executable accepted checker and, optionally, consumes a
+  `CertifiedBorrowReject`; the top-level `borrowOutcome?` boolean is the
+  corresponding witness-found bit (`borrowOutcome?_eq_true_iff_witness`), and
+  if it is true the witness proves either `borrowCheck term` or
+  `borrowReject term` (`borrowOutcome?_sound`).  With no rejection certificate
+  supplied, a true `borrowOutcome? fuel term` result projects directly to
+  `borrowCheck term` (`borrowCheck_of_borrowOutcome?` and
+  `borrowCheck_of_borrowOutcomeWitness`).  The term-level helper
+  `checkTermFails?` uses the same unknown filter.  Logical rejection is the
+  Prop `borrowReject term` and is exposed only through proof-carrying
+  `CertifiedTermReject` certificates, with closed programs packaged as
+  `CertifiedBorrowReject` so the same witness proves both `borrowReject term`
+  and the corresponding `borrowCheckFailed? fuel term = true` verdict.
+  Runtime-only reference constants are handled by the executable source-syntax
+  classifier `sourceTerm?`: when the finite checker fails and `sourceTerm?`
+  is false, `certifyBorrowRejectOfNonSource?` produces a
+  `CertifiedBorrowReject`, with
+  `borrowReject_of_certifyBorrowRejectOfNonSource?` and
+  `borrowOutcomeWitness_of_certifyBorrowRejectOfNonSource?` exposing only the
+  proof-facing rejection/outcome statements to examples.  The
+  distinction is necessary because fuel-bounded search can fail on typable
+  terms (`borrowUnknown?_zero_on_typable_unit`), and this is recorded as the
+  theorem `borrowCheck?_false_not_rejection_complete`.
+
+- **Lemma 4.11 (Preservation) uses the assignment-local borrow frame, not
+  `BorrowSafeEnv`.**  The old global premise was enough to rule out dangling
+  dereference-write counterexamples, but it also rejected valid joined
+  environments whose conflicts are irrelevant to the write being performed.
+  Preservation now gets the needed fact from `AssignmentBorrowSafety`: for a
+  dereference assignment, only the roots that can supply authority for that
+  dereference must be borrow-safe against the rest of the environment.  This is
+  the local condition used to prove the `&mut` leaf-exclusivity bridge in the
+  assignment case.
 
 - **Runtime validity is stronger than Definition 4.3.**  `ValidRuntimeState`
   contains the paper's `ValidState`, plus explicit invariants for the abstract
@@ -272,7 +365,8 @@ These deviations from the paper should be kept.
   it is the Lean interface for the paper's finite/well-behaved store model, and
   is discharged by concrete finite stores.
 
-- **General runtime safety exposes an initial borrow-safety premise.**  For
-  arbitrary nonempty runtime store typings, the terminal-safety wrappers carry
-  `BorrowSafeEnv` for the input environment.  Source-initial empty-store
-  wrappers discharge this premise from the empty environment.
+- **General runtime safety has no global borrow-safety premise.**  Arbitrary
+  nonempty runtime wrappers still require source syntax, runtime validity,
+  store typing, well-formed environments, safe abstraction, and the finite-store
+  operational assumptions, but not `BorrowSafeEnv`.  The typing derivation
+  itself supplies the local borrow-safety facts needed by assignments.

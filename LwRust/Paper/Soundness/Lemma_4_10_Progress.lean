@@ -745,7 +745,7 @@ theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hwellFormed hsafe hstore htyping
   cases htyping with
-  | assign _hLhs hRhs hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
+  | assign _hLhs hRhs _hRhsSafe hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
       _hcontained _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
@@ -948,10 +948,10 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       (ih (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-      hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
+      hLhs hRhs hRhsSafe hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
       hvst hwf hsafe hstore
     exact progress_assign_typing hwf hsafe hstore
-      (TermTyping.assign hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
+      (TermTyping.assign hLhs hRhs hRhsSafe hLhsPost hshape hwfTy hwrite hranked hcoh
         hcontained hnotWrite)
       (ih (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
   case eq =>
@@ -972,7 +972,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
-      _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe
+      _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear
       _hresultSafe ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
     rcases ihCondition hvst.ite_condition hwf hsafe hstore with
       hterminalCondition | hstepCondition
@@ -1009,7 +1009,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
   case whileLoopJoin =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin
       _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       _ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
       _hvst _hwf _hsafe _hstore

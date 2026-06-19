@@ -74,6 +74,91 @@ theorem EnvSameShapeStrengthening.refl (env : Env) :
   · intro x sourceSlot hslot
     exact ⟨sourceSlot, hslot, rfl⟩
 
+/-- A borrow contained in the finer (source) type of a shape-preserving
+strengthening is also contained in the coarser (result) type, with a *superset*
+of targets.  This is the structural core of "preserve writeProhibited":
+strengthening only grows borrow target lists (W-Bor), and `sameShape` rules out
+the contained borrow being struck to `undef`. -/
+theorem partialTyContains_borrow_transport_strengthens
+    {sourceTy resultTy : PartialTy} {mutable : Bool} {targets : List LVal} :
+    PartialTyContains sourceTy (.borrow mutable targets) →
+    PartialTyStrengthens sourceTy resultTy →
+    PartialTy.sameShape sourceTy resultTy →
+    ∃ targets',
+      PartialTyContains resultTy (.borrow mutable targets') ∧
+        targets.Subset targets' := by
+  intro hcontains hstrength
+  induction hstrength with
+  | @reflex ty =>
+      intro _hshape
+      exact ⟨targets, hcontains, fun _ h => h⟩
+  | @box left right _hsub ih =>
+      intro hshape
+      cases hcontains with
+      | box hinner =>
+          have hshape' : PartialTy.sameShape left right := by
+            simpa [PartialTy.sameShape] using hshape
+          rcases ih hinner hshape' with ⟨targets', hc, hsub⟩
+          exact ⟨targets', PartialTyContains.box hc, hsub⟩
+  | @tyBox left right _hsub ih =>
+      intro hshape
+      cases hcontains with
+      | tyBox hinner =>
+          have hshape' : PartialTy.sameShape (.ty left) (.ty right) := by
+            simpa [PartialTy.sameShape, Ty.sameShape] using hshape
+          rcases ih hinner hshape' with ⟨targets', hc, hsub⟩
+          exact ⟨targets', PartialTyContains.tyBox hc, hsub⟩
+  | @borrow m leftTargets rightTargets hsubset =>
+      intro _hshape
+      cases hcontains with
+      | here => exact ⟨rightTargets, PartialTyContains.here, hsubset⟩
+  | @undefLeft left right _hsub _ih =>
+      intro _hshape
+      cases hcontains
+  | @intoUndef left right _hsub _ih =>
+      intro hshape
+      simp [PartialTy.sameShape] at hshape
+  | @boxIntoUndef left right _hsub _ih =>
+      intro hshape
+      simp [PartialTy.sameShape] at hshape
+
+/-- "Preserve writeProhibited": a write that is not prohibited in the coarser
+(result) environment is not prohibited in any finer same-shape strengthening
+environment.  Strengthening only grows borrow target lists, so the finer
+environment has *fewer* conflicting borrows.  This is the mechanised form of the
+T-If insight — every write that type-checks against the merged join env is
+automatically safe against each branch env. -/
+theorem not_writeProhibited_of_sameShapeStrengthening
+    {envFine envCoarse : Env} {w : LVal} :
+    EnvSameShapeStrengthening envFine envCoarse →
+    ¬ WriteProhibited envCoarse w →
+    ¬ WriteProhibited envFine w := by
+  intro hstr hnot hfine
+  have htransport :
+      ∀ x mutable targets target,
+        envFine ⊢ x ↝ (.borrow mutable targets) →
+        target ∈ targets →
+        ∃ targets', envCoarse ⊢ x ↝ (.borrow mutable targets') ∧ target ∈ targets' := by
+    intro x mutable targets target hcontains hmem
+    rcases hcontains with ⟨fineSlot, hfineSlot, hcont⟩
+    rcases hstr.2 x fineSlot hfineSlot with ⟨coarseSlot, hcoarseSlot, _hlife⟩
+    rcases hstr.1 x coarseSlot hcoarseSlot with
+      ⟨fineSlot', hfineSlot', _hlife', hstrength, hshape⟩
+    have heq : fineSlot = fineSlot' :=
+      Option.some.inj (hfineSlot.symm.trans hfineSlot')
+    subst heq
+    rcases partialTyContains_borrow_transport_strengthens hcont hstrength hshape with
+      ⟨targets', hcontR, hsub⟩
+    exact ⟨targets', ⟨coarseSlot, hcoarseSlot, hcontR⟩, hsub hmem⟩
+  apply hnot
+  unfold WriteProhibited ReadProhibited at hfine ⊢
+  rcases hfine with ⟨x, targets, target, hcont, hmem, hconf⟩ |
+      ⟨x, targets, target, hcont, hmem, hconf⟩
+  · rcases htransport x true targets target hcont hmem with ⟨targets', hcontR, hmemR⟩
+    exact Or.inl ⟨x, targets', target, hcontR, hmemR, hconf⟩
+  · rcases htransport x false targets target hcont hmem with ⟨targets', hcontR, hmemR⟩
+    exact Or.inr ⟨x, targets', target, hcontR, hmemR, hconf⟩
+
 theorem EnvSameShapeStrengthening.trans {first second third : Env} :
     EnvSameShapeStrengthening first second →
     EnvSameShapeStrengthening second third →
@@ -102,6 +187,317 @@ theorem EnvSameShapeStrengthening.safe
     store ∼ₛ result := by
   intro hmap hsafe
   exact safeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
+
+/-- Same-shape strengthening commutes with `dropLifetime`: both environments
+drop exactly the slots at the given lifetime (strengthening preserves slot
+lifetimes), and the survivors keep their strengthening relationship. -/
+theorem EnvSameShapeStrengthening.dropLifetime {source result : Env}
+    {lifetime : Lifetime} :
+    EnvSameShapeStrengthening source result →
+    EnvSameShapeStrengthening (source.dropLifetime lifetime)
+      (result.dropLifetime lifetime) := by
+  intro hmap
+  constructor
+  · intro x resultSlot hresult
+    simp only [Env.dropLifetime] at hresult
+    cases hr : result.slotAt x with
+    | none => rw [hr] at hresult; simp at hresult
+    | some slot =>
+        rw [hr] at hresult
+        by_cases hlt : slot.lifetime = lifetime
+        · simp [hlt] at hresult
+        · simp [hlt] at hresult
+          subst hresult
+          rcases hmap.1 x slot hr with ⟨sourceSlot, hsource, hlife, hstr, hshape⟩
+          refine ⟨sourceSlot, ?_, hlife, hstr, hshape⟩
+          simp only [Env.dropLifetime, hsource]
+          have hne : sourceSlot.lifetime ≠ lifetime := by rw [hlife]; exact hlt
+          simp [hne]
+  · intro x sourceSlot hsource
+    simp only [Env.dropLifetime] at hsource
+    cases hs : source.slotAt x with
+    | none => rw [hs] at hsource; simp at hsource
+    | some slot =>
+        rw [hs] at hsource
+        by_cases hlt : slot.lifetime = lifetime
+        · simp [hlt] at hsource
+        · simp [hlt] at hsource
+          subst hsource
+          rcases hmap.2 x slot hs with ⟨resultSlot, hresult, hlife⟩
+          refine ⟨resultSlot, ?_, hlife⟩
+          simp only [Env.dropLifetime, hresult]
+          have hne : resultSlot.lifetime ≠ lifetime := by rw [← hlife]; exact hlt
+          simp [hne]
+
+/-- `t` is the live target a stored borrow value actually points to: some store
+cell holds a (non-owning) reference to a location that `t` resolves to.  Unlike
+mere resolvability, a *stale* merged-join target — one no current borrow points
+to — does not satisfy this, so the live-target witness env can drop it and stay
+borrow safe. -/
+def TargetPointedTo (store : ProgramStore) (t : LVal) : Prop :=
+  ∃ cell cellSlot loc,
+    store.slotAt cell = some cellSlot ∧
+      cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
+      store.loc t = some loc
+
+/-- `t` is the live target selected by root `x`'s OWN borrow: `x`'s value reaches
+(via ownership) a cell holding a reference to a location that `t` resolves to.
+Unlike `TargetPointedTo` (which allows *any* root's borrow), this ties the live
+target to `x` — the refinement that discharges the `T-If` join side condition,
+since a merged-in target only `x`-selected in the executed branch is not
+`x`-selected by a stale branch.  (`ProtectedByBase` inlined to keep this before
+the witness definition.) -/
+def SelectedTarget (store : ProgramStore) (x : Name) (t : LVal) : Prop :=
+  ∃ cell cellSlot loc,
+    (cell = VariableProjection x ∨
+        ProgramStore.OwnsTransitively store (VariableProjection x) cell) ∧
+      store.slotAt cell = some cellSlot ∧
+      cellSlot.value = .value (.ref { location := loc, owner := false }) ∧
+      store.loc t = some loc
+
+/-- A selected target is in particular pointed to (forgetting the root). -/
+theorem SelectedTarget.targetPointedTo {store : ProgramStore} {x : Name}
+    {t : LVal} : SelectedTarget store x t → TargetPointedTo store t := by
+  rintro ⟨cell, cellSlot, loc, _hprot, hslot, hval, hloc⟩
+  exact ⟨cell, cellSlot, loc, hslot, hval, hloc⟩
+
+/-- Inversion: the storage of a valid `value` owns (directly) `owned` iff
+`value` is a `box`/`boxFull` whose pointee is exactly `owned`.  For non-box
+valid values there is no owning edge. -/
+theorem ownsAt_storage_inv {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {storage owned : Location}
+    {stoLt : Lifetime} :
+    ValidPartialValue store value ty →
+    store.slotAt storage = some { value := value, lifetime := stoLt } →
+    ProgramStore.OwnsAt store owned storage →
+    (∃ inner, ty = .box inner ∧
+        value = .value (.ref { location := owned, owner := true })) ∨
+    (∃ innerTy, ty = .ty (.box innerTy) ∧
+        value = .value (.ref { location := owned, owner := true })) := by
+  intro hvalid hsto howns
+  rcases howns with ⟨lt, hslot⟩
+  rw [hsto] at hslot
+  have hval : value = .value (owningRef owned) := by
+    have := Option.some.inj hslot
+    simpa using congrArg StoreSlot.value this
+  cases hvalid with
+  | unit => simp [owningRef] at hval
+  | int => simp [owningRef] at hval
+  | bool => simp [owningRef] at hval
+  | undef => simp [owningRef] at hval
+  | @borrow location mutable targets target hmem hloc =>
+      simp [owningRef] at hval
+  | @box ownerLocation ownerSlot inner hownerSlot hinnerValid =>
+      left
+      refine ⟨inner, rfl, ?_⟩
+      have : ownerLocation = owned := by
+        simpa [owningRef] using hval
+      subst this
+      simp [owningRef] at hval ⊢
+  | @boxFull ownerLocation ownerSlot innerTy hownerSlot hinnerValid =>
+      right
+      refine ⟨innerTy, rfl, ?_⟩
+      have : ownerLocation = owned := by
+        simpa [owningRef] using hval
+      subst this
+      simp [owningRef] at hval ⊢
+
+/-- Reverse-descent.  `value` valid at `ty` is stored at `storage`; `storage`
+owns (directly or transitively) `cell`, which holds a *borrow* (non-owning)
+reference to `loc`.  Then `ty` contains a borrow type one of whose static
+targets resolves (`store.loc`) to `loc`.  This is the structural inverse of the
+forward `Reaches`/`BorrowDependency` chases: instead of walking a value down to
+a dependency, it climbs an ownership chain back up to the env borrow node whose
+realization explains the cell. -/
+theorem borrowContains_of_owned_borrowCell {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {storage cell loc : Location}
+    {cellSlot : StoreSlot} {stoLt : Lifetime} :
+    ValidPartialValue store value ty →
+    store.slotAt storage = some { value := value, lifetime := stoLt } →
+    ProgramStore.OwnsTransitively store storage cell →
+    store.slotAt cell = some cellSlot →
+    cellSlot.value = .value (.ref { location := loc, owner := false }) →
+    ∃ mutable targets target,
+      PartialTyContains ty (.borrow mutable targets) ∧
+      target ∈ targets ∧ store.loc target = some loc := by
+  intro hvalid hsto howns
+  induction howns generalizing value ty stoLt with
+  | @direct storage owned hownsEdge =>
+      intro hcell hcellval
+      rcases ownsAt_storage_inv hvalid hsto hownsEdge with
+        ⟨inner, htyEq, hvalEq⟩ | ⟨innerTy, htyEq, hvalEq⟩
+      · subst htyEq
+        cases hvalid with
+        | @box ol os _ hos hinner =>
+            have holEq : ol = owned := by simpa using hvalEq
+            subst holEq
+            have hosEq : os = cellSlot := Option.some.inj (hos.symm.trans hcell)
+            subst hosEq
+            rw [hcellval] at hinner
+            cases hinner with
+            | @borrow location mutable targets target hmem hloc =>
+                exact ⟨mutable, targets, target,
+                  PartialTyContains.box PartialTyContains.here, hmem, hloc⟩
+      · subst htyEq
+        cases hvalid with
+        | @boxFull ol os _ hos hinner =>
+            have holEq : ol = owned := by simpa using hvalEq
+            subst holEq
+            have hosEq : os = cellSlot := Option.some.inj (hos.symm.trans hcell)
+            subst hosEq
+            rw [hcellval] at hinner
+            cases hinner with
+            | @borrow location mutable targets target hmem hloc =>
+                exact ⟨mutable, targets, target,
+                  PartialTyContains.tyBox PartialTyContains.here, hmem, hloc⟩
+  | @trans storage middle owned hownsEdge htail ih =>
+      intro hcell hcellval
+      rcases ownsAt_storage_inv hvalid hsto hownsEdge with
+        ⟨inner, htyEq, hvalEq⟩ | ⟨innerTy, htyEq, hvalEq⟩
+      · subst htyEq
+        cases hvalid with
+        | @box ol os _ hos hinner =>
+            have holEq : ol = middle := by simpa using hvalEq
+            subst holEq
+            rcases ih hinner hos hcell hcellval with ⟨m, ts, t, hcontains, hmem, hloc⟩
+            exact ⟨m, ts, t, PartialTyContains.box hcontains, hmem, hloc⟩
+      · subst htyEq
+        cases hvalid with
+        | @boxFull ol os _ hos hinner =>
+            have holEq : ol = middle := by simpa using hvalEq
+            subst holEq
+            rcases ih hinner hos hcell hcellval with ⟨m, ts, t, hcontains, hmem, hloc⟩
+            exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hloc⟩
+
+/-- A value that is a *borrow* (non-owning) reference, valid at `ty`, forces `ty`
+to be a plain borrow type whose static targets contain one resolving to the
+pointee. -/
+theorem borrowContains_of_valid_borrowRef {store : ProgramStore}
+    {ty : PartialTy} {loc : Location} :
+    ValidPartialValue store (.value (.ref { location := loc, owner := false })) ty →
+    ∃ mutable targets target,
+      ty = .ty (.borrow mutable targets) ∧
+      target ∈ targets ∧ store.loc target = some loc := by
+  intro hvalid
+  cases hvalid with
+  | @borrow location mutable targets target hmem hloc =>
+      exact ⟨mutable, targets, target, rfl, hmem, hloc⟩
+
+/-- From a `SelectedTarget store x s` (a cell owned by `x` holding a borrow ref
+to `loc`, with `store.loc s = some loc`) and a store that realizes `env`,
+recover the genuine `env` borrow node at `x` together with a *realized* env
+target `t₃` (`store.loc t₃ = some loc`).  `t₃` is in particular itself a
+selected target of `x`, co-located with the original cell.  This is the
+realization bridge from a runtime selected target to a static branch borrow
+node. -/
+theorem envBorrow_of_selectedTarget {store : ProgramStore} {env : Env}
+    {x : Name} {s : LVal} :
+    store ∼ₛ env →
+    SelectedTarget store x s →
+    ∃ mutable targets t₃,
+      env ⊢ x ↝ (.borrow mutable targets) ∧ t₃ ∈ targets ∧
+      SelectedTarget store x t₃ ∧ store.loc t₃ = store.loc s := by
+  intro hrealize hsel
+  rcases hsel with ⟨cell, cellSlot, loc, hprot, hcellSlot, hcellval, hsloc⟩
+  obtain ⟨xEnvSlot, hxEnvSlot⟩ : ∃ es, env.slotAt x = some es := by
+    have hdom := (hrealize.1 x).1
+    have hxStore : ∃ slot, store.slotAt (VariableProjection x) = some slot := by
+      rcases hprot with hvar | howns
+      · exact ⟨cellSlot, by rw [← hvar]; exact hcellSlot⟩
+      · cases howns with
+        | direct hedge => rcases hedge with ⟨lt, hslot⟩; exact ⟨_, hslot⟩
+        | trans hedge _ => rcases hedge with ⟨lt, hslot⟩; exact ⟨_, hslot⟩
+    exact hdom hxStore
+  rcases hrealize.2 x xEnvSlot hxEnvSlot with ⟨xValue, hxStoreSlot, hxValid⟩
+  rcases hprot with hvar | howns
+  · subst hvar
+    have hvalEq : xValue = .value (.ref { location := loc, owner := false }) := by
+      have heq : some (StoreSlot.mk xValue xEnvSlot.lifetime) = some cellSlot :=
+        hxStoreSlot.symm.trans hcellSlot
+      have hvv := congrArg StoreSlot.value (Option.some.inj heq)
+      simpa [hcellval] using hvv
+    rw [hvalEq] at hxValid
+    rcases borrowContains_of_valid_borrowRef hxValid with
+      ⟨mutable, targets, target, htyEq, hmem, hloc⟩
+    refine ⟨mutable, targets, target, ⟨xEnvSlot, hxEnvSlot,
+      htyEq ▸ PartialTyContains.here⟩, hmem,
+      ⟨VariableProjection x, cellSlot, loc, Or.inl rfl, hcellSlot,
+        hcellval, hloc⟩, ?_⟩
+    rw [hloc, hsloc]
+  · rcases borrowContains_of_owned_borrowCell hxValid hxStoreSlot howns
+        hcellSlot hcellval with ⟨mutable, targets, target, hcontains, hmem, hloc⟩
+    refine ⟨mutable, targets, target,
+      ⟨xEnvSlot, hxEnvSlot, hcontains⟩, hmem,
+      ⟨cell, cellSlot, loc, Or.inr howns, hcellSlot, hcellval, hloc⟩, ?_⟩
+    rw [hloc, hsloc]
+
+/-- The `&mut` *location-exclusivity* invariant of the executed-branch store
+across a `T-If` join (`store ∼ₛ env₃`, `env₅ = env₃ ⊔ env₄`).
+
+Read off the realized env₃ store: whenever an env₅ borrow node at root `x`
+*selects* (`SelectedTarget store x s`) a target `s` reaching some location, and
+the realized branch env₃ *also* selects, at the same root `x`, a target `t₃`
+reaching the *same* location (`store.loc t₃ = store.loc s`), then the two borrow
+nodes carry the same mutability bit.
+
+This is the honest store-level invariant the §4.5.1 ite-join deviation needs:
+at most one *live* `&mut` borrow reaches any given location, so a runtime cell
+that co-resolves an env₄-only join target `s` and an env₃ target `t₃` cannot
+disagree on `&mut`-ness — the mutability reaching a location is a function of the
+location, not of which branch's target names it.  Crucially it is purely a
+property of the realized store plus which targets are `&mut` (read off env₃ and
+the join), so it is *invariant under the type-level ite join*: the join never
+touches the store, and W-Bor preserves the mutable bit. -/
+def LocMutExcl (store : ProgramStore) (env₃ env₅ : Env) : Prop :=
+  ∀ x mutable targets s,
+    env₅ ⊢ x ↝ (.borrow mutable targets) → s ∈ targets → SelectedTarget store x s →
+    ∀ mutable₃ targets₃ t₃,
+      env₃ ⊢ x ↝ (.borrow mutable₃ targets₃) → t₃ ∈ targets₃ →
+      SelectedTarget store x t₃ →
+      store.loc t₃ = store.loc s →
+      mutable₃ = mutable
+
+/-- `BorrowDependency` is monotone along a same-shape strengthening of the type:
+strengthening only grows borrow target lists (W-Bor), so any borrow-resolution
+dependency present at the finer type persists at the coarser type.  Equivalently,
+`SlotDepKill` over the coarse (join) type implies it over each finer branch type
+— the bridge for transporting the deref-write frame between `env₅` and the
+witness `env₃`. -/
+theorem borrowDependency_mono_sameShape {store : ProgramStore}
+    {value : PartialValue} {tyFine tyCoarse : PartialTy} {dep : Location} :
+    RuntimeFrame.BorrowDependency store value tyFine dep →
+    PartialTyStrengthens tyFine tyCoarse →
+    PartialTy.sameShape tyFine tyCoarse →
+    RuntimeFrame.BorrowDependency store value tyCoarse dep := by
+  intro hdep
+  induction hdep generalizing tyCoarse with
+  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+      intro hstr hshape
+      cases hstr with
+      | reflex => exact RuntimeFrame.BorrowDependency.borrow hmem hloc hreads
+      | borrow hsub =>
+          exact RuntimeFrame.BorrowDependency.borrow (hsub hmem) hloc hreads
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | @boxInner location slot inner dependency hslot _hinner ih =>
+      intro hstr hshape
+      cases hstr with
+      | reflex => exact RuntimeFrame.BorrowDependency.boxInner hslot _hinner
+      | @box _innerL innerC hsubInner =>
+          have hshapeInner : PartialTy.sameShape inner innerC := by
+            simpa [PartialTy.sameShape] using hshape
+          exact RuntimeFrame.BorrowDependency.boxInner hslot
+            (ih hsubInner hshapeInner)
+      | boxIntoUndef _ => simp [PartialTy.sameShape] at hshape
+  | @boxFullInner location slot ty dependency hslot _hinner ih =>
+      intro hstr hshape
+      cases hstr with
+      | reflex => exact RuntimeFrame.BorrowDependency.boxFullInner hslot _hinner
+      | @tyBox _innerL innerC hsubInner =>
+          have hshapeInner : PartialTy.sameShape (.ty ty) (.ty innerC) := by
+            simpa [PartialTy.sameShape, Ty.sameShape] using hshape
+          exact RuntimeFrame.BorrowDependency.boxFullInner hslot
+            (ih hsubInner hshapeInner)
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
 
 theorem EnvSameShapeStrengthening.update_result_strengthening
     {source result : Env} {x : Name} {sourceSlot resultSlot : EnvSlot} :
@@ -1088,9 +1484,9 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
       TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
         hfreshOut hcoh henv)
-    (fun hLhs _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
+    (fun hLhs _hRhs hRhsSafe hLhsPost hshape hwf hwrite hranked hcoh hcontained
         hnotWrite ih hsource =>
-      TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hLhsPost
+      TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hRhsSafe hLhsPost
         hshape hwf hwrite hranked hcoh hcontained hnotWrite)
     (fun _hLhs hfresh _hghostRhs _hRhs hcopyL hcopyR hshape ihL ihGhost ihR
         hsource =>
@@ -1098,11 +1494,11 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihGhost (SourceTerm.eq_rhs hsource))
         (ihR (SourceTerm.eq_rhs hsource)) hcopyL hcopyR hshape)
     (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
-        hcontained hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
+        hcontained hcoherent hlinear hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear hborrowSafe
+        hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear
         hresultSafe)
     (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
         hsource =>
@@ -1120,10 +1516,10 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv
+    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
         hwellTy hdrop _hcondEntry _hbodyEntry
         ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
-      TermTyping.whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
+      TermTyping.whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
         hwellTy hdrop
@@ -2771,7 +3167,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+        hLhs hRhs _hRhsSafe _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
         hnotWrite ih
         htypingEq hwellFormed =>
       by
@@ -2798,7 +3194,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
           _falseBranch _trueTy _falseTy _joinTy}
         _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
-        hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        hcontained hcoherent hlinear _hresultSafe ihCondition ihTrue ihFalse
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1
@@ -2827,7 +3223,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       ⟨conditionResult.1, WellFormedTy.unit⟩)
     (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
           _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hcondInv _hbodyInv
+        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
         _hwellTy _hdrop _hcondEntry _hbodyEntry
         ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
         htypingEq hwellFormed =>
@@ -4570,6 +4966,24 @@ theorem ownsTransitively_of_cons {store : ProgramStore} {storage leaf : Location
     ProgramStore.OwnsTransitively store storage leaf := by
   intro hspine
   exact ownsTransitively_of_nonempty hspine (by simp)
+
+/-- An ownership spine from a variable's projection protects its leaf: the leaf
+is the variable itself (empty spine) or transitively owned by it.  This connects
+`firstNodePack`'s spine to `ProtectedByBase`, the root component of a borrow's
+*selected* target. -/
+theorem protectedByBase {store : ProgramStore} {storage leaf : Location}
+    {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path}
+    {x : Name} :
+    StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy →
+    storage = VariableProjection x →
+    ProtectedByBase store x leaf := by
+  intro hspine hstorage
+  cases hspine with
+  | nil _hslot _hvalid => exact Or.inl hstorage
+  | box hslot howner htail =>
+      subst hstorage
+      exact Or.inr (ownsTransitively_of_cons
+        (StoreOwnerSpine.box hslot howner htail))
 
 theorem leaf_ne_storage_of_cons {store : ProgramStore} {storage leaf : Location}
     {slot leafSlot : StoreSlot} {ty leafTy : PartialTy} {path : Path} :
@@ -7081,8 +7495,8 @@ theorem RuntimeFrame.locReads_below {store : ProgramStore} {env : Env}
 Resolving into (or reading from) a guard-protected owner tree forces the
 resolving lvalue's base into the guard set, provided the guard set absorbs the
 container of any borrow node that targets a guarded base.  At the assignment
-use-site the guard set is the write's authority chain and absorption is exactly
-borrow safety (`BorrowSafeEnv`) against the chain's mutable-borrow records.
+use-site the guard set is the write's authority chain and absorption is supplied
+by assignment-local `BorrowSafeRoot` obligations.
 -/
 
 theorem RuntimeFrame.loc_protected_guarded_base {store : ProgramStore}
@@ -7095,7 +7509,7 @@ theorem RuntimeFrame.loc_protected_guarded_base {store : ProgramStore}
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
-      t ∈ ts → G (LVal.base t) → G container) →
+      t ∈ ts → SelectedTarget store container t → G (LVal.base t) → G container) →
     LValTyping env lv pt lifetime →
     store.loc lv = some location →
     ProtectedByBase store r location →
@@ -7113,7 +7527,7 @@ where
       (hheap : StoreOwnerTargetsHeap store)
       (hcollapse : ∀ container mutable ts t,
         env ⊢ container ↝ (.borrow mutable ts) →
-        t ∈ ts → G (LVal.base t) → G container)
+        t ∈ ts → SelectedTarget store container t → G (LVal.base t) → G container)
       (htyping : LValTyping env lv pt lifetime)
       (hloc : store.loc lv = some location)
       (hprot : ProtectedByBase store r location) (hG : G r) :
@@ -7193,7 +7607,8 @@ where
                 hwitnessTyping hlocW hprot hG
             have hGrootM : G rootM :=
               hcollapse rootM mutable' targets' witness
-                (hcontainsM PartialTyContains.here) hmemW hGwitness
+                (hcontainsM PartialTyContains.here) hmemW
+                ⟨M, _, location, hprotM, hslotM, rfl, hlocW⟩ hGwitness
             have hres :=
               go hφ hwellFormed hsafe hvalidStore hheap hcollapse hsource
                 hMloc hprotM hGrootM
@@ -7245,7 +7660,7 @@ theorem RuntimeFrame.locReads_protected_guarded_base {store : ProgramStore}
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
-      t ∈ ts → G (LVal.base t) → G container) →
+      t ∈ ts → SelectedTarget store container t → G (LVal.base t) → G container) →
     LValTyping env lv pt lifetime →
     RuntimeFrame.LocReads store lv location →
     ProtectedByBase store r location →
@@ -7279,6 +7694,396 @@ def SlotDepKill (store : ProgramStore) (env : Env) (leaf : Location)
       some { value := value, lifetime := zslot.lifetime } →
     ¬ RuntimeFrame.BorrowDependency store value zslot.ty leaf
 
+/-- **Location-based `&mut` leaf exclusivity.**
+
+The honest store-level runtime invariant that discharges the deref-write frame's
+cross-variable kill obligation *pointwise*.
+
+`MutLeafExclusive store env owner leaf` says: `leaf` is the runtime location a
+live `&mut` (held by the lval `owner`) currently points to, and *no other*
+variable's stored borrow resolves through it.  Concretely, for every variable
+`z` distinct from `owner`'s base, `z`'s stored value carries **no** borrow
+dependency reading `leaf` (`SlotDepKill store env leaf z`) — `z`'s borrow
+back-edges never resolve through the written `&mut` leaf.
+
+This is exactly the missing fact pinned down by "angle C": the `LocationBelow`
+cycle in the deref-assign kill closes its DOWN direction for any borrow target
+(`locReads_below`) but its UP direction only for `owner` itself (the firstNode,
+whose deref chain *is* the write chain).  For a cross-variable `z` the UP
+direction is unavailable, and the only contradiction is that `z` must not read
+the written `&mut` leaf at all — i.e. `SlotDepKill` for that `z`.
+
+`BorrowDependency` (hence `SlotDepKill`) is defined through `LocReads` and
+`store.loc`, so this is a genuinely location-based store/env-level invariant —
+keyed on actual store locations and realized pointees, never on a syntactic
+merged target list — and the `T-If` join therefore preserves it for free.  The
+owner's *own* dependency through `leaf` is handled separately by location
+well-foundedness (`slotDepKill_of_firstNode`), so `MutLeafExclusive` only
+constrains the genuinely cross-variable aliases. -/
+def MutLeafExclusive (store : ProgramStore) (env : Env) (owner : LVal)
+    (leaf : Location) : Prop :=
+  ∀ z, z ≠ LVal.base owner → SlotDepKill store env leaf z
+
+/-- **The general store/env-level `&mut`-exclusivity invariant.**
+
+`MutBorrowsExclusive store env` is the write-agnostic invariant threaded through
+preservation that discharges the deref-write frame's `MutLeafExclusive`
+obligation.  It says: every live mutable borrow's runtime pointee location is
+*exclusive* — no other variable's stored borrow resolves through it.
+
+Concretely, for every lval `source` whose env type is `&mut targets` and whose
+dereference resolves at runtime to a leaf location `leaf`
+(`store.loc (.deref source) = some leaf`), the leaf is `MutLeafExclusive`: no
+cross-variable borrow back-edge carries a `BorrowDependency` reading `leaf`.
+
+This is a genuinely store-level / location-based invariant (keyed on
+`store.loc` and `BorrowDependency`, never on a syntactic merged target list), so
+the `T-If` *join* preserves it for free — the post-`ite` store is the executed
+branch's store and `&mut`-ness is store-keyed.  Its real preservation crux is
+straight-line borrow creation (`x = &mut y`), discharged by the borrow rule's
+write-prohibition check. -/
+def MutBorrowsExclusive (store : ProgramStore) (env : Env) : Prop :=
+  ∀ (source : LVal) (targets : List LVal) (bl : Lifetime) (leaf : Location),
+    LValTyping env source (.ty (.borrow true targets)) bl →
+    store.loc (.deref source) = some leaf →
+    MutLeafExclusive store env source leaf
+
+/-- The general invariant instantiates to the deref-write frame's
+`MutLeafExclusive` obligation for any `&mut`-typed `source` whose deref resolves
+to `leaf`. -/
+theorem MutBorrowsExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
+    {source : LVal} {targets : List LVal} {bl : Lifetime} {leaf : Location}
+    (hexcl : MutBorrowsExclusive store env)
+    (hsource : LValTyping env source (.ty (.borrow true targets)) bl)
+    (hleaf : store.loc (.deref source) = some leaf) :
+    MutLeafExclusive store env source leaf :=
+  hexcl source targets bl leaf hsource hleaf
+
+/-! ### Realized-witness `&mut` leaf exclusivity (join-trivial reformulation)
+
+The `MutLeafExclusive`/`SlotDepKill` family above is keyed on
+`RuntimeFrame.BorrowDependency store value zslot.ty leaf`, which reads `zslot.ty`
+(the env type) — so it is ANTI-MONOTONE under the W-Bor target-list union and the
+`T-If` join coarsens it, making establishment at the join impossible (the
+§4.5.1 deviation, verified in Lean over many runs).
+
+`RuntimeFrame.RealizedBorrowReads` (Frame.lean) is the TYPE-FREE realization: it
+follows only the borrow target that resolves to the stored reference's OWN pointee
+location, never a static target-list member.  Keying the kill on it removes the
+env-type from the conclusion entirely, so the invariant below is invariant under
+any env coarsening and the `T-If` join preserves it for free (the post-join store
+is the executed branch's store). -/
+
+/-- Type-free, store-realized version of `SlotDepKill`: variable `z`'s stored
+value carries no *realized* borrow read of `leaf`.  Reads `env` only for the slot
+lifetime (a store-realized quantity); the stored value's TYPE is never inspected,
+so this predicate is unchanged by any env-type coarsening. -/
+def RealizedSlotKill (store : ProgramStore) (env : Env) (leaf : Location)
+    (z : Name) : Prop :=
+  ∀ zslot value,
+    env.slotAt z = some zslot →
+    store.slotAt (VariableProjection z) =
+      some { value := value, lifetime := zslot.lifetime } →
+    ¬ RuntimeFrame.RealizedBorrowReads store value leaf
+
+/-- A `RealizedSlotKill` discharges the `SlotDepKill` obligation: any
+`BorrowDependency` is in particular a `RealizedBorrowReads`. -/
+theorem RealizedSlotKill.slotDepKill {store : ProgramStore} {env : Env}
+    {leaf : Location} {z : Name}
+    (h : RealizedSlotKill store env leaf z) :
+    SlotDepKill store env leaf z := by
+  intro zslot value henv hstore hdep
+  exact h zslot value henv hstore hdep.realizedBorrowReads
+
+/-- Type-free version of `MutLeafExclusive`. -/
+def RealizedLeafExclusive (store : ProgramStore) (env : Env) (owner : LVal)
+    (leaf : Location) : Prop :=
+  ∀ z, z ≠ LVal.base owner → RealizedSlotKill store env leaf z
+
+/-- A `RealizedLeafExclusive` discharges the `MutLeafExclusive` obligation. -/
+theorem RealizedLeafExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
+    {owner : LVal} {leaf : Location}
+    (h : RealizedLeafExclusive store env owner leaf) :
+    MutLeafExclusive store env owner leaf :=
+  fun z hz => (h z hz).slotDepKill
+
+/-- **The join-trivial store-realized `&mut`-exclusivity invariant.**
+
+Identical in shape to `MutBorrowsExclusive`, but its conclusion is the type-free
+`RealizedLeafExclusive`.  The only env-dependence is the gate (`source` is
+`&mut`-typed; `leaf` is its runtime pointee) — both store-realized facts that the
+`T-If` join preserves — while the conclusion never reads any stored value's type.
+This is what makes the join preserve it for free. -/
+def RealizedMutBorrowsExclusive (store : ProgramStore) (env : Env) : Prop :=
+  ∀ (source : LVal) (targets : List LVal) (bl : Lifetime) (leaf : Location),
+    LValTyping env source (.ty (.borrow true targets)) bl →
+    store.loc (.deref source) = some leaf →
+    RealizedLeafExclusive store env source leaf
+
+/-- The realized invariant instantiates to the deref-write frame's
+`MutLeafExclusive` obligation. -/
+theorem RealizedMutBorrowsExclusive.mutLeafExclusive {store : ProgramStore}
+    {env : Env} {source : LVal} {targets : List LVal} {bl : Lifetime}
+    {leaf : Location}
+    (hexcl : RealizedMutBorrowsExclusive store env)
+    (hsource : LValTyping env source (.ty (.borrow true targets)) bl)
+    (hleaf : store.loc (.deref source) = some leaf) :
+    MutLeafExclusive store env source leaf :=
+  (hexcl source targets bl leaf hsource hleaf).mutLeafExclusive
+
+/-- **Conclusion-transfer (the join-trivial core).**  `RealizedSlotKill` transfers
+along *any* env relation that preserves the slot lifetime of `z`, because its
+conclusion (`¬ RealizedBorrowReads store value leaf`) is entirely store-keyed and
+never inspects the slot type.  In particular it transfers from a finer env to its
+same-shape strengthening (`EnvSameShapeStrengthening fine coarse`), which is what
+makes the `T-If` join preserve the realized invariant for free — the prior
+type-keyed `SlotDepKill` was anti-monotone here. -/
+theorem RealizedSlotKill.transfer_lifetime {store : ProgramStore}
+    {envFine envCoarse : Env} {leaf : Location} {z : Name}
+    (hfine : RealizedSlotKill store envFine leaf z)
+    (hlife : ∀ coarseSlot, envCoarse.slotAt z = some coarseSlot →
+      ∃ fineSlot, envFine.slotAt z = some fineSlot ∧
+        fineSlot.lifetime = coarseSlot.lifetime) :
+    RealizedSlotKill store envCoarse leaf z := by
+  intro coarseSlot value hcoarse hstore hreads
+  rcases hlife coarseSlot hcoarse with ⟨fineSlot, hfineSlot, hlifeEq⟩
+  refine hfine fineSlot value hfineSlot ?_ hreads
+  rw [hlifeEq]; exact hstore
+
+/-- **`RealizedLeafExclusive` transfers from a finer env to its same-shape
+strengthening.**  The `owner` base is unchanged; for every other variable, the
+conclusion transfers by `RealizedSlotKill.transfer_lifetime` using the lifetime
+agreement built into `EnvSameShapeStrengthening`. -/
+theorem RealizedLeafExclusive.of_strengthening {store : ProgramStore}
+    {envFine envCoarse : Env} {owner : LVal} {leaf : Location}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hfine : RealizedLeafExclusive store envFine owner leaf) :
+    RealizedLeafExclusive store envCoarse owner leaf := by
+  intro z hz
+  refine (hfine z hz).transfer_lifetime ?_
+  intro coarseSlot hcoarse
+  rcases hstr.1 z coarseSlot hcoarse with
+    ⟨fineSlot, hfineSlot, hlifeEq, _hstrength, _hshape⟩
+  exact ⟨fineSlot, hfineSlot, hlifeEq⟩
+
+/-- The `&mut`-gate pullback: a `&mut`-typing valid against the coarser (join)
+env also holds — over a possibly *finer* target list, hence the same `owner`
+base — against the finer (branch) env.  This is the dual of the borrow-invariance
+transport (`partialTyContains_borrow_transport_strengthens` /
+`not_writeProhibited_of_sameShapeStrengthening` run fine→coarse): it is the one
+genuinely recursive `LValTyping` metatheorem the join establishment still needs
+(see `realizedMutBorrowsExclusive_of_strengthening`).  Stated as a relation so the
+join lemma is parametric over it and stays placeholder-free while it is being built. -/
+def LValMutGatePullback (envFine envCoarse : Env) : Prop :=
+  ∀ source targets bl,
+    LValTyping envCoarse source (.ty (.borrow true targets)) bl →
+    ∃ targetsFine blFine,
+      LValTyping envFine source (.ty (.borrow true targetsFine)) blFine
+
+/-- The **variable case** of the gate pullback is discharged outright by
+`EnvSameShapeStrengthening`: a `&mut`-typed variable slot in the coarse (join) env
+corresponds to a slot in the finer env whose type strengthens into it, and
+same-shape forces that finer type to also be `&mut` (over a subset target list,
+hence the same `.var` base).  This covers the practically dominant case — and in
+particular every borrow created by `x = &mut y` (Step 3) — leaving only nested
+`*p`-shaped `&mut` lvals to the deeper recursive `LValTyping` transport. -/
+theorem lvalMutVar_pullback_of_strengthening {envFine envCoarse : Env} {x : Name}
+    {targets : List LVal} {bl : Lifetime}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hcoarseSlot : envCoarse.slotAt x = some ⟨.ty (.borrow true targets), bl⟩) :
+    ∃ targetsFine blFine,
+      LValTyping envFine (.var x) (.ty (.borrow true targetsFine)) blFine := by
+  rcases hstr.1 x ⟨.ty (.borrow true targets), bl⟩ hcoarseSlot with
+    ⟨fineSlot, hfineSlot, _hlife, hstrength, hshape⟩
+  cases fineSlot with
+  | mk fty flt =>
+    simp only at hstrength hshape
+    cases hstrength with
+    | reflex => exact ⟨targets, flt, LValTyping.var hfineSlot⟩
+    | borrow _hsub => exact ⟨_, flt, LValTyping.var hfineSlot⟩
+
+/-- **The join-trivial monotonicity of the realized `&mut`-exclusivity invariant.**
+
+Given the `&mut`-gate pullback, `RealizedMutBorrowsExclusive` transports from the
+finer branch env `env₃` to its same-shape strengthening `env₅` (the `T-If` join).
+The conclusion side is fully store-keyed and transports for free
+(`RealizedLeafExclusive.of_strengthening`); the only env-type-sensitive ingredient
+is the gate, supplied by `LValMutGatePullback`.  This is the join establishment
+that was *impossible* for the type-keyed `MutBorrowsExclusive` (whose conclusion
+read the join-coarsened slot type and was anti-monotone). -/
+theorem realizedMutBorrowsExclusive_of_strengthening {store : ProgramStore}
+    {envFine envCoarse : Env}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hgate : LValMutGatePullback envFine envCoarse)
+    (hfine : RealizedMutBorrowsExclusive store envFine) :
+    RealizedMutBorrowsExclusive store envCoarse := by
+  intro source targets bl leaf hsource hleaf
+  rcases hgate source targets bl hsource with ⟨targetsFine, blFine, hsourceFine⟩
+  exact RealizedLeafExclusive.of_strengthening hstr
+    (hfine source targetsFine blFine leaf hsourceFine hleaf)
+
+/-! ### The live-`&mut` registry (trilemma-escape: env-type-free provenance)
+
+The realized-witness analysis pinned a TRILEMMA (memory `soundness-current-sorries`,
+Update 2026-06-16): the exclusivity predicate the deref-write kill needs must be
+either (a) type-FREE — `RealizedBorrowReads` — which is join-trivial but
+*unestablishable* at borrow creation (no typed target handle to invoke the borrow
+rule), or (b) all-targets-typed — `BorrowDependency` — which is establishable but
+*anti-monotone* (the W-Bor join coarsens the target list and the kill reads it).
+Every prior design re-derived exclusivity from a *program point's* `(store, env)`,
+so it was caught on one horn or the other.
+
+The **escape** is to stop re-deriving exclusivity from the env at each program
+point, and instead thread it as an INDEPENDENT invariant that carries its own
+provenance: a *registry* `R : List (Location × Name)` recording, per live `&mut`
+borrow, its runtime pointee `Location` together with the owning variable.  The
+exclusivity invariant `MutRegistryExclusive store R` references ONLY the store and
+`R` — never any env target list — so:
+
+* the `T-If` join is a genuine pass-through (`MutRegistryExclusive.ite_passthrough`):
+  the join leaves the store and `R` untouched and creates no borrows, so there is
+  literally nothing to re-derive (CORNER B — the make-or-break corner);
+* the registry is populated AT `&mut` creation, where the type/mut-bit IS known
+  (so the unestablishability horn is also avoided, CORNER C);
+* and it discharges the env-keyed `MutLeafExclusive` the deref-frame consumes via
+  the existing store-realized `RealizedBorrowReads` frame (CORNER A).
+
+The kill is keyed STORE-ONLY (`StoreRealizedSlotKill`): it quantifies over the
+store's variable slots directly and never reads the env, not even for a lifetime.
+That is what makes the invariant a function of `(store, R)` alone. -/
+
+/-- **Store-only realized slot kill.**  Variable `z`'s stored value carries no
+*realized* borrow read of `leaf`.  Unlike `RealizedSlotKill`, this reads NO env at
+all (it quantifies over the store slot's value directly, for any lifetime), so it
+is a function of the store alone.  It is strictly stronger than `RealizedSlotKill
+store env leaf z` for every `env` (`StoreRealizedSlotKill.realizedSlotKill`). -/
+def StoreRealizedSlotKill (store : ProgramStore) (leaf : Location)
+    (z : Name) : Prop :=
+  ∀ value lifetime,
+    store.slotAt (VariableProjection z) =
+      some { value := value, lifetime := lifetime } →
+    ¬ RuntimeFrame.RealizedBorrowReads store value leaf
+
+/-- A store-only kill discharges the env-keyed `RealizedSlotKill` for ANY env: it
+already constrains the store slot under every lifetime, so in particular under the
+one `env` assigns to `z`. -/
+theorem StoreRealizedSlotKill.realizedSlotKill {store : ProgramStore} {env : Env}
+    {leaf : Location} {z : Name}
+    (h : StoreRealizedSlotKill store leaf z) :
+    RealizedSlotKill store env leaf z := by
+  intro zslot value _henv hstore hreads
+  exact h value zslot.lifetime hstore hreads
+
+/-- **The live-`&mut` registry exclusivity invariant — a function of `(store, R)`
+alone.**
+
+`R : List (Location × Name)` lists, per live `&mut` borrow, its runtime pointee
+`leaf` and owning variable `owner`.  The invariant says: for every registered
+`(leaf, owner)`, the leaf is *exclusively* borrowed — no cross-variable (`z ≠
+owner`) stored value carries a realized borrow read of `leaf`.
+
+Crucially this references ONLY the store and `R`; it never reads any env target
+list (it is keyed on `StoreRealizedSlotKill`, which is store-only).  That is what
+makes the `T-If` join a genuine pass-through (CORNER B). -/
+def MutRegistryExclusive (store : ProgramStore)
+    (R : List (Location × Name)) : Prop :=
+  ∀ leaf owner, (leaf, owner) ∈ R →
+    ∀ z, z ≠ owner → StoreRealizedSlotKill store leaf z
+
+/-! #### CORNER A — consumption
+
+The registry discharges the env-keyed `MutLeafExclusive` premise that the existing
+deref-write frame (`safeAbstraction_assign_deref_drop_of_wellFormed`,
+`validPartialValue_update_of_owner_and_realized_reads_frame`) consumes, provided
+the deref-write's `source` is registered at its pointee `leaf` (i.e. `(leaf,
+base source) ∈ R`).  No env target list is touched: the store-only kill is lifted
+to `RealizedSlotKill` (any env), then to `SlotDepKill`, then to
+`MutLeafExclusive`. -/
+
+/-- **CORNER A (consumption).**  If `source`'s pointee `leaf` is registered under
+owner `base source`, the registry yields the env-keyed `MutLeafExclusive store env
+source leaf` the deref-frame needs — for ANY `env`.  This is the connection from
+the env-free registry to the existing consumption site. -/
+theorem MutRegistryExclusive.mutLeafExclusive {store : ProgramStore} {env : Env}
+    {R : List (Location × Name)} {source : LVal} {leaf : Location}
+    (hexcl : MutRegistryExclusive store R)
+    (hreg : (leaf, LVal.base source) ∈ R) :
+    MutLeafExclusive store env source leaf := by
+  intro z hz
+  exact ((hexcl leaf (LVal.base source) hreg z hz).realizedSlotKill).slotDepKill
+
+/-! #### CORNER B — join pass-through (the make-or-break corner)
+
+`MutRegistryExclusive store R` is a function of `(store, R)` alone, so a `T-If`
+join — which leaves the store and the registry untouched, and creates no borrows —
+preserves it *definitionally* with the SAME `store` and SAME `R`.  There is no env
+target list to re-derive, which is exactly the horn every prior design impaled
+itself on.  Stated as both an explicit pass-through and an env-independence lemma. -/
+
+/-- **CORNER B (join pass-through).**  Across a `T-If` join the store and registry
+are unchanged, so the registry invariant passes through with the SAME `store` and
+SAME `R` — there is *nothing to re-derive*.  The proof is `id`: the invariant does
+not mention any env, so neither the executed-branch env `env₃` nor the merged join
+env `env₅` appears.  THIS is the corner all prior (env-keyed) designs failed. -/
+theorem MutRegistryExclusive.ite_passthrough {store : ProgramStore}
+    {R : List (Location × Name)}
+    (h : MutRegistryExclusive store R) :
+    MutRegistryExclusive store R :=
+  h
+
+/-- The registry invariant is **independent of the env** entirely: it transports
+across *any* pair of envs with the SAME `store` and `R`.  This is the formal
+content of "the join is a genuine pass-through" — quantifying over the two join
+envs `envFine` (branch `env₃`) and `envCoarse` (join `env₅`) shows neither can
+appear in the conclusion, so the W-Bor target-list coarsening cannot break it.
+Contrast `realizedMutBorrowsExclusive_of_strengthening`, which still needed the
+`LValMutGatePullback` env-type ingredient; the registry needs none. -/
+theorem MutRegistryExclusive.env_independent {store : ProgramStore}
+    {R : List (Location × Name)} (_envFine _envCoarse : Env)
+    (h : MutRegistryExclusive store R) :
+    MutRegistryExclusive store R :=
+  h
+
+/-! #### CORNER C — creation establishment
+
+A straight-line `&mut`-creation step `x = &mut y` extends `R` with `(loc_y, x)`.
+Establishing `MutRegistryExclusive` for the extended registry splits on the new
+entry vs. the old ones:
+
+* old entries `(leaf, owner) ∈ R` keep their kill — provided the creation does not
+  introduce a new realized read of an old `leaf` (the frame side condition, which
+  the borrow rule's write/read-prohibition supplies);
+* the new entry `(loc_y, x)` requires that no cross-variable `z ≠ x` reads `loc_y`
+  — which is exactly the `&mut`-exclusivity at the pointee `loc_y` that the borrow
+  rule's `¬ WriteProhibited` premise guarantees at creation (where the TYPE is
+  known).
+
+Below: the registry-extension *algebra* (the cons split), proved green, reducing
+CORNER C to (i) old-entry stability under the creation update and (ii) the new
+entry's pointee-exclusivity — the two facts the borrow rule supplies.  Full
+threading through the creation step is later preservation engineering. -/
+
+/-- **CORNER C (creation — the registry-extension algebra).**  Extending the
+registry with a fresh entry `(newLeaf, x)` preserves `MutRegistryExclusive`,
+given (i) the pre-existing invariant still holds at the (possibly updated) store,
+and (ii) the new entry's pointee `newLeaf` is exclusively borrowed by `x` — i.e.
+every cross-variable `z ≠ x` has a `StoreRealizedSlotKill store newLeaf z`.  This
+isolates exactly the two obligations the borrow rule discharges at `x = &mut y`:
+old-entry stability and new-pointee exclusivity. -/
+theorem MutRegistryExclusive.cons {store : ProgramStore}
+    {R : List (Location × Name)} {newLeaf : Location} {x : Name}
+    (hold : MutRegistryExclusive store R)
+    (hnew : ∀ z, z ≠ x → StoreRealizedSlotKill store newLeaf z) :
+    MutRegistryExclusive store ((newLeaf, x) :: R) := by
+  intro leaf owner hmem z hz
+  rcases List.mem_cons.mp hmem with heq | htail
+  · -- the new entry
+    cases heq
+    exact hnew z hz
+  · -- an old entry
+    exact hold leaf owner htail z hz
+
+
 /-- The write's guard set. -/
 inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
     (base₀ : Name) : Name → Prop where
@@ -7291,13 +8096,30 @@ inductive WriteGuarded (store : ProgramStore) (env : Env) (leaf : Location)
       t ∈ targets →
       LVal.base t = z →
       SlotDepKill store env leaf container →
+      SelectedTarget store container t →
       WriteGuarded store env leaf base₀ z
 
-/-- Borrow safety collapses any borrow node targeting a guarded base onto a
-guarded container carrying a dependency kill. -/
-theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
+/-- Runtime write guards are contained in the static authority closure. -/
+theorem WriteGuarded.authorityGuard {store : ProgramStore} {env : Env}
+    {leaf : Location} {base₀ root : Name} :
+    WriteGuarded store env leaf base₀ root →
+    BorrowAuthorityGuard env base₀ root := by
+  intro hguard
+  induction hguard with
+  | base _hkill =>
+      exact BorrowAuthorityGuard.base
+  | step hcontainer hnode hmem _hbase _hkill _hlive ih =>
+      simpa [_hbase] using BorrowAuthorityGuard.step ih hnode hmem
+
+/--
+Only roots in the write's authority closure need to be borrow-safe against the
+rest of the environment.  Unrelated conflicts elsewhere in a joined environment
+are irrelevant to this collapse.
+-/
+theorem WriteGuarded.collapse_kill_authority {store : ProgramStore} {env : Env}
     {leaf : Location} {base₀ : Name}
-    (hborrowSafe : BorrowSafeEnv env)
+    (hsafeRoot :
+      ∀ root, BorrowAuthorityGuard env base₀ root → BorrowSafeRoot env root)
     (hnotWP : ¬ WriteProhibited env (.var base₀)) :
     ∀ {c : Name} {mutable : Bool} {ts : List LVal} {t : LVal},
       env ⊢ c ↝ (.borrow mutable ts) →
@@ -7317,11 +8139,13 @@ theorem WriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
       | false =>
           exact Or.inr ⟨c, ts, t, hnode, hmem,
             by simpa [PathConflicts, LVal.base] using hz⟩
-  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' =>
+  | @step container _z targets' t' hGc hnode' hmem' hbase' hkill' _hlive' =>
       have hconflict : t' ⋈ t := by
         simpa [PathConflicts, hbase'] using hz.symm
+      have hcontainerSafe : BorrowSafeRoot env container :=
+        hsafeRoot container hGc.authorityGuard
       have hceq : container = c :=
-        hborrowSafe container c mutable targets' ts t' t hnode' hnode hmem'
+        hcontainerSafe c mutable targets' ts t' t hnode' hnode hmem'
           hmem hconflict
       subst hceq
       exact ⟨hGc, hkill'⟩
@@ -7773,10 +8597,13 @@ where
                     have hcontains : PartialTyContains envSlot.ty
                         (.borrow true ts) :=
                       StoreOwnerSpine.contains_leafTy h6 rfl
+                    have hcellProt : ProtectedByBase store (LVal.base u) cell :=
+                      StoreOwnerSpine.protectedByBase h6 rfl
                     have hGtarget :
                         WriteGuarded store env leaf base₀ (LVal.base tSel) :=
                       WriteGuarded.step hGbase ⟨envSlot, h1, hcontains⟩
                         hmemSel rfl hkill
+                        ⟨cell, cellSlot, L, hcellProt, h3, h4, hlocSel⟩
                     rcases WriteBorrowTargets.selected_branch_to_result_exists
                         (Nat.succ_pos rank) hfanout
                         (WriteBorrowTargets.initialized_leaves_of_typed
@@ -8036,6 +8863,79 @@ theorem RuntimeFrame.borrowDependency_witness {store : ProgramStore}
   | boxFullInner _hslot _hinner ih =>
       rcases ih with ⟨m, ts, t, hcontains, hmem, hreads⟩
       exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads⟩
+
+/-- The borrow-resolution dependency's target is a *live* target: the leaf borrow
+value (reached through any owning boxes from a cell holding `value`) is a
+reference to the location that `target` resolves to.  So `TargetPointedTo` holds
+for the dependency target. -/
+theorem RuntimeFrame.borrowDependency_targetPointedTo {store : ProgramStore}
+    {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
+    {cell : Location} {cellSlot : StoreSlot} :
+    RuntimeFrame.BorrowDependency store value partialTy dependency →
+    store.slotAt cell = some cellSlot →
+    cellSlot.value = value →
+    ∃ mutable targets target,
+      PartialTyContains partialTy (.borrow mutable targets) ∧
+      target ∈ targets ∧
+      RuntimeFrame.LocReads store target dependency ∧
+      TargetPointedTo store target := by
+  intro hdep
+  induction hdep generalizing cell cellSlot with
+  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+      intro hcell hval
+      exact ⟨mutable, targets, target, PartialTyContains.here, hmem, hreads,
+        ⟨cell, cellSlot, location, hcell, hval, hloc⟩⟩
+  | @boxInner location slot inner dep hslot _hinner ih =>
+      intro _hcell _hval
+      rcases ih hslot rfl with ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
+      exact ⟨m, ts, t, PartialTyContains.box hcontains, hmem, hreads, htpt⟩
+  | @boxFullInner location slot innerTy dep hslot _hinner ih =>
+      intro _hcell _hval
+      rcases ih hslot rfl with ⟨m, ts, t, hcontains, hmem, hreads, htpt⟩
+      exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads, htpt⟩
+
+/-- The same as `borrowDependency_targetPointedTo`, but the dependency's target is
+*selected* by the root variable `x` that owns the dependency-bearing cell: every
+cell crossed by the borrow-resolution descent is owned by `x` (the descent only
+follows owning boxes), so the leaf borrow cell holding the reference to the
+target's location is `ProtectedByBase store x`.  This is exactly the
+`SelectedTarget` used by selected-target frame lemmas. -/
+theorem RuntimeFrame.borrowDependency_selectedTarget {store : ProgramStore}
+    {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
+    {cell : Location} {cellSlot : StoreSlot} {x : Name} :
+    RuntimeFrame.BorrowDependency store value partialTy dependency →
+    store.slotAt cell = some cellSlot →
+    cellSlot.value = value →
+    ProtectedByBase store x cell →
+    ∃ mutable targets target,
+      PartialTyContains partialTy (.borrow mutable targets) ∧
+      target ∈ targets ∧
+      RuntimeFrame.LocReads store target dependency ∧
+      SelectedTarget store x target := by
+  intro hdep
+  induction hdep generalizing cell cellSlot with
+  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+      intro hcell hval hprot
+      exact ⟨mutable, targets, target, PartialTyContains.here, hmem, hreads,
+        ⟨cell, cellSlot, location, hprot, hcell, hval, hloc⟩⟩
+  | @boxInner location slot inner dep hslot _hinner ih =>
+      intro hcell hval hprot
+      have howns : ProgramStore.OwnsAt store location cell :=
+        ⟨cellSlot.lifetime, by
+          rw [hcell]; cases cellSlot; simp [owningRef] at hval ⊢; exact hval⟩
+      have hprotInner : ProtectedByBase store x location :=
+        ProtectedByBase.trans_owned hprot howns
+      rcases ih hslot rfl hprotInner with ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
+      exact ⟨m, ts, t, PartialTyContains.box hcontains, hmem, hreads, hsel⟩
+  | @boxFullInner location slot innerTy dep hslot _hinner ih =>
+      intro hcell hval hprot
+      have howns : ProgramStore.OwnsAt store location cell :=
+        ⟨cellSlot.lifetime, by
+          rw [hcell]; cases cellSlot; simp [owningRef] at hval ⊢; exact hval⟩
+      have hprotInner : ProtectedByBase store x location :=
+        ProtectedByBase.trans_owned hprot howns
+      rcases ih hslot rfl hprotInner with ⟨m, ts, t, hcontains, hmem, hreads, hsel⟩
+      exact ⟨m, ts, t, PartialTyContains.tyBox hcontains, hmem, hreads, hsel⟩
 
 /-- A contained borrow survives same-shape strengthening, with a grown target
 list. -/
