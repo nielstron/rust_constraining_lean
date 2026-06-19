@@ -74,6 +74,19 @@ theorem EnvSameShapeStrengthening.refl (env : Env) :
   · intro x sourceSlot hslot
     exact ⟨sourceSlot, hslot, rfl⟩
 
+theorem EnvSameShapeStrengthening.fresh_source_of_result
+    {source result : Env} {x : Name}
+    (hstr : EnvSameShapeStrengthening source result) :
+    result.fresh x → source.fresh x := by
+  intro hfresh
+  unfold Env.fresh at hfresh ⊢
+  cases hsource : source.slotAt x with
+  | none => rfl
+  | some sourceSlot =>
+      rcases hstr.2 x sourceSlot hsource with ⟨resultSlot, hresult, _hlife⟩
+      rw [hfresh] at hresult
+      cases hresult
+
 /-- A borrow contained in the finer (source) type of a shape-preserving
 strengthening is also contained in the coarser (result) type, with a *superset*
 of targets.  This is the structural core of "preserve writeProhibited":
@@ -10469,6 +10482,60 @@ inductive RuntimeValueMutBorrow (store : ProgramStore) :
         (.value (.ref { location := location, owner := true }))
         (.ty (.box ty)) leaf
 
+/-- **The concrete mutable-borrow footprint is invariant under `sameShape`.**
+
+Changing a partial type's borrow *target lists* (keeping its mutability bits and
+box structure) leaves the runtime footprint unchanged: the `borrow` constructor
+quantifies the target list freely, and the box constructors only descend through
+owned-box structure.  This is the structural fact that makes footprint-keyed
+provenance join-stable — an environment join widens target lists but preserves
+slot shapes, so the per-root footprint it ranges over does not move. -/
+theorem RuntimeValueMutBorrow.of_sameShape {store : ProgramStore}
+    {value : PartialValue} {tyA : PartialTy} {leaf : Location} :
+    RuntimeValueMutBorrow store value tyA leaf →
+    ∀ {tyB : PartialTy}, PartialTy.sameShape tyA tyB →
+      RuntimeValueMutBorrow store value tyB leaf := by
+  intro hfp
+  induction hfp with
+  | @borrow leaf targetsA =>
+      intro tyB hshape
+      cases tyB with
+      | ty tB =>
+          cases tB with
+          | borrow mB targetsB =>
+              have hmB : mB = true := by
+                simpa [PartialTy.sameShape, Ty.sameShape] using hshape
+              subst hmB
+              exact RuntimeValueMutBorrow.borrow
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | @box loc slot innerA leaf hslot _hinner ih =>
+      intro tyB hshape
+      cases tyB with
+      | box innerB =>
+          exact RuntimeValueMutBorrow.box hslot
+            (ih (by simpa [PartialTy.sameShape] using hshape))
+      | ty _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | @boxFull loc slot tA leaf hslot _hinner ih =>
+      intro tyB hshape
+      cases tyB with
+      | ty tB =>
+          cases tB with
+          | box tB' =>
+              exact RuntimeValueMutBorrow.boxFull hslot
+                (ih (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape))
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | borrow _ _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+
 /-- A mutable-borrow footprint is, in particular, a concrete runtime borrow
 footprint.  This forgets only the mutability/type evidence; the concrete leaf is
 unchanged. -/
@@ -10495,6 +10562,118 @@ theorem RuntimeValueMutBorrow.invalidatedBelow {store : ProgramStore}
   intro hborrow hbelow
   exact ⟨leaf, hborrow.toBorrow, hbelow⟩
 
+/-- Erasing a store slot cannot create a concrete mutable-borrow footprint. -/
+theorem RuntimeValueMutBorrow.erase_to_store {store : ProgramStore}
+    {erased : Location} {value : PartialValue} {ty : PartialTy}
+    {leaf : Location} :
+    RuntimeValueMutBorrow (store.erase erased) value ty leaf →
+    RuntimeValueMutBorrow store value ty leaf := by
+  intro hborrow
+  induction hborrow with
+  | borrow =>
+      exact RuntimeValueMutBorrow.borrow
+  | box hslot _hinner ih =>
+      exact RuntimeValueMutBorrow.box
+        (RuntimeFrame.slotAt_of_erase_slotAt hslot) ih
+  | boxFull hslot _hinner ih =>
+      exact RuntimeValueMutBorrow.boxFull
+        (RuntimeFrame.slotAt_of_erase_slotAt hslot) ih
+
+/-- Updating a slot to `undef` cannot create a concrete mutable-borrow footprint
+inside an existing value. -/
+theorem RuntimeValueMutBorrow.update_undef_to_store {store : ProgramStore}
+    {updated : Location} {updatedLifetime : Lifetime}
+    {value : PartialValue} {ty : PartialTy} {leaf : Location} :
+    RuntimeValueMutBorrow
+      (store.update updated { value := .undef, lifetime := updatedLifetime })
+      value ty leaf →
+    RuntimeValueMutBorrow store value ty leaf := by
+  intro hborrow
+  induction hborrow with
+  | borrow =>
+      exact RuntimeValueMutBorrow.borrow
+  | @box location slot inner leaf hslot _hinner ih =>
+      by_cases hlocation : location = updated
+      · subst hlocation
+        simp [ProgramStore.update] at hslot
+        cases hslot
+        cases _hinner
+      · exact RuntimeValueMutBorrow.box
+          (by
+            rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hlocation]
+            exact hslot)
+          ih
+  | @boxFull location slot ty leaf hslot _hinner ih =>
+      by_cases hlocation : location = updated
+      · subst hlocation
+        simp [ProgramStore.update] at hslot
+        cases hslot
+        cases _hinner
+      · exact RuntimeValueMutBorrow.boxFull
+          (by
+            rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hlocation]
+            exact hslot)
+          ih
+
+/-- The runtime mutable-borrow footprint is unchanged by an update at a *fresh*
+location, when the value being navigated is anchored in the old store.  The
+footprint only ever reads *owned* (allocated) cells, and a fresh location is not
+owned, so the update is never observed.  This is the frame needed to transport
+footprint coverage across a `declare` (fresh variable slot). -/
+theorem RuntimeValueMutBorrow.update_fresh_slot_to_store {store : ProgramStore}
+    {updated : Location} {newSlot : StoreSlot} {slotLocation : Location}
+    {value : PartialValue} {ty : PartialTy} {lifetime : Lifetime}
+    {leaf : Location}
+    (hallocated : StoreOwnersAllocated store)
+    (hfresh : store.fresh updated)
+    (hslot :
+      store.slotAt slotLocation = some { value := value, lifetime := lifetime }) :
+    RuntimeValueMutBorrow (store.update updated newSlot) value ty leaf →
+    RuntimeValueMutBorrow store value ty leaf := by
+  intro hfp
+  induction hfp generalizing slotLocation lifetime with
+  | borrow => exact RuntimeValueMutBorrow.borrow
+  | @box location slot inner leaf hslotUpdated _hinner ih =>
+      by_cases hlocation : location = updated
+      · subst location
+        exact False.elim
+          ((not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
+            ⟨slotLocation, lifetime, by simpa [owningRef] using hslot⟩)
+      · have hslotOld : store.slotAt location = some slot := by
+          rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hlocation]
+          exact hslotUpdated
+        exact RuntimeValueMutBorrow.box hslotOld (ih hslotOld)
+  | @boxFull location slot t leaf hslotUpdated _hinner ih =>
+      by_cases hlocation : location = updated
+      · subst location
+        exact False.elim
+          ((not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
+            ⟨slotLocation, lifetime, by simpa [owningRef] using hslot⟩)
+      · have hslotOld : store.slotAt location = some slot := by
+          rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hlocation]
+          exact hslotUpdated
+        exact RuntimeValueMutBorrow.boxFull hslotOld (ih hslotOld)
+
+/-- Striking a type path only removes initialized structure, so any mutable
+footprint still visible in the struck type was already visible in the original
+type. -/
+theorem RuntimeValueMutBorrow.of_strike {store : ProgramStore}
+    {path : Path} {old struck : PartialTy} {value : PartialValue}
+    {leaf : Location} :
+    Strike path old struck →
+    RuntimeValueMutBorrow store value struck leaf →
+      RuntimeValueMutBorrow store value old leaf := by
+  intro hstrike hfp
+  induction path generalizing old struck value leaf with
+  | nil =>
+      cases old <;> cases struck <;> simp [Strike] at hstrike
+      cases hfp
+  | cons _ path ih =>
+      cases old <;> cases struck <;> simp [Strike] at hstrike
+      cases hfp with
+      | box hslot hinner =>
+          exact RuntimeValueMutBorrow.box hslot (ih hstrike hinner)
+
 /-- A registry covers all concrete mutable-borrow leaves carried by one runtime
 value once that value is installed under `owner`. -/
 def ValueMutRegistryCovers (store : ProgramStore) (owner : Name)
@@ -10517,6 +10696,19 @@ def ValueMutRegistryExact (store : ProgramStore) (owner : Name)
     (R : List (Location × Name)) : Prop :=
   ValueMutRegistryCovers store owner value ty R ∧
     ValueMutRegistrySound store owner value ty R
+
+theorem ValueMutRegistryExact.of_sameShape {store : ProgramStore}
+    {owner : Name} {value : PartialValue} {tyA tyB : PartialTy}
+    {R : List (Location × Name)}
+    (hexact : ValueMutRegistryExact store owner value tyA R)
+    (hshape : PartialTy.sameShape tyA tyB) :
+    ValueMutRegistryExact store owner value tyB R := by
+  constructor
+  · intro leaf hborrow
+    exact hexact.1 leaf (hborrow.of_sameShape (PartialTy.sameShape_symm hshape))
+  · intro leaf entryOwner hmem
+    rcases hexact.2 leaf entryOwner hmem with ⟨howner, hborrow⟩
+    exact ⟨howner, hborrow.of_sameShape hshape⟩
 
 /-- Coverage for a value is monotone under appending extra registry entries on
 the right. -/
@@ -10914,6 +11106,44 @@ def MutRegistryCovers (store : ProgramStore) (env : Env)
     store.loc (.deref source) = some leaf →
     (leaf, LVal.base source) ∈ R
 
+/-- **Footprint-keyed environment coverage.**  Every concrete mutable-borrow leaf
+in the *runtime footprint* (`RuntimeValueMutBorrow`) of an environment slot's
+value is registered under that slot's owner.
+
+Unlike `MutRegistryCovers` (which ranges over static `&mut`-typed lvalues and so
+sees the borrow *target lists*), this ranges over the runtime footprint, which is
+target-list-independent.  That is the shape the soundness argument actually
+needs: a static target-list widening at a join does not move the runtime
+footprint, so this coverage is join-stable — whereas static-gate coverage is not
+(an enlarged target list can make a write type-check in the join that did not in
+the branch). -/
+def RootFootprintCovers (store : ProgramStore) (env : Env)
+    (R : List (Location × Name)) : Prop :=
+  ∀ (x : Name) (slot : EnvSlot) (value : Value) (lifetime : Lifetime)
+    (leaf : Location),
+    env.slotAt x = some slot →
+    store.slotAt (VariableProjection x) =
+      some { value := .value value, lifetime := lifetime } →
+    RuntimeValueMutBorrow store (.value value) slot.ty leaf →
+    (leaf, x) ∈ R
+
+/-- **Footprint coverage is join-stable.**  Because the runtime footprint is
+invariant under `sameShape` (`RuntimeValueMutBorrow.of_sameShape`), coverage of
+the finer (branch) environment transports to its same-shape strengthening (the
+join) with the *same* registry — and, crucially, with **no gate pullback**.  This
+is the clean replacement for `RuntimeWritableMutGatePullback`, which is false in
+general. -/
+theorem RootFootprintCovers.of_sameShapeStrengthening {store : ProgramStore}
+    {envFine envCoarse : Env} {R : List (Location × Name)}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hcover : RootFootprintCovers store envFine R) :
+    RootFootprintCovers store envCoarse R := by
+  intro x coarseSlot value lifetime leaf hcoarseSlot hstore hfp
+  rcases hstr.1 x coarseSlot hcoarseSlot with
+    ⟨fineSlot, hfineSlot, _hlife, _hstrength, hshape⟩
+  exact hcover x fineSlot value lifetime leaf hfineSlot hstore
+    (hfp.of_sameShape (PartialTy.sameShape_symm hshape))
+
 /-- Existing environment coverage remains valid after appending extra registry
 entries on the right. -/
 theorem MutRegistryCovers.append_right {store : ProgramStore} {env : Env}
@@ -10951,6 +11181,552 @@ stored reference locations and ownership subtrees, not arbitrary lvalue
 expressions or joined target-list alternatives. -/
 def ConcreteRuntimeBorrowProvenance (store : ProgramStore) (env : Env) : Prop :=
   ∃ R, MutRegistryCovers store env R ∧ ConcreteMutRegistryExclusive store R
+
+/-- **Footprint-keyed concrete runtime borrow provenance.**  Same store-based
+exclusivity as `ConcreteRuntimeBorrowProvenance`, but the coverage side is keyed
+on the runtime footprint (`RootFootprintCovers`) rather than on static `&mut`
+lvalue gates.  This is the join-stable, value-establishable invariant: a
+static target-list widening at a join cannot move the runtime footprint, so the
+provenance transports through joins with no gate pullback. -/
+def ConcreteRuntimeFootprintProvenance (store : ProgramStore) (env : Env) : Prop :=
+  ∃ R, RootFootprintCovers store env R ∧ ConcreteMutRegistryExclusive store R
+
+/-- Footprint provenance carried by a value for installation as a root.
+
+The package is value-scoped: exactness covers the concrete mutable-borrow leaves
+physically carried by the value, while concrete exclusivity records that those
+leaves are safe against every other root once the value is installed under
+`owner`. -/
+def ConcreteRuntimeValueFootprintInstallProvenance
+    (store : ProgramStore) (owner : Name) (value : Value) (ty : Ty) : Prop :=
+  ∃ R,
+    ValueMutRegistryExact store owner (.value value) (.ty ty) R ∧
+      ConcreteMutRegistryExclusive store R
+
+/-- The old broad value-install package implies footprint value installation:
+footprint installation keeps the exact concrete value registry and drops the
+static lvalue-coverage side. -/
+theorem ConcreteRuntimeValueInstallProvenance.footprint
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    ConcreteRuntimeValueInstallProvenance store env owner value ty lifetime →
+      ConcreteRuntimeValueFootprintInstallProvenance store owner value ty := by
+  intro hprov
+  rcases hprov with ⟨R, hexact, hexcl, _hcover⟩
+  exact ⟨R, hexact, hexcl⟩
+
+/-- Installing `unit` as a root contributes no mutable-borrow footprint. -/
+theorem ConcreteRuntimeValueFootprintInstallProvenance.unit
+    {store : ProgramStore} {owner : Name} :
+    ConcreteRuntimeValueFootprintInstallProvenance store owner .unit .unit := by
+  refine ⟨[], ?_, ?_⟩
+  · constructor
+    · intro leaf hborrow
+      cases hborrow
+    · intro leaf entryOwner hmem
+      simp at hmem
+  · intro leaf entryOwner hmem _z _hz
+    simp at hmem
+
+/-- Installing an integer as a root contributes no mutable-borrow footprint. -/
+theorem ConcreteRuntimeValueFootprintInstallProvenance.int
+    {store : ProgramStore} {owner : Name} {value : Int} :
+    ConcreteRuntimeValueFootprintInstallProvenance store owner
+      (.int value) .int := by
+  refine ⟨[], ?_, ?_⟩
+  · constructor
+    · intro leaf hborrow
+      cases hborrow
+    · intro leaf entryOwner hmem
+      simp at hmem
+  · intro leaf entryOwner hmem _z _hz
+    simp at hmem
+
+/-- Installing a boolean as a root contributes no mutable-borrow footprint. -/
+theorem ConcreteRuntimeValueFootprintInstallProvenance.bool
+    {store : ProgramStore} {owner : Name} {value : Bool} :
+    ConcreteRuntimeValueFootprintInstallProvenance store owner
+      (.bool value) .bool := by
+  refine ⟨[], ?_, ?_⟩
+  · constructor
+    · intro leaf hborrow
+      cases hborrow
+    · intro leaf entryOwner hmem
+      simp at hmem
+  · intro leaf entryOwner hmem _z _hz
+    simp at hmem
+
+/-- Immutable borrow values carry no mutable-borrow footprint. -/
+theorem ConcreteRuntimeValueFootprintInstallProvenance.immBorrow
+    {store : ProgramStore} {owner : Name}
+    {location : Location} {targets : List LVal} :
+    ConcreteRuntimeValueFootprintInstallProvenance store owner
+      (.ref { location := location, owner := false })
+      (.borrow false targets) := by
+  refine ⟨[], ?_, ?_⟩
+  · constructor
+    · intro leaf hborrow
+      cases hborrow
+    · intro leaf entryOwner hmem
+      simp at hmem
+  · intro leaf entryOwner hmem _z _hz
+    simp at hmem
+
+/-- Installing a mutable reference contributes exactly its concrete pointee leaf
+to the mutable-borrow footprint.  The caller supplies the owner-relative concrete
+kill for that leaf. -/
+theorem ConcreteRuntimeValueFootprintInstallProvenance.mutBorrow
+    {store : ProgramStore} {owner : Name}
+    {location : Location} {targets : List LVal}
+    (hkill : ∀ z, z ≠ owner → StoreConcreteBorrowKill store location z) :
+    ConcreteRuntimeValueFootprintInstallProvenance store owner
+      (.ref { location := location, owner := false })
+      (.borrow true targets) := by
+  refine ⟨[(location, owner)], ValueMutRegistryExact.singleton_borrow, ?_⟩
+  intro leaf entryOwner hmem z hz
+  have hpair : (leaf, entryOwner) = (location, owner) :=
+    List.mem_singleton.mp hmem
+  cases hpair
+  exact hkill z hz
+
+theorem ConcreteRuntimeValueFootprintInstallProvenance.of_sourceValue
+    {store : ProgramStore} {typing : StoreTyping} {owner : Name}
+    {value : Value} {ty : Ty} :
+    SourceValue value →
+    ValueTyping typing value ty →
+      ConcreteRuntimeValueFootprintInstallProvenance store owner value ty := by
+  intro hsource htyping
+  cases htyping
+  · exact ConcreteRuntimeValueFootprintInstallProvenance.unit
+  · exact ConcreteRuntimeValueFootprintInstallProvenance.int
+  · exact ConcreteRuntimeValueFootprintInstallProvenance.bool
+  · cases hsource
+
+theorem ConcreteRuntimeValueFootprintInstallProvenance.of_sameShape
+    {store : ProgramStore} {owner : Name} {value : Value}
+    {tyA tyB : Ty} :
+    ConcreteRuntimeValueFootprintInstallProvenance store owner value tyA →
+    Ty.sameShape tyA tyB →
+      ConcreteRuntimeValueFootprintInstallProvenance store owner value tyB := by
+  intro hprov hshape
+  rcases hprov with ⟨R, hexact, hexcl⟩
+  exact ⟨R,
+    hexact.of_sameShape (by simpa [PartialTy.sameShape] using hshape),
+    hexcl⟩
+
+/-- Footprint provenance transports through an environment join (same-shape
+strengthening) with the same store and registry — the clean replacement for the
+(false) writable-gate pullback. -/
+theorem ConcreteRuntimeFootprintProvenance.of_sameShapeStrengthening
+    {store : ProgramStore} {envFine envCoarse : Env}
+    (hstr : EnvSameShapeStrengthening envFine envCoarse)
+    (hprov : ConcreteRuntimeFootprintProvenance store envFine) :
+    ConcreteRuntimeFootprintProvenance store envCoarse := by
+  rcases hprov with ⟨R, hcover, hexcl⟩
+  exact ⟨R, RootFootprintCovers.of_sameShapeStrengthening hstr hcover, hexcl⟩
+
+/-- Install footprint provenance for a root already present in the store.
+
+Old-root coverage comes from the existing footprint provenance.  The installed
+root coverage comes from the value-scoped exact footprint registry. -/
+theorem ConcreteRuntimeFootprintProvenance.install_root_of_valueFootprint
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime}
+    (hpostOld : ConcreteRuntimeFootprintProvenance store env)
+    (hinstalled :
+      store.slotAt (VariableProjection owner) =
+        some { value := .value value, lifetime := lifetime })
+    (hvalueProv :
+      ConcreteRuntimeValueFootprintInstallProvenance store owner value ty) :
+    ConcreteRuntimeFootprintProvenance store
+      (env.update owner { ty := .ty ty, lifetime := lifetime }) := by
+  rcases hpostOld with ⟨R, hcover, hexcl⟩
+  rcases hvalueProv with ⟨extra, hexact, hextra⟩
+  refine ⟨R ++ extra, ?_, hexcl.append hextra⟩
+  intro x slot rootValue rootLifetime leaf henvSlot hstoreSlot hfp
+  by_cases hx : x = owner
+  · subst hx
+    have hslotEq :
+        slot = { ty := .ty ty, lifetime := lifetime } := by
+      simpa [Env.update] using henvSlot.symm
+    subst hslotEq
+    have hstoreEq :
+        ({ value := .value value, lifetime := lifetime } : StoreSlot) =
+          { value := .value rootValue, lifetime := rootLifetime } :=
+      Option.some.inj (hinstalled.symm.trans hstoreSlot)
+    cases hstoreEq
+    exact List.mem_append.mpr (Or.inr (hexact.1 leaf hfp))
+  · have henvOld : env.slotAt x = some slot := by
+      simpa [Env.update, hx] using henvSlot
+    exact List.mem_append.mpr
+      (Or.inl (hcover x slot rootValue rootLifetime leaf henvOld
+        hstoreSlot hfp))
+
+/-- The empty environment has footprint provenance. -/
+theorem ConcreteRuntimeFootprintProvenance.empty {store : ProgramStore} :
+    ConcreteRuntimeFootprintProvenance store Env.empty := by
+  refine ⟨[], ?_, ?_⟩
+  · intro x slot value lifetime leaf hslot _hstore _hfp
+    simp [Env.empty] at hslot
+  · intro leaf owner hmem _z _hz
+    simp at hmem
+
+/-- Footprint provenance is unchanged by a value-tail multistep (the store is
+unchanged by reducing a value to a value). -/
+theorem ConcreteRuntimeFootprintProvenance.value_tail
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {value finalValue : Value} :
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance finalStore env := by
+  intro hmulti hprov
+  rcases multistep_value_inv hmulti with ⟨hstore, _hterm⟩
+  simpa [hstore] using hprov
+
+/-- Erasing a store slot preserves footprint coverage: any root value and
+mutable-borrow footprint still observable after the erase was already observable
+before the erase. -/
+theorem RootFootprintCovers.erase {store : ProgramStore} {env : Env}
+    {R : List (Location × Name)} {erased : Location}
+    (hcover : RootFootprintCovers store env R) :
+    RootFootprintCovers (store.erase erased) env R := by
+  intro x slot value lifetime leaf henvSlot hstoreSlot hfp
+  exact hcover x slot value lifetime leaf henvSlot
+    (RuntimeFrame.slotAt_of_erase_slotAt hstoreSlot)
+    hfp.erase_to_store
+
+/-- Updating one slot to `undef` preserves footprint coverage against an
+unchanged environment.  If the updated location were the queried root, the root
+slot could not contain a full value after the update. -/
+theorem RootFootprintCovers.update_undef {store : ProgramStore} {env : Env}
+    {R : List (Location × Name)} {updated : Location}
+    {updatedLifetime : Lifetime}
+    (hcover : RootFootprintCovers store env R) :
+    RootFootprintCovers
+      (store.update updated { value := .undef, lifetime := updatedLifetime })
+      env R := by
+  intro x slot value lifetime leaf henvSlot hstoreSlot hfp
+  by_cases hroot : VariableProjection x = updated
+  · subst hroot
+    simp [ProgramStore.update] at hstoreSlot
+  · have hstoreOld :
+        store.slotAt (VariableProjection x) =
+          some { value := .value value, lifetime := lifetime } := by
+      rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hroot]
+      exact hstoreSlot
+    exact hcover x slot value lifetime leaf henvSlot hstoreOld
+      hfp.update_undef_to_store
+
+/-- Footprint coverage survives a move paired with the concrete runtime update
+that writes `undef`.  The moved root case is handled by `Strike`: any mutable
+footprint still visible in the struck slot type was visible in the original
+slot type. -/
+theorem RootFootprintCovers.move_update_undef {store : ProgramStore}
+    {env env' : Env} {R : List (Location × Name)} {moved : LVal}
+    {updated : Location} {updatedLifetime : Lifetime}
+    (hcover : RootFootprintCovers store env R)
+    (hmove : EnvMove env moved env') :
+    RootFootprintCovers
+      (store.update updated { value := .undef, lifetime := updatedLifetime })
+      env' R := by
+  rcases hmove with ⟨moveSlot, struck, hmoveSlot, hstrike, henv'⟩
+  subst henv'
+  intro x slot value lifetime leaf henvSlot hstoreSlot hfp
+  have hstoreOld :
+      store.slotAt (VariableProjection x) =
+        some { value := .value value, lifetime := lifetime } := by
+    by_cases hroot : VariableProjection x = updated
+    · subst hroot
+      simp [ProgramStore.update] at hstoreSlot
+    · rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hroot]
+      exact hstoreSlot
+  have hfpStore :
+      RuntimeValueMutBorrow store (.value value) slot.ty leaf :=
+    hfp.update_undef_to_store
+  by_cases hx : x = LVal.base moved
+  · subst hx
+    have hslotEq : slot = { moveSlot with ty := struck } := by
+      simpa [Env.update] using henvSlot.symm
+    subst hslotEq
+    exact hcover (LVal.base moved) moveSlot value lifetime leaf hmoveSlot
+      hstoreOld (RuntimeValueMutBorrow.of_strike hstrike hfpStore)
+  · have henvOld : env.slotAt x = some slot := by
+      simpa [Env.update, hx] using henvSlot
+    exact hcover x slot value lifetime leaf henvOld hstoreOld hfpStore
+
+/-- Fresh-variable updates preserve old-root footprint coverage, with any
+hypothetical fresh-location leaves filtered out of the registry.
+
+The filter is harmless for well-formed runtime states: if an old root had a
+mutable footprint leaf at the fresh variable location, concrete root safety
+would make that fresh location allocated in the old store. -/
+theorem RootFootprintCovers.update_fresh_var_filter_of_rootsSafe
+    {store : ProgramStore} {env : Env} {R : List (Location × Name)}
+    {x : Name} {newSlot : StoreSlot}
+    (hallocated : StoreOwnersAllocated store)
+    (hfreshStore : store.fresh (.var x))
+    (hfreshEnv : env.fresh x)
+    (hroots : ConcreteRuntimeRootsSafe store env)
+    (hcover : RootFootprintCovers store env R) :
+    RootFootprintCovers (store.update (.var x) newSlot) env
+      (R.filter (fun entry => decide (entry.1 ≠ .var x))) := by
+  intro y slot value lifetime leaf henvSlot hstoreSlot hfp
+  have hyx : y ≠ x := by
+    intro hy
+    subst hy
+    rw [hfreshEnv] at henvSlot
+    cases henvSlot
+  have hvarNe : VariableProjection y ≠ .var x := by
+    simpa [VariableProjection] using hyx
+  have hstoreOld :
+      store.slotAt (VariableProjection y) =
+        some { value := .value value, lifetime := lifetime } := by
+    rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hvarNe]
+    exact hstoreSlot
+  have hfpOld :
+      RuntimeValueMutBorrow store (.value value) slot.ty leaf :=
+    RuntimeValueMutBorrow.update_fresh_slot_to_store
+      hallocated hfreshStore hstoreOld hfp
+  have hleafNe : leaf ≠ .var x := by
+    intro hleaf
+    subst hleaf
+    rcases hroots y slot henvSlot with ⟨rootValue, hrootStore, hsafeRoot⟩
+    have hrootValueEq : rootValue = .value value := by
+      exact congrArg StoreSlot.value
+        (Option.some.inj (hrootStore.symm.trans hstoreOld))
+    have hsafeValue : ConcreteRuntimeValueSafe store (.value value) := by
+      simpa [hrootValueEq] using hsafeRoot
+    rcases hsafeValue.borrow_allocated hfpOld.toBorrow with
+      ⟨freshSlot, hfreshSlot⟩
+    rw [ProgramStore.fresh] at hfreshStore
+    rw [hfreshStore] at hfreshSlot
+    cases hfreshSlot
+  exact List.mem_filter.mpr
+    ⟨hcover y slot value lifetime leaf henvSlot hstoreOld hfpOld,
+      decide_eq_true hleafNe⟩
+
+/-- Fresh-heap updates preserve root footprint coverage, with the fresh heap
+location filtered out of the registry.  A concrete-safe old root cannot already
+contain a borrow to the fresh heap location. -/
+theorem RootFootprintCovers.update_fresh_heap_filter_of_rootsSafe
+    {store : ProgramStore} {env : Env} {R : List (Location × Name)}
+    {address : Nat} {newSlot : StoreSlot}
+    (hallocated : StoreOwnersAllocated store)
+    (hfresh : store.fresh (.heap address))
+    (hroots : ConcreteRuntimeRootsSafe store env)
+    (hcover : RootFootprintCovers store env R) :
+    RootFootprintCovers (store.update (.heap address) newSlot) env
+      (R.filter (fun entry => decide (entry.1 ≠ .heap address))) := by
+  intro x slot value lifetime leaf henvSlot hstoreSlot hfp
+  have hvarNe : VariableProjection x ≠ .heap address := by
+    intro h
+    cases h
+  have hstoreOld :
+      store.slotAt (VariableProjection x) =
+        some { value := .value value, lifetime := lifetime } := by
+    rw [← RuntimeFrame.ProgramStore.slotAt_update_ne hvarNe]
+    exact hstoreSlot
+  have hfpOld :
+      RuntimeValueMutBorrow store (.value value) slot.ty leaf :=
+    RuntimeValueMutBorrow.update_fresh_slot_to_store
+      hallocated hfresh hstoreOld hfp
+  have hleafNe : leaf ≠ .heap address := by
+    intro hleaf
+    subst hleaf
+    rcases hroots x slot henvSlot with ⟨rootValue, hrootStore, hsafeRoot⟩
+    have hrootValueEq : rootValue = .value value := by
+      exact congrArg StoreSlot.value
+        (Option.some.inj (hrootStore.symm.trans hstoreOld))
+    have hsafeValue : ConcreteRuntimeValueSafe store (.value value) := by
+      simpa [hrootValueEq] using hsafeRoot
+    rcases hsafeValue.borrow_allocated hfpOld.toBorrow with
+      ⟨freshSlot, hfreshSlot⟩
+    rw [ProgramStore.fresh] at hfresh
+    rw [hfresh] at hfreshSlot
+    cases hfreshSlot
+  exact List.mem_filter.mpr
+    ⟨hcover x slot value lifetime leaf henvSlot hstoreOld hfpOld,
+      decide_eq_true hleafNe⟩
+
+/-- Footprint provenance survives erasing one store slot. -/
+theorem ConcreteRuntimeFootprintProvenance.erase {store : ProgramStore}
+    {env : Env} {erased : Location} :
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance (store.erase erased) env := by
+  intro hprov
+  rcases hprov with ⟨R, hcover, hexcl⟩
+  exact ⟨R, hcover.erase, hexcl.erase⟩
+
+/-- Footprint provenance survives updating one store slot to `undef` when the
+environment is unchanged. -/
+theorem ConcreteRuntimeFootprintProvenance.update_undef
+    {store : ProgramStore} {env : Env} {updated : Location}
+    {updatedLifetime : Lifetime} :
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance
+      (store.update updated { value := .undef, lifetime := updatedLifetime })
+      env := by
+  intro hprov
+  rcases hprov with ⟨R, hcover, hexcl⟩
+  exact ⟨R, hcover.update_undef, hexcl.update_undef⟩
+
+/-- Footprint provenance survives a move paired with the matching concrete
+`undef` update. -/
+theorem ConcreteRuntimeFootprintProvenance.move_update_undef
+    {store : ProgramStore} {env env' : Env} {moved : LVal}
+    {updated : Location} {updatedLifetime : Lifetime}
+    (hmove : EnvMove env moved env') :
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance
+      (store.update updated { value := .undef, lifetime := updatedLifetime })
+      env' := by
+  intro hprov
+  rcases hprov with ⟨R, hcover, hexcl⟩
+  exact ⟨R, hcover.move_update_undef hmove, hexcl.update_undef⟩
+
+/-- Footprint provenance for old roots survives installing a fresh variable when
+the installed slot is concrete-safe against every surviving old registered
+mutable-borrow leaf. -/
+theorem ConcreteRuntimeFootprintProvenance.update_fresh_var_filter_of_rootsSafe
+    {store : ProgramStore} {env : Env}
+    {x : Name} {newSlot : StoreSlot}
+    (hallocated : StoreOwnersAllocated store)
+    (hfreshStore : store.fresh (.var x))
+    (hfreshEnv : env.fresh x)
+    (hroots : ConcreteRuntimeRootsSafe store env)
+    (hnew :
+      ∀ leaf owner,
+        leaf ≠ .var x →
+        x ≠ owner →
+          ¬ RuntimeValueBorrowInvalidatedBelow
+            (store.update (.var x) newSlot) newSlot.value leaf) :
+    ConcreteRuntimeFootprintProvenance store env →
+      ConcreteRuntimeFootprintProvenance
+        (store.update (.var x) newSlot) env := by
+  intro hprov
+  rcases hprov with ⟨R, hcover, hexcl⟩
+  exact ⟨R.filter (fun entry => decide (entry.1 ≠ .var x)),
+    RootFootprintCovers.update_fresh_var_filter_of_rootsSafe
+      hallocated hfreshStore hfreshEnv hroots hcover,
+    ConcreteMutRegistryExclusive.update_fresh_var_filter
+      hallocated hfreshStore hexcl
+      (fun leaf owner _hmem hleaf howner =>
+        hnew leaf owner hleaf howner)⟩
+
+/-- Declaration form of
+`ConcreteRuntimeFootprintProvenance.update_fresh_var_filter_of_rootsSafe`. -/
+theorem ConcreteRuntimeFootprintProvenance.declare_old_roots_of_rootsSafe
+    {store : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {x : Name} {value : Value}
+    (hallocated : StoreOwnersAllocated store)
+    (hfreshStore : store.fresh (.var x))
+    (hfreshEnv : env.fresh x)
+    (hroots : ConcreteRuntimeRootsSafe store env)
+    (hnew :
+      ∀ leaf owner,
+        leaf ≠ .var x →
+        x ≠ owner →
+          ¬ RuntimeValueBorrowInvalidatedBelow
+            (store.declare x lifetime value) (.value value) leaf) :
+    ConcreteRuntimeFootprintProvenance store env →
+      ConcreteRuntimeFootprintProvenance
+        (store.declare x lifetime value) env := by
+  intro hprov
+  simpa [ProgramStore.declare] using
+    ConcreteRuntimeFootprintProvenance.update_fresh_var_filter_of_rootsSafe
+      (store := store) (env := env) (x := x)
+      (newSlot := { value := .value value, lifetime := lifetime })
+      hallocated hfreshStore hfreshEnv hroots
+      (by
+        intro leaf owner hleaf howner
+        simpa [ProgramStore.declare] using hnew leaf owner hleaf howner)
+      hprov
+
+/-- Footprint provenance survives allocating a fresh heap box. -/
+theorem ConcreteRuntimeFootprintProvenance.boxAt {store : ProgramStore}
+    {env : Env} {address : Nat} {value : Value}
+    (hallocated : StoreOwnersAllocated store)
+    (hfresh : store.fresh (.heap address))
+    (hroots : ConcreteRuntimeRootsSafe store env) :
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance (store.boxAt address value).1 env := by
+  intro hprov
+  rcases hprov with ⟨R, hcover, hexcl⟩
+  refine ⟨R.filter (fun entry => decide (entry.1 ≠ .heap address)), ?_, ?_⟩
+  · simpa [ProgramStore.boxAt] using
+      RootFootprintCovers.update_fresh_heap_filter_of_rootsSafe
+        hallocated hfresh hroots hcover
+  · simpa [ProgramStore.boxAt] using
+      ConcreteMutRegistryExclusive.update_fresh_heap_filter
+        hallocated hfresh hexcl
+
+/-- Footprint provenance is preserved by dropping values when the environment is
+unchanged. -/
+theorem ConcreteRuntimeFootprintProvenance.drops
+    {store store' : ProgramStore} {env : Env} {values : List PartialValue} :
+    Drops store values store' →
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance store' env := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro hprov
+      exact hprov
+  | nonOwner _hnonOwner _hdrops ih =>
+      intro hprov
+      exact ih hprov
+  | ownerMissing _howner _hmissing _hdrops ih =>
+      intro hprov
+      exact ih hprov
+  | ownerPresent _howner _hslot _hdrops ih =>
+      intro hprov
+      exact ih hprov.erase
+
+/-- Footprint coverage is monotone under lifetime dropping: every root slot that
+survives `dropLifetime` is the same slot in the original environment. -/
+theorem RootFootprintCovers.dropLifetime {store : ProgramStore} {env : Env}
+    {R : List (Location × Name)} {lifetime : Lifetime}
+    (hcover : RootFootprintCovers store env R) :
+    RootFootprintCovers store (env.dropLifetime lifetime) R := by
+  intro x slot value rootLifetime leaf hslot hstore hfp
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨henvSlot, _⟩
+  exact hcover x slot value rootLifetime leaf henvSlot hstore hfp
+
+/-- Footprint provenance survives a lifetime drop paired with the matching
+environment lifetime drop. -/
+theorem ConcreteRuntimeFootprintProvenance.dropsLifetime
+    {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    DropsLifetime store lifetime store' →
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance store' (env.dropLifetime lifetime) := by
+  intro hdrops hprov
+  cases hdrops with
+  | intro _hdropSet hdrops =>
+      rcases ConcreteRuntimeFootprintProvenance.drops hdrops hprov with
+        ⟨R, hcover, hexcl⟩
+      exact ⟨R, hcover.dropLifetime, hexcl⟩
+
+/-- Footprint provenance follows the single `R-BlockB` drop hidden inside a
+singleton-value block multistep. -/
+theorem ConcreteRuntimeFootprintProvenance.blockBValueMultiStep
+    {store finalStore : ProgramStore} {env : Env}
+    {lifetime blockLifetime : Lifetime} {value finalValue : Value} :
+    MultiStep store lifetime (.block blockLifetime [.val value])
+      finalStore (.val finalValue) →
+    ConcreteRuntimeFootprintProvenance store env →
+    ConcreteRuntimeFootprintProvenance finalStore
+      (env.dropLifetime blockLifetime) := by
+  intro hmulti hprov
+  cases hmulti with
+  | trans hstep hrest =>
+      cases hstep with
+      | blockA hvalueStep =>
+          exact False.elim (value_no_step hvalueStep)
+      | blockB hdrops =>
+          rcases multistep_value_inv hrest with ⟨hstore, hterm⟩
+          subst hstore
+          cases hterm
+          exact ConcreteRuntimeFootprintProvenance.dropsLifetime hdrops hprov
 
 /--
 Runtime-selected writable mutable-borrow gate for assignment through `*source`.
@@ -11032,6 +11808,67 @@ def RuntimeValueWritableInstallProvenance
       MutRegistryExclusive store R ∧
       InstalledFreshValueWritableMutRegistryCovers store env owner ty
         lifetime R
+
+/-- Concrete writable authority carried by installing a value as a root.
+
+Unlike `ConcreteRuntimeValueWritableInstallProvenance`, this package does not
+require the registry entries to be exactly the mutable-borrow leaves physically
+stored inside the installed value.  Mutable reborrows can expose writable gates
+through the selected target's current value; those authority leaves are real
+write obligations even though they are not in the top-level reference cell's
+runtime footprint. -/
+def ConcreteRuntimeValueWritableAuthorityInstallProvenance
+    (store : ProgramStore) (env : Env) (owner : Name)
+    (value : Value) (ty : Ty) (lifetime : Lifetime) : Prop :=
+  ∃ R,
+    ConcreteMutRegistryExclusive store R ∧
+      InstalledFreshValueWritableMutRegistryCovers store env owner ty
+        lifetime R
+
+/-- Store-realized version of
+`ConcreteRuntimeValueWritableAuthorityInstallProvenance`, for the legacy
+ordinary-safe-abstraction frame.  The concrete-root migration should eventually
+consume the concrete package directly. -/
+def RuntimeValueWritableAuthorityInstallProvenance
+    (store : ProgramStore) (env : Env) (owner : Name)
+    (value : Value) (ty : Ty) (lifetime : Lifetime) : Prop :=
+  ∃ R,
+    MutRegistryExclusive store R ∧
+      InstalledFreshValueWritableMutRegistryCovers store env owner ty
+        lifetime R
+
+theorem ConcreteRuntimeValueWritableInstallProvenance.authority
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    ConcreteRuntimeValueWritableInstallProvenance store env owner value ty
+      lifetime →
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner value
+      ty lifetime := by
+  intro hprov
+  rcases hprov with ⟨R, _hexact, hexcl, hcover⟩
+  exact ⟨R, hexcl, hcover⟩
+
+theorem RuntimeValueWritableInstallProvenance.authority
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    RuntimeValueWritableInstallProvenance store env owner value ty lifetime →
+    RuntimeValueWritableAuthorityInstallProvenance store env owner value ty
+      lifetime := by
+  intro hprov
+  rcases hprov with ⟨R, _hexact, hexcl, hcover⟩
+  exact ⟨R, hexcl, hcover⟩
+
+/-- The writable exact value-install package implies footprint value
+installation. -/
+theorem ConcreteRuntimeValueWritableInstallProvenance.footprint
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    ConcreteRuntimeValueWritableInstallProvenance store env owner value ty
+      lifetime →
+      ConcreteRuntimeValueFootprintInstallProvenance store owner value ty := by
+  intro hprov
+  rcases hprov with ⟨R, hexact, hexcl, _hcover⟩
+  exact ⟨R, hexact, hexcl⟩
 
 /-- The old all-syntactic-target install package implies the writable-gate
 install package. -/
@@ -11126,6 +11963,153 @@ theorem RuntimeValueWritableInstallProvenance.bool {store : ProgramStore}
     have hty := LValTyping.update_bool_base_ty_eq hbase hsource
     cases hty
 
+/-- An update path cannot step through an immutable borrow. -/
+theorem UpdateAtPath.no_immutable_borrow_deref {rank : Nat} {env result : Env}
+    {path : List Unit} {targets : List LVal} {rhsTy : Ty}
+    {updatedTy : PartialTy} :
+    ¬ UpdateAtPath rank env (() :: path) (.ty (.borrow false targets))
+      rhsTy result updatedTy := by
+  intro h
+  cases h
+
+/-- A freshly installed immutable borrow root never exposes an assignment-
+consumable mutable gate rooted at that owner.  Dereferencing an immutable borrow
+may reveal an `&mut`-typed value, but writes cannot pass through the immutable
+borrow edge. -/
+theorem RuntimeWritableMutGate.not_of_installed_immutable_borrow_root
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {targets : List LVal} {lifetime : Lifetime} {source : LVal}
+    {leaf : Location} :
+    LVal.base source = owner →
+    ¬ RuntimeWritableMutGate store
+      (env.update owner { ty := .ty (.borrow false targets), lifetime := lifetime })
+      source leaf := by
+  intro hbase
+  rintro ⟨_targets, _bl, rhsTy, _result, _hsource, _hleaf, hwrite⟩
+  cases hwrite with
+  | @intro _rank _env₁ env₂ lv slot _ty updatedTy hslot hupdate =>
+      have hslotEq :
+          slot =
+            { ty := .ty (.borrow false targets), lifetime := lifetime } := by
+        simpa [Env.update, LVal.base, hbase] using hslot.symm
+      subst hslotEq
+      exact UpdateAtPath.no_immutable_borrow_deref
+        (path := LVal.path source) (by
+          simpa [LVal.path_deref_cons] using hupdate)
+
+theorem RuntimeValueWritableInstallProvenance.immBorrow
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {location : Location} {targets : List LVal} :
+    RuntimeValueWritableInstallProvenance store env owner
+      (.ref { location := location, owner := false }) (.borrow false targets)
+      lifetime := by
+  refine ⟨[], ?_, ?_, ?_⟩
+  · constructor
+    · intro leaf hborrow
+      cases hborrow
+    · intro leaf entryOwner hmem
+      simp at hmem
+  · intro leaf entryOwner hmem _z _hz
+    simp at hmem
+  · intro source leaf hbase hgate
+    exact False.elim
+      (RuntimeWritableMutGate.not_of_installed_immutable_borrow_root
+        hbase hgate)
+
+theorem ConcreteRuntimeValueWritableInstallProvenance.immBorrow
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {location : Location} {targets : List LVal} :
+    ConcreteRuntimeValueWritableInstallProvenance store env owner
+      (.ref { location := location, owner := false }) (.borrow false targets)
+      lifetime := by
+  refine ⟨[], ?_, ?_, ?_⟩
+  · constructor
+    · intro leaf hborrow
+      cases hborrow
+    · intro leaf entryOwner hmem
+      simp at hmem
+  · intro leaf entryOwner hmem _z _hz
+    simp at hmem
+  · intro source leaf hbase hgate
+    exact False.elim
+      (RuntimeWritableMutGate.not_of_installed_immutable_borrow_root
+        hbase hgate)
+
+theorem RuntimeValueWritableAuthorityInstallProvenance.of_writable
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    RuntimeValueWritableInstallProvenance store env owner value ty lifetime →
+    RuntimeValueWritableAuthorityInstallProvenance store env owner value ty
+      lifetime :=
+  RuntimeValueWritableInstallProvenance.authority
+
+theorem ConcreteRuntimeValueWritableAuthorityInstallProvenance.of_writable
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    ConcreteRuntimeValueWritableInstallProvenance store env owner value ty
+      lifetime →
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner value
+      ty lifetime :=
+  ConcreteRuntimeValueWritableInstallProvenance.authority
+
+theorem RuntimeValueWritableAuthorityInstallProvenance.unit
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} :
+    RuntimeValueWritableAuthorityInstallProvenance store env owner .unit .unit
+      lifetime :=
+  RuntimeValueWritableInstallProvenance.unit.authority
+
+theorem RuntimeValueWritableAuthorityInstallProvenance.int
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {value : Int} :
+    RuntimeValueWritableAuthorityInstallProvenance store env owner (.int value)
+      .int lifetime :=
+  RuntimeValueWritableInstallProvenance.int.authority
+
+theorem RuntimeValueWritableAuthorityInstallProvenance.bool
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {value : Bool} :
+    RuntimeValueWritableAuthorityInstallProvenance store env owner (.bool value)
+      .bool lifetime :=
+  RuntimeValueWritableInstallProvenance.bool.authority
+
+theorem RuntimeValueWritableAuthorityInstallProvenance.immBorrow
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {location : Location} {targets : List LVal} :
+    RuntimeValueWritableAuthorityInstallProvenance store env owner
+      (.ref { location := location, owner := false }) (.borrow false targets)
+      lifetime :=
+  RuntimeValueWritableInstallProvenance.immBorrow.authority
+
+theorem ConcreteRuntimeValueWritableAuthorityInstallProvenance.unit
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} :
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner .unit
+      .unit lifetime :=
+  ConcreteRuntimeValueWritableInstallProvenance.unit.authority
+
+theorem ConcreteRuntimeValueWritableAuthorityInstallProvenance.int
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {value : Int} :
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner
+      (.int value) .int lifetime :=
+  ConcreteRuntimeValueWritableInstallProvenance.int.authority
+
+theorem ConcreteRuntimeValueWritableAuthorityInstallProvenance.bool
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {value : Bool} :
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner
+      (.bool value) .bool lifetime :=
+  ConcreteRuntimeValueWritableInstallProvenance.bool.authority
+
+theorem ConcreteRuntimeValueWritableAuthorityInstallProvenance.immBorrow
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {lifetime : Lifetime} {location : Location} {targets : List LVal} :
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner
+      (.ref { location := location, owner := false }) (.borrow false targets)
+      lifetime :=
+  ConcreteRuntimeValueWritableInstallProvenance.immBorrow.authority
+
 /-- Broad syntactic coverage implies writable-gate coverage. -/
 theorem MutRegistryCovers.writable {store : ProgramStore} {env : Env}
     {R : List (Location × Name)}
@@ -11179,6 +12163,55 @@ theorem RuntimeWritableMutGatePullback.trans {store : ProgramStore}
     RuntimeWritableMutGatePullback store envFine envCoarse := by
   intro source leaf hgate
   exact hleft source leaf (hright source leaf hgate)
+
+/-- Installed writable-value coverage transports through a writable-gate pullback
+between the two installed-owner environments. -/
+theorem InstalledFreshValueWritableMutRegistryCovers.of_writableGatePullback
+    {store : ProgramStore} {envFine envCoarse : Env} {owner : Name}
+    {tyFine tyCoarse : Ty} {lifetime : Lifetime}
+    {R : List (Location × Name)}
+    (hgate : RuntimeWritableMutGatePullback store
+      (envFine.update owner { ty := .ty tyFine, lifetime := lifetime })
+      (envCoarse.update owner { ty := .ty tyCoarse, lifetime := lifetime }))
+    (hcover :
+      InstalledFreshValueWritableMutRegistryCovers store envFine owner tyFine
+        lifetime R) :
+    InstalledFreshValueWritableMutRegistryCovers store envCoarse owner tyCoarse
+      lifetime R := by
+  intro source leaf hbase hcoarse
+  exact hcover source leaf hbase (hgate source leaf hcoarse)
+
+/-- Store-realized value authority transports through a writable-gate pullback
+between the two installed-owner environments. -/
+theorem RuntimeValueWritableAuthorityInstallProvenance.of_writableGatePullback
+    {store : ProgramStore} {envFine envCoarse : Env} {owner : Name}
+    {value : Value} {tyFine tyCoarse : Ty} {lifetime : Lifetime}
+    (hgate : RuntimeWritableMutGatePullback store
+      (envFine.update owner { ty := .ty tyFine, lifetime := lifetime })
+      (envCoarse.update owner { ty := .ty tyCoarse, lifetime := lifetime }))
+    (hprov :
+      RuntimeValueWritableAuthorityInstallProvenance store envFine owner value
+        tyFine lifetime) :
+    RuntimeValueWritableAuthorityInstallProvenance store envCoarse owner value
+      tyCoarse lifetime := by
+  rcases hprov with ⟨R, hexcl, hcover⟩
+  exact ⟨R, hexcl, hcover.of_writableGatePullback hgate⟩
+
+/-- Concrete value authority transports through a writable-gate pullback between
+the two installed-owner environments. -/
+theorem ConcreteRuntimeValueWritableAuthorityInstallProvenance.of_writableGatePullback
+    {store : ProgramStore} {envFine envCoarse : Env} {owner : Name}
+    {value : Value} {tyFine tyCoarse : Ty} {lifetime : Lifetime}
+    (hgate : RuntimeWritableMutGatePullback store
+      (envFine.update owner { ty := .ty tyFine, lifetime := lifetime })
+      (envCoarse.update owner { ty := .ty tyCoarse, lifetime := lifetime }))
+    (hprov :
+      ConcreteRuntimeValueWritableAuthorityInstallProvenance store envFine owner
+        value tyFine lifetime) :
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance store envCoarse owner
+      value tyCoarse lifetime := by
+  rcases hprov with ⟨R, hexcl, hcover⟩
+  exact ⟨R, hexcl, hcover.of_writableGatePullback hgate⟩
 
 /-- Writable-gate coverage transports through a writable-gate pullback. -/
 theorem WritableMutRegistryCovers.of_writableGatePullback
@@ -11446,6 +12479,35 @@ theorem RuntimeWritableBorrowProvenance.install_fresh_root_of_valueWritableProve
       intro source leaf hbase hgate
       exact hcover source leaf hbase hgate)
 
+/-- Install a freshly declared or rewritten root using authority-scoped
+store-realized writable provenance.
+
+This is weaker than `install_fresh_root_of_valueWritableProvenance`: the extra
+registry only has to cover writable gates rooted at the installed owner.  It
+does not need to be an exact footprint of the stored value. -/
+theorem RuntimeWritableBorrowProvenance.install_fresh_root_of_valueWritableAuthority
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime}
+    (hpostOld : RuntimeWritableBorrowProvenance store env)
+    (holdPullback :
+      ∀ source leaf,
+        LVal.base source ≠ owner →
+        RuntimeWritableMutGate store
+          (env.update owner { ty := .ty ty, lifetime := lifetime })
+          source leaf →
+        RuntimeWritableMutGate store env source leaf)
+    (hvalueProv :
+      RuntimeValueWritableAuthorityInstallProvenance store env owner value ty
+        lifetime) :
+    RuntimeWritableBorrowProvenance store
+      (env.update owner { ty := .ty ty, lifetime := lifetime }) := by
+  rcases hvalueProv with ⟨R, hexcl, hcover⟩
+  exact RuntimeWritableBorrowProvenance.install_root
+    hpostOld hexcl holdPullback
+    (by
+      intro source leaf hbase hgate
+      exact hcover source leaf hbase hgate)
+
 /-- Concrete runtime borrow provenance keyed only by writable mutable gates. -/
 def ConcreteRuntimeWritableBorrowProvenance
     (store : ProgramStore) (env : Env) : Prop :=
@@ -11692,6 +12754,74 @@ theorem ConcreteRuntimeWritableBorrowProvenance.install_fresh_root_of_valueWrita
     (by
       intro source leaf hbase hgate
       exact hcover source leaf hbase hgate)
+
+/-- Concrete authority-scoped variant of
+`install_fresh_root_of_valueWritableProvenance`.  This is the declaration-side
+package the concrete-root preservation migration should target. -/
+theorem ConcreteRuntimeWritableBorrowProvenance.install_fresh_root_of_valueWritableAuthority
+    {store : ProgramStore} {env : Env} {owner : Name}
+    {value : Value} {ty : Ty} {lifetime : Lifetime}
+    (hpostOld : ConcreteRuntimeWritableBorrowProvenance store env)
+    (holdPullback :
+      ∀ source leaf,
+        LVal.base source ≠ owner →
+        RuntimeWritableMutGate store
+          (env.update owner { ty := .ty ty, lifetime := lifetime })
+          source leaf →
+        RuntimeWritableMutGate store env source leaf)
+    (hvalueProv :
+      ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner
+        value ty lifetime) :
+    ConcreteRuntimeWritableBorrowProvenance store
+      (env.update owner { ty := .ty ty, lifetime := lifetime }) := by
+  rcases hvalueProv with ⟨R, hexcl, hcover⟩
+  exact ConcreteRuntimeWritableBorrowProvenance.install_root
+    hpostOld hexcl holdPullback
+    (by
+      intro source leaf hbase hgate
+      exact hcover source leaf hbase hgate)
+
+/-- Declaration installer for the migrated concrete-writable provenance package.
+
+This theorem deliberately exposes the remaining local bridges as premises:
+old-root concrete exclusivity across the fresh store update, old-root writable-gate
+pullback, and value-authority provenance in the final store. -/
+theorem ConcreteRuntimeWritableBorrowProvenance.declare_fresh_root_of_valueWritableAuthority
+    {store : ProgramStore} {env : Env} {current lifetime : Lifetime}
+    {x : Name} {value : Value} {ty : Ty}
+    (hwell : WellFormedEnv env current)
+    (hsafe : store ∼ₛ env)
+    (hallocated : StoreOwnersAllocated store)
+    (hfresh : store.fresh (.var x))
+    (hnew :
+      ∀ leaf owner,
+        leaf ≠ .var x →
+        x ≠ owner →
+          ¬ RuntimeValueBorrowInvalidatedBelow
+            (store.declare x lifetime value) (.value value) leaf)
+    (holdPullback :
+      ∀ source leaf,
+        LVal.base source ≠ x →
+        RuntimeWritableMutGate (store.declare x lifetime value)
+          (env.update x { ty := .ty ty, lifetime := lifetime })
+          source leaf →
+        RuntimeWritableMutGate (store.declare x lifetime value) env
+          source leaf)
+    (hvalueProv :
+      ConcreteRuntimeValueWritableAuthorityInstallProvenance
+        (store.declare x lifetime value) env x value ty lifetime) :
+    ConcreteRuntimeWritableBorrowProvenance store env →
+      ConcreteRuntimeWritableBorrowProvenance
+        (store.declare x lifetime value)
+        (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  intro hprov
+  have hpostOld :
+      ConcreteRuntimeWritableBorrowProvenance
+        (store.declare x lifetime value) env :=
+    ConcreteRuntimeWritableBorrowProvenance.declare_old_roots_of_not_below_invalidated
+      hwell hsafe hallocated hfresh hnew hprov
+  exact ConcreteRuntimeWritableBorrowProvenance.install_fresh_root_of_valueWritableAuthority
+    hpostOld holdPullback hvalueProv
 
 /-- Writable-gate provenance gives the concrete below-root assignment frame for
 any other root. -/
@@ -12973,6 +14103,124 @@ theorem TerminalStateSafeWithConcreteRootsAndProvenance.strengthen_join
   exact ⟨hwellJoin, hterminalJoin,
     ConcreteRuntimeBorrowProvenance.of_mutGatePullback hgate hprov⟩
 
+/-- Terminal concrete roots plus footprint-keyed concrete provenance.
+
+This is the join-stable preservation package: the root component is the public
+runtime-safety statement, while the private provenance frame is keyed by the
+runtime mutable-borrow footprint of each root value.  Unlike static mutable-gate
+coverage, footprint coverage is invariant under target-list widening at joins. -/
+def TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  TerminalStateSafeWithConcreteRoots store value env ty ∧
+    ConcreteRuntimeFootprintProvenance store env
+
+/-- Forget footprint provenance and keep concrete roots. -/
+theorem TerminalStateSafeWithConcreteRootsAndFootprintProvenance.toConcreteRoots
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance store value env ty →
+      TerminalStateSafeWithConcreteRoots store value env ty :=
+  And.left
+
+/-- Value-tail composition for concrete roots plus footprint provenance. -/
+theorem TerminalStateSafeWithConcreteRootsAndFootprintProvenance.value_tail
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+      finalStore finalValue env ty := by
+  intro hterminal htail
+  exact ⟨hterminal.1.value_tail htail,
+    ConcreteRuntimeFootprintProvenance.value_tail htail hterminal.2⟩
+
+/-- Terminal concrete roots plus footprint provenance transport through a join.
+
+The footprint frame uses only same-shape strengthening: target-list alternatives
+added by a join do not change the concrete mutable-borrow leaves stored in root
+values. -/
+theorem TerminalStateSafeWithConcreteRootsAndFootprintProvenance.strengthen_join
+    {finalStore : ProgramStore} {finalValue : Value}
+    {branchEnv joinEnv : Env} {lifetime : Lifetime}
+    {branchTy joinTy : Ty}
+    (hcontained : ContainedBorrowsWellFormed joinEnv)
+    (hcoherent : Coherent joinEnv)
+    (hlinear : Linearizable joinEnv)
+    (hpreserved : EnvLifetimesPreserved branchEnv joinEnv)
+    (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
+    (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
+    (hwellBranch : WellFormedEnv branchEnv lifetime)
+    (hterminal : TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+      finalStore finalValue branchEnv branchTy) :
+    WellFormedEnv joinEnv lifetime ∧
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+        finalStore finalValue joinEnv joinTy := by
+  rcases hterminal with ⟨hterminalRoots, hprov⟩
+  rcases TerminalStateSafeWithConcreteRoots.strengthen_join
+      hcontained hcoherent hlinear hpreserved hmap hstrengthens
+      hwellBranch hterminalRoots with
+    ⟨hwellJoin, hterminalJoin⟩
+  exact ⟨hwellJoin, hterminalJoin,
+    ConcreteRuntimeFootprintProvenance.of_sameShapeStrengthening hmap hprov⟩
+
+/-- Terminal concrete roots plus footprint provenance, also carrying the
+value-scoped footprint installation package needed when the terminal value is
+installed later as a fresh root. -/
+def TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  TerminalStateSafeWithConcreteRootsAndFootprintProvenance store value env ty ∧
+    ∀ owner, env.fresh owner →
+      ConcreteRuntimeValueFootprintInstallProvenance store owner value ty
+
+theorem TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance.toFootprint
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+      store value env ty →
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance store value env ty :=
+  And.left
+
+theorem TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance.value_tail
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+      store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+      TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+        finalStore finalValue env ty := by
+  intro hterminal htail
+  rcases hterminal with ⟨hfootprint, hvalueInstall⟩
+  rcases multistep_value_inv htail with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact ⟨hfootprint, hvalueInstall⟩
+
+theorem TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance.strengthen_join
+    {finalStore : ProgramStore} {finalValue : Value}
+    {branchEnv joinEnv : Env} {lifetime : Lifetime}
+    {branchTy joinTy : Ty}
+    (hcontained : ContainedBorrowsWellFormed joinEnv)
+    (hcoherent : Coherent joinEnv)
+    (hlinear : Linearizable joinEnv)
+    (hpreserved : EnvLifetimesPreserved branchEnv joinEnv)
+    (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
+    (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
+    (hwellBranch : WellFormedEnv branchEnv lifetime)
+    (hterminal :
+      TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+        finalStore finalValue branchEnv branchTy) :
+    WellFormedEnv joinEnv lifetime ∧
+      TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+        finalStore finalValue joinEnv joinTy := by
+  rcases hterminal with ⟨hfootprint, hvalueInstall⟩
+  rcases TerminalStateSafeWithConcreteRootsAndFootprintProvenance.strengthen_join
+      hcontained hcoherent hlinear hpreserved hmap hstrengthens hwellBranch
+      hfootprint with
+    ⟨hwellJoin, hfootprintJoin⟩
+  refine ⟨hwellJoin, hfootprintJoin, ?_⟩
+  intro owner hfreshJoin
+  exact (hvalueInstall owner (hmap.fresh_source_of_result hfreshJoin)).of_sameShape
+    (ty_sameShape_of_strengthens hstrengthens)
+
 /-- Forget concrete mutable-borrow provenance down to concrete root safety.
 
 The provenance registry is stronger than what runtime safety through joins
@@ -13105,6 +14353,17 @@ def TerminalStateSafeWithConcreteRootsAndWritableFrames
     RuntimeWritableBorrowProvenance store env ∧
       ConcreteRuntimeWritableBorrowProvenance store env
 
+/-- Terminal concrete roots plus concrete writable-gate provenance only.
+
+This is the concrete-root preservation package that avoids carrying the
+store-realized writable frame.  The provenance component is still strong enough
+for concrete root updates and join transport, but it does not assert ordinary
+`MutRegistryExclusive` for nested reborrow authority. -/
+def TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  TerminalStateSafeWithConcreteRoots store value env ty ∧
+    ConcreteRuntimeWritableBorrowProvenance store env
+
 /-- Forget writable-gate provenance and keep concrete roots. -/
 theorem TerminalStateSafeWithConcreteRootsAndWritableProvenance.toConcreteRoots
     {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
@@ -13118,6 +14377,33 @@ theorem TerminalStateSafeWithConcreteRootsAndWritableFrames.toConcreteRoots
     TerminalStateSafeWithConcreteRootsAndWritableFrames store value env ty →
       TerminalStateSafeWithConcreteRoots store value env ty :=
   And.left
+
+/-- Forget the store-realized writable frame and keep only the concrete writable
+frame. -/
+theorem TerminalStateSafeWithConcreteRootsAndWritableFrames.toConcreteWritableProvenance
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndWritableFrames store value env ty →
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+        store value env ty := by
+  intro hterminal
+  exact ⟨hterminal.1, hterminal.2.2⟩
+
+/-- Forget concrete writable-gate provenance and keep concrete roots. -/
+theorem TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance.toConcreteRoots
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance store value
+      env ty →
+      TerminalStateSafeWithConcreteRoots store value env ty :=
+  And.left
+
+/-- Project broad concrete provenance to the writable-gate concrete package. -/
+theorem TerminalStateSafeWithConcreteRootsAndProvenance.toConcreteWritableProvenance
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndProvenance store value env ty →
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+        store value env ty := by
+  intro hterminal
+  exact ⟨hterminal.1, hterminal.2.writable⟩
 
 /-- Value-tail composition for concrete roots plus writable-gate provenance. -/
 theorem TerminalStateSafeWithConcreteRootsAndWritableProvenance.value_tail
@@ -13143,6 +14429,61 @@ theorem TerminalStateSafeWithConcreteRootsAndWritableFrames.value_tail
   exact ⟨hterminal.1.value_tail htail,
     RuntimeWritableBorrowProvenance.value_tail htail hterminal.2.1,
     ConcreteRuntimeWritableBorrowProvenance.value_tail htail hterminal.2.2⟩
+
+/-- Value-tail composition for concrete roots plus concrete writable-gate
+provenance. -/
+theorem TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance.value_tail
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance store value
+      env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+      finalStore finalValue env ty := by
+  intro hterminal htail
+  exact ⟨hterminal.1.value_tail htail,
+    ConcreteRuntimeWritableBorrowProvenance.value_tail htail hterminal.2⟩
+
+/-- Terminal concrete roots plus concrete writable provenance, also carrying
+authority-scoped value-install provenance for any later fresh root/lifetime.
+
+The value-authority component is intentionally not exact-footprint based: nested
+mutable reborrows can expose writable authority through the selected target's
+current value, even when those leaves are not stored directly in the top-level
+reference value. -/
+def TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance store value
+    env ty ∧
+    ∀ owner installLifetime, env.fresh owner →
+      ConcreteRuntimeValueWritableAuthorityInstallProvenance store env owner
+        value ty installLifetime
+
+theorem TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance.toConcreteWritableProvenance
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+      store value env ty →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+      store value env ty :=
+  And.left
+
+/-- Value-tail composition for concrete writable provenance plus value-authority
+installation.  A value tail cannot change the store or value. -/
+theorem TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance.value_tail
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+      store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+      finalStore finalValue env ty := by
+  intro hterminal htail
+  rcases hterminal with ⟨hwritable, hvalueAuthority⟩
+  rcases multistep_value_inv htail with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact ⟨hwritable, hvalueAuthority⟩
 
 /-- Terminal concrete roots plus writable-gate provenance transport through a
 join.
@@ -13206,6 +14547,81 @@ theorem TerminalStateSafeWithConcreteRootsAndWritableFrames.strengthen_join
     RuntimeWritableBorrowProvenance.of_writableGatePullback hgate hprov,
     ConcreteRuntimeWritableBorrowProvenance.of_writableGatePullback
       hgate hconcreteProv⟩
+
+/-- Terminal concrete roots plus concrete writable-gate provenance transport
+through a join.
+
+This is the join transport used by the concrete-root migration when ordinary
+store-realized writable frames are no longer carried. -/
+theorem TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance.strengthen_join
+    {finalStore : ProgramStore} {finalValue : Value}
+    {branchEnv joinEnv : Env} {lifetime : Lifetime}
+    {branchTy joinTy : Ty}
+    (hcontained : ContainedBorrowsWellFormed joinEnv)
+    (hcoherent : Coherent joinEnv)
+    (hlinear : Linearizable joinEnv)
+    (hpreserved : EnvLifetimesPreserved branchEnv joinEnv)
+    (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
+    (hgate : RuntimeWritableMutGatePullback finalStore branchEnv joinEnv)
+    (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
+    (hwellBranch : WellFormedEnv branchEnv lifetime)
+    (hterminal :
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+        finalStore finalValue branchEnv branchTy) :
+    WellFormedEnv joinEnv lifetime ∧
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+        finalStore finalValue joinEnv joinTy := by
+  rcases hterminal with ⟨hterminalRoots, hprov⟩
+  rcases TerminalStateSafeWithConcreteRoots.strengthen_join
+      hcontained hcoherent hlinear hpreserved hmap hstrengthens
+      hwellBranch hterminalRoots with
+    ⟨hwellJoin, hterminalJoin⟩
+  exact ⟨hwellJoin, hterminalJoin,
+    ConcreteRuntimeWritableBorrowProvenance.of_writableGatePullback
+      hgate hprov⟩
+
+/-- Terminal concrete writable provenance plus value-authority installation
+transports through a join once the installed-owner writable gates are also pulled
+back.
+
+The extra pullback is the declaration/assignment-specific bridge: ordinary join
+transport handles existing roots, while a value that will be installed under a
+fresh owner must cover writable gates in the corresponding updated environments. -/
+theorem TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance.strengthen_join
+    {finalStore : ProgramStore} {finalValue : Value}
+    {branchEnv joinEnv : Env} {lifetime : Lifetime}
+    {branchTy joinTy : Ty}
+    (hcontained : ContainedBorrowsWellFormed joinEnv)
+    (hcoherent : Coherent joinEnv)
+    (hlinear : Linearizable joinEnv)
+    (hpreserved : EnvLifetimesPreserved branchEnv joinEnv)
+    (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
+    (hgate : RuntimeWritableMutGatePullback finalStore branchEnv joinEnv)
+    (hinstalledGate :
+      ∀ owner installLifetime, joinEnv.fresh owner →
+        RuntimeWritableMutGatePullback finalStore
+          (branchEnv.update owner
+            { ty := .ty branchTy, lifetime := installLifetime })
+          (joinEnv.update owner
+            { ty := .ty joinTy, lifetime := installLifetime }))
+    (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
+    (hwellBranch : WellFormedEnv branchEnv lifetime)
+    (hterminal :
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+        finalStore finalValue branchEnv branchTy) :
+    WellFormedEnv joinEnv lifetime ∧
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+        finalStore finalValue joinEnv joinTy := by
+  rcases hterminal with ⟨hwritable, hvalueAuthority⟩
+  rcases TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance.strengthen_join
+      hcontained hcoherent hlinear hpreserved hmap hgate hstrengthens
+      hwellBranch hwritable with
+    ⟨hwellJoin, hwritableJoin⟩
+  refine ⟨hwellJoin, hwritableJoin, ?_⟩
+  intro owner installLifetime hfreshJoin
+  exact (hvalueAuthority owner installLifetime
+    (hmap.fresh_source_of_result hfreshJoin)).of_writableGatePullback
+    (hinstalledGate owner installLifetime hfreshJoin)
 
 /-- No lvalue is typeable in the empty environment. -/
 theorem LValTyping.not_empty {lv : LVal} {partialTy : PartialTy}

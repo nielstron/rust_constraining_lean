@@ -119,16 +119,264 @@ theorem no_valueInstallProvenance_for_immutable_reborrow :
 theorem valueWritableInstallProvenance_for_immutable_reborrow :
     ConcreteRuntimeValueWritableInstallProvenance storeAfterP envBeforeP "p"
       pValue (.borrow false [x]) l := by
-  refine ⟨[], ?_, ?_, ?_⟩
-  · constructor
-    · intro leaf hborrow
-      cases hborrow
-    · intro leaf entryOwner hmem
-      simp at hmem
-  · intro leaf entryOwner hmem _z _hz
-    simp at hmem
+  simpa [pValue] using
+    (ConcreteRuntimeValueWritableInstallProvenance.immBorrow
+      (store := storeAfterP) (env := envBeforeP) (owner := "p")
+      (lifetime := l) (location := .var "x") (targets := [x]))
+
+/-!
+The writable install package is still too narrow for mutable borrows.  If
+`q = &mut m` and `m : &mut b`, then the value stored in `q` physically carries
+only the reference to `m`, but the freshly installed root exposes a writable gate
+through `**q` to `b`.
+
+That is the type-threaded navigation bridge the preservation migration still
+needs: writable authority rooted at a newly installed mutable borrow can reach
+mutable-borrow leaves already stored in the selected target.
+-/
+
+def b : LVal := .var "b"
+def m : LVal := .var "m"
+def q : LVal := .var "q"
+
+def nestedMutableEnvBeforeQ : Env :=
+  (Env.empty.update "b" { ty := .ty .int, lifetime := l }).update "m"
+    { ty := .ty (.borrow true [b]), lifetime := l }
+
+def nestedMutableEnvAfterQ : Env :=
+  nestedMutableEnvBeforeQ.update "q"
+    { ty := .ty (.borrow true [m]), lifetime := l }
+
+def qValue : Value :=
+  .ref { location := .var "m", owner := false }
+
+def nestedMutableStoreAfterQ : ProgramStore :=
+  ((ProgramStore.empty.declare "b" l (.int 0)).declare "m" l
+      (.ref { location := .var "b", owner := false })).declare "q" l qValue
+
+def nestedMutableWriteBResult : Env :=
+  nestedMutableEnvAfterQ.update "b" { ty := .ty .int, lifetime := l }
+
+def nestedMutableWriteDerefMResult : Env :=
+  nestedMutableWriteBResult.update "m"
+    { ty := .ty (.borrow true [b]), lifetime := l }
+
+def nestedMutableWriteDerefDerefQResult : Env :=
+  nestedMutableWriteDerefMResult.update "q"
+    { ty := .ty (.borrow true [m]), lifetime := l }
+
+theorem nested_derefQ_typed_mut :
+    LValTyping nestedMutableEnvAfterQ (.deref q)
+      (.ty (.borrow true [b])) l := by
+  exact LValTyping.borrow
+    (LValTyping.var
+      (slot := { ty := .ty (.borrow true [m]), lifetime := l })
+      (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, l]))
+    (LValTargetsTyping.singleton
+      (LValTyping.var
+        (slot := { ty := .ty (.borrow true [b]), lifetime := l })
+        (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, m, l])))
+
+theorem nested_derefM_typed_int :
+    LValTyping nestedMutableEnvAfterQ (.deref m) (.ty .int) l := by
+  exact LValTyping.borrow
+    (LValTyping.var
+      (slot := { ty := .ty (.borrow true [b]), lifetime := l })
+      (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, m, l]))
+    (LValTargetsTyping.singleton
+      (LValTyping.var
+        (slot := { ty := .ty .int, lifetime := l })
+        (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, b, l])))
+
+theorem nested_derefDerefQ_loc :
+    nestedMutableStoreAfterQ.loc (.deref (.deref q)) = some (.var "b") := by
+  simp [nestedMutableStoreAfterQ, qValue, q, l, ProgramStore.declare,
+    ProgramStore.update, ProgramStore.loc]
+
+theorem nested_write_b :
+    EnvWrite 2 nestedMutableEnvAfterQ b .int nestedMutableWriteBResult := by
+  exact EnvWrite.intro
+    (slot := { ty := .ty .int, lifetime := l })
+    (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, b, LVal.base, l])
+    (UpdateAtPath.weak ShapeCompatible.int (PartialTyUnion.self (.ty .int)))
+
+theorem nested_write_deref_m :
+    EnvWrite 1 nestedMutableEnvAfterQ (.deref m) .int
+      nestedMutableWriteDerefMResult := by
+  exact EnvWrite.intro
+    (env₂ := nestedMutableWriteBResult)
+    (updatedTy := .ty (.borrow true [b]))
+    (slot := { ty := .ty (.borrow true [b]), lifetime := l })
+    (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, m, LVal.base, l])
+    (UpdateAtPath.mutBorrow
+      (WriteBorrowTargets.singleton nested_write_b
+        ⟨.int, l,
+          by
+            simpa [prependPath, b] using
+              (LValTyping.var
+                (slot := { ty := .ty .int, lifetime := l })
+                (by
+                  simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, b,
+                    l]))⟩))
+
+theorem nested_write_deref_deref_q :
+    EnvWrite 0 nestedMutableEnvAfterQ (.deref (.deref q)) .int
+      nestedMutableWriteDerefDerefQResult := by
+  exact EnvWrite.intro
+    (env₂ := nestedMutableWriteDerefMResult)
+    (updatedTy := .ty (.borrow true [m]))
+    (slot := { ty := .ty (.borrow true [m]), lifetime := l })
+    (by simp [nestedMutableEnvAfterQ, nestedMutableEnvBeforeQ, q, LVal.base, l])
+    (UpdateAtPath.mutBorrow
+      (WriteBorrowTargets.singleton nested_write_deref_m
+        ⟨.int, l,
+          by
+            simpa [prependPath, m] using nested_derefM_typed_int⟩))
+
+theorem nested_runtimeWritableGate_derefQ_to_b :
+    RuntimeWritableMutGate nestedMutableStoreAfterQ nestedMutableEnvAfterQ
+      (.deref q) (.var "b") := by
+  exact ⟨[b], l, .int, nestedMutableWriteDerefDerefQResult,
+    nested_derefQ_typed_mut,
+    by simpa [q, b] using nested_derefDerefQ_loc,
+    nested_write_deref_deref_q⟩
+
+theorem top_ref_runtimeValueMutBorrow_leaf_eq {store : ProgramStore}
+    {location leaf : Location} {targets : List LVal} :
+    RuntimeValueMutBorrow store
+      (.value (.ref { location := location, owner := false }))
+      (.ty (.borrow true targets)) leaf →
+    leaf = location := by
+  intro hborrow
+  cases hborrow
+  rfl
+
+theorem nested_qValue_no_mut_borrow_b :
+    ¬ RuntimeValueMutBorrow nestedMutableStoreAfterQ (.value qValue)
+      (.ty (.borrow true [m])) (.var "b") := by
+  intro hborrow
+  have hleaf :
+      (.var "b" : Location) = .var "m" := by
+    exact top_ref_runtimeValueMutBorrow_leaf_eq
+      (store := nestedMutableStoreAfterQ) (location := .var "m")
+      (leaf := .var "b") (targets := [.var "m"])
+      (by simpa [qValue, m] using hborrow)
+  simp at hleaf
+
+theorem no_valueWritableInstallProvenance_for_nested_mutable_borrow :
+    ¬ ConcreteRuntimeValueWritableInstallProvenance nestedMutableStoreAfterQ
+      nestedMutableEnvBeforeQ "q" qValue (.borrow true [m]) l := by
+  intro hprov
+  rcases hprov with ⟨R, hexact, _hexcl, hcover⟩
+  have hmem : (.var "b", "q") ∈ R :=
+    hcover (.deref q) (.var "b") (by simp [q, LVal.base])
+      (by
+        simpa [nestedMutableEnvAfterQ, q, m, b, l] using
+          nested_runtimeWritableGate_derefQ_to_b)
+  rcases hexact.2 (.var "b") "q" hmem with ⟨_howner, hborrow⟩
+  exact nested_qValue_no_mut_borrow_b hborrow
+
+theorem nestedMutableStoreAfterQ_no_ownsAt
+    {owned storage : Location} :
+    ¬ ProgramStore.OwnsAt nestedMutableStoreAfterQ owned storage := by
+  rintro ⟨ownedLifetime, hslot⟩
+  cases storage with
+  | var name =>
+      by_cases hq : name = "q"
+      · subst hq
+        simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+          ProgramStore.update, owningRef] at hslot
+      · by_cases hm : name = "m"
+        · subst hm
+          simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+            ProgramStore.update, owningRef] at hslot
+        · by_cases hb : name = "b"
+          · subst hb
+            simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+              ProgramStore.update, owningRef] at hslot
+          · simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+              ProgramStore.update, owningRef, hq, hm, hb] at hslot
+  | heap address =>
+      simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+        ProgramStore.update, owningRef] at hslot
+
+theorem nestedMutableStoreAfterQ_no_ownsTransitively
+    {root owned : Location} :
+    ¬ ProgramStore.OwnsTransitively nestedMutableStoreAfterQ root owned := by
+  intro howns
+  induction howns with
+  | direct hownsAt =>
+      exact nestedMutableStoreAfterQ_no_ownsAt hownsAt
+  | trans hownsAt _tail _ih =>
+      exact nestedMutableStoreAfterQ_no_ownsAt hownsAt
+
+theorem nestedMutableStoreAfterQ_kill
+    {leaf : Location} {z : Name} :
+    StoreConcreteBorrowKill nestedMutableStoreAfterQ leaf z := by
+  intro value lifetime _hslot hinvalid
+  rcases hinvalid with ⟨borrowed, _hborrow, hbelow⟩
+  exact nestedMutableStoreAfterQ_no_ownsTransitively hbelow
+
+theorem nestedMutableStoreAfterQ_deref_rooted_q_loc
+    {source : LVal} {leaf : Location} :
+    LVal.base source = "q" →
+    nestedMutableStoreAfterQ.loc (.deref source) = some leaf →
+      leaf = .var "m" ∨ leaf = .var "b" := by
+  intro hbase hloc
+  induction source generalizing leaf with
+  | var name =>
+      simp [LVal.base] at hbase
+      subst hbase
+      simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+        ProgramStore.update, ProgramStore.loc] at hloc
+      exact Or.inl hloc.symm
+  | deref inner ih =>
+      change ((nestedMutableStoreAfterQ.loc (.deref inner)).bind
+        (fun location =>
+          (nestedMutableStoreAfterQ.slotAt location).bind
+            (fun slot =>
+              match slot.value with
+              | .value (.ref ref) => some ref.location
+              | .value _ => none
+              | .undef => none))) = some leaf at hloc
+      cases hinner : nestedMutableStoreAfterQ.loc (.deref inner) with
+      | none =>
+          rw [hinner] at hloc
+          cases hloc
+      | some middle =>
+          rw [hinner] at hloc
+          rcases ih (by simpa [LVal.base] using hbase) hinner with
+            hmiddle | hmiddle
+          · subst hmiddle
+            simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+              ProgramStore.update] at hloc
+            exact Or.inr hloc.symm
+          · subst hmiddle
+            simp [nestedMutableStoreAfterQ, qValue, ProgramStore.declare,
+              ProgramStore.update] at hloc
+
+theorem valueWritableAuthorityInstallProvenance_for_nested_mutable_borrow :
+    ConcreteRuntimeValueWritableAuthorityInstallProvenance
+      nestedMutableStoreAfterQ nestedMutableEnvBeforeQ "q" qValue
+      (.borrow true [m]) l := by
+  refine ⟨[(.var "m", "q"), (.var "b", "q")], ?_, ?_⟩
+  · intro leaf owner hmem z _hz
+    rcases List.mem_cons.mp hmem with hhead | htail
+    · cases hhead
+      exact nestedMutableStoreAfterQ_kill
+    · have hpair : (leaf, owner) = (.var "b", "q") :=
+        List.mem_singleton.mp htail
+      cases hpair
+      exact nestedMutableStoreAfterQ_kill
   · intro source leaf hbase hgate
-    exact False.elim (no_writable_mut_gate_rooted_p hbase hgate)
+    rcases hgate with ⟨_targets, _bl, _rhsTy, _result, _hsourceTyping, hloc,
+      _hwrite⟩
+    rcases nestedMutableStoreAfterQ_deref_rooted_q_loc hbase hloc with
+      hleaf | hleaf
+    · subst hleaf
+      simp
+    · subst hleaf
+      simp
 
 end ProvenanceCounterexample
 

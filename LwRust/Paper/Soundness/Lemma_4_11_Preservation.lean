@@ -4108,6 +4108,114 @@ theorem preservation_runtime_multistep_of_step_to_value_with_concrete_roots_and_
     hmulti
 
 /-- One-redex-to-value multistep preservation for terminal concrete roots plus
+concrete writable-gate provenance. -/
+theorem preservation_runtime_multistep_of_step_to_value_with_concrete_roots_and_concreteWritableProvenance
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+        store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+      finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+        store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact hpreserved.value_tail htail)
+    hmulti
+
+/-- One-redex-to-value multistep preservation for terminal concrete roots plus
+concrete writable-gate provenance and value-authority installation. -/
+theorem preservation_runtime_multistep_of_step_to_value_with_concrete_roots_concreteWritable_and_valueAuthority
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+        store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+      finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+        store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact hpreserved.value_tail htail)
+    hmulti
+
+/-- One-redex-to-value multistep preservation for terminal concrete roots plus
+footprint-keyed concrete provenance. -/
+theorem preservation_runtime_multistep_of_step_to_value_with_concrete_roots_and_footprintProvenance
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+        store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+      finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+        store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+        intro _store' _value _finalStore _finalValue hpreserved htail
+        exact hpreserved.value_tail htail)
+      hmulti
+
+/-- One-redex-to-value multistep preservation for terminal concrete roots plus
+footprint provenance and a value-scoped footprint-install package. -/
+theorem preservation_runtime_multistep_of_step_to_value_with_concrete_roots_footprint_and_valueProvenance
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+        store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+      finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+        store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact hpreserved.value_tail htail)
+    hmulti
+
+/-- One-redex-to-value multistep preservation for terminal concrete roots plus
 runtime-selected borrow safety. -/
 theorem preservation_runtime_multistep_of_step_to_value_with_concrete_roots_and_runtimeSafety
     {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
@@ -4422,6 +4530,221 @@ theorem preservation_multistep_runtime_value_with_concrete_roots_and_writableFra
   exact preservation_refl_runtime_value_with_concrete_roots_and_writableFrames
     hvalidRuntime hvalidStoreTyping hwellFormed hsafe hruntime hconcrete
     hwellTy htyping
+
+/-- Zero-step value preservation for terminal concrete roots plus concrete
+writable-gate provenance. -/
+theorem preservation_refl_runtime_value_with_concrete_roots_and_concreteWritableProvenance
+    {store : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} :
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeWritableBorrowProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+      store value env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping
+  cases htyping with
+  | const hvalueTyping =>
+      exact ⟨preservation_refl_runtime_value_with_concrete_roots
+          hvalidRuntime hvalidStoreTyping hwellFormed hsafe hwellTy
+          (TermTyping.const (lifetime := lifetime) hvalueTyping),
+        hprov⟩
+
+/-- Value multistep preservation for terminal concrete roots plus concrete
+writable-gate provenance. -/
+theorem preservation_multistep_runtime_value_with_concrete_roots_and_concreteWritableProvenance
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeWritableBorrowProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableProvenance
+      finalStore finalValue env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact preservation_refl_runtime_value_with_concrete_roots_and_concreteWritableProvenance
+    hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy htyping
+
+/-- Zero-step value preservation for terminal concrete roots plus
+footprint-keyed concrete provenance. -/
+theorem preservation_refl_runtime_value_with_concrete_roots_and_footprintProvenance
+    {store : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} :
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeFootprintProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+      store value env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping
+  cases htyping with
+  | const hvalueTyping =>
+      exact ⟨preservation_refl_runtime_value_with_concrete_roots
+          hvalidRuntime hvalidStoreTyping hwellFormed hsafe hwellTy
+          (TermTyping.const (lifetime := lifetime) hvalueTyping),
+        hprov⟩
+
+/-- Value multistep preservation for terminal concrete roots plus
+footprint-keyed concrete provenance. -/
+theorem preservation_multistep_runtime_value_with_concrete_roots_and_footprintProvenance
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeFootprintProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+      finalStore finalValue env₂ ty := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact preservation_refl_runtime_value_with_concrete_roots_and_footprintProvenance
+    hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy htyping
+
+/-- Zero-step source-value preservation for terminal concrete roots plus
+footprint provenance and value-install provenance.  Source values are never raw
+references, so their install footprint is empty. -/
+theorem preservation_refl_runtime_source_value_with_concrete_roots_footprint_and_valueProvenance
+    {store : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} :
+    SourceTerm (.val value) →
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeFootprintProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+      store value env₂ ty := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov
+    hwellTy htyping
+  cases htyping with
+  | const hvalueTyping =>
+      refine ⟨?_, ?_⟩
+      · exact preservation_refl_runtime_value_with_concrete_roots_and_footprintProvenance
+          hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+          (TermTyping.const (lifetime := lifetime) hvalueTyping)
+      · intro owner _hfresh
+        exact ConcreteRuntimeValueFootprintInstallProvenance.of_sourceValue
+          (hsource value (by simp [termValues])) hvalueTyping
+
+/-- Value multistep preservation for source values with footprint and
+value-install provenance. -/
+theorem preservation_multistep_runtime_source_value_with_concrete_roots_footprint_and_valueProvenance
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    SourceTerm (.val value) →
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeFootprintProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsFootprintAndValueProvenance
+      finalStore finalValue env₂ ty := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov
+    hwellTy htyping hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact preservation_refl_runtime_source_value_with_concrete_roots_footprint_and_valueProvenance
+    hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping
+
+/-- Zero-step source-value preservation for terminal concrete roots plus concrete
+writable provenance and value-authority installation.  Source values are never raw
+references, so primitive authority-install packages are enough. -/
+theorem preservation_refl_runtime_source_value_with_concrete_roots_concreteWritable_and_valueAuthority
+    {store : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} :
+    SourceTerm (.val value) →
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeWritableBorrowProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+      store value env₂ ty := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping
+  cases htyping with
+  | const hvalueTyping =>
+      have hsourceValue : SourceValue value :=
+        hsource value (by simp [termValues])
+      refine ⟨?_, ?_⟩
+      · exact preservation_refl_runtime_value_with_concrete_roots_and_concreteWritableProvenance
+          hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+          (TermTyping.const (lifetime := lifetime) hvalueTyping)
+      · intro owner installLifetime _hfresh
+        cases hvalueTyping
+        · exact ConcreteRuntimeValueWritableAuthorityInstallProvenance.unit
+        · exact ConcreteRuntimeValueWritableAuthorityInstallProvenance.int
+        · exact ConcreteRuntimeValueWritableAuthorityInstallProvenance.bool
+        · exact absurd hsourceValue (by simp [SourceValue])
+
+/-- Value multistep preservation for source values with concrete writable
+provenance and value-authority installation. -/
+theorem preservation_multistep_runtime_source_value_with_concrete_roots_concreteWritable_and_valueAuthority
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {value finalValue : Value} {ty : Ty} :
+    SourceTerm (.val value) →
+    ValidRuntimeState store (.val value) →
+    ValidStoreTyping store (.val value) typing →
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ConcreteRuntimeWritableBorrowProvenance store env →
+    WellFormedTy env ty lifetime →
+    TermTyping env typing lifetime (.val value) ty env₂ →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndConcreteWritableAndValueAuthorityProvenance
+      finalStore finalValue env₂ ty := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov
+    hwellTy htyping hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact preservation_refl_runtime_source_value_with_concrete_roots_concreteWritable_and_valueAuthority
+    hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe hprov hwellTy
+    htyping
 
 /-- Zero-step value preservation for the migration package: terminal concrete
 roots, runtime-selected borrow safety, and concrete writable-gate provenance. -/
@@ -4811,6 +5134,27 @@ theorem preservation_blockB_value_multistep_runtime_with_concrete_roots_and_prov
     (preservation_blockB_value_multistep_runtime_with_concrete_provenance
       hvalidRuntime hsafe hprov hchild hwellBody hwellTy hvalidValue hmulti).2⟩
 
+/-- Singleton value block preservation with concrete roots and footprint-keyed
+concrete provenance. -/
+theorem preservation_blockB_value_multistep_runtime_with_concrete_roots_and_footprintProvenance
+    {store finalStore : ProgramStore} {env : Env}
+    {lifetime blockLifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    ValidRuntimeState store (.block blockLifetime [.val value]) →
+    store ∼ₛ env →
+    ConcreteRuntimeFootprintProvenance store env →
+    LifetimeChild lifetime blockLifetime →
+    WellFormedEnv env blockLifetime →
+    WellFormedTy env ty lifetime →
+    ValidValue store value ty →
+    MultiStep store lifetime (.block blockLifetime [.val value])
+      finalStore (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance finalStore
+      finalValue (env.dropLifetime blockLifetime) ty := by
+  intro hvalidRuntime hsafe hprov hchild hwellBody hwellTy hvalidValue hmulti
+  exact ⟨preservation_blockB_value_multistep_runtime_with_concrete_roots
+      hvalidRuntime hsafe hchild hwellBody hwellTy hvalidValue hmulti,
+    ConcreteRuntimeFootprintProvenance.blockBValueMultiStep hmulti hprov⟩
+
 /-- Singleton value block preservation for concrete roots plus the diagnostic
 location-level no-overlap check.  This proves the block/drop closure for that
 check, but the check itself is too strong for accepted mutable reborrows. -/
@@ -4894,6 +5238,44 @@ theorem preservation_block_terminal_multistep_runtime_of_first_step_with_concret
     MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
     TerminalStateSafeWithConcreteRootsAndProvenance finalStore finalValue
       env' ty := by
+  intro hseq hblockA hblockB hmulti
+  rcases multistep_block_to_value_first_step_inv hmulti with
+    hseqCase | hblockACase | hblockBCase
+  · rcases hseqCase with ⟨value, next, rest, store', hterms, hdrops, htail⟩
+    exact hseq value next rest store' hterms hdrops htail
+  · rcases hblockACase with ⟨term, rest, store', term', hterms, hstep, htail⟩
+    exact hblockA term rest store' term' hterms hstep htail
+  · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
+    exact hblockB value store' hterms hdrops htail
+
+theorem preservation_block_terminal_multistep_runtime_of_first_step_with_concrete_roots_and_footprintProvenance
+    {store finalStore : ProgramStore} {env' : Env}
+    {lifetime blockLifetime : Lifetime} {terms : List Term}
+    {finalValue : Value} {ty : Ty} :
+    (∀ value next rest store',
+      terms = .val value :: next :: rest →
+      Drops store [.value value] store' →
+      MultiStep store' lifetime (.block blockLifetime (next :: rest))
+        finalStore (.val finalValue) →
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance finalStore
+        finalValue env' ty) →
+    (∀ term rest store' term',
+      terms = term :: rest →
+      Step store blockLifetime term store' term' →
+      MultiStep store' lifetime (.block blockLifetime (term' :: rest))
+        finalStore (.val finalValue) →
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance finalStore
+        finalValue env' ty) →
+    (∀ value store',
+      terms = [.val value] →
+      DropsLifetime store blockLifetime store' →
+      MultiStep store' lifetime (.val value) finalStore (.val finalValue) →
+      TerminalStateSafeWithConcreteRootsAndFootprintProvenance finalStore
+        finalValue env' ty) →
+    MultiStep store lifetime (.block blockLifetime terms) finalStore
+      (.val finalValue) →
+    TerminalStateSafeWithConcreteRootsAndFootprintProvenance finalStore
+      finalValue env' ty := by
   intro hseq hblockA hblockB hmulti
   rcases multistep_block_to_value_first_step_inv hmulti with
     hseqCase | hblockACase | hblockBCase
@@ -5686,6 +6068,140 @@ theorem preservation_whileRunEnds_with_concrete_roots_and_provenance
                 ConcreteRuntimeBorrowProvenance store₀ env₃ :=
               ConcreteRuntimeBorrowProvenance.drops hdrops hprovBody
             exact preservation_blockB_value_multistep_runtime_with_concrete_roots_and_provenance
+              hvalidAfterSeq hsafeAfterSeq hprovAfterSeq hchild hwellBody
+              WellFormedTy.unit ValidPartialValue.unit htail)
+          (by
+            intro term rest store₀ term' hterms hstep _htail
+            cases hterms
+            exact False.elim (value_no_step hstep))
+          (by
+            intro value store₀ hterms _hdropsL _htail
+            simp at hterms)
+          hblockCont
+      rcases hterminalIterEnd with ⟨hterminalIterSafe, hprovIterEnd⟩
+      rcases hinvariant _ hterminalIterSafe.1.2.1 hprovIterEnd with
+        ⟨hsafeInv, hprovInv⟩
+      exact ih rfl hsafeInv hprovInv
+        (validRuntimeState_of_sourceTerm hsourceCondition
+          hterminalIterSafe.1.1)
+  | bodyPhase =>
+      intro heq _hsafe' _hprov' _hvalid'
+      cases heq
+
+/-- While-run preservation for terminal concrete roots plus footprint
+provenance.
+
+This is the join-stable loop helper for the footprint migration: iterations
+carry concrete root safety and the footprint registry, and the block/sequence
+drops use footprint transports rather than static mutable-gate coverage. -/
+theorem preservation_whileRunEnds_with_concrete_roots_and_footprintProvenance
+    {lifetime bodyLifetime : Lifetime} {condition body : Term}
+    {envInv env₂ env₃ : Env} {bodyTy : Ty}
+    (hchild : LifetimeChild lifetime bodyLifetime)
+    (hsourceCondition : SourceTerm condition)
+    (hsourceBody : SourceTerm body)
+    (ihCondition : ∀ store finalStore finalValue,
+      ValidRuntimeState store condition →
+      store ∼ₛ envInv →
+      ConcreteRuntimeFootprintProvenance store envInv →
+      MultiStep store lifetime condition finalStore (.val finalValue) →
+      WellFormedEnv env₂ lifetime ∧
+        TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+          finalStore finalValue env₂ .bool)
+    (ihBody : ∀ store finalStore finalValue,
+      ValidRuntimeState store body →
+      WellFormedEnv env₂ bodyLifetime →
+      store ∼ₛ env₂ →
+      ConcreteRuntimeFootprintProvenance store env₂ →
+      MultiStep store bodyLifetime body finalStore (.val finalValue) →
+      WellFormedEnv env₃ bodyLifetime ∧
+        TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+          finalStore finalValue env₃ bodyTy ∧
+        ∀ endStore : ProgramStore,
+          endStore ∼ₛ env₃.dropLifetime bodyLifetime →
+          ConcreteRuntimeFootprintProvenance endStore
+            (env₃.dropLifetime bodyLifetime) →
+          endStore ∼ₛ envInv ∧
+            ConcreteRuntimeFootprintProvenance endStore envInv) :
+    ∀ form startStore endStore,
+      WhileRunEnds lifetime bodyLifetime condition body form
+        startStore endStore →
+      form = .whileCond bodyLifetime condition condition body →
+      startStore ∼ₛ envInv →
+      ConcreteRuntimeFootprintProvenance startStore envInv →
+      ValidRuntimeState startStore condition →
+      WellFormedEnv env₂ lifetime ∧
+        TerminalStateSafeWithConcreteRootsAndFootprintProvenance
+          endStore .unit env₂ .unit := by
+  intro form startStore endStore hends
+  induction hends with
+  | exit =>
+      rename_i hcond
+      intro heq hsafe' hprov' hvalid'
+      cases heq
+      rcases ihCondition _ _ _ hvalid' hsafe' hprov' hcond with
+        ⟨hwellCondition, hterminalCondition⟩
+      rcases hterminalCondition with
+        ⟨⟨hterminalConditionSafe, hterminalConditionRoots⟩,
+          hprovCondition⟩
+      have hvalidUnit :=
+        validRuntimeState_of_sourceTerm sourceTerm_unit_value
+          hterminalConditionSafe.1
+      exact ⟨hwellCondition,
+        ⟨⟨⟨hvalidUnit, hterminalConditionSafe.2.1,
+              ValidPartialValue.unit⟩,
+            ⟨hvalidUnit, hterminalConditionRoots.2.1,
+              ConcreteRuntimeValueSafe.unit⟩⟩,
+          hprovCondition⟩⟩
+  | iterate =>
+      rename_i hcond hblock _hrest ih
+      intro heq hsafe' hprov' hvalid'
+      cases heq
+      rcases ihCondition _ _ _ hvalid' hsafe' hprov' hcond with
+        ⟨hwellCondition, hterminalCondition⟩
+      rcases hterminalCondition with
+        ⟨⟨hterminalConditionSafe, _hterminalConditionRoots⟩,
+          hprovCondition⟩
+      rcases multistep_block_head_to_value_inv hblock with
+        ⟨midStore, bodyValue, hbodyRun, hblockCont⟩
+      rcases ihBody _ _ _
+          (validRuntimeState_of_sourceTerm hsourceBody
+            hterminalConditionSafe.1)
+          (WellFormedEnv.of_outlives hwellCondition
+            (LifetimeChild.outlives hchild))
+          hterminalConditionSafe.2.1 hprovCondition hbodyRun with
+        ⟨hwellBody, hterminalBody, hinvariant⟩
+      rcases hterminalBody with
+        ⟨⟨hterminalBodySafe, _hterminalBodyRoots⟩, hprovBody⟩
+      have hvalidConsBlock :
+          ValidRuntimeState midStore
+            (.block bodyLifetime [.val bodyValue, .val .unit]) :=
+        validRuntimeState_block_value_cons_of_value_source_tail
+          sourceTerm_unit_block hterminalBodySafe.1
+      have hterminalIterEnd :
+          TerminalStateSafeWithConcreteRootsAndFootprintProvenance _
+            _ (env₃.dropLifetime bodyLifetime) .unit :=
+        preservation_block_terminal_multistep_runtime_of_first_step_with_concrete_roots_and_footprintProvenance
+          (env' := env₃.dropLifetime bodyLifetime) (ty := .unit)
+          (by
+            intro value next rest store₀ hterms hdrops htail
+            cases hterms
+            have hseqStep :
+                Step midStore lifetime
+                  (.block bodyLifetime [.val bodyValue, .val .unit])
+                  store₀ (.block bodyLifetime [.val .unit]) :=
+              Step.seq hdrops
+            have hvalidAfterSeq :
+                ValidRuntimeState store₀
+                  (.block bodyLifetime [.val .unit]) :=
+              validRuntimeState_seq_step hvalidConsBlock hseqStep
+            have hsafeAfterSeq : store₀ ∼ₛ env₃ :=
+              safeAbstraction_seq_value_drop hterminalBodySafe.2.1
+                hvalidConsBlock hwellBody hdrops
+            have hprovAfterSeq :
+                ConcreteRuntimeFootprintProvenance store₀ env₃ :=
+              ConcreteRuntimeFootprintProvenance.drops hdrops hprovBody
+            exact preservation_blockB_value_multistep_runtime_with_concrete_roots_and_footprintProvenance
               hvalidAfterSeq hsafeAfterSeq hprovAfterSeq hchild hwellBody
               WellFormedTy.unit ValidPartialValue.unit htail)
           (by

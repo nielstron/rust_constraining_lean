@@ -1371,6 +1371,186 @@ theorem Ty.partialTyUnion_exists_of_sameShape {left right : Ty} :
     · intro _ _; trivial
   exact key left right hshape
 
+/-- A union of two `undef` shadows is the `undef` shadow of the inner union. -/
+theorem PartialTyUnion.undef {left right union : Ty} :
+    PartialTyUnion (.ty left) (.ty right) (.ty union) →
+    PartialTyUnion (.undef left) (.undef right) (.undef union) := by
+  intro hunion
+  refine ⟨?_, ?_⟩
+  · intro candidate hcandidate
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
+    rcases hcandidate with rfl | rfl
+    · exact PartialTyStrengthens.undefLeft (PartialTyUnion.left_strengthens hunion)
+    · exact PartialTyStrengthens.undefLeft (PartialTyUnion.right_strengthens hunion)
+  · intro upper hupper
+    have hl : PartialTyStrengthens (.undef left) upper := hupper (by simp)
+    have hr : PartialTyStrengthens (.undef right) upper := hupper (by simp)
+    obtain ⟨u', rfl, hlu⟩ :
+        ∃ u', upper = .undef u' ∧ PartialTyStrengthens (.ty left) (.ty u') := by
+      cases hl with
+      | reflex => exact ⟨left, rfl, PartialTyStrengthens.reflex⟩
+      | undefLeft h => exact ⟨_, rfl, h⟩
+    have hru : PartialTyStrengthens (.ty right) (.ty u') := by
+      cases hr with
+      | reflex => exact PartialTyStrengthens.reflex
+      | undefLeft h => exact h
+    have hunionUpper : PartialTyStrengthens (.ty union) (.ty u') :=
+      hunion.2 (by
+        intro c hc
+        simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hc
+        rcases hc with rfl | rfl
+        · exact hlu
+        · exact hru)
+    exact PartialTyStrengthens.undefLeft hunionUpper
+
+/-- **Existence of partial-type joins for same-shape types.**  Every pair of
+same-shape partial types has a least upper bound in the strengthening order. -/
+theorem PartialTy.partialTyJoin_exists_of_sameShape {left right : PartialTy} :
+    PartialTy.sameShape left right →
+      ∃ union, PartialTyJoin left right union := by
+  refine PartialTy.rec
+    (motive_1 := fun _ => True)
+    (motive_2 := fun left =>
+      ∀ right, PartialTy.sameShape left right →
+        ∃ union, PartialTyJoin left right union)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ left right
+  · trivial
+  · trivial
+  · intro _ _; trivial
+  · intro _ _; trivial
+  · trivial
+  · -- PartialTy.ty
+    intro a _ih right hshape
+    cases right with
+    | ty b =>
+        rcases Ty.partialTyUnion_exists_of_sameShape
+          (by simpa [PartialTy.sameShape] using hshape) with ⟨u, hu⟩
+        exact ⟨.ty u, hu⟩
+    | box _ => simp [PartialTy.sameShape] at hshape
+    | undef _ => simp [PartialTy.sameShape] at hshape
+  · -- PartialTy.box
+    intro pa ih right hshape
+    cases right with
+    | box pb =>
+        rcases ih pb (by simpa [PartialTy.sameShape] using hshape) with ⟨u, hu⟩
+        exact ⟨.box u, PartialTyUnion.box hu⟩
+    | ty _ => simp [PartialTy.sameShape] at hshape
+    | undef _ => simp [PartialTy.sameShape] at hshape
+  · -- PartialTy.undef
+    intro ta _ih right hshape
+    cases right with
+    | undef tb =>
+        rcases Ty.partialTyUnion_exists_of_sameShape
+          (by simpa [PartialTy.sameShape] using hshape) with ⟨u, hu⟩
+        exact ⟨.undef u, PartialTyUnion.undef hu⟩
+    | ty _ => simp [PartialTy.sameShape] at hshape
+    | box _ => simp [PartialTy.sameShape] at hshape
+
+/-- **Existence of the environment join (LUB) for joinable environments.**
+
+Two environments with the same domain whose corresponding slots are same-shape
+with equal lifetimes have a least upper bound in the environment-strengthening
+order.  The join is built pointwise from the partial-type joins of the slots. -/
+theorem EnvJoin.exists_of_joinable {left right : Env}
+    (hdom : ∀ x, left.slotAt x = none ↔ right.slotAt x = none)
+    (hcompat : ∀ x ls rs, left.slotAt x = some ls → right.slotAt x = some rs →
+       PartialTy.sameShape ls.ty rs.ty ∧ ls.lifetime = rs.lifetime) :
+    ∃ join, EnvJoin left right join := by
+  classical
+  have hchoice : ∀ x, ∃ (o : Option EnvSlot),
+      (∀ ls, left.slotAt x = some ls →
+        ∃ rs js, right.slotAt x = some rs ∧ o = some js ∧
+          PartialTyJoin ls.ty rs.ty js.ty ∧ js.lifetime = ls.lifetime) ∧
+      (left.slotAt x = none → o = none) := by
+    intro x
+    cases hl : left.slotAt x with
+    | none =>
+        refine ⟨none, ?_, ?_⟩
+        · intro ls h; cases h
+        · intro _; rfl
+    | some ls =>
+        cases hr : right.slotAt x with
+        | none =>
+            exact absurd ((hdom x).mpr hr) (by rw [hl]; simp)
+        | some rs =>
+            obtain ⟨hshape, _hlife⟩ := hcompat x ls rs hl hr
+            obtain ⟨u, hu⟩ := PartialTy.partialTyJoin_exists_of_sameShape hshape
+            refine ⟨some { ty := u, lifetime := ls.lifetime }, ?_, ?_⟩
+            · intro ls' hl'
+              cases hl'
+              exact ⟨rs, { ty := u, lifetime := ls.lifetime }, rfl, rfl, hu, rfl⟩
+            · intro h; cases h
+  obtain ⟨joinSlotAt, hjoin⟩ := Classical.axiomOfChoice hchoice
+  have hLeftLe : EnvStrengthens left { slotAt := joinSlotAt } := by
+    intro x
+    dsimp only
+    obtain ⟨hsome, hnone⟩ := hjoin x
+    cases hl : left.slotAt x with
+    | none => simp only [hnone hl]
+    | some ls =>
+        obtain ⟨rs, js, _hr, hojs, hpj, hlife⟩ := hsome ls hl
+        simp only [hojs]
+        exact ⟨hlife.symm, PartialTyUnion.left_strengthens hpj⟩
+  have hRightLe : EnvStrengthens right { slotAt := joinSlotAt } := by
+    intro x
+    dsimp only
+    obtain ⟨hsome, hnone⟩ := hjoin x
+    cases hl : left.slotAt x with
+    | none =>
+        have hr : right.slotAt x = none := (hdom x).mp hl
+        simp only [hr, hnone hl]
+    | some ls =>
+        obtain ⟨rs, js, hr, hojs, hpj, hlife⟩ := hsome ls hl
+        obtain ⟨_hshape, hlifeLR⟩ := hcompat x ls rs hl hr
+        simp only [hr, hojs]
+        exact ⟨by rw [← hlifeLR]; exact hlife.symm,
+          PartialTyUnion.right_strengthens hpj⟩
+  refine ⟨{ slotAt := joinSlotAt }, ?_, ?_⟩
+  · intro z hz
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hz
+    rcases hz with rfl | rfl
+    · exact hLeftLe
+    · exact hRightLe
+  · intro ub hub
+    have hubLeft : left ≤ ub := hub (by simp)
+    have hubRight : right ≤ ub := hub (by simp)
+    show EnvStrengthens { slotAt := joinSlotAt } ub
+    intro x
+    dsimp only
+    obtain ⟨hsome, hnone⟩ := hjoin x
+    cases hl : left.slotAt x with
+    | none =>
+        have ho : joinSlotAt x = none := hnone hl
+        have hubNone : ub.slotAt x = none := by
+          have hubx := hubLeft x
+          cases hua : ub.slotAt x with
+          | none => rfl
+          | some us => rw [hl, hua] at hubx; exact hubx.elim
+        simp only [ho, hubNone]
+    | some ls =>
+        obtain ⟨rs, js, hr, hojs, hpj, hlife⟩ := hsome ls hl
+        cases hua : ub.slotAt x with
+        | none =>
+            have hubx := hubLeft x
+            rw [hl, hua] at hubx
+            exact hubx.elim
+        | some us =>
+            have hubxL := hubLeft x
+            have hubxR := hubRight x
+            rw [hl, hua] at hubxL
+            rw [hr, hua] at hubxR
+            obtain ⟨hlifeLU, hstrLU⟩ := hubxL
+            obtain ⟨_hlifeRU, hstrRU⟩ := hubxR
+            simp only [hojs, hua]
+            refine ⟨?_, ?_⟩
+            · rw [hlife]; exact hlifeLU
+            · exact hpj.2 (by
+                intro c hc
+                simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hc
+                rcases hc with rfl | rfl
+                · exact hstrLU
+                · exact hstrRU)
+
 /-- Shape compatibility of full types implies structural same-shape. -/
 theorem PartialTy.sameShape_of_shapeCompatible {env : Env} {a b : Ty} :
     ShapeCompatible env (.ty a) (.ty b) → PartialTy.sameShape (.ty a) (.ty b) := by
