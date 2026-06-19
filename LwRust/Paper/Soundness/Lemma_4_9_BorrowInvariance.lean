@@ -8083,74 +8083,183 @@ theorem lvalMutVar_pullback_of_strengthening {envFine envCoarse : Env}
       LValTyping envFine (.var x) (.ty (.borrow true targetsFine)) blFine := by
   exact lvalBorrowVar_pullback_of_strengthening hstr hcoarseSlot
 
-/-- **General runtime-realized lval typing pullback.**
+/-- A binary type union is the least upper bound: it strengthens into any common
+upper bound of its two inputs. -/
+theorem PartialTyUnion.least {a b u ub : PartialTy}
+    (hunion : PartialTyUnion a b u)
+    (ha : PartialTyStrengthens a ub) (hb : PartialTyStrengthens b ub) :
+    PartialTyStrengthens u ub := by
+  have hupper : ub ∈ upperBounds ({a, b} : Set PartialTy) := by
+    intro z hz
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hz
+    rcases hz with rfl | rfl
+    · exact ha
+    · exact hb
+  exact hunion.2 hupper
 
-If `envFine` same-shape-strengthens into `envCoarse` and `envFine` is well-formed
-and safely abstracts the store, then any lvalue typing in the coarse env whose
-location resolves in the store has a corresponding typing in the fine env whose
-type has the *same shape*.
+/-- A target-list union strengthens into any partial type `ub` that every member
+target's type strengthens into.  This is the list-level least-upper-bound fact,
+proved by structural recursion over the target list with `PartialTyUnion.least`
+for the cons join. -/
+theorem lvalTargetsTyping_union_le_of_forall_member_le {env : Env}
+    {targets : List LVal} {unionTy ub : PartialTy} {lifetime : Lifetime}
+    (htargets : LValTargetsTyping env targets unionTy lifetime)
+    (hmem : ∀ t, t ∈ targets → ∀ tty tlt,
+      LValTyping env t (.ty tty) tlt → PartialTyStrengthens (.ty tty) ub) :
+    PartialTyStrengthens unionTy ub := by
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _ _ _ _ => True)
+    (motive_2 := fun targets unionTy _ _ =>
+      (∀ t, t ∈ targets → ∀ tty tlt,
+        LValTyping env t (.ty tty) tlt → PartialTyStrengthens (.ty tty) ub) →
+        PartialTyStrengthens unionTy ub)
+    ?var ?box ?borrow ?singleton ?cons htargets hmem
+  · intro _x _slot _hslot; trivial
+  · intro _lv _inner _lifetime _htyping _ih; trivial
+  · intro _lv _mutable _targets _bl _tl _tty _htyping _htargets _ih1 _ih2; trivial
+  · intro target ty targetLifetime htyping _ihTyping hmem'
+    exact hmem' target (by simp) _ _ htyping
+  · intro target rest headTy headLifetime _restLifetime _lifetime restTy unionTy
+      hhead _hrest hunion _hintersection _ihHead ihRest hmem'
+    have hheadLe : PartialTyStrengthens (.ty headTy) ub :=
+      hmem' target (by simp) _ _ hhead
+    have hrestLe : PartialTyStrengthens restTy ub :=
+      ihRest (fun t ht tty tlt htt =>
+        hmem' t (List.mem_cons_of_mem _ ht) tty tlt htt)
+    exact PartialTyUnion.least hunion hheadLe hrestLe
 
-This is the structural core of `RuntimeLValMutGatePullback.of_sameShapeStrengthening`:
-the variable case uses same-shape strengthening directly; the box-dereference case
-recurses; the borrow-dereference case rebuilds the target-list typing in the fine
-env from `Coherent envFine` (so the fine target list, though possibly smaller, is
-still non-empty and typable), and pins the union shape to the runtime-selected
-target via `location_borrow_selected_target`. -/
-theorem lvalTyping_sameShape_pullback_of_strengthening
-    {store : ProgramStore} {envFine envCoarse : Env} {current : Lifetime}
+/-- **General lval typing pullback under same-shape strengthening (rank form).**
+
+If `envFine` same-shape-strengthens into `envCoarse` and `envFine` is well-formed,
+then any lvalue typing in the coarse env has a corresponding typing in the fine
+env whose type has the *same shape* and *strengthens into* the coarse type.
+
+This is store-free: `WellFormedEnv envFine` already forbids empty borrow-target
+lists (via `Coherent`), so a dereference that types in the coarse env also types
+in the fine env.  The variable case uses same-shape strengthening directly; the
+box case recurses structurally; the borrow case rebuilds the fine target-list
+typing from `Coherent envFine`, then pins the union to the coarse union via the
+least-upper-bound fact, recursing on the strictly lower-ranked borrow targets
+(linearization rank) and using fine-env determinism to reconcile the target
+typing chosen by `Coherent` with the one produced by the recursion. -/
+theorem lvalTyping_pullback_of_strengthening_rank
+    {envFine envCoarse : Env} {φ : Name → Nat} {current : Lifetime}
     (hwellFine : WellFormedEnv envFine current)
-    (hsafeFine : store ∼ₛ envFine)
+    (hφF : LinearizedBy φ envFine)
     (hstr : EnvSameShapeStrengthening envFine envCoarse) :
-    ∀ {source : LVal} {pty : PartialTy} {bl : Lifetime} {leaf : Location},
-      LValTyping envCoarse source pty bl →
-      store.loc source = some leaf →
-      ∃ ptyFine blFine,
-        LValTyping envFine source ptyFine blFine ∧
-          PartialTy.sameShape ptyFine pty := by
-  intro source
-  induction source with
-  | var x =>
-      intro pty bl leaf htyping _hloc
-      cases htyping with
-      | var hslot =>
-          rcases hstr.1 x _ hslot with
-            ⟨fineSlot, hfineSlot, _hlife, _hstrength, hshape⟩
-          exact ⟨fineSlot.ty, fineSlot.lifetime, LValTyping.var hfineSlot, hshape⟩
-  | deref u ih =>
-      intro pty bl leaf htyping hloc
-      rcases ProgramStore.loc_deref_some_inv hloc with
-        ⟨M, ref, sourceLifetime, hMloc, _hMslot, _hrefLeaf⟩
-      cases htyping with
-      | box hsource =>
-          rcases ih hsource hMloc with ⟨puFine, buFine, hufine, hushape⟩
-          cases puFine with
-          | box puInner =>
-              exact ⟨puInner, buFine, LValTyping.box hufine, by
-                simpa [PartialTy.sameShape] using hushape⟩
-          | ty t => simp [PartialTy.sameShape] at hushape
-          | undef t => simp [PartialTy.sameShape] at hushape
-      | borrow hsource htargets =>
-          rcases ih hsource hMloc with ⟨puFine, buFine, hufine, hushape⟩
-          -- `hushape : sameShape puFine (.ty (.borrow mutable uTargets))`
-          -- forces `puFine = .ty (.borrow mutable uTargetsFine)`.
-          sorry
+    ∀ (rankBound sizeBound : Nat) {lv : LVal} {tyC : PartialTy} {lC : Lifetime},
+      φ (LVal.base lv) < rankBound →
+      sizeOf lv < sizeBound →
+      LValTyping envCoarse lv tyC lC →
+      ∃ tyF lF,
+        LValTyping envFine lv tyF lF ∧
+          PartialTy.sameShape tyF tyC ∧
+          PartialTyStrengthens tyF tyC := by
+  intro rankBound
+  induction rankBound with
+  | zero =>
+      intro _sizeBound lv tyC lC hrank _hsize _htyping
+      exact absurd hrank (Nat.not_lt_zero _)
+  | succ rankBound ihRank =>
+      intro sizeBound
+      induction sizeBound with
+      | zero =>
+          intro lv tyC lC _hrank hsize _htyping
+          exact absurd hsize (Nat.not_lt_zero _)
+      | succ sizeBound ihSize =>
+          intro lv tyC lC hrank hsize htyping
+          cases htyping with
+          | var hslot =>
+              rename_i x slot
+              rcases hstr.1 x slot hslot with
+                ⟨fineSlot, hfineSlot, _hlife, hstrength, hshape⟩
+              exact ⟨fineSlot.ty, fineSlot.lifetime,
+                LValTyping.var hfineSlot, hshape, hstrength⟩
+          | box hsource =>
+              rename_i u
+              rcases ihSize (lv := u) (by simpa [LVal.base] using hrank)
+                  (by simp at hsize ⊢; omega) hsource with
+                ⟨tyFU, lFU, hufine, hushape, hustrength⟩
+              cases tyFU with
+              | box innerF =>
+                  refine ⟨innerF, lFU, LValTyping.box hufine, ?_, ?_⟩
+                  · simpa [PartialTy.sameShape] using hushape
+                  · cases hustrength with
+                    | reflex => exact PartialTyStrengthens.reflex
+                    | box h => exact h
+              | ty t => simp [PartialTy.sameShape] at hushape
+              | undef t => simp [PartialTy.sameShape] at hushape
+          | borrow hsource htargets =>
+              rename_i u mutable uTargets borrowLifetime
+              rcases LValTargetsTyping.output_full htargets with ⟨tyCunion, rfl⟩
+              rcases ihSize (lv := u) (by simpa [LVal.base] using hrank)
+                  (by simp at hsize ⊢; omega) hsource with
+                ⟨tyFU, lFU, hufine, hushape, hustrength⟩
+              cases tyFU with
+              | ty tF =>
+                  cases tF with
+                  | borrow mF uTargetsF =>
+                      have hsubset : uTargetsF.Subset uTargets := by
+                        cases hustrength with
+                        | reflex => exact fun _ h => h
+                        | borrow hsub => exact hsub
+                      rcases hwellFine.2.2.1 u mF uTargetsF lFU hufine with
+                        ⟨tyFunion, lFunion, htargetsFine⟩
+                      have hUnionStrength :
+                          PartialTyStrengthens (.ty tyFunion) (.ty tyCunion) := by
+                        refine lvalTargetsTyping_union_le_of_forall_member_le
+                          htargetsFine ?_
+                        intro t ht tty tlt htfine
+                        have htmem : t ∈ uTargets := hsubset ht
+                        rcases lvalTargetsTyping_member_strengthens htargets t htmem
+                          with ⟨ttyC, ttlC, htcoarse, htcStrength⟩
+                        have htrank : φ (LVal.base t) < rankBound := by
+                          have hlt := (lvalTyping_vars_rank_lt hφF).1 hufine
+                            (LVal.base t)
+                            (by
+                              simp only [PartialTy.vars, Ty.vars, List.mem_map]
+                              exact ⟨t, ht, rfl⟩)
+                          have hu : φ (LVal.base u) < rankBound + 1 := by
+                            simpa [LVal.base] using hrank
+                          omega
+                        rcases ihRank (sizeOf t + 1) htrank (Nat.lt_succ_self _)
+                          htcoarse with
+                          ⟨ttyF2, ttlF2, htfine2, _htshape2, htstrength2⟩
+                        have heqv :=
+                          lvalTyping_eqv_of_linearizedBy hφF htfine htfine2
+                        have h1 : PartialTyStrengthens (.ty tty) ttyF2 :=
+                          PartialTy.eqv_strengthens heqv
+                        exact partialTyStrengthens_trans h1
+                          (partialTyStrengthens_trans htstrength2 htcStrength)
+                      refine ⟨.ty tyFunion, lFunion,
+                        LValTyping.borrow hufine htargetsFine, ?_, hUnionStrength⟩
+                      simpa [PartialTy.sameShape] using
+                        ty_sameShape_of_strengthens hUnionStrength
+                  | unit => simp [PartialTy.sameShape, Ty.sameShape] at hushape
+                  | int => simp [PartialTy.sameShape, Ty.sameShape] at hushape
+                  | bool => simp [PartialTy.sameShape, Ty.sameShape] at hushape
+                  | box t' => simp [PartialTy.sameShape, Ty.sameShape] at hushape
+              | box p => simp [PartialTy.sameShape] at hushape
+              | undef t => simp [PartialTy.sameShape] at hushape
 
 /-- The runtime-realized `&mut`-gate pullback follows from same-shape
-strengthening: every coarse mutable-borrow source whose dereference resolves in
-the store is a mutable-borrow source in the fine env as well.  This is the join
-discharge that needs no separate borrow-safety assumption — the runtime store
-resolution is the only bridge. -/
+strengthening alone: every coarse mutable-borrow source is a mutable-borrow
+source in the fine env as well.  This is the join discharge that needs no
+separate borrow-safety assumption.  (The store/safe-abstraction argument is kept
+in the signature for call-site uniformity but is unused: `WellFormedEnv envFine`
+already supplies everything via `Coherent`/`Linearizable`.) -/
 theorem RuntimeLValMutGatePullback.of_sameShapeStrengthening
     {store : ProgramStore} {envFine envCoarse : Env} {current : Lifetime}
     (hwellFine : WellFormedEnv envFine current)
-    (hsafeFine : store ∼ₛ envFine)
+    (_hsafeFine : store ∼ₛ envFine)
     (hstr : EnvSameShapeStrengthening envFine envCoarse) :
     RuntimeLValMutGatePullback store envFine envCoarse := by
-  intro source targets bl leaf hsource hleaf
-  rcases ProgramStore.loc_deref_some_inv hleaf with
-    ⟨sLoc, _ref, _slt, hsLoc, _, _⟩
-  rcases lvalTyping_sameShape_pullback_of_strengthening hwellFine hsafeFine hstr
-      hsource hsLoc with ⟨ptyFine, blFine, hfine, hshape⟩
+  intro source targets bl leaf hsource _hleaf
+  rcases hwellFine.2.2.2 with ⟨φ, hφF⟩
+  rcases lvalTyping_pullback_of_strengthening_rank hwellFine hφF hstr
+      (φ (LVal.base source) + 1) (sizeOf source + 1)
+      (Nat.lt_succ_self _) (Nat.lt_succ_self _) hsource with
+    ⟨ptyFine, blFine, hfine, hshape, _hstrength⟩
   cases ptyFine with
   | ty t =>
       cases t with
