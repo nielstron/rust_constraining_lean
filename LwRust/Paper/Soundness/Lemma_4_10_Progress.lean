@@ -745,7 +745,7 @@ theorem progress_assign_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hwellFormed hsafe hstore htyping
   cases htyping with
-  | assign _hLhs hRhs _hRhsSafe hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
+  | assign _hLhs hRhs hLhsPost _hshape _hwf _hwriteEnv _hranked _hcoh
       _hcontained _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
@@ -948,10 +948,10 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       (ih (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-      hLhs hRhs hRhsSafe hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
+      hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
       hvst hwf hsafe hstore
     exact progress_assign_typing hwf hsafe hstore
-      (TermTyping.assign hLhs hRhs hRhsSafe hLhsPost hshape hwfTy hwrite hranked hcoh
+      (TermTyping.assign hLhs hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
         hcontained hnotWrite)
       (ih (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
   case eq =>

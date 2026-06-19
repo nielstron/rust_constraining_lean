@@ -1,8 +1,7 @@
 import LwRust.Paper.BorrowChecker
-import LwRust.Paper.Examples.Internal.Reject.SwappedBorrowJoin
 
 /-!
-Crossed mutable-borrow examples for the local assignment authority check.
+Crossed mutable-borrow examples for joined target lists.
 
 The examples below are closed checker inputs: the late-initialized Rust locals
 `x` and `y` are represented by ordinary dummy initializers, then overwritten in
@@ -46,7 +45,7 @@ theorem swappedBorrowCrossedIfProgram_accepted :
     borrowCheck swappedBorrowCrossedIfProgram := by
   borrow_check
 
-/-! ## Appending `*x = 1` produces a finite checker failure -/
+/-! ## Appending `*x = 1` is accepted -/
 
 def swappedBorrowDerefXAfterIfProgram : Term :=
   .block [0] [                                -- Rust: {
@@ -77,79 +76,13 @@ def swappedBorrowDerefXAfterIfProgram : Term :=
       (.val (.int 1))                         -- Rust: = 1;
   ]                                           -- Rust: }
 
-theorem swappedBorrowDerefXAfterIfProgram_failedByChecker :
-    borrowCheckFailureWitness 256 swappedBorrowDerefXAfterIfProgram := by
+theorem swappedBorrowDerefXAfterIfProgram_accepted :
+    borrowCheck swappedBorrowDerefXAfterIfProgram := by
   borrow_check
 
-theorem swappedBorrowDerefXAfterIfProgram_rejected :
-    borrowReject swappedBorrowDerefXAfterIfProgram := by
-  simpa [swappedBorrowDerefXAfterIfProgram,
-    SwappedBorrowJoinReject.derefXAfterIfProgram,
-    SwappedBorrowJoinReject.condition,
-    SwappedBorrowJoinReject.trueBranch,
-    SwappedBorrowJoinReject.falseBranch,
-    SwappedBorrowJoinReject.l, SwappedBorrowJoinReject.m,
-    SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
-    SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
-    SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using SwappedBorrowJoinReject.borrowRejected
-
-theorem swappedBorrowDerefXAfterIfProgram_outcomeWitness :
-    borrowOutcomeWitness 256 swappedBorrowDerefXAfterIfProgram
-      (some SwappedBorrowJoinReject.borrowRejection) := by
-  simpa [swappedBorrowDerefXAfterIfProgram,
-    SwappedBorrowJoinReject.derefXAfterIfProgram,
-    SwappedBorrowJoinReject.condition,
-    SwappedBorrowJoinReject.trueBranch,
-    SwappedBorrowJoinReject.falseBranch,
-    SwappedBorrowJoinReject.l, SwappedBorrowJoinReject.m,
-    SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
-    SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
-    SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using
-      (show borrowOutcomeWitness 256
-          SwappedBorrowJoinReject.derefXAfterIfProgram
-          (some SwappedBorrowJoinReject.borrowRejection) from by
-        borrow_check using SwappedBorrowJoinReject.borrowRejection)
-
-theorem swappedBorrowDerefXAfterIfProgram_noCheckWitness (fuel : Nat) :
-    ¬ borrowCheckWitness fuel swappedBorrowDerefXAfterIfProgram := by
-  simpa [swappedBorrowDerefXAfterIfProgram,
-    SwappedBorrowJoinReject.derefXAfterIfProgram,
-    SwappedBorrowJoinReject.condition,
-    SwappedBorrowJoinReject.trueBranch,
-    SwappedBorrowJoinReject.falseBranch,
-    SwappedBorrowJoinReject.l, SwappedBorrowJoinReject.m,
-    SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
-    SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
-    SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using SwappedBorrowJoinReject.noBorrowCheckWitness fuel
-
-theorem swappedBorrowDerefXAfterIfProgram_checkerFalse (fuel : Nat) :
-    borrowCheck? fuel swappedBorrowDerefXAfterIfProgram = false := by
-  simpa [swappedBorrowDerefXAfterIfProgram,
-    SwappedBorrowJoinReject.derefXAfterIfProgram,
-    SwappedBorrowJoinReject.condition,
-    SwappedBorrowJoinReject.trueBranch,
-    SwappedBorrowJoinReject.falseBranch,
-    SwappedBorrowJoinReject.l, SwappedBorrowJoinReject.m,
-    SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
-    SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
-    SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using SwappedBorrowJoinReject.checkerFalse fuel
-
-theorem swappedBorrowDerefXAfterIfProgram_notAcceptedByChecker :
-    borrowCheck? 256 swappedBorrowDerefXAfterIfProgram = false := by
-  simpa [swappedBorrowDerefXAfterIfProgram,
-    SwappedBorrowJoinReject.derefXAfterIfProgram,
-    SwappedBorrowJoinReject.condition,
-    SwappedBorrowJoinReject.trueBranch,
-    SwappedBorrowJoinReject.falseBranch,
-    SwappedBorrowJoinReject.l, SwappedBorrowJoinReject.m,
-    SwappedBorrowJoinReject.a, SwappedBorrowJoinReject.b,
-    SwappedBorrowJoinReject.c, SwappedBorrowJoinReject.d,
-    SwappedBorrowJoinReject.x, SwappedBorrowJoinReject.y]
-    using SwappedBorrowJoinReject.checkerFalse 256
+theorem swappedBorrowDerefXAfterIfProgram_checkerTrue :
+    borrowCheck? 256 swappedBorrowDerefXAfterIfProgram = true := by
+  borrow_run
 
 /-! ## Appending an unrelated root assignment is accepted -/
 

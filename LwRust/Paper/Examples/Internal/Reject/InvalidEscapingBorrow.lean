@@ -79,7 +79,7 @@ private theorem escapingBorrow_assign_not_typable :
   rintro ⟨_ty, _env, htyping⟩
   unfold InvalidEscapingBorrowExample.assignYBorrowZ at htyping
   cases htyping with
-  | assign _hLhs hRhs _hBorrowSafe hLhsPost _hshape hwell _hwrite
+  | assign _hLhs hRhs hLhsPost _hshape hwell _hwrite
       _hranked _hcoherence _hcontained _hnotWrite =>
       cases hRhs with
       | mutBorrow _hLv _hmutable _hnotWriteRhs =>

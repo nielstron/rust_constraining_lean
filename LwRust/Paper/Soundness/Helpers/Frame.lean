@@ -341,6 +341,114 @@ inductive RealizedBorrowReads (store : ProgramStore) :
       RealizedBorrowReads store
         (.value (.ref { location := location, owner := true })) dependency
 
+/-- Erasing store slots cannot create a new realized borrow read: every realized
+read observed after the erase was already a realized read in the original store.
+-/
+theorem RealizedBorrowReads.erase_to_store {store : ProgramStore}
+    {erased : Location} {value : PartialValue} {dependency : Location} :
+    RealizedBorrowReads (store.erase erased) value dependency →
+    RealizedBorrowReads store value dependency := by
+  intro hreads
+  induction hreads with
+  | borrow hloc hlocReads =>
+      exact RealizedBorrowReads.borrow
+        (loc_erase_some_to_store hloc)
+        (locReads_erase_to_store hlocReads)
+  | box hslot _hinnerReads ih =>
+      exact RealizedBorrowReads.box (slotAt_of_erase_slotAt hslot) ih
+
+/-- Updating a slot to `undef` cannot make a location resolution succeed in a
+new way.  Any successful `loc` after the update was already successful before
+the update. -/
+theorem loc_update_undef_some_to_store {store : ProgramStore}
+    {updated : Location} {updatedLifetime : Lifetime} :
+    ∀ {lv : LVal} {location : Location},
+      (store.update updated { value := .undef, lifetime := updatedLifetime }).loc lv =
+        some location →
+      store.loc lv = some location := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro location hloc
+      simpa [ProgramStore.loc] using hloc
+  | deref lv ih =>
+      intro location hloc
+      cases hsource :
+          (store.update updated { value := .undef, lifetime := updatedLifetime }).loc lv with
+      | none =>
+          simp [ProgramStore.loc, hsource] at hloc
+      | some source =>
+          have hsourceStore : store.loc lv = some source := ih hsource
+          by_cases hsourceEq : source = updated
+          · subst hsourceEq
+            simp [ProgramStore.loc, hsource] at hloc
+          · have hslotEq :
+                (store.update updated
+                    { value := .undef, lifetime := updatedLifetime }).slotAt source =
+                  store.slotAt source :=
+                ProgramStore.slotAt_update_ne hsourceEq
+            cases hslot : store.slotAt source with
+            | none =>
+                simp [ProgramStore.loc, hsource, hslotEq, hslot] at hloc
+            | some slot =>
+                rcases slot with ⟨slotValue, slotLifetime⟩
+                cases slotValue with
+                | undef =>
+                    simp [ProgramStore.loc, hsource, hslotEq, hslot] at hloc
+                | value value =>
+                    cases value with
+                    | ref ref =>
+                        simp [ProgramStore.loc, hsource, hslotEq, hslot] at hloc
+                        simp [ProgramStore.loc, hsourceStore, hslot, hloc]
+                    | unit =>
+                        simp [ProgramStore.loc, hsource, hslotEq, hslot] at hloc
+                    | int value =>
+                        simp [ProgramStore.loc, hsource, hslotEq, hslot] at hloc
+                    | bool value =>
+                        simp [ProgramStore.loc, hsource, hslotEq, hslot] at hloc
+
+/-- Location reads observed after updating a slot to `undef` were already reads
+of the original store. -/
+theorem locReads_update_undef_to_store {store : ProgramStore}
+    {updated : Location} {updatedLifetime : Lifetime} {lv : LVal}
+    {location : Location} :
+    LocReads
+        (store.update updated { value := .undef, lifetime := updatedLifetime })
+        lv location →
+    LocReads store lv location := by
+  intro hreads
+  induction hreads with
+  | here hloc =>
+      exact LocReads.here (loc_update_undef_some_to_store hloc)
+  | there _hreads ih =>
+      exact LocReads.there ih
+
+/-- Updating a slot to `undef` cannot create a store-realized borrow read. -/
+theorem RealizedBorrowReads.update_undef_to_store {store : ProgramStore}
+    {updated : Location} {updatedLifetime : Lifetime}
+    {value : PartialValue} {dependency : Location} :
+    RealizedBorrowReads
+        (store.update updated { value := .undef, lifetime := updatedLifetime })
+        value dependency →
+    RealizedBorrowReads store value dependency := by
+  intro hreads
+  induction hreads with
+  | borrow hloc hlocReads =>
+      exact RealizedBorrowReads.borrow
+        (loc_update_undef_some_to_store hloc)
+        (locReads_update_undef_to_store hlocReads)
+  | @box location slot dependency hslot _hinnerReads ih =>
+      by_cases hlocation : location = updated
+      · subst hlocation
+        simp [ProgramStore.update] at hslot
+        cases hslot
+        cases _hinnerReads
+      · exact RealizedBorrowReads.box
+          (by
+            rw [← ProgramStore.slotAt_update_ne hlocation]
+            exact hslot)
+          ih
+
 /-- A borrow-resolution dependency is in particular a store-realized borrow read:
 its `borrow` head already pins the target to the reference's own pointee location
 (`store.loc target = some location`), and its box descent crosses owning boxes.

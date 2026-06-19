@@ -665,22 +665,6 @@ inductive BorrowAuthorityGuard (env : Env) (base : Name) : Name → Prop where
       target ∈ targets →
       BorrowAuthorityGuard env base (LVal.base target)
 
-/--
-Assignment-level borrow-safety frame.
-
-Direct root writes do not need the whole post-RHS environment to be globally
-borrow-safe: the ordinary `WriteProhibited` and write/coherence obligations
-control the written root.  Writes through a dereference only require borrow
-safety for the roots in that dereference's authority closure, so unrelated
-conflicts elsewhere in a path-insensitive join do not block the assignment.
--/
-def AssignmentBorrowSafety (env : Env) : LVal → Prop
-  | .var _ => True
-  | .deref source =>
-      ∀ root,
-        BorrowAuthorityGuard env (LVal.base source) root →
-        BorrowSafeRoot env root
-
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/
 def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
@@ -988,7 +972,6 @@ mutual
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
         LValTyping env₁ lhs oldTy targetLifetime →
         TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-        AssignmentBorrowSafety env₂ lhs →
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →

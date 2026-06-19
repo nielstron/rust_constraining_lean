@@ -208,7 +208,7 @@ theorem no_assign_value_var_typing_of_surviving_borrow {env : Env}
         (.assign (.var written) (.val value)) ty outEnv := by
   rintro ⟨ty, outEnv, htyping⟩
   cases htyping with
-  | assign _hLhs hRhs _hRhsSafe _hLhsPost _hshape _hwellRhs hwrite
+  | assign _hLhs hRhs _hLhsPost _hshape _hwellRhs hwrite
       _hranked _hcoherence _hcontained hnotWrite =>
       cases hRhs with
       | const _hvalue =>

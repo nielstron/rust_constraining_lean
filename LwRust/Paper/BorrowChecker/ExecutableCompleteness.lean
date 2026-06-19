@@ -94,7 +94,10 @@ mutual
               checkTerm?_ne_fuelExhausted_of_bound rhs hwhile (by omega)
             cases hleft : lvalType? fuel env lhs with
             | none =>
-                simp [checkTerm?, fromOption, hleft]
+                have hfits : lvalFitsFuel fuel lhs = true :=
+                  lvalFitsFuel_of_lvalCheckerFuelBound_lt (by omega)
+                simp [checkTerm?, fromOption, lvalTypeOrError?, hleft,
+                  hfits]
             | some before =>
                 rcases before with ⟨oldTy, targetLifetime⟩
                 cases hcheck : checkTerm? fuel env typing lifetime rhs with
@@ -103,42 +106,42 @@ mutual
                       check_error_ne_fuelExhausted hcheck hrhs
                     simp [checkTerm?, fromOption, hleft, hcheck, hmessage]
                 | ok rhsResult =>
-                    cases hsafe : assignmentBorrowSafety rhsResult.env lhs
-                    · simp [checkTerm?, fromOption, ensure, hleft, hcheck,
-                        hsafe]
-                    · cases hafter :
-                          lvalType? fuel rhsResult.env lhs with
+                    cases hafter :
+                        lvalType? fuel rhsResult.env lhs with
                       | none =>
+                          have hfits : lvalFitsFuel fuel lhs = true :=
+                            lvalFitsFuel_of_lvalCheckerFuelBound_lt
+                              (by omega)
                           simp [checkTerm?, fromOption, ensure, hleft, hcheck,
-                            hsafe, hafter]
+                            hafter, lvalTypeOrError?, hfits]
                       | some after =>
                           rcases after with ⟨oldTyAfter, targetLifetimeAfter⟩
                           cases holdTy :
                               decide (oldTyAfter = oldTy)
                           · simp [checkTerm?, fromOption, ensure, hleft,
-                              hcheck, hsafe, hafter, holdTy]
+                              hcheck, hafter, holdTy]
                           · cases hlifetime :
                                 decide (targetLifetimeAfter = targetLifetime)
                             · simp [checkTerm?, fromOption, ensure, hleft,
-                                hcheck, hsafe, hafter, holdTy, hlifetime]
+                                hcheck, hafter, holdTy, hlifetime]
                             · cases hshape :
                                   shapeCompatiblePartialTy fuel rhsResult.env
                                     oldTy (.ty rhsResult.ty)
                               · simp [checkTerm?, fromOption, ensure, hleft,
-                                  hcheck, hsafe, hafter, holdTy, hlifetime,
+                                  hcheck, hafter, holdTy, hlifetime,
                                   hshape]
                               · cases hwell :
                                     wellFormedTy fuel rhsResult.env
                                       rhsResult.ty targetLifetime
                                 · simp [checkTerm?, fromOption, ensure, hleft,
-                                    hcheck, hsafe, hafter, holdTy, hlifetime,
+                                    hcheck, hafter, holdTy, hlifetime,
                                     hshape, hwell]
                                 · cases hwrite :
                                       envWrite? fuel 0 rhsResult.env lhs
                                         rhsResult.ty with
                                   | none =>
                                       simp [checkTerm?, fromOption, ensure,
-                                        hleft, hcheck, hsafe, hafter, holdTy,
+                                        hleft, hcheck, hafter, holdTy,
                                         hlifetime, hshape, hwell, hwrite]
                                   | some written =>
                                       cases houtside :
@@ -146,7 +149,7 @@ mutual
                                             (LVal.base lhs) with
                                       | false =>
                                           simp [checkTerm?, fromOption, ensure,
-                                            hleft, hcheck, hsafe, hafter,
+                                            hleft, hcheck, hafter,
                                             holdTy, hlifetime, hshape, hwell,
                                             hwrite, houtside]
                                       | true =>
@@ -155,7 +158,7 @@ mutual
                                                 written rhsResult.ty with
                                           | false =>
                                               simp [checkTerm?, fromOption,
-                                                ensure, hleft, hcheck, hsafe,
+                                                ensure, hleft, hcheck,
                                                 hafter, holdTy, hlifetime,
                                                 hshape, hwell, hwrite,
                                                 houtside, hbelow]
@@ -174,7 +177,7 @@ mutual
                                                 cases hnotWrite :
                                                   writeProhibited written lhs <;>
                                                 simp [checkTerm?, fromOption,
-                                                  ensure, hleft, hcheck, hsafe,
+                                                  ensure, hleft, hcheck,
                                                   hafter, holdTy, hlifetime,
                                                   hshape, hwell, hwrite,
                                                   houtside, hbelow, hcontained,
@@ -196,7 +199,12 @@ mutual
         | borrow mutable lv =>
             cases htype : lvalType? fuel env lv with
             | none =>
-                simp [checkTerm?, fromOption, htype]
+                have hfits : lvalFitsFuel fuel lv = true :=
+                  lvalFitsFuel_of_lvalCheckerFuelBound_lt (by
+                    simp [termCheckerFuelBound] at hbound
+                    omega)
+                simp [checkTerm?, fromOption, lvalTypeOrError?, htype,
+                  hfits]
             | some result =>
                 rcases result with ⟨partialTy, valueLifetime⟩
                 cases partialTy with
@@ -215,7 +223,12 @@ mutual
         | move lv =>
             cases htype : lvalType? fuel env lv with
             | none =>
-                simp [checkTerm?, fromOption, htype]
+                have hfits : lvalFitsFuel fuel lv = true :=
+                  lvalFitsFuel_of_lvalCheckerFuelBound_lt (by
+                    simp [termCheckerFuelBound] at hbound
+                    omega)
+                simp [checkTerm?, fromOption, lvalTypeOrError?, htype,
+                  hfits]
             | some result =>
                 rcases result with ⟨partialTy, valueLifetime⟩
                 cases partialTy with
@@ -232,7 +245,12 @@ mutual
         | copy lv =>
             cases htype : lvalType? fuel env lv with
             | none =>
-                simp [checkTerm?, fromOption, htype]
+                have hfits : lvalFitsFuel fuel lv = true :=
+                  lvalFitsFuel_of_lvalCheckerFuelBound_lt (by
+                    simp [termCheckerFuelBound] at hbound
+                    omega)
+                simp [checkTerm?, fromOption, lvalTypeOrError?, htype,
+                  hfits]
             | some result =>
                 rcases result with ⟨partialTy, valueLifetime⟩
                 cases partialTy with

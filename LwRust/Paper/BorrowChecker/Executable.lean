@@ -1263,6 +1263,26 @@ mutual
         some (unionTy, lifetime)
 end
 
+def lvalFitsFuel : Nat → LVal → Bool
+  | 0, _ => false
+  | _fuel + 1, .var _ => true
+  | fuel + 1, .deref lv => lvalFitsFuel fuel lv
+
+def lvalTypeOrError? (fuel : Nat) (env : FiniteEnv)
+    (lv : LVal) (message : String) : Except String (PartialTy × Lifetime) :=
+  match lvalType? fuel env lv with
+  | some result => .ok result
+  | none =>
+      if lvalFitsFuel fuel lv then .error message
+      else .error "borrow checker fuel exhausted"
+
+@[simp] theorem lvalTypeOrError?_some {fuel : Nat} {env : FiniteEnv}
+    {lv : LVal} {message : String} {result : PartialTy × Lifetime} :
+    lvalType? fuel env lv = some result →
+      lvalTypeOrError? fuel env lv message = .ok result := by
+  intro h
+  simp [lvalTypeOrError?, h]
+
 def lvalBaseOutlives (env : FiniteEnv) (lv : LVal)
     (lifetime : Lifetime) : Bool :=
   match env.lookup (LVal.base lv) with
@@ -1914,39 +1934,6 @@ def borrowSafeRoot (env : FiniteEnv) (root : Name) : Bool :=
         otherBorrow.2.2.all (fun targetOther =>
           !pathConflicts targetMutable targetOther || root == otherBorrow.1))))
 
-def mutableBorrowTargetsOfRoot (env : FiniteEnv) (root : Name) :
-    List LVal :=
-  (envBorrowEdges env).foldl
-    (fun targets edge =>
-      if edge.1 == root && edge.2.1 then unionLVals targets edge.2.2 else targets)
-    []
-
-def guardClosure (env : FiniteEnv) : Nat → List Name → List Name → List Name
-  | 0, seen, _ => seen
-  | _fuel + 1, seen, [] => seen
-  | fuel + 1, seen, root :: rest =>
-      if seen.contains root then
-        guardClosure env fuel seen rest
-      else
-        let next := (mutableBorrowTargetsOfRoot env root).map LVal.base
-        guardClosure env fuel (seen ++ [root]) (unionNames rest next)
-
-def guardedRoots (env : FiniteEnv) (source : LVal) : List Name :=
-  guardClosure env ((envNames env).length + 1) [] [LVal.base source]
-
-def guardClosed (env : FiniteEnv) (roots : List Name) : Bool :=
-  roots.all (fun root =>
-    (mutableBorrowTargetsOfRoot env root).all (fun target =>
-      roots.contains (LVal.base target)))
-
-def assignmentBorrowSafety (env : FiniteEnv) : LVal → Bool
-  | .var _ => true
-  | .deref source =>
-      let roots := guardedRoots env source
-      roots.contains (LVal.base source) &&
-        guardClosed env roots &&
-          roots.all (borrowSafeRoot env)
-
 mutual
   def updateAtPath? (fuel rank : Nat) (env : FiniteEnv)
       (path : Path) (oldTy : PartialTy) (rhsTy : Ty) :
@@ -2073,7 +2060,7 @@ mutual
             .error "cannot infer type for missing; use checkTermAs?"
         | .copy lv => do
             let (partialTy, _) ←
-              fromOption "copy operand is not typeable" (lvalType? fuel env lv)
+              lvalTypeOrError? fuel env lv "copy operand is not typeable"
             let ty ←
               match partialTy with
               | PartialTy.ty ty => pure ty
@@ -2083,7 +2070,7 @@ mutual
             pure ⟨ty, env⟩
         | .move lv => do
             let (partialTy, _) ←
-              fromOption "move operand is not typeable" (lvalType? fuel env lv)
+              lvalTypeOrError? fuel env lv "move operand is not typeable"
             let ty ←
               match partialTy with
               | PartialTy.ty ty => pure ty
@@ -2093,7 +2080,7 @@ mutual
             pure ⟨ty, moved⟩
         | .borrow mutable lv => do
             let (partialTy, _) ←
-              fromOption "borrow operand is not typeable" (lvalType? fuel env lv)
+              lvalTypeOrError? fuel env lv "borrow operand is not typeable"
             match partialTy with
             | PartialTy.ty _ =>
                 if mutable then
@@ -2124,13 +2111,11 @@ mutual
             pure ⟨.unit, env'⟩
         | .assign lhs rhs => do
             let (oldTy, targetLifetime) ←
-              fromOption "assignment lhs is not typeable" (lvalType? fuel env lhs)
+              lvalTypeOrError? fuel env lhs "assignment lhs is not typeable"
             let rhsResult ← checkTerm? fuel env typing lifetime rhs
-            ensure (assignmentBorrowSafety rhsResult.env lhs)
-              "assignment-local borrow authority failed"
             let (oldTyAfter, targetLifetimeAfter) ←
-              fromOption "assignment lhs is not typeable after rhs"
-                (lvalType? fuel rhsResult.env lhs)
+              lvalTypeOrError? fuel rhsResult.env lhs
+                "assignment lhs is not typeable after rhs"
             ensure (decide (oldTyAfter = oldTy) &&
                 decide (targetLifetimeAfter = targetLifetime))
               "assignment lhs type changed while checking rhs"
@@ -2475,6 +2460,20 @@ theorem lvalCheckerFuelBound_pos (lv : LVal) :
   | deref inner ih =>
       simp [lvalCheckerFuelBound]
 
+theorem lvalFitsFuel_of_lvalCheckerFuelBound_lt {fuel : Nat} {lv : LVal} :
+    lvalCheckerFuelBound lv < fuel → lvalFitsFuel fuel lv = true := by
+  induction lv generalizing fuel with
+  | var _ =>
+      cases fuel <;> simp [lvalCheckerFuelBound, lvalFitsFuel]
+  | deref inner ih =>
+      cases fuel with
+      | zero =>
+          simp [lvalCheckerFuelBound]
+      | succ fuel =>
+          intro h
+          simp [lvalCheckerFuelBound] at h
+          exact ih h
+
 mutual
   def tyBorrowTargetsFuelBounded (fuel : Nat) : Ty → Prop
     | .unit => True
@@ -2680,24 +2679,13 @@ def checkerErrorUnknown? (message : String) : Bool :=
   message = "borrow checker fuel exhausted" ||
     message = "while-join invariant iteration did not converge" ||
     message = "cannot infer type for missing; use checkTermAs?" ||
-    message = "diverging while bodies require an expected body type in this checker" ||
-    message = "copy operand is not typeable" ||
-    message = "move operand is not typeable" ||
-    message = "borrow operand is not typeable" ||
-    message = "assignment lhs is not typeable" ||
-    message = "assignment lhs is not typeable after rhs" ||
-    message = "equality operand shapes are incompatible" ||
-    message = "assignment rhs shape is incompatible with lhs" ||
-    message = "assignment environment write failed"
+    message = "diverging while bodies require an expected body type in this checker"
 
 def checkTermFails? (fuel : Nat) (env : FiniteEnv)
     (typing : StoreTyping) (lifetime : Lifetime) (term : Term) : Bool :=
   match checkTerm? fuel env typing lifetime term with
   | .ok _ => false
   | .error message => !checkerErrorUnknown? message
-
-def checkAssignmentBorrowSafety? (env : FiniteEnv) (lhs : LVal) : Bool :=
-  assignmentBorrowSafety env lhs
 
 /--
 Run the executable checker on decidable computation goals.

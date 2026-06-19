@@ -7,9 +7,8 @@ Examples not accepted by the executable checker, written as readable checker
 inputs.
 
 Certified logical rejections state the inductive `borrowReject` property.
-Finite checker failure is still shown for examples that do not yet have a
-non-typability certificate; `borrowUnknownWitness` records cases where the
-current finite checker cannot classify the program.
+Finite checker failure is still shown separately from non-typability
+certificates.
 -/
 
 namespace LwRust
@@ -32,6 +31,10 @@ theorem rawBorrowedReferenceConstantExample_notAcceptedByChecker :
     borrowCheck? 64 rawBorrowedReferenceConstantExample = false := by
   native_decide
 
+theorem rawBorrowedReferenceConstantExample_rejectedByChecker :
+    borrowCheckFailed? 64 rawBorrowedReferenceConstantExample = true := by
+  borrow_run
+
 def boxedRawBorrowedReferenceConstantExample : Term :=
   .box
     (.val (.ref { location := .var "x", owner := false }))
@@ -46,6 +49,10 @@ theorem boxedRawBorrowedReferenceConstantExample_rejected :
 theorem boxedRawBorrowedReferenceConstantExample_notAcceptedByChecker :
     borrowCheck? 64 boxedRawBorrowedReferenceConstantExample = false := by
   native_decide
+
+theorem boxedRawBorrowedReferenceConstantExample_rejectedByChecker :
+    borrowCheckFailed? 64 boxedRawBorrowedReferenceConstantExample = true := by
+  borrow_run
 
 /-! ## Assigning through a mutably borrowed place -/
 
@@ -66,6 +73,10 @@ theorem invalidBorrowExampleProgram_rejected :
 theorem invalidBorrowExampleProgram_notAcceptedByChecker :
     borrowCheck? 256 invalidBorrowExampleProgram = false := by
   native_decide
+
+theorem invalidBorrowExampleProgram_rejectedByChecker :
+    borrowCheckFailed? 256 invalidBorrowExampleProgram = true := by
+  borrow_run
 
 /-! ## Letting a borrow escape its source lifetime -/
 
@@ -103,6 +114,10 @@ theorem invalidEscapingBorrowExampleProgram_notAcceptedByChecker :
     borrowCheck? 256 invalidEscapingBorrowExampleProgram = false := by
   native_decide
 
+theorem invalidEscapingBorrowExampleProgram_rejectedByChecker :
+    borrowCheckFailed? 256 invalidEscapingBorrowExampleProgram = true := by
+  borrow_run
+
 /-! ## Joined reborrow with incoherent nested targets -/
 
 def nestedIncoherentJoinProgram : Term :=
@@ -126,6 +141,11 @@ theorem nestedIncoherentJoinProgram_notAcceptedByChecker :
     borrowCheck? 256 nestedIncoherentJoinProgram = false := by
   native_decide
 
+theorem nestedIncoherentJoinProgram_rejectedByChecker :
+    borrowCheckFailed? 256 nestedIncoherentJoinProgram = true := by
+  exact borrowCheckFailureWitness_checked
+    nestedIncoherentJoinProgram_failedByChecker
+
 /-! ## Assignment after a non-uniform nested borrow join -/
 
 def nestedBorrowShapeMismatchProgram : Term :=
@@ -144,13 +164,18 @@ def nestedBorrowShapeMismatchProgram : Term :=
       (.borrow false (.var "a"))                    -- Rust: = &a;
   ]                                                 -- Rust: }
 
-theorem nestedBorrowShapeMismatchProgram_unknownByChecker :
-    borrowUnknownWitness 256 nestedBorrowShapeMismatchProgram := by
+theorem nestedBorrowShapeMismatchProgram_failedByChecker :
+    borrowCheckFailureWitness 256 nestedBorrowShapeMismatchProgram := by
   borrow_check
 
 theorem nestedBorrowShapeMismatchProgram_notAcceptedByChecker :
     borrowCheck? 256 nestedBorrowShapeMismatchProgram = false := by
   native_decide
+
+theorem nestedBorrowShapeMismatchProgram_rejectedByChecker :
+    borrowCheckFailed? 256 nestedBorrowShapeMismatchProgram = true := by
+  exact borrowCheckFailureWitness_checked
+    nestedBorrowShapeMismatchProgram_failedByChecker
 
 /-! ## Reborrow assignment through a dereference changes the wrong frame -/
 
@@ -172,6 +197,69 @@ theorem derefBorrowReassignmentProgram_failedByChecker :
 theorem derefBorrowReassignmentProgram_notAcceptedByChecker :
     borrowCheck? 256 derefBorrowReassignmentProgram = false := by
   native_decide
+
+theorem derefBorrowReassignmentProgram_rejectedByChecker :
+    borrowCheckFailed? 256 derefBorrowReassignmentProgram = true := by
+  exact borrowCheckFailureWitness_checked
+    derefBorrowReassignmentProgram_failedByChecker
+
+/-! ## Reborrowing through a reference cell blocks later cell replacement -/
+
+def nestedReferenceInvalidationProgram : Term :=
+  .block [0] [                                      -- Rust: {
+    .letMut "b" (.val (.int 0)),                    -- Rust: let mut b = 0;
+    .letMut "c" (.val (.int 1)),                    -- Rust: let mut c = 1;
+    .letMut "a" (.borrow true (.var "b")),          -- Rust: let mut a = &mut b;
+    .letMut "p" (.borrow true (.var "a")),          -- Rust: let mut p = &mut a;
+    .letMut "q" (.borrow true (.deref (.var "a"))), -- Rust: let mut q = &mut *a;
+    .assign
+      (.deref (.var "p"))                           -- Rust: *p
+      (.borrow true (.var "c")),                    -- Rust: = &mut c;
+    .assign
+      (.deref (.var "q"))                           -- Rust: *q
+      (.val (.int 2))                               -- Rust: = 2;
+  ]                                                 -- Rust: }
+
+theorem nestedReferenceInvalidationProgram_failedByChecker :
+    borrowCheckFailureWitness 256 nestedReferenceInvalidationProgram := by
+  borrow_check
+
+theorem nestedReferenceInvalidationProgram_notAcceptedByChecker :
+    borrowCheck? 256 nestedReferenceInvalidationProgram = false := by
+  native_decide
+
+theorem nestedReferenceInvalidationProgram_rejectedByChecker :
+    borrowCheckFailed? 256 nestedReferenceInvalidationProgram = true := by
+  exact borrowCheckFailureWitness_checked
+    nestedReferenceInvalidationProgram_failedByChecker
+
+/-! ## Reborrowing inside an owned box blocks replacing the box root -/
+
+def boxedReborrowInvalidationProgram : Term :=
+  .block [0] [                                      -- Rust: {
+    .letMut "b" (.box (.val (.int 0))),             -- Rust: let mut b = Box::new(0);
+    .letMut "q" (.borrow true (.deref (.var "b"))), -- Rust: let mut q = &mut *b;
+    .letMut "p" (.borrow true (.var "b")),          -- Rust: let mut p = &mut b;
+    .assign
+      (.deref (.var "p"))                           -- Rust: *p
+      (.box (.val (.int 1))),                       -- Rust: = Box::new(1);
+    .assign
+      (.deref (.var "q"))                           -- Rust: *q
+      (.val (.int 2))                               -- Rust: = 2;
+  ]                                                 -- Rust: }
+
+theorem boxedReborrowInvalidationProgram_failedByChecker :
+    borrowCheckFailureWitness 256 boxedReborrowInvalidationProgram := by
+  borrow_check
+
+theorem boxedReborrowInvalidationProgram_notAcceptedByChecker :
+    borrowCheck? 256 boxedReborrowInvalidationProgram = false := by
+  native_decide
+
+theorem boxedReborrowInvalidationProgram_rejectedByChecker :
+    borrowCheckFailed? 256 boxedReborrowInvalidationProgram = true := by
+  exact borrowCheckFailureWitness_checked
+    boxedReborrowInvalidationProgram_failedByChecker
 
 end Paper
 end LwRust

@@ -81,5 +81,25 @@ theorem pointerIfAssignmentExample_lowFuelUnknown :
     borrowUnknownWitness 3 pointerIfAssignmentExample := by
   borrow_check[3]
 
+/-! ## Nested mutable reborrow through a borrow cell -/
+
+def nestedMutableReborrowWriteExample : Term :=
+  .block [0] [
+    .letMut "a" (.val (.int 0)),                    -- Rust: let mut a = 0;
+    .letMut "q" (.borrow true (.var "a")),          -- Rust: let mut q = &mut a;
+    .letMut "x" (.borrow true (.var "q")),          -- Rust: let mut x = &mut q;
+    .assign
+      (.deref (.deref (.var "x")))                  -- Rust: **x
+      (.val (.int 1))                               -- Rust: = 1;
+  ]
+
+theorem nestedMutableReborrowWriteExample_accepted :
+    borrowCheck nestedMutableReborrowWriteExample := by
+  borrow_check
+
+theorem nestedMutableReborrowWriteExample_checkerTrue :
+    borrowCheck? 512 nestedMutableReborrowWriteExample = true := by
+  native_decide
+
 end Paper
 end LwRust

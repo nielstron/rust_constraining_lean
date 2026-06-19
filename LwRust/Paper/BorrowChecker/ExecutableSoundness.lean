@@ -187,7 +187,6 @@ def assign {fuel : Nat} {env rhsEnv outEnv : FiniteEnv}
         outEnv = true)
     (lhsBefore : LValTyping env.toEnv lhs oldTy targetLifetime)
     (rhsCert : CertifiedTermCheck fuel env typing lifetime rhs rhsTy rhsEnv)
-    (assignmentSafe : AssignmentBorrowSafety rhsEnv.toEnv lhs)
     (lhsAfter : LValTyping rhsEnv.toEnv lhs oldTy targetLifetime)
     (shape : ShapeCompatible rhsEnv.toEnv oldTy (.ty rhsTy))
     (wellFormed : WellFormedTy rhsEnv.toEnv rhsTy targetLifetime)
@@ -202,7 +201,7 @@ def assign {fuel : Nat} {env rhsEnv outEnv : FiniteEnv}
     CertifiedTermCheck fuel env typing lifetime (.assign lhs rhs) .unit outEnv :=
   { checked := checked
     typing :=
-      TermTyping.assign lhsBefore rhsCert.typing assignmentSafe lhsAfter shape
+      TermTyping.assign lhsBefore rhsCert.typing lhsAfter shape
         wellFormed write below coherence contained notWriteProhibited }
 
 def equal {fuel : Nat} {env lhsEnv rhsEnv ghostEnv : FiniteEnv}
@@ -4004,114 +4003,6 @@ private theorem borrowSafeRoot_sound {env : FiniteEnv} {root : Name} :
   simp [hconflictBool] at htargetOtherCheck
   simpa using htargetOtherCheck
 
-private theorem mutableBorrowTargetsOfRoot_foldl_preserves
-    {edges : List (Name × Bool × List LVal)} {root : Name}
-    {target : LVal} {acc : List LVal} :
-    target ∈ acc →
-      target ∈ edges.foldl
-        (fun targets edge =>
-          if edge.1 == root && edge.2.1 then unionLVals targets edge.2.2
-          else targets)
-        acc := by
-  induction edges generalizing acc with
-  | nil =>
-      intro h
-      exact h
-  | cons edge rest ih =>
-      intro h
-      apply ih
-      by_cases hcheck : edge.1 == root && edge.2.1
-      · simp [hcheck]
-        exact mem_unionLVals.mpr (Or.inl h)
-      · simpa [hcheck] using h
-
-private theorem mutableBorrowTargetsOfRoot_foldl_of_edge
-    {edges : List (Name × Bool × List LVal)} {acc : List LVal}
-    {root : Name} {targets : List LVal} {target : LVal} :
-    (root, true, targets) ∈ edges →
-      target ∈ targets →
-        target ∈ edges.foldl
-          (fun targets edge =>
-            if edge.1 == root && edge.2.1 then unionLVals targets edge.2.2
-            else targets)
-          acc := by
-  intro hedge htarget
-  induction hedge generalizing acc with
-  | head =>
-      simp only [List.foldl]
-      simp only [beq_self_eq_true, Bool.true_and, if_true]
-      change target ∈
-        List.foldl
-          (fun (targets : List LVal) (edge : Name × Bool × List LVal) =>
-            if edge.1 == root && edge.2.1 then unionLVals targets edge.2.2
-            else targets)
-          (unionLVals acc targets) _
-      apply mutableBorrowTargetsOfRoot_foldl_preserves
-      exact mem_unionLVals.mpr (Or.inr htarget)
-  | tail edge _ ih =>
-      exact ih (acc :=
-        if edge.1 == root && edge.2.1 then unionLVals acc edge.2.2
-        else acc)
-
-private theorem mutableBorrowTargetsOfRoot_mem {env : FiniteEnv}
-    {root : Name} {targets : List LVal} {target : LVal} :
-    (root, true, targets) ∈ envBorrowEdges env →
-      target ∈ targets →
-        target ∈ mutableBorrowTargetsOfRoot env root := by
-  intro hedge htarget
-  unfold mutableBorrowTargetsOfRoot
-  exact mutableBorrowTargetsOfRoot_foldl_of_edge hedge htarget
-
-private theorem guardClosed_sound {env : FiniteEnv} {roots : List Name} :
-    guardClosed env roots = true →
-      ∀ {root targets target},
-        root ∈ roots →
-          env.toEnv ⊢ root ↝ (&mut targets) →
-            target ∈ targets →
-              LVal.base target ∈ roots := by
-  intro hclosed root targets target hroot hcontains htarget
-  unfold guardClosed at hclosed
-  have hrootCheck :=
-    (List.all_eq_true.mp hclosed) root hroot
-  have htargetMem :
-      target ∈ mutableBorrowTargetsOfRoot env root :=
-    mutableBorrowTargetsOfRoot_mem (envBorrowEdges_of_contains hcontains)
-      htarget
-  have htargetCheck :=
-    (List.all_eq_true.mp hrootCheck) target htargetMem
-  simpa using htargetCheck
-
-private theorem assignmentBorrowSafety_sound {env : FiniteEnv} {lhs : LVal} :
-    assignmentBorrowSafety env lhs = true →
-      AssignmentBorrowSafety env.toEnv lhs := by
-  cases lhs with
-  | var name =>
-      intro _h
-      trivial
-  | deref source =>
-      intro h
-      unfold assignmentBorrowSafety at h
-      let roots := guardedRoots env source
-      have hsplit :
-          (LVal.base source ∈ roots ∧ guardClosed env roots = true) ∧
-            ∀ root, root ∈ roots → borrowSafeRoot env root = true := by
-        simpa [roots, Bool.and_assoc] using
-          (Bool.and_eq_true_iff.mp h)
-      rcases hsplit with ⟨⟨hbase, hclosed⟩, hallSafe⟩
-      intro root hguard
-      have hrootMem : root ∈ roots := by
-        induction hguard with
-        | base =>
-            exact hbase
-        | step hcontainer hcontains htarget ih =>
-            exact guardClosed_sound hclosed ih hcontains htarget
-      exact borrowSafeRoot_sound (hallSafe root hrootMem)
-
-theorem checkAssignmentBorrowSafety?_sound {env : FiniteEnv} {lhs : LVal} :
-    checkAssignmentBorrowSafety? env lhs = true →
-      AssignmentBorrowSafety env.toEnv lhs :=
-  assignmentBorrowSafety_sound
-
 private theorem readProhibited_false_sound {env : FiniteEnv} {lv : LVal} :
     readProhibited env lv = false →
       ¬ ReadProhibited env.toEnv lv := by
@@ -4770,7 +4661,7 @@ private theorem termTyping_preserves_wellFormed_for_checker
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
           _rhs _rhsTy}
-        hLhs hRhs _hRhsSafe _hLhsPost _hshape _hwellRhs hwrite hranked
+        hLhs hRhs _hLhsPost _hshape _hwellRhs hwrite hranked
         hwriteCoh hcontained hnotWrite ih htypingEq hwellFormed =>
       by
         let result := ih htypingEq hwellFormed
@@ -5205,7 +5096,9 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
           simp [checkTerm?] at hcheck
           cases hlv : lvalType? fuel env lv with
           | none =>
-              simp [hlv, fromOption, Bind.bind, Except.bind] at hcheck
+              by_cases hfits : lvalFitsFuel fuel lv <;>
+                simp [lvalTypeOrError?, hlv, hfits, fromOption, Bind.bind,
+                  Except.bind] at hcheck
           | some typed =>
               rcases typed with ⟨partialTy, valueLifetime⟩
               cases partialTy with
@@ -5230,7 +5123,9 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
           simp [checkTerm?] at hcheck
           cases hlv : lvalType? fuel env lv with
           | none =>
-              simp [hlv, fromOption, Bind.bind, Except.bind] at hcheck
+              by_cases hfits : lvalFitsFuel fuel lv <;>
+                simp [lvalTypeOrError?, hlv, hfits, fromOption, Bind.bind,
+                  Except.bind] at hcheck
           | some typed =>
               rcases typed with ⟨partialTy, valueLifetime⟩
               cases partialTy with
@@ -5261,7 +5156,9 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
           simp [checkTerm?] at hcheck
           cases hlv : lvalType? fuel env lv with
           | none =>
-              simp [hlv, fromOption, Bind.bind, Except.bind] at hcheck
+              by_cases hfits : lvalFitsFuel fuel lv <;>
+                simp [lvalTypeOrError?, hlv, hfits, fromOption, Bind.bind,
+                  Except.bind] at hcheck
           | some typed =>
               rcases typed with ⟨partialTy, valueLifetime⟩
               cases partialTy with
@@ -5381,7 +5278,9 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
           simp [checkTerm?] at hcheck
           cases hlhsBefore : lvalType? fuel env lhs with
           | none =>
-              simp [hlhsBefore, fromOption, Bind.bind, Except.bind] at hcheck
+              by_cases hfits : lvalFitsFuel fuel lhs <;>
+                simp [lvalTypeOrError?, hlhsBefore, hfits, fromOption,
+                  Bind.bind, Except.bind] at hcheck
           | some lhsBefore =>
               rcases lhsBefore with ⟨oldTy, targetLifetime⟩
               simp [hlhsBefore, fromOption, Bind.bind, Except.bind] at hcheck
@@ -5391,137 +5290,136 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
               | ok rhsResult =>
                   simp [hrhs, Bind.bind, Except.bind] at hcheck
                   have hrhsSound := ih hrefs hwell hrhs
-                  cases hassignSafe : assignmentBorrowSafety rhsResult.env lhs
-                  · simp [ensure, hassignSafe, Bind.bind, Except.bind] at hcheck
-                  · simp [ensure, hassignSafe, Bind.bind, Except.bind] at hcheck
-                    cases hlhsAfter :
-                        lvalType? fuel rhsResult.env lhs with
-                    | none =>
-                        simp [hlhsAfter, fromOption, Bind.bind, Except.bind]
-                          at hcheck
-                    | some lhsAfter =>
-                        rcases lhsAfter with ⟨oldTyAfter, targetLifetimeAfter⟩
-                        simp [hlhsAfter, fromOption, Bind.bind, Except.bind]
-                          at hcheck
-                        by_cases hOldEq : oldTyAfter = oldTy
-                        · by_cases hLifetimeEq :
-                              targetLifetimeAfter = targetLifetime
-                          · simp [ensure, hOldEq, hLifetimeEq, Bind.bind,
-                              Except.bind] at hcheck
-                            subst oldTyAfter
-                            subst targetLifetimeAfter
-                            cases hshape :
-                                shapeCompatiblePartialTy fuel rhsResult.env
-                                  oldTy (.ty rhsResult.ty)
-                            · simp [ensure, hshape, Bind.bind, Except.bind]
-                                at hcheck
-                            · simp [ensure, hshape, Bind.bind, Except.bind]
-                                at hcheck
-                              cases hwellRhs :
-                                  wellFormedTy fuel rhsResult.env
-                                    rhsResult.ty targetLifetime
-                              · simp [ensure, hwellRhs, Bind.bind,
-                                  Except.bind] at hcheck
-                              · simp [ensure, hwellRhs, Bind.bind,
-                                  Except.bind] at hcheck
-                                cases hwrite :
-                                    envWrite? fuel 0 rhsResult.env lhs
-                                      rhsResult.ty with
-                                | none =>
-                                    simp [hwrite, fromOption, Bind.bind,
+                  cases hlhsAfter :
+                      lvalType? fuel rhsResult.env lhs with
+                  | none =>
+                      by_cases hfits : lvalFitsFuel fuel lhs <;>
+                        simp [lvalTypeOrError?, hlhsAfter, hfits,
+                          fromOption, Bind.bind, Except.bind] at hcheck
+                  | some lhsAfter =>
+                      rcases lhsAfter with ⟨oldTyAfter, targetLifetimeAfter⟩
+                      simp [hlhsAfter, fromOption, Bind.bind, Except.bind]
+                        at hcheck
+                      by_cases hOldEq : (oldTyAfter = oldTy)
+                      ·
+                        by_cases hLifetimeEq :
+                            (targetLifetimeAfter = targetLifetime)
+                        ·
+                          simp [ensure, hOldEq, hLifetimeEq, Bind.bind,
+                            Except.bind] at hcheck
+                          subst oldTyAfter
+                          subst targetLifetimeAfter
+                          cases hshape :
+                              shapeCompatiblePartialTy fuel rhsResult.env
+                                oldTy (.ty rhsResult.ty)
+                          · simp [ensure, hshape, Bind.bind, Except.bind]
+                              at hcheck
+                          · simp [ensure, hshape, Bind.bind, Except.bind]
+                              at hcheck
+                            cases hwellRhs :
+                                wellFormedTy fuel rhsResult.env
+                                  rhsResult.ty targetLifetime
+                            · simp [ensure, hwellRhs, Bind.bind,
+                                Except.bind] at hcheck
+                            · simp [ensure, hwellRhs, Bind.bind,
+                                Except.bind] at hcheck
+                              cases hwrite :
+                                  envWrite? fuel 0 rhsResult.env lhs
+                                    rhsResult.ty with
+                              | none =>
+                                  simp [hwrite, fromOption, Bind.bind,
+                                    Except.bind] at hcheck
+                              | some written =>
+                                  simp [hwrite, fromOption, Bind.bind,
+                                    Except.bind] at hcheck
+                                  cases houtside :
+                                      envEqOutside rhsResult.env written
+                                        (LVal.base lhs)
+                                  · simp [ensure, houtside, Bind.bind,
                                       Except.bind] at hcheck
-                                | some written =>
-                                    simp [hwrite, fromOption, Bind.bind,
+                                  · simp [ensure, houtside, Bind.bind,
                                       Except.bind] at hcheck
-                                    cases houtside :
-                                        envEqOutside rhsResult.env written
-                                          (LVal.base lhs)
-                                    · simp [ensure, houtside, Bind.bind,
+                                    cases hbelow :
+                                        rhsBorrowTargetsBelow rhsResult.env
+                                          written rhsResult.ty
+                                    · simp [ensure, hbelow, Bind.bind,
                                         Except.bind] at hcheck
-                                    · simp [ensure, houtside, Bind.bind,
+                                    · simp [ensure, hbelow, Bind.bind,
                                         Except.bind] at hcheck
-                                      cases hbelow :
-                                          rhsBorrowTargetsBelow rhsResult.env
-                                            written rhsResult.ty
-                                      · simp [ensure, hbelow, Bind.bind,
-                                          Except.bind] at hcheck
-                                      · simp [ensure, hbelow, Bind.bind,
-                                          Except.bind] at hcheck
-                                        by_cases hcontained :
-                                            containedBorrowsWellFormed fuel
-                                              written = true
-                                        · by_cases hlinear :
-                                              linearizable written = true
-                                          · have hinvariants :
-                                              (containedBorrowsWellFormed fuel
-                                                  written &&
-                                                linearizable written) = true := by
-                                              simp [hcontained, hlinear]
-                                            simp [ensure, hcontained, hlinear,
+                                      by_cases hcontained :
+                                          containedBorrowsWellFormed fuel
+                                            written = true
+                                      · by_cases hlinear :
+                                            linearizable written = true
+                                        · have hinvariants :
+                                            (containedBorrowsWellFormed fuel
+                                                written &&
+                                              linearizable written) = true := by
+                                            simp [hcontained, hlinear]
+                                          simp [ensure, hcontained, hlinear,
+                                            Bind.bind, Except.bind] at hcheck
+                                          cases hcoherentNonempty :
+                                              coherentNonempty fuel written
+                                          · simp [ensure, hcoherentNonempty,
                                               Bind.bind, Except.bind] at hcheck
-                                            cases hcoherentNonempty :
-                                                coherentNonempty fuel written
-                                            · simp [ensure, hcoherentNonempty,
-                                                Bind.bind, Except.bind] at hcheck
-                                            · simp [ensure, hcoherentNonempty,
-                                                Bind.bind, Except.bind] at hcheck
-                                              cases hrootCoherent :
-                                                  rootCoherent fuel written
-                                                    (LVal.base lhs)
-                                              · simp [ensure, hrootCoherent,
+                                          · simp [ensure, hcoherentNonempty,
+                                              Bind.bind, Except.bind] at hcheck
+                                            cases hrootCoherent :
+                                                rootCoherent fuel written
+                                                  (LVal.base lhs)
+                                            · simp [ensure, hrootCoherent,
+                                                Bind.bind, Except.bind]
+                                                at hcheck
+                                            · simp [ensure, hrootCoherent,
+                                                Bind.bind, Except.bind]
+                                                at hcheck
+                                              cases hnotWrite :
+                                                  writeProhibited written lhs
+                                              · simp [ensure, hnotWrite,
                                                   Bind.bind, Except.bind]
                                                   at hcheck
-                                              · simp [ensure, hrootCoherent,
+                                                cases hcheck
+                                                have hinv :=
+                                                  assignmentResultInvariants_sound
+                                                    hinvariants
+                                                have hnotWriteProp :=
+                                                  writeProhibited_false_sound
+                                                    hnotWrite
+                                                have htyping :
+                                                    TermTyping env.toEnv typing
+                                                      lifetime (.assign lhs rhs)
+                                                      .unit written.toEnv :=
+                                                  TermTyping.assign
+                                                    (lvalType?_sound
+                                                      hlhsBefore)
+                                                    hrhsSound.1
+                                                    (lvalType?_sound hlhsAfter)
+                                                    (shapeCompatiblePartialTy_sound
+                                                      hshape)
+                                                    (wellFormedTy_sound
+                                                      hwellRhs)
+                                                    (envWrite?_sound hwrite)
+                                                    (rhsBorrowTargetsBelow_sound
+                                                      hbelow)
+                                                    (envWriteCoherenceObligations_of_checker
+                                                      houtside
+                                                      hcoherentNonempty
+                                                      hrootCoherent hinv.2
+                                                      hnotWriteProp)
+                                                    hinv.1 hnotWriteProp
+                                                exact checkTermSound_of_typing
+                                                  hrefs hwell htyping
+                                              · simp [ensure, hnotWrite,
                                                   Bind.bind, Except.bind]
                                                   at hcheck
-                                                cases hnotWrite :
-                                                    writeProhibited written lhs
-                                                · simp [ensure, hnotWrite,
-                                                    Bind.bind, Except.bind]
-                                                    at hcheck
-                                                  cases hcheck
-                                                  have hinv :=
-                                                    assignmentResultInvariants_sound
-                                                      hinvariants
-                                                  have hnotWriteProp :=
-                                                    writeProhibited_false_sound
-                                                      hnotWrite
-                                                  have htyping :
-                                                      TermTyping env.toEnv typing
-                                                        lifetime (.assign lhs rhs)
-                                                        .unit written.toEnv :=
-                                                    TermTyping.assign
-                                                      (lvalType?_sound
-                                                        hlhsBefore)
-                                                      hrhsSound.1
-                                                      (assignmentBorrowSafety_sound
-                                                        hassignSafe)
-                                                      (lvalType?_sound hlhsAfter)
-                                                      (shapeCompatiblePartialTy_sound
-                                                        hshape)
-                                                      (wellFormedTy_sound
-                                                        hwellRhs)
-                                                      (envWrite?_sound hwrite)
-                                                      (rhsBorrowTargetsBelow_sound
-                                                        hbelow)
-                                                      (envWriteCoherenceObligations_of_checker
-                                                        houtside
-                                                        hcoherentNonempty
-                                                        hrootCoherent hinv.2
-                                                        hnotWriteProp)
-                                                      hinv.1 hnotWriteProp
-                                                  exact checkTermSound_of_typing
-                                                    hrefs hwell htyping
-                                                · simp [ensure, hnotWrite,
-                                                    Bind.bind, Except.bind]
-                                                    at hcheck
-                                          · simp [ensure, hcontained, hlinear,
-                                              Bind.bind, Except.bind] at hcheck
-                                        · simp [ensure, hcontained, Bind.bind,
-                                            Except.bind] at hcheck
-                          · simp [ensure, hOldEq, hLifetimeEq, Bind.bind,
-                              Except.bind] at hcheck
-                        · simp [ensure, hOldEq, Bind.bind, Except.bind] at hcheck
+                                        · simp [ensure, hcontained, hlinear,
+                                            Bind.bind, Except.bind] at hcheck
+                                      · simp [ensure, hcontained, Bind.bind,
+                                          Except.bind] at hcheck
+                        ·
+                          simp [ensure, hOldEq, hLifetimeEq, Bind.bind,
+                            Except.bind] at hcheck
+                      · simp [ensure, hOldEq, Bind.bind, Except.bind] at hcheck
       | eq lhs rhs =>
           simp [checkTerm?] at hcheck
           cases hlhs : checkTerm? fuel env typing lifetime lhs with
