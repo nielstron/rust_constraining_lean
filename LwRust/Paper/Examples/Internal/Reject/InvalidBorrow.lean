@@ -1,4 +1,4 @@
-import LwRust.Paper.BorrowCheckerSoundness
+import LwRust.Paper.BorrowChecker.ExecutableSoundness
 import LwRust.Paper.Examples.Operational
 
 /-!
@@ -10,6 +10,71 @@ namespace LwRust
 namespace Paper
 
 open Core
+
+private theorem writeProhibited_of_slot_borrow_conflict {env : Env}
+    {borrower : Name} {slot : EnvSlot} {mutable : Bool}
+    {targets : List LVal} {target written : LVal}
+    (hslot : env.slotAt borrower = some slot)
+    (hcontains : PartialTyContains slot.ty (.borrow mutable targets))
+    (hmem : target ∈ targets)
+    (hconflict : target ⋈ written) :
+    WriteProhibited env written := by
+  cases mutable
+  · right
+    exact ⟨borrower, targets, target, ⟨slot, hslot, hcontains⟩,
+      hmem, hconflict⟩
+  · left
+    exact ⟨borrower, targets, target, ⟨slot, hslot, hcontains⟩,
+      hmem, hconflict⟩
+
+private theorem writeProhibited_var_after_direct_write_of_surviving_borrow
+    {env result : Env} {written borrower : Name}
+    {writtenSlot borrowSlot : EnvSlot} {mutable : Bool}
+    {targets : List LVal} {target : LVal} {rhsTy : Ty}
+    (hwrittenSlot : env.slotAt written = some writtenSlot)
+    (hborrowerNe : borrower ≠ written)
+    (hborrowSlot : env.slotAt borrower = some borrowSlot)
+    (hcontains :
+      PartialTyContains borrowSlot.ty (.borrow mutable targets))
+    (hmem : target ∈ targets)
+    (hconflict : target ⋈ (.var written))
+    (hwrite : EnvWrite 0 env (.var written) rhsTy result) :
+    WriteProhibited result (.var written) := by
+  have hresult := envWrite_zero_var_eq hwrittenSlot hwrite
+  subst result
+  have hborrowSlot' :
+      (env.update written { writtenSlot with ty := .ty rhsTy }).slotAt
+        borrower = some borrowSlot := by
+    rw [Env.update_slotAt_ne]
+    exact hborrowSlot
+    exact hborrowerNe
+  exact writeProhibited_of_slot_borrow_conflict hborrowSlot'
+    hcontains hmem hconflict
+
+private theorem no_assign_value_var_typing_of_surviving_borrow {env : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {written borrower : Name}
+    {writtenSlot borrowSlot : EnvSlot} {mutable : Bool}
+    {targets : List LVal} {target : LVal} {value : Value}
+    (hwrittenSlot : env.slotAt written = some writtenSlot)
+    (hborrowerNe : borrower ≠ written)
+    (hborrowSlot : env.slotAt borrower = some borrowSlot)
+    (hcontains :
+      PartialTyContains borrowSlot.ty (.borrow mutable targets))
+    (hmem : target ∈ targets)
+    (hconflict : target ⋈ (.var written)) :
+    ¬ ∃ ty outEnv,
+      TermTyping env typing lifetime
+        (.assign (.var written) (.val value)) ty outEnv := by
+  rintro ⟨_ty, _outEnv, htyping⟩
+  cases htyping with
+  | assign _hLhs hRhs _hLhsPost _hshape _hwellRhs hwrite
+      _hranked _hcoherence _hcontained hnotWrite =>
+      cases hRhs with
+      | const _hvalue =>
+          exact hnotWrite
+            (writeProhibited_var_after_direct_write_of_surviving_borrow
+              hwrittenSlot hborrowerNe hborrowSlot hcontains hmem
+              hconflict hwrite)
 
 private def invalidBorrowIntSlot : EnvSlot :=
   { ty := .ty .int, lifetime := InvalidBorrowExample.l }

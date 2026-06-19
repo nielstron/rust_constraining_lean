@@ -2171,8 +2171,6 @@ mutual
                   "if result type is not well-formed"
                 ensure (wellFormedKit fuel joinEnv)
                   "if joined environment is not well formed"
-                ensure (tyBorrowSafeAgainstEnv joinEnv joinTy)
-                  "if result type is not borrow-safe against join"
                 pure ⟨joinTy, joinEnv⟩
             | _, _ =>
                 if termDiverges falseBranch then

@@ -1,4 +1,4 @@
-import LwRust.Paper.BorrowCheckerSoundness
+import LwRust.Paper.BorrowChecker.ExecutableSoundness
 import LwRust.Paper.Examples.Internal.Reject.InvalidEscapingBorrow
 import LwRust.Paper.Examples.Internal.Reject.InvalidBorrow
 import LwRust.Paper.Examples.Operational
@@ -24,10 +24,22 @@ source programs and values created by the operational semantics.
 def rawBorrowedReferenceConstant : Term :=
   .val (.ref { location := .var "x", owner := false })
 
+private theorem rawBorrowedReferenceConstant_no_types :
+    ¬ ∃ ty env,
+      TermTyping Env.empty StoreTyping.empty Lifetime.root
+        rawBorrowedReferenceConstant ty env := by
+  rintro ⟨_ty, _env, htyping⟩
+  cases htyping with
+  | const hvalue =>
+      cases hvalue with
+      | ref hloc =>
+          simp [StoreTyping.empty, rawBorrowedReferenceConstant] at hloc
+
 def rawBorrowedReferenceConstant_rejection :
     CertifiedTermReject 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
       rawBorrowedReferenceConstant :=
-  CertifiedTermReject.ofNonSource (by borrow_run) (by native_decide)
+  { checked := by borrow_run
+    notyping := rawBorrowedReferenceConstant_no_types }
 
 def rawBorrowedReferenceConstant_borrowRejection :
     CertifiedBorrowReject 32 rawBorrowedReferenceConstant :=
@@ -52,10 +64,20 @@ theorem rawBorrowedReferenceConstant_borrowOutcome_witness :
 def boxedRawBorrowedReferenceConstant : Term :=
   .box rawBorrowedReferenceConstant
 
+private theorem boxedRawBorrowedReferenceConstant_no_types :
+    ¬ ∃ ty env,
+      TermTyping Env.empty StoreTyping.empty Lifetime.root
+        boxedRawBorrowedReferenceConstant ty env := by
+  rintro ⟨_ty, _env, htyping⟩
+  cases htyping with
+  | box hinner =>
+      exact rawBorrowedReferenceConstant_no_types ⟨_, _, hinner⟩
+
 def boxedRawBorrowedReferenceConstant_rejection :
     CertifiedTermReject 32 FiniteEnv.empty StoreTyping.empty Lifetime.root
       boxedRawBorrowedReferenceConstant :=
-  CertifiedTermReject.ofNonSource (by borrow_run) (by native_decide)
+  { checked := by borrow_run
+    notyping := boxedRawBorrowedReferenceConstant_no_types }
 
 def boxedRawBorrowedReferenceConstant_borrowRejection :
     CertifiedBorrowReject 32 boxedRawBorrowedReferenceConstant :=

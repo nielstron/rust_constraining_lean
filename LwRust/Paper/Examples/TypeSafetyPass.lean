@@ -81,6 +81,65 @@ theorem pointerIfAssignmentExample_lowFuelUnknown :
     borrowUnknownWitness 3 pointerIfAssignmentExample := by
   borrow_check[3]
 
+/-! ## Joined reborrows keep runtime branch correlation -/
+
+def swappedBorrowJoinA : LVal := .var "a"
+def swappedBorrowJoinB : LVal := .var "b"
+def swappedBorrowJoinC : LVal := .var "c"
+def swappedBorrowJoinD : LVal := .var "d"
+def swappedBorrowJoinX : LVal := .var "x"
+def swappedBorrowJoinY : LVal := .var "y"
+
+def swappedBorrowJoinCondition : Term :=
+  .eq
+    (.copy swappedBorrowJoinA)                       -- Rust: if a
+    (.copy swappedBorrowJoinB)                       -- Rust: == b
+
+def swappedBorrowJoinTrueBranch : Term :=
+  .block [0, 0] [
+    .assign
+      swappedBorrowJoinX                             -- Rust: x
+      (.borrow true swappedBorrowJoinA),             -- Rust: = &mut a;
+    .assign
+      swappedBorrowJoinY                             -- Rust: y
+      (.borrow true swappedBorrowJoinB)              -- Rust: = &mut b;
+  ]
+
+def swappedBorrowJoinFalseBranch : Term :=
+  .block [0, 0] [
+    .assign
+      swappedBorrowJoinX                             -- Rust: x
+      (.borrow true swappedBorrowJoinB),             -- Rust: = &mut b;
+    .assign
+      swappedBorrowJoinY                             -- Rust: y
+      (.borrow true swappedBorrowJoinA)              -- Rust: = &mut a;
+  ]
+
+def swappedBorrowJoinWriteExample : Term :=
+  .block [0] [
+    .letMut "a" (.val (.int 0)),                    -- Rust: let mut a = 0;
+    .letMut "b" (.val (.int 0)),                    -- Rust: let mut b = 0;
+    .letMut "c" (.val (.int 0)),                    -- Rust: let mut c = 0;
+    .letMut "d" (.val (.int 0)),                    -- Rust: let mut d = 0;
+    .letMut "x" (.borrow true swappedBorrowJoinC),  -- Rust: let mut x = &mut c;
+    .letMut "y" (.borrow true swappedBorrowJoinD),  -- Rust: let mut y = &mut d;
+    .ite
+      swappedBorrowJoinCondition
+      swappedBorrowJoinTrueBranch
+      swappedBorrowJoinFalseBranch,
+    .assign
+      (.deref swappedBorrowJoinX)                   -- Rust: *x
+      (.val (.int 1))                               -- Rust: = 1;
+  ]
+
+theorem swappedBorrowJoinWriteExample_accepted :
+    borrowCheck swappedBorrowJoinWriteExample := by
+  borrow_check
+
+theorem swappedBorrowJoinWriteExample_checkerTrue :
+    borrowCheck? 256 swappedBorrowJoinWriteExample = true := by
+  native_decide
+
 /-! ## Nested mutable reborrow through a borrow cell -/
 
 def nestedMutableReborrowWriteExample : Term :=

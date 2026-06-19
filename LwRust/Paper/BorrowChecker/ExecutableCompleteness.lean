@@ -414,13 +414,11 @@ mutual
                                           wellFormedTy fuel joinEnv joinTy
                                             lifetime
                                       <;> cases hkit : wellFormedKit fuel joinEnv
-                                      <;> cases hsafe :
-                                          tyBorrowSafeAgainstEnv joinEnv joinTy
                                       <;> simp [checkTerm?, ensure,
                                         hconditionCheck, hconditionTy,
                                         htrueCheck, hfalseCheck, hjoinTy,
                                         hjoinEnv, hthenShape, hfalseShape,
-                                        hwell, hkit, hsafe]
+                                        hwell, hkit]
                               | box inner =>
                                   cases hdiv : termDiverges falseBranch <;>
                                     simp [checkTerm?, ensure, hconditionCheck,

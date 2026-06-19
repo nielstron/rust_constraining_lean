@@ -1,6 +1,6 @@
-import LwRust.Paper.BorrowCheckerSoundness
+import LwRust.Paper.BorrowChecker.ExecutableSoundness
 import LwRust.Paper.Examples.Operational
-import LwRust.Paper.Soundness.InitialStates
+import LwRust.Paper.Soundness.Lemma_4_10_Progress
 
 /-!
 Internal non-typeability proof for the escaping-borrow rejection example.

@@ -1,4 +1,4 @@
-import LwRust.Paper.BorrowCheckerSoundness
+import LwRust.Paper.BorrowChecker.ExecutableSoundness
 import LwRust.Paper.Examples.Internal.TypeSafetyReject
 import LwRust.Paper.Examples.Operational
 
@@ -202,6 +202,32 @@ theorem derefBorrowReassignmentProgram_rejectedByChecker :
     borrowCheckFailed? 256 derefBorrowReassignmentProgram = true := by
   exact borrowCheckFailureWitness_checked
     derefBorrowReassignmentProgram_failedByChecker
+
+/-! ## Immutable reborrow does not grant write authority -/
+
+def immutableReborrowWriteThroughMutRefProgram : Term :=
+  .block [0] [                                      -- Rust: {
+    .letMut "a" (.val (.int 0)),                    -- Rust: let mut a = 0;
+    .letMut "x" (.borrow true (.var "a")),          -- Rust: let mut x = &mut a;
+    .letMut "p" (.borrow false (.var "x")),         -- Rust: let mut p = &x;
+    .assign
+      (.deref (.deref (.var "p")))                  -- Rust: **p
+      (.val (.int 1))                               -- Rust: = 1;
+  ]                                                 -- Rust: }
+
+theorem immutableReborrowWriteThroughMutRefProgram_failedByChecker :
+    borrowCheckFailureWitness 256
+      immutableReborrowWriteThroughMutRefProgram := by
+  borrow_check
+
+theorem immutableReborrowWriteThroughMutRefProgram_notAcceptedByChecker :
+    borrowCheck? 256 immutableReborrowWriteThroughMutRefProgram = false := by
+  native_decide
+
+theorem immutableReborrowWriteThroughMutRefProgram_rejectedByChecker :
+    borrowCheckFailed? 256 immutableReborrowWriteThroughMutRefProgram = true := by
+  exact borrowCheckFailureWitness_checked
+    immutableReborrowWriteThroughMutRefProgram_failedByChecker
 
 /-! ## Reborrowing through a reference cell blocks later cell replacement -/
 

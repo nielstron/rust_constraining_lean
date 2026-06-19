@@ -248,15 +248,14 @@ def ite {fuel : Nat} {env conditionEnv trueEnv falseEnv joinEnv : FiniteEnv}
     (wellFormed : WellFormedTy joinEnv.toEnv joinTy lifetime)
     (contained : ContainedBorrowsWellFormed joinEnv.toEnv)
     (coherent : Coherent joinEnv.toEnv)
-    (linearizable : Linearizable joinEnv.toEnv)
-    (typeBorrowSafe : TyBorrowSafeAgainstEnv joinEnv.toEnv joinTy) :
+    (linearizable : Linearizable joinEnv.toEnv) :
     CertifiedTermCheck fuel env typing lifetime
       (.ite condition trueBranch falseBranch) joinTy joinEnv :=
   { checked := checked
     typing :=
       TermTyping.ite conditionCert.typing trueCert.typing falseCert.typing
         typeJoin envJoin trueSameShape falseSameShape wellFormed contained
-        coherent linearizable typeBorrowSafe }
+        coherent linearizable }
 
 end CertifiedTermCheck
 
@@ -4686,7 +4685,7 @@ private theorem termTyping_preserves_wellFormed_for_checker
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
           _trueBranch _falseBranch _trueTy _falseTy _joinTy}
         _hcondition _htrue _hfalse _hjoin henvJoin _hsameLeft _hsameRight
-        hwellJoin hcontained hcoherent hlinear _hresultSafe ihCondition
+        hwellJoin hcontained hcoherent hlinear ihCondition
         ihTrue _ihFalse htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let thenResult := ihTrue htypingEq conditionResult.1
@@ -5627,41 +5626,34 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
                                               Except.bind] at hcheck
                                           · simp [ensure, hkit, Bind.bind,
                                               Except.bind] at hcheck
-                                            cases htySafe :
-                                                tyBorrowSafeAgainstEnv joinEnv
-                                                  joinTy
-                                            · simp [htySafe] at hcheck
-                                            · simp [htySafe] at hcheck
-                                              cases hcheck
-                                              have hkitSound :=
-                                                wellFormedKit_sound hkit
-                                              have htyping :
-                                                  TermTyping env.toEnv typing
-                                                    lifetime
-                                                    (.ite condition trueBranch
-                                                      falseBranch)
-                                                    joinTy joinEnv.toEnv :=
-                                                TermTyping.ite
-                                                  (by simpa [hconditionTy]
-                                                    using hconditionSound.1)
-                                                  hthenSound.1 hfalseSound.1
-                                                  (partialTyJoin?_sound
-                                                    hjoinTy)
-                                                  (envJoin?_sound hjoinEnv)
-                                                  (envJoinSameShape_sound
-                                                    hthenShape)
-                                                  (envJoinSameShape_sound
-                                                    hfalseShape)
-                                                  (wellFormedTy_sound
-                                                    hwellJoin)
-                                                  hkitSound.1
-                                                  (wellFormedKit_coherent_sound
-                                                    hkit)
-                                                  hkitSound.2.2
-                                                  (tyBorrowSafeAgainstEnv_sound
-                                                    htySafe)
-                                              exact checkTermSound_of_typing
-                                                hrefs hwell htyping
+                                            cases hcheck
+                                            have hkitSound :=
+                                              wellFormedKit_sound hkit
+                                            have htyping :
+                                                TermTyping env.toEnv typing
+                                                  lifetime
+                                                  (.ite condition trueBranch
+                                                    falseBranch)
+                                                  joinTy joinEnv.toEnv :=
+                                              TermTyping.ite
+                                                (by simpa [hconditionTy]
+                                                  using hconditionSound.1)
+                                                hthenSound.1 hfalseSound.1
+                                                (partialTyJoin?_sound
+                                                  hjoinTy)
+                                                (envJoin?_sound hjoinEnv)
+                                                (envJoinSameShape_sound
+                                                  hthenShape)
+                                                (envJoinSameShape_sound
+                                                  hfalseShape)
+                                                (wellFormedTy_sound
+                                                  hwellJoin)
+                                                hkitSound.1
+                                                (wellFormedKit_coherent_sound
+                                                  hkit)
+                                                hkitSound.2.2
+                                            exact checkTermSound_of_typing
+                                              hrefs hwell htyping
                             | box _ =>
                                 simp [hjoinTy] at hcheck
                                 cases hdiv : termDiverges falseBranch

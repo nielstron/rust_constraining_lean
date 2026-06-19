@@ -151,7 +151,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy
       _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
-      _hwellJoin _hcontained _hcoherent _hlinear _hresultSafe
+      _hwellJoin _hcontained _hcoherent _hlinear
       ihCondition ihTrue ihFalse htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbranchMem

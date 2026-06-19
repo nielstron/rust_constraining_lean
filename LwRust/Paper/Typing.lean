@@ -1027,12 +1027,7 @@ mutual
       well-formed-environment invariants for the join.  Joins merge borrow
       target lists, so these do not follow from the branch invariants by a
       local argument; they are carried, as the corresponding `T-Assign`
-      obligations are;
-    * `TyBorrowSafeAgainstEnv` for the result type — this is the
-      root-independent result-extension invariant used by the weakened
-      Corollary 4.14 interface.
-      It does not follow from branch-local result safety because the joined
-      result can be installed in the joined environment. -/
+      obligations are. -/
     | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy joinTy : Ty} :
@@ -1047,7 +1042,6 @@ mutual
         ContainedBorrowsWellFormed env₅ →
         Coherent env₅ →
         Linearizable env₅ →
-        TyBorrowSafeAgainstEnv env₅ joinTy →
         TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
           joinTy env₅
     /-- T-IfDiv: divergence-aware conditional merge.
