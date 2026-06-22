@@ -1493,36 +1493,33 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
       TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
         (ihGhost (SourceTerm.eq_rhs hsource))
         (ihR (SourceTerm.eq_rhs hsource)) hcopyL hcopyR hshape)
-    (fun _hcondition htrueBlock hfalseBlock _htrue _hfalse hjoin henvJoin hsameLeft
-        hsameRight hwellJoin hcontained hcoherent hlinear hresultSafe
-        ihCondition ihTrue ihFalse hsource =>
+    (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
+        hcontained hcoherent hlinear hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
-        htrueBlock hfalseBlock
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
         hjoin henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent hlinear
         hresultSafe)
-    (fun _hcondition htrueBlock hfalseBlock _htrue _hfalse hdiverges ihCondition
-        ihTrue ihFalse hsource =>
+    (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
+        hsource =>
       TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
-        htrueBlock hfalseBlock
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
         hdiverges)
-    (fun hchild hbodyBlock _hcond _hbody hwellTy hdrop ihCond ihBody hsource =>
-      TermTyping.whileLoop hchild hbodyBlock
+    (fun hchild _hcond _hbody hwellTy hdrop ihCond ihBody hsource =>
+      TermTyping.whileLoop hchild
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hwellTy hdrop)
-    (fun hchild hbodyBlock _hcond _hbody hdiverges ihCond ihBody hsource =>
-      TermTyping.whileLoopDiverging hchild hbodyBlock
+    (fun hchild _hcond _hbody hdiverges ihCond ihBody hsource =>
+      TermTyping.whileLoopDiverging hchild
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild hbodyBlock hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
+    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
         hwellTy hdrop _hcondEntry _hbodyEntry
         ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
-      TermTyping.whileLoopJoin hchild hbodyBlock hjoin hss1 hss2 hcbwf hcoh hlin
+      TermTyping.whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
         hwellTy hdrop
@@ -3194,12 +3191,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       let leftResult := ihL htypingEq hwellFormed
       let rightResult := ihR htypingEq leftResult.1
       ⟨rightResult.1, WellFormedTy.bool⟩)
-      (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
-            _falseBranch _trueTy _falseTy _joinTy}
-          _hcondition _htrueBlock _hfalseBlock _htrue _hfalse _hjoin _henvJoin
-          _hsameLeft _hsameRight hwellJoin hcontained hcoherent hlinear _hresultSafe
-          ihCondition ihTrue ihFalse
-          htypingEq hwellFormed =>
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
+        hcontained hcoherent hlinear _hresultSafe ihCondition ihTrue ihFalse
+        htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1
       let falseResult := ihFalse htypingEq conditionResult.1
@@ -3207,29 +3203,28 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
           exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
             (EnvJoin.lifetimesPreserved_left _henvJoin),
         hcoherent, hlinear⟩, hwellJoin⟩)
-      (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-            _falseBranch _trueTy _falseTy}
-          _hcondition _htrueBlock _hfalseBlock _htrue _hfalse _hdiverges
-          ihCondition ihTrue _ihFalse
-          htypingEq hwellFormed =>
+    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy}
+        _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
+        htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       ihTrue htypingEq conditionResult.1)
-      (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-            _bodyTy}
-          _hchild _hbodyBlock _hcond _hbody _hwellTy _hdrop ihCond _ihBody
-          htypingEq hwellFormed =>
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
+          _bodyTy}
+        _hchild _hcond _hbody _hwellTy _hdrop ihCond _ihBody
+        htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
-      (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-            _bodyTy}
-          _hchild _hbodyBlock _hcond _hbody _hdiverges ihCond _ihBody
-          htypingEq hwellFormed =>
+    (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
+          _bodyTy}
+        _hchild _hcond _hbody _hdiverges ihCond _ihBody
+        htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
-      (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-            _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-          _hchild _hbodyBlock hjoin _hss1 _hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
-          _hwellTy _hdrop _hcondEntry _hbodyEntry
+    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
+        _hwellTy _hdrop _hcondEntry _hbodyEntry
         ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
         htypingEq hwellFormed =>
       let invWellFormed : WellFormedEnv _envInv _lifetime :=

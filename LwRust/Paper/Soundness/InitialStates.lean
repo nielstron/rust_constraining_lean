@@ -150,9 +150,8 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy
-      _hcondition _htrueBlock _hfalseBlock _htrue _hfalse _hjoin
-      _henvJoin _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent
-      _hlinear _hresultSafe
+      _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
+      _hwellJoin _hcontained _hcoherent _hlinear _hresultSafe
       ihCondition ihTrue ihFalse htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbranchMem
@@ -163,7 +162,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
   case iteDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy
-      _hcondition _htrueBlock _hfalseBlock _htrue _hfalse _hdiverges
+      _hcondition _htrue _hfalse _hdiverges
       ihCondition ihTrue ihFalse htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbranchMem
@@ -173,7 +172,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       · exact ihFalse htypingEq candidate hfalseMem
   case whileLoop =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-      _body _bodyTy _hchild _hbodyBlock _hcond _hbody _hwellTyBody _hdropEq
+      _body _bodyTy _hchild _hcond _hbody _hwellTyBody _hdropEq
       ihCondition ihBody htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbodyMem
@@ -181,7 +180,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     · exact ihBody htypingEq candidate hbodyMem
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-      _body _bodyTy _hchild _hbodyBlock _hcond _hbody _hdiverges
+      _body _bodyTy _hchild _hcond _hbody _hdiverges
       ihCondition ihBody htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbodyMem
@@ -190,7 +189,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
   case whileLoopJoin =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hbodyBlock _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin
+      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin
       _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq candidate hmem
     simp [termValues] at hmem

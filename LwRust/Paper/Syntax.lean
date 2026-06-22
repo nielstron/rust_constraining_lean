@@ -144,18 +144,6 @@ mutual
     | term :: rest => term.size + Term.sizeList rest
 end
 
-def Term.IsBlock : Term → Prop
-  | .block _ _ => True
-  | _ => False
-
-def Term.isBlock : Term → Bool
-  | .block _ _ => true
-  | _ => false
-
-@[simp] theorem Term.isBlock_eq_true_iff {term : Term} :
-    term.isBlock = true ↔ term.IsBlock := by
-  cases term <;> simp [Term.isBlock, Term.IsBlock]
-
 inductive Term.Diverges : Term → Prop where
   | missing : Term.Diverges .missing
   | block {lifetime : Lifetime} {terms : List Term} {term : Term} :

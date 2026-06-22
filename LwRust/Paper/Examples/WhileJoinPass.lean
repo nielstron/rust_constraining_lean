@@ -23,11 +23,9 @@ def whileJoinRetargetLoopExample : Term :=
       (.eq
         (.copy (.deref (.var "q")))    -- Rust: *q
         (.val (.int 0)))               -- Rust: == 0
-      (.block [0, 0, 0] [              -- Rust: {
-        .assign
-          (.var "q")                   -- Rust: q
-          (.borrow false (.var "y"))   -- Rust: = &y;
-      ])
+      (.assign
+        (.var "q")                     -- Rust: q
+        (.borrow false (.var "y")))    -- Rust: = &y;
   ]
 
 theorem whileJoinRetargetLoopExample_accepted :

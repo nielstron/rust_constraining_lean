@@ -247,8 +247,8 @@ private theorem tail_after_preIf_not_typable :
       cases htail with
       | singleton hassign =>
           cases hite with
-          | ite hcond _htrueBlock _hfalseBlock htrue hfalse _hpty hjoin
-              hsameTrue hsameFalse _hwell _hcont _hcoh _hlin _htySafe =>
+          | ite hcond htrue hfalse _hpty hjoin hsameTrue hsameFalse _hwell
+              _hcont _hcoh _hlin _htySafe =>
               have hcondEnv := condition_preserves_preIf hcond
               rw [hcondEnv] at htrue hfalse
               cases hassign with
@@ -262,7 +262,7 @@ private theorem tail_after_preIf_not_typable :
                         (trueBranch_x_slot_of_typing htrue)
                         (falseBranch_y_slot_of_typing hfalse)
                         hsafe
-          | iteDiverging _hcond _htrueBlock _hfalseBlock _htrue _hfalse hdiv =>
+          | iteDiverging _hcond _htrue _hfalse hdiv =>
               exact falseBranch_not_diverges hdiv
       | cons _ htail => cases htail
 

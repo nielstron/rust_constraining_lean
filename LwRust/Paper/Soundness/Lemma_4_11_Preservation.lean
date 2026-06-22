@@ -3994,9 +3994,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
   -- terminal state into the join environment.
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition
-      _htrueBlock _hfalseBlock _htrue _hfalse hjoin henvJoin hsameLeft
-      hsameRight _hwellJoin hcontained hcoherent hlinear _hresultSafe ihCondition ihTrue
+      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
+      _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin hcontained
+      hcoherent hlinear _hresultSafe ihCondition ihTrue
       ihFalse htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hmulti
     cases htypingEq
@@ -4052,8 +4052,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
   -- T-IfDiv: only the true branch can terminate.
   case iteDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-      _falseBranch _trueTy _falseTy _hcondition _htrueBlock _hfalseBlock
-      _htrue _hfalse hdiverges
+      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
       ihCondition ihTrue _ihFalse htypingEq hsource store finalStore
       finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
     cases htypingEq
@@ -4087,7 +4086,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
   -- shared run induction carries only `∼ₛ _env₁`.
   case whileLoop =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy hchild _hbodyBlock _hcondition _hbody _hwellTyBody hdropEq ihCondition
+      _bodyTy hchild _hcondition _hbody _hwellTyBody hdropEq ihCondition
       ihBody htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hmulti
     cases htypingEq
@@ -4120,7 +4119,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
   -- run induction is refuted by divergence.
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy hchild _hbodyBlock _hcondition _hbody hdiverges ihCondition _ihBody
+      _bodyTy hchild _hcondition _hbody hdiverges ihCondition _ihBody
       htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hmulti
     cases htypingEq
@@ -4149,7 +4148,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
   case whileLoopJoin =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      _hbodyBlock hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv _hwellTyBody
+      hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv _hwellTyBody
       hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
       _ihBodyEntry htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hmulti

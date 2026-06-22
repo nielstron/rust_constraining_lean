@@ -2173,8 +2173,6 @@ mutual
         | .ite condition trueBranch falseBranch => do
             let conditionResult ← checkTerm? fuel env typing lifetime condition
             ensure (decide (conditionResult.ty = .bool)) "if condition is not bool"
-            ensure trueBranch.isBlock "if true branch is not a block"
-            ensure falseBranch.isBlock "if false branch is not a block"
             let thenResult ← checkTerm? fuel conditionResult.env typing lifetime trueBranch
             let falseResult ← checkTerm? fuel conditionResult.env typing lifetime falseBranch
             match partialTyJoin? (.ty thenResult.ty) (.ty falseResult.ty),
@@ -2234,7 +2232,6 @@ mutual
       (condition body : Term) : Except String CheckResult := do
     ensure (isLifetimeChild lifetime bodyLifetime)
       "while body lifetime is not a child of current lifetime"
-    ensure body.isBlock "while body is not a block"
     let conditionResult ← checkTerm? fuel env typing lifetime condition
     ensure (decide (conditionResult.ty = .bool)) "while condition is not bool"
     let bodyResult ← checkTerm? fuel conditionResult.env typing bodyLifetime body
@@ -2281,7 +2278,6 @@ mutual
       (condition body : Term) : Except String CheckResult := do
     ensure (isLifetimeChild lifetime bodyLifetime)
       "while body lifetime is not a child of current lifetime"
-    ensure body.isBlock "while body is not a block"
     checkWhileJoinLoop? fuel fuel env env typing lifetime bodyLifetime condition body
 
   def checkWhile? (fuel : Nat) (env : FiniteEnv)
