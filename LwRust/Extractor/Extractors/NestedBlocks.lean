@@ -28,13 +28,10 @@ than chosen freely:
   { … } else { …; panic!() }` — using the divergence-aware rule `T-IfDiv`
   (`TermTyping.iteDiverging`), the calculus' counterpart of rustc's
   never-type propagation: the truncated branch is fully checked but, since it
-  diverges, contributes nothing to the merge.  This works whenever the
-  truncated branch is block-shaped (every branch of a real Rust `if` is); for
-  the unrealistic non-block branch frontiers of the generated grammar the
-  extraction falls back to the condition plus the frontier branch's statement
-  extraction.  (Sequencing *both* branches as statements would be wrong: the
-  branches are typed in the same environment, so their effects must not be
-  chained.)
+  diverges, contributes nothing to the merge.  Branch and loop-body frontiers
+  are extracted through `extractBlockTerm`, so rebuilt `if`/`while` bodies are
+  always syntactic blocks.  Unrealistic non-block branch frontiers from the
+  generated grammar are replaced by a synthesized diverging block.
 * Value position: `ast_copier` wraps the statement extraction in an anonymous
   `{ …; __missing__() }` block.  LwRust blocks carry explicit lifetimes and
   `T-Block` pins them to the ambient lifetime chain, so source statements
@@ -59,18 +56,62 @@ extractor (for an unopened block frontier) use this. -/
 def childLifetime (lifetime : Lifetime) : Lifetime :=
   { path := lifetime.path ++ [0] }
 
-/-- Branch frontiers for which a conditional can be rebuilt: the value
-extraction of such a frontier is either the forced completion itself (`done`,
-fully-completed blocks) or a diverging term (`cutoff`, block frontiers closed
-by `missingTerm`).  Real Rust `if` branches are always blocks, so this covers
-every realistic frontier; the remaining shapes fall back to statement
-extraction. -/
-def branchRebuildable : PartialTerm → Bool
-  | Generated.PartialTerm.done _ => Bool.true
-  | Generated.PartialTerm.cutoff => Bool.true
-  | Generated.PartialTerm.blockStart => Bool.true
-  | Generated.PartialTerm.blockTerms _ _ => Bool.true
+/-- A synthesized diverging block nested directly below `lifetime`. -/
+def missingBlockTerm (lifetime : Lifetime) : Term :=
+  SyntaxCtor.ctermBlock_ctor (childLifetime lifetime) [missingTerm]
+
+/-- Syntactic block test for complete terms used in block-position extraction. -/
+def termIsBlock : Term → Bool
+  | .block _ _ => Bool.true
   | _ => Bool.false
+
+/-- Keep an already block-shaped complete term; otherwise replace it by a
+synthetic block.  This is only used in Rust block positions (`if` branches and
+while bodies), where a complete non-block term is outside the intended source
+grammar. -/
+def blockOrMissing (currentLifetime : Lifetime) : Term → Term
+  | .block lifetime terms => .block lifetime terms
+  | _ => missingBlockTerm currentLifetime
+
+mutual
+
+/-- Syntactic Rust-shape restriction: every source `if` branch and `while`
+body is a block.  This is intentionally separate from typing. -/
+def controlBodiesBlock : Term → Prop
+  | .block _ terms => controlBodiesBlockList terms
+  | .letMut _ initialiser => controlBodiesBlock initialiser
+  | .assign _ rhs => controlBodiesBlock rhs
+  | .box operand => controlBodiesBlock operand
+  | .borrow _ _ => True
+  | .move _ => True
+  | .copy _ => True
+  | .val _ => True
+  | .missing => True
+  | .eq lhs rhs => controlBodiesBlock lhs ∧ controlBodiesBlock rhs
+  | .ite condition trueBranch falseBranch =>
+      controlBodiesBlock condition ∧
+        termIsBlock trueBranch = Bool.true ∧ controlBodiesBlock trueBranch ∧
+        termIsBlock falseBranch = Bool.true ∧ controlBodiesBlock falseBranch
+  | .whileLoop _ condition body =>
+      controlBodiesBlock condition ∧
+        termIsBlock body = Bool.true ∧ controlBodiesBlock body
+  | .whileCond _ conditionInFlight condition body =>
+      controlBodiesBlock conditionInFlight ∧ controlBodiesBlock condition ∧
+        controlBodiesBlock body
+  | .whileBody _ bodyInFlight condition body =>
+      controlBodiesBlock bodyInFlight ∧ controlBodiesBlock condition ∧
+        controlBodiesBlock body
+
+/-- List form of `controlBodiesBlock` for block bodies. -/
+def controlBodiesBlockList : List Term → Prop
+  | [] => True
+  | term :: rest => controlBodiesBlock term ∧ controlBodiesBlockList rest
+
+end
+
+/-- Completion relation restricted to Rust-shaped outputs. -/
+def BlockOutputCompletesProgram (p : PartialProgram) (full : Program) : Prop :=
+  CompletesProgram p full ∧ controlBodiesBlock full
 
 mutual
 
@@ -89,6 +130,16 @@ def extractTerm (currentLifetime : Lifetime) : PartialTerm → Term
       SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)
   | frontier =>
       (extractTermStmts currentLifetime frontier).headD missingTerm
+termination_by p => (sizeOf p, 1)
+
+/-- Extract a frontier that sits in a Rust block position, such as an `if`
+branch or while body.  The result is always syntactically a block. -/
+def extractBlockTerm (currentLifetime : Lifetime) : PartialTerm → Term
+  | Generated.PartialTerm.done term => blockOrMissing currentLifetime term
+  | Generated.PartialTerm.blockStart => missingBlockTerm currentLifetime
+  | Generated.PartialTerm.blockTerms lifetime terms =>
+      SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)
+  | _ => missingBlockTerm currentLifetime
 termination_by p => (sizeOf p, 1)
 
 /-- Extract a partial expression in statement position
@@ -131,26 +182,23 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | Generated.PartialTerm.iteCondition condition =>
       extractTermStmts currentLifetime condition
   | Generated.PartialTerm.iteTrueBranch condition trueBranch =>
-      if branchRebuildable trueBranch then
-        [SyntaxCtor.ctermIte_ctor condition
-          (extractTerm currentLifetime trueBranch) missingTerm]
-      else
-        condition :: extractTermStmts currentLifetime trueBranch
+      [SyntaxCtor.ctermIte_ctor condition
+        (extractBlockTerm currentLifetime trueBranch)
+        (missingBlockTerm currentLifetime)]
   | Generated.PartialTerm.iteFalseBranch condition trueBranch falseBranch =>
-      if branchRebuildable falseBranch then
+      if termIsBlock trueBranch then
         [SyntaxCtor.ctermIte_ctor condition trueBranch
-          (extractTerm currentLifetime falseBranch)]
+          (extractBlockTerm currentLifetime falseBranch)]
       else
-        condition :: extractTermStmts currentLifetime falseBranch
+        [SyntaxCtor.ctermIte_ctor condition
+          (missingBlockTerm currentLifetime)
+          (missingBlockTerm currentLifetime)]
   | Generated.PartialTerm.whileStart => []
   | Generated.PartialTerm.whileCondition _bodyLifetime condition =>
       extractTermStmts currentLifetime condition
   | Generated.PartialTerm.whileBody bodyLifetime condition body =>
-      if branchRebuildable body then
-        [SyntaxCtor.ctermWhile_ctor bodyLifetime condition
-          (extractTerm bodyLifetime body)]
-      else
-        [SyntaxCtor.ctermWhile_ctor bodyLifetime condition missingTerm]
+      [SyntaxCtor.ctermWhile_ctor bodyLifetime condition
+        (extractBlockTerm bodyLifetime body)]
 termination_by p => (sizeOf p, 0)
 
 /-- Extract a block body frontier (`ast_copier.visit_stmts`): keep the
@@ -258,11 +306,43 @@ unconditionally. -/
 theorem missingBlock_typed {env : Env} {typing : StoreTyping}
     {lifetime : Lifetime} :
     TermTyping env typing lifetime
-      (SyntaxCtor.ctermBlock_ctor (childLifetime lifetime) [missingTerm])
-      .unit (env.dropLifetime (childLifetime lifetime)) :=
+      (missingBlockTerm lifetime) .unit
+      (env.dropLifetime (childLifetime lifetime)) :=
   TermTyping.block ⟨0, rfl⟩
     (TermListTyping.singleton (TermTyping.missing WellFormedTy.unit tyLoanFree_unit))
     WellFormedTy.unit rfl
+
+/-- The synthesized block is syntactically diverging because its only term is
+`missingTerm`. -/
+theorem missingBlock_diverging {lifetime : Lifetime} :
+    LwRust.Core.Term.Diverges (missingBlockTerm lifetime) := by
+  unfold missingBlockTerm SyntaxCtor.ctermBlock_ctor
+  exact LwRust.Core.Term.Diverges.block (by simp)
+    LwRust.Core.Term.Diverges.missing
+
+/-- `blockOrMissing` always produces a block-shaped term. -/
+theorem blockOrMissing_isBlock {currentLifetime : Lifetime} {term : Term} :
+    termIsBlock (blockOrMissing currentLifetime term) = Bool.true := by
+  cases term <;> simp [blockOrMissing, missingBlockTerm, termIsBlock]
+
+/-- Block-position extraction always produces a block-shaped term. -/
+theorem extractBlockTerm_isBlock {currentLifetime : Lifetime} {p : PartialTerm} :
+    termIsBlock (extractBlockTerm currentLifetime p) = Bool.true := by
+  cases p <;> simp [extractBlockTerm, missingBlockTerm, termIsBlock]
+  case done term =>
+      exact blockOrMissing_isBlock
+
+/-- A complete term kept in block position, or a synthesized block replacing it,
+is always typable from the same input state when the complete term was typable. -/
+theorem blockOrMissing_typed {env env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty}
+    (htyped : TermTyping env typing lifetime term ty env₂) :
+    ∃ ty' env', TermTyping env typing lifetime
+      (blockOrMissing lifetime term) ty' env' := by
+  cases term <;> simp [blockOrMissing]
+  · exact ⟨ty, env₂, htyped⟩
+  all_goals
+    exact ⟨.unit, env.dropLifetime (childLifetime lifetime), missingBlock_typed⟩
 
 /-- Every non-`done` body extraction ends in (hence contains) `missingTerm`,
 so the rebuilt block diverges. -/
@@ -329,6 +409,49 @@ theorem extractTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
     simp only [extractTerm]
     obtain ⟨env', hstmts⟩ := extractTermStmts_typed hcomp htyped
     exact headD_typed hstmts
+termination_by (sizeOf p, 1)
+decreasing_by
+  all_goals
+    first
+    | decreasing_tactic
+    | (simp_wf
+       try subst_vars
+       first
+       | exact Prod.Lex.right _ (by omega)
+       | exact Prod.Lex.left _ _ (by try simp; omega))
+
+/-- Block-position transport: the extracted frontier is a block and is typable
+from the same input state as any well-typed completion. -/
+theorem extractBlockTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
+    {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    (hcomp : CompletesTerm p completion)
+    (htyped : TermTyping env typing currentLifetime completion ty env₂) :
+    ∃ ty' env', TermTyping env typing currentLifetime
+      (extractBlockTerm currentLifetime p) ty' env' := by
+  cases p
+  case done =>
+      cases hcomp
+      simp only [extractBlockTerm]
+      exact blockOrMissing_typed htyped
+  case blockStart =>
+      simp only [extractBlockTerm]
+      exact ⟨.unit, _, missingBlock_typed⟩
+  case blockTerms blockLifetime terms =>
+      cases hcomp with
+      | ctermBlock_blockTerms hterms =>
+          cases htyped with
+          | «block» hchild hlist hwf heq =>
+              obtain ⟨ty', envBody, hlist', hdisj⟩ :=
+                extractTerms_typed hterms hlist
+              simp only [extractBlockTerm]
+              refine ⟨ty', envBody.dropLifetime blockLifetime,
+                TermTyping.block hchild hlist' ?_ rfl⟩
+              rcases hdisj with rfl | ⟨rfl, rfl⟩
+              · exact WellFormedTy.unit
+              · exact hwf
+  all_goals
+    simp only [extractBlockTerm]
+    exact ⟨.unit, _, missingBlock_typed⟩
 termination_by (sizeOf p, 1)
 decreasing_by
   all_goals
@@ -411,18 +534,10 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
         | ite hcondition' htrue' => exact ⟨_, hcondition', _, _, htrue'⟩
         | iteDiverging hcondition' htrue' => exact ⟨_, hcondition', _, _, htrue'⟩
       simp only [extractTermStmts]
-      cases hrebuild : branchRebuildable trueBranch with
-      | «true» =>
-          simp
-          obtain ⟨tyLive', envLive, hlive⟩ := extractTerm_typed htrue htrue'
-          exact ⟨envLive, .cons
-            (TermTyping.iteDiverging hcondition' hlive
-              (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
-              .missing) .nil⟩
-      | «false» =>
-          simp
-          obtain ⟨env', hstmts⟩ := extractTermStmts_typed htrue htrue'
-          exact ⟨env', .cons hcondition' hstmts⟩
+      obtain ⟨tyLive', envLive, hlive⟩ := extractBlockTerm_typed htrue htrue'
+      exact ⟨envLive, .cons
+        (TermTyping.iteDiverging hcondition' hlive
+          missingBlock_typed missingBlock_diverging) .nil⟩
   case ctermIte_iteFalseBranch condition trueBranch falseBranch
       falseCompletion hfalse =>
       obtain ⟨envMid, hcondition', tyLive, envOut, htrue', tyDead, envDead,
@@ -441,48 +556,51 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
         | iteDiverging hcondition' htrue' hfalse' =>
             exact ⟨_, hcondition', _, _, htrue', _, _, hfalse'⟩
       simp only [extractTermStmts]
-      cases falseBranch
-      case done falseTerm =>
-          cases hfalse
-          simp [branchRebuildable, extractTerm]
-          exact ⟨env₂, .cons htyped .nil⟩
-      case cutoff =>
-          simp [branchRebuildable, extractTerm]
-          exact ⟨envOut, .cons
-            (TermTyping.iteDiverging hcondition' htrue'
-              (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
-              .missing) .nil⟩
-      case blockStart =>
-          simp [branchRebuildable, extractTerm]
-          exact ⟨envOut, .cons
-            (TermTyping.iteDiverging hcondition' htrue' missingBlock_typed
-              (.block (by simp) .missing)) .nil⟩
-      case blockTerms blockLifetime terms =>
-          cases hfalse with
-          | ctermBlock_blockTerms hterms =>
-              cases terms
-              case done xs =>
-                  cases hterms
-                  simp [branchRebuildable, extractTerm, extractTerms]
-                  exact ⟨env₂, .cons htyped .nil⟩
-              all_goals
-                cases hfalse' with
-                | «block» hchild hlist hwf _heq =>
-                    obtain ⟨tyBody, envBody, hlist', hdisj⟩ :=
-                      extractTerms_typed hterms hlist
-                    simp [branchRebuildable, extractTerm]
-                    refine ⟨envOut, .cons
+      cases htrueBlock : termIsBlock trueBranch
+      case «false» =>
+          simp
+          exact ⟨envMid.dropLifetime (childLifetime currentLifetime), .cons
+            (TermTyping.iteDiverging hcondition' missingBlock_typed
+              missingBlock_typed missingBlock_diverging) .nil⟩
+      case «true» =>
+          cases trueBranch <;> simp [termIsBlock] at htrueBlock
+          case «block» trueLifetime trueTerms =>
+              cases falseBranch
+              case done =>
+                  cases hfalse
+                  cases falseCompletion <;> simp [extractBlockTerm, blockOrMissing]
+                  · exact ⟨env₂, .cons htyped .nil⟩
+                  all_goals
+                    exact ⟨envOut, .cons
                       (TermTyping.iteDiverging hcondition' htrue'
-                        (TermTyping.block hchild hlist' ?_ rfl)
-                        (.block (extractTerms_diverging nofun) .missing))
-                      .nil⟩
-                    rcases hdisj with rfl | ⟨rfl, rfl⟩
-                    · exact WellFormedTy.unit
-                    · exact hwf
-      all_goals
-        obtain ⟨env', hstmts⟩ := extractTermStmts_typed hfalse hfalse'
-        simp only [extractTermStmts, branchRebuildable, reduceIte] at hstmts ⊢
-        exact ⟨env', .cons hcondition' hstmts⟩
+                        missingBlock_typed missingBlock_diverging) .nil⟩
+              case blockTerms blockLifetime terms =>
+                  cases hfalse with
+                  | ctermBlock_blockTerms hterms =>
+                      cases terms
+                      case done xs =>
+                          cases hterms
+                          simp [extractBlockTerm, extractTerms]
+                          exact ⟨env₂, .cons htyped .nil⟩
+                      all_goals
+                        cases hfalse' with
+                        | «block» hchild hlist hwf _heq =>
+                            obtain ⟨tyBody, envBody, hlist', hdisj⟩ :=
+                              extractTerms_typed hterms hlist
+                            simp [extractBlockTerm]
+                            refine ⟨envOut, .cons
+                              (TermTyping.iteDiverging hcondition' htrue'
+                                (TermTyping.block hchild hlist' ?_ rfl)
+                                (.block (extractTerms_diverging nofun) .missing))
+                              .nil⟩
+                            rcases hdisj with rfl | ⟨rfl, rfl⟩
+                            · exact WellFormedTy.unit
+                            · exact hwf
+              all_goals
+                simp [extractBlockTerm]
+                exact ⟨envOut, .cons
+                  (TermTyping.iteDiverging hcondition' htrue'
+                    missingBlock_typed missingBlock_diverging) .nil⟩
   case ctermWhile_whileCondition hcondition =>
       simp only [extractTermStmts]
       cases htyped with
@@ -511,35 +629,28 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
             exact ⟨_, hchild, hcondEntry, _, _, hbodyEntry⟩
       simp only [extractTermStmts]
       cases body
-      case done bodyTerm =>
+      case done =>
           cases hbody
-          simp [branchRebuildable, extractTerm]
-          exact ⟨env₂, .cons htyped .nil⟩
-      case cutoff =>
-          simp [branchRebuildable, extractTerm]
-          exact ⟨envMid, .cons
-            (TermTyping.whileLoopDiverging hchild' hcondition'
-              (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
-              .missing) .nil⟩
-      case blockStart =>
-          simp [branchRebuildable, extractTerm]
-          exact ⟨envMid, .cons
-            (TermTyping.whileLoopDiverging hchild' hcondition'
-              missingBlock_typed (.block (by simp) .missing)) .nil⟩
+          cases bodyCompletion <;> simp [extractBlockTerm, blockOrMissing]
+          · exact ⟨env₂, .cons htyped .nil⟩
+          all_goals
+            exact ⟨envMid, .cons
+              (TermTyping.whileLoopDiverging hchild' hcondition'
+                missingBlock_typed missingBlock_diverging) .nil⟩
       case blockTerms blockLifetime terms =>
           cases hbody with
           | ctermBlock_blockTerms hterms =>
               cases terms
               case done xs =>
                   cases hterms
-                  simp [branchRebuildable, extractTerm, extractTerms]
+                  simp [extractBlockTerm, extractTerms]
                   exact ⟨env₂, .cons htyped .nil⟩
               all_goals
                 cases hbody' with
                 | «block» hchild₂ hlist hwf _heq =>
                     obtain ⟨tyBlock, envBlock, hlist', hdisj⟩ :=
                       extractTerms_typed hterms hlist
-                    simp [branchRebuildable, extractTerm]
+                    simp [extractBlockTerm]
                     refine ⟨envMid, .cons
                       (TermTyping.whileLoopDiverging hchild' hcondition'
                         (TermTyping.block hchild₂ hlist' ?_ rfl)
@@ -549,11 +660,10 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
                     · exact WellFormedTy.unit
                     · exact hwf
       all_goals
-        simp only [extractTermStmts, branchRebuildable, reduceIte]
+        simp [extractBlockTerm]
         exact ⟨envMid, .cons
           (TermTyping.whileLoopDiverging hchild' hcondition'
-            (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
-            .missing) .nil⟩
+            missingBlock_typed missingBlock_diverging) .nil⟩
   all_goals
     simp only [extractTermStmts]
     exact ⟨env, .nil⟩
@@ -624,6 +734,13 @@ theorem extractProgram_wellTyped_of_completion
   obtain ⟨ty', env', htyped'⟩ := extractTerm_typed hCompletion htyped
   exact ⟨ty', env', htyped'⟩
 
+theorem extractProgram_wellTyped_of_blockOutput_completion
+    {p : PartialProgram} {full : Program}
+    (hCompletion : BlockOutputCompletesProgram p full)
+    (hFull : ProgramWellTyped full) :
+    ProgramWellTyped (extractProgram p) := by
+  exact extractProgram_wellTyped_of_completion hCompletion.1 hFull
+
 end TypedExtraction
 
 theorem extractor_wellTyped_conservative :
@@ -631,11 +748,24 @@ theorem extractor_wellTyped_conservative :
   intro p hInvalid full hCompletion hFull
   exact hInvalid (extractProgram_wellTyped_of_completion hCompletion hFull)
 
+theorem extractor_wellTyped_blockOutput_conservative :
+    Conservative ProgramWellTyped BlockOutputCompletesProgram extractProgram := by
+  intro p hInvalid full hCompletion hFull
+  exact hInvalid
+    (extractProgram_wellTyped_of_blockOutput_completion hCompletion hFull)
+
 theorem extractor_wellTyped_prefixChecker_complete :
     PrefixCheckerComplete ProgramWellTyped CompletesProgram
       (ExtractorPrefixChecker programWellTyped extractProgram) := by
   exact conservative_extractors_give_complete_prefix_checkers
     extractor_wellTyped_conservative
+    programWellTyped_complete
+
+theorem extractor_wellTyped_blockOutput_prefixChecker_complete :
+    PrefixCheckerComplete ProgramWellTyped BlockOutputCompletesProgram
+      (ExtractorPrefixChecker programWellTyped extractProgram) := by
+  exact conservative_extractors_give_complete_prefix_checkers
+    extractor_wellTyped_blockOutput_conservative
     programWellTyped_complete
 
 end ConservativeExtractor
