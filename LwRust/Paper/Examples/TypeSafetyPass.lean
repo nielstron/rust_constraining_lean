@@ -32,8 +32,12 @@ theorem scalarCopyComparisonExample_accepted :
 def ifThenElseIntExample : Term :=
   .ite
     (.val (.bool true)) -- Rust: if true
-    (.val (.int 1))     -- Rust: { 1 }
-    (.val (.int 2))     -- Rust: else { 2 }
+    (.block [0] [       -- Rust: {
+      .val (.int 1)     -- Rust: 1
+    ])
+    (.block [0] [       -- Rust: else {
+      .val (.int 2)     -- Rust: 2
+    ])
 
 theorem ifThenElseIntExample_accepted :
     borrowCheck ifThenElseIntExample := by
@@ -46,8 +50,12 @@ def ifEqThenElseIntExample : Term :=
     (.eq
       (.val (.int 1)) -- Rust: if 1
       (.val (.int 1))) -- Rust: == 1
-    (.val (.int 1))    -- Rust: { 1 }
-    (.val (.int 2))    -- Rust: else { 2 }
+    (.block [0] [      -- Rust: {
+      .val (.int 1)    -- Rust: 1
+    ])
+    (.block [0] [      -- Rust: else {
+      .val (.int 2)    -- Rust: 2
+    ])
 
 theorem ifEqThenElseIntExample_accepted :
     borrowCheck ifEqThenElseIntExample := by
@@ -65,12 +73,16 @@ def pointerIfAssignmentExample : Term :=
       (.eq
         (.copy (.deref (.var "p")))     -- Rust: if *p
         (.val (.int 1)))                -- Rust: == 1
-      (.assign
-        (.var "p")                      -- Rust: p
-        (.borrow true (.var "y")))      -- Rust: = &mut y;
-      (.assign
-        (.deref (.var "p"))             -- Rust: *p
-        (.val (.int 1)))                -- Rust: = 1;
+      (.block [0, 0] [                  -- Rust: {
+        .assign
+          (.var "p")                    -- Rust: p
+          (.borrow true (.var "y"))     -- Rust: = &mut y;
+      ])
+      (.block [0, 0] [                  -- Rust: else {
+        .assign
+          (.deref (.var "p"))           -- Rust: *p
+          (.val (.int 1))               -- Rust: = 1;
+      ])
   ]
 
 theorem pointerIfAssignmentExample_accepted :

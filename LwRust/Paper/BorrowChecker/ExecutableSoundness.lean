@@ -236,13 +236,15 @@ def ite {fuel : Nat} {env conditionEnv trueEnv falseEnv joinEnv : FiniteEnv}
         (.ite condition trueBranch falseBranch) joinTy joinEnv = true)
     (conditionCert :
       CertifiedTermCheck fuel env typing lifetime condition .bool conditionEnv)
-    (trueCert :
-      CertifiedTermCheck fuel conditionEnv typing lifetime trueBranch trueTy
-        trueEnv)
-    (falseCert :
-      CertifiedTermCheck fuel conditionEnv typing lifetime falseBranch falseTy
-        falseEnv)
-    (typeJoin : PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy))
+      (trueCert :
+        CertifiedTermCheck fuel conditionEnv typing lifetime trueBranch trueTy
+          trueEnv)
+      (falseCert :
+        CertifiedTermCheck fuel conditionEnv typing lifetime falseBranch falseTy
+          falseEnv)
+      (trueBlock : trueBranch.IsBlock)
+      (falseBlock : falseBranch.IsBlock)
+      (typeJoin : PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy))
     (envJoin : EnvJoin trueEnv.toEnv falseEnv.toEnv joinEnv.toEnv)
     (trueSameShape : EnvJoinSameShape trueEnv.toEnv joinEnv.toEnv)
     (falseSameShape : EnvJoinSameShape falseEnv.toEnv joinEnv.toEnv)
@@ -253,11 +255,11 @@ def ite {fuel : Nat} {env conditionEnv trueEnv falseEnv joinEnv : FiniteEnv}
     (typeBorrowSafe : TyBorrowSafeAgainstEnv joinEnv.toEnv joinTy) :
     CertifiedTermCheck fuel env typing lifetime
       (.ite condition trueBranch falseBranch) joinTy joinEnv :=
-  { checked := checked
-    typing :=
-      TermTyping.ite conditionCert.typing trueCert.typing falseCert.typing
-        typeJoin envJoin trueSameShape falseSameShape wellFormed contained
-        coherent linearizable typeBorrowSafe }
+    { checked := checked
+      typing :=
+        TermTyping.ite conditionCert.typing trueBlock falseBlock trueCert.typing
+          falseCert.typing typeJoin envJoin trueSameShape falseSameShape
+          wellFormed contained coherent linearizable typeBorrowSafe }
 
 end CertifiedTermCheck
 
@@ -4792,11 +4794,11 @@ private theorem termTyping_preserves_wellFormed_for_checker
       let leftResult := ihL htypingEq hwellFormed
       let rightResult := ihR htypingEq leftResult.1
       ⟨rightResult.1, WellFormedTy.bool⟩)
-    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-          _trueBranch _falseBranch _trueTy _falseTy _joinTy}
-        _hcondition _htrue _hfalse _hjoin henvJoin _hsameLeft _hsameRight
-        hwellJoin hcontained hcoherent hlinear _hresultSafe ihCondition
-        ihTrue _ihFalse htypingEq hwellFormed =>
+      (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+            _trueBranch _falseBranch _trueTy _falseTy _joinTy}
+          _hcondition _htrueBlock _hfalseBlock _htrue _hfalse _hjoin henvJoin
+          _hsameLeft _hsameRight hwellJoin hcontained hcoherent hlinear
+          _hresultSafe ihCondition ihTrue _ihFalse htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let thenResult := ihTrue htypingEq conditionResult.1
       ⟨⟨hcontained,
@@ -4804,29 +4806,29 @@ private theorem termTyping_preserves_wellFormed_for_checker
             (EnvJoin.lifetimesPreserved_left henvJoin),
           hcoherent, hlinear⟩,
         hwellJoin⟩)
-    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-          _trueBranch _falseBranch _trueTy _falseTy}
-        _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
-        htypingEq hwellFormed =>
+      (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+            _trueBranch _falseBranch _trueTy _falseTy}
+          _hcondition _htrueBlock _hfalseBlock _htrue _hfalse _hdiverges
+          ihCondition ihTrue _ihFalse htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       ihTrue htypingEq conditionResult.1)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-          _body _bodyTy}
-        _hchild _hcond _hbody _hwellTy _hdrop ihCond _ihBody htypingEq
-        hwellFormed =>
+      (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+            _body _bodyTy}
+          _hchild _hbodyBlock _hcond _hbody _hwellTy _hdrop ihCond _ihBody
+          htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-          _body _bodyTy}
-        _hchild _hcond _hbody _hdiverges ihCond _ihBody htypingEq
-        hwellFormed =>
+      (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+            _body _bodyTy}
+          _hchild _hbodyBlock _hcond _hbody _hdiverges ihCond _ihBody
+          htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
-    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
-        _hwellTy _hdrop _hcondEntry _hbodyEntry ihCondInv _ihBodyInv
-        _ihCondEntry _ihBodyEntry htypingEq hwellFormed =>
+      (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+            _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+          _hchild _hbodyBlock hjoin _hss1 _hss2 hcbwf hcoh hlin _hcondInv
+          _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry ihCondInv
+          _ihBodyInv _ihCondEntry _ihBodyEntry htypingEq hwellFormed =>
       let invWellFormed : WellFormedEnv _envInv _lifetime :=
         ⟨hcbwf,
           EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
@@ -4929,63 +4931,69 @@ private theorem checkStrictWhile?_sound_of_termSound {fuel : Nat}
   · simp [ensure, hchildCheck, Bind.bind, Except.bind] at hcheck
   · simp [ensure, hchildCheck, Bind.bind, Except.bind] at hcheck
     have hchild := isLifetimeChild_sound hchildCheck
-    cases hcondition :
-        checkTerm? fuel env typing lifetime condition with
-    | error message =>
-        simp [hcondition, Bind.bind, Except.bind] at hcheck
-    | ok conditionResult =>
-        simp [hcondition, Bind.bind, Except.bind] at hcheck
-        by_cases hconditionTy : conditionResult.ty = .bool
-        · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
-          have hconditionSound := termSound hrefs hwell hcondition
-          have hbodyWell : WellFormedEnv conditionResult.env.toEnv bodyLifetime :=
-            WellFormedEnv.of_outlives hconditionSound.2.1
-              (LifetimeChild.outlives hchild)
-          cases hbody :
-              checkTerm? fuel conditionResult.env typing bodyLifetime body with
-          | error message =>
-              simp [hbody, Bind.bind, Except.bind] at hcheck
-          | ok bodyResult =>
-              simp [hbody, Bind.bind, Except.bind] at hcheck
-              cases hbodyTyCheck :
-                  wellFormedTy fuel bodyResult.env bodyResult.ty lifetime
-              · simp [ensure, hbodyTyCheck, Bind.bind, Except.bind] at hcheck
-              · simp [ensure, hbodyTyCheck, Bind.bind, Except.bind] at hcheck
-                cases hrestore :
-                    envEqOnSupport
-                      (bodyResult.env.dropLifetime bodyLifetime) env
-                · simp [ensure, hrestore, Bind.bind, Except.bind] at hcheck
-                · simp [ensure, hrestore, Bind.bind, Except.bind] at hcheck
-                  have hbodySound := termSound hrefs hbodyWell hbody
-                  have hdrop :
-                      bodyResult.env.toEnv.dropLifetime bodyLifetime = env.toEnv := by
-                    have hsame :
-                        (bodyResult.env.dropLifetime bodyLifetime).toEnv =
-                          env.toEnv := by
-                      exact sameBindings_toEnv_eq hrestore
-                    simpa [FiniteEnv.toEnv_dropLifetime] using hsame
-                  cases hcheck
-                  have htyping :
-                      TermTyping env.toEnv typing lifetime
-                        (.whileLoop bodyLifetime condition body) .unit
-                        conditionResult.env.toEnv :=
-                    TermTyping.whileLoop hchild
-                      (by simpa [hconditionTy] using hconditionSound.1)
-                      hbodySound.1
-                      (wellFormedTy_sound hbodyTyCheck)
-                      hdrop
-                  exact checkTermSound_of_typing hrefs hwell htyping
-        · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
+    cases hbodyBlockCheck : body.isBlock
+    · simp [ensure, hbodyBlockCheck, Bind.bind, Except.bind] at hcheck
+    · simp [ensure, hbodyBlockCheck, Bind.bind, Except.bind] at hcheck
+      have hbodyBlock : body.IsBlock :=
+        (Term.isBlock_eq_true_iff).mp hbodyBlockCheck
+      cases hcondition :
+          checkTerm? fuel env typing lifetime condition with
+      | error message =>
+          simp [hcondition, Bind.bind, Except.bind] at hcheck
+      | ok conditionResult =>
+          simp [hcondition, Bind.bind, Except.bind] at hcheck
+          by_cases hconditionTy : conditionResult.ty = .bool
+          · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
+            have hconditionSound := termSound hrefs hwell hcondition
+            have hbodyWell : WellFormedEnv conditionResult.env.toEnv bodyLifetime :=
+              WellFormedEnv.of_outlives hconditionSound.2.1
+                (LifetimeChild.outlives hchild)
+            cases hbody :
+                checkTerm? fuel conditionResult.env typing bodyLifetime body with
+            | error message =>
+                simp [hbody, Bind.bind, Except.bind] at hcheck
+            | ok bodyResult =>
+                simp [hbody, Bind.bind, Except.bind] at hcheck
+                cases hbodyTyCheck :
+                    wellFormedTy fuel bodyResult.env bodyResult.ty lifetime
+                · simp [ensure, hbodyTyCheck, Bind.bind, Except.bind] at hcheck
+                · simp [ensure, hbodyTyCheck, Bind.bind, Except.bind] at hcheck
+                  cases hrestore :
+                      envEqOnSupport
+                        (bodyResult.env.dropLifetime bodyLifetime) env
+                  · simp [ensure, hrestore, Bind.bind, Except.bind] at hcheck
+                  · simp [ensure, hrestore, Bind.bind, Except.bind] at hcheck
+                    have hbodySound := termSound hrefs hbodyWell hbody
+                    have hdrop :
+                        bodyResult.env.toEnv.dropLifetime bodyLifetime = env.toEnv := by
+                      have hsame :
+                          (bodyResult.env.dropLifetime bodyLifetime).toEnv =
+                            env.toEnv := by
+                        exact sameBindings_toEnv_eq hrestore
+                      simpa [FiniteEnv.toEnv_dropLifetime] using hsame
+                    cases hcheck
+                    have htyping :
+                        TermTyping env.toEnv typing lifetime
+                          (.whileLoop bodyLifetime condition body) .unit
+                          conditionResult.env.toEnv :=
+                      TermTyping.whileLoop hchild hbodyBlock
+                        (by simpa [hconditionTy] using hconditionSound.1)
+                        hbodySound.1
+                        (wellFormedTy_sound hbodyTyCheck)
+                        hdrop
+                    exact checkTermSound_of_typing hrefs hwell htyping
+          · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
 
 private theorem checkWhileJoinLoop?_sound_of_termSound {fuel : Nat}
     (termSound : CheckTermSoundAt fuel) :
     ∀ {iterations : Nat} {entry inv : FiniteEnv} {typing : StoreTyping}
       {lifetime bodyLifetime : Lifetime} {condition body : Term}
       {result : CheckResult},
-      (∀ env lifetime, CheckerStoreTypingRefsWellFormed env typing lifetime) →
-      LifetimeChild lifetime bodyLifetime →
-      WellFormedEnv entry.toEnv lifetime →
-      WellFormedEnv inv.toEnv lifetime →
+        (∀ env lifetime, CheckerStoreTypingRefsWellFormed env typing lifetime) →
+        LifetimeChild lifetime bodyLifetime →
+        body.IsBlock →
+        WellFormedEnv entry.toEnv lifetime →
+        WellFormedEnv inv.toEnv lifetime →
       checkWhileJoinLoop? iterations fuel entry inv typing lifetime
         bodyLifetime condition body = .ok result →
         TermTyping entry.toEnv typing lifetime
@@ -4996,27 +5004,27 @@ private theorem checkWhileJoinLoop?_sound_of_termSound {fuel : Nat}
   induction iterations with
   | zero =>
       intro entry inv typing lifetime bodyLifetime condition body result
-        hrefs hchild hentryWell hinvWell hcheck
+        hrefs hchild hbodyBlock hentryWell hinvWell hcheck
       simp [checkWhileJoinLoop?] at hcheck
   | succ iterations ih =>
       intro entry inv typing lifetime bodyLifetime condition body result
-        hrefs hchild hentryWell hinvWell hcheck
+        hrefs hchild hbodyBlock hentryWell hinvWell hcheck
       simp [checkWhileJoinLoop?] at hcheck
       cases hcondition :
           checkTerm? fuel inv typing lifetime condition with
       | error message =>
           simp [hcondition, Bind.bind, Except.bind] at hcheck
       | ok conditionResult =>
-        simp [hcondition, Bind.bind, Except.bind] at hcheck
-        by_cases hconditionTy : conditionResult.ty = .bool
-        · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
-          have hconditionSound := termSound hrefs hinvWell hcondition
-          have hbodyWell :
-              WellFormedEnv conditionResult.env.toEnv bodyLifetime :=
-            WellFormedEnv.of_outlives hconditionSound.2.1
-              (LifetimeChild.outlives hchild)
-          cases hbody :
-              checkTerm? fuel conditionResult.env typing bodyLifetime body with
+          simp [hcondition, Bind.bind, Except.bind] at hcheck
+          by_cases hconditionTy : conditionResult.ty = .bool
+          · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
+            have hconditionSound := termSound hrefs hinvWell hcondition
+            have hbodyWell :
+                WellFormedEnv conditionResult.env.toEnv bodyLifetime :=
+              WellFormedEnv.of_outlives hconditionSound.2.1
+                (LifetimeChild.outlives hchild)
+            cases hbody :
+                checkTerm? fuel conditionResult.env typing bodyLifetime body with
             | error message =>
                 simp [hbody, Bind.bind, Except.bind] at hcheck
             | ok bodyResult =>
@@ -5053,7 +5061,8 @@ private theorem checkWhileJoinLoop?_sound_of_termSound {fuel : Nat}
                                 hkitSound.2.2⟩
                             cases hfixed : envEqOnSupport nextInv inv
                             · simp [hfixed, Bind.bind, Except.bind] at hcheck
-                              exact ih hrefs hchild hentryWell hnextWell hcheck
+                              exact ih hrefs hchild hbodyBlock hentryWell
+                                hnextWell hcheck
                             · simp [hfixed, Bind.bind, Except.bind] at hcheck
                               cases hentryCondition :
                                   checkTerm? fuel entry typing lifetime condition with
@@ -5117,8 +5126,9 @@ private theorem checkWhileJoinLoop?_sound_of_termSound {fuel : Nat}
                                               (.whileLoop bodyLifetime condition body)
                                               .unit conditionResult.env.toEnv :=
                                           TermTyping.whileLoopJoin hchild
-                                            hjoinInv hentryShapeInv hbackShapeInv
-                                            hcontainedInv hcoherentInv hlinearInv
+                                            hbodyBlock hjoinInv hentryShapeInv
+                                            hbackShapeInv hcontainedInv
+                                            hcoherentInv hlinearInv
                                             (by simpa [hconditionTy] using
                                               hconditionSound.1)
                                             hbodySound.1
@@ -5131,7 +5141,7 @@ private theorem checkWhileJoinLoop?_sound_of_termSound {fuel : Nat}
                                           hentryWell htyping
                                   · simp [ensure, hentryConditionTy,
                                       Bind.bind, Except.bind] at hcheck
-        · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
+          · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
 
 private theorem checkWhileJoin?_sound_of_termSound {fuel : Nat}
     (termSound : CheckTermSoundAt fuel) :
@@ -5150,8 +5160,13 @@ private theorem checkWhileJoin?_sound_of_termSound {fuel : Nat}
   cases hchildCheck : isLifetimeChild lifetime bodyLifetime
   · simp [ensure, hchildCheck, Bind.bind, Except.bind] at hcheck
   · simp [ensure, hchildCheck, Bind.bind, Except.bind] at hcheck
-    exact checkWhileJoinLoop?_sound_of_termSound termSound
-      hrefs (isLifetimeChild_sound hchildCheck) hwell hwell hcheck
+    cases hbodyBlockCheck : body.isBlock
+    · simp [ensure, hbodyBlockCheck, Bind.bind, Except.bind] at hcheck
+    · simp [ensure, hbodyBlockCheck, Bind.bind, Except.bind] at hcheck
+      exact checkWhileJoinLoop?_sound_of_termSound termSound
+        hrefs (isLifetimeChild_sound hchildCheck)
+        ((Term.isBlock_eq_true_iff).mp hbodyBlockCheck)
+        hwell hwell hcheck
 
 private theorem checkWhile?_sound_of_termSound {fuel : Nat}
     (termSound : CheckTermSoundAt fuel) :
@@ -5638,6 +5653,21 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
               have hconditionSound := ih hrefs hwell hcondition
               by_cases hconditionTy : conditionResult.ty = .bool
               · simp [ensure, hconditionTy, Bind.bind, Except.bind] at hcheck
+                have htrueBlockCheck : trueBranch.isBlock = true := by
+                  cases hblock : trueBranch.isBlock
+                  · simp [ensure, hblock, Bind.bind, Except.bind] at hcheck
+                  · simpa using hblock
+                have hfalseBlockCheck : falseBranch.isBlock = true := by
+                  cases hblock : falseBranch.isBlock
+                  · simp [ensure, htrueBlockCheck, hblock, Bind.bind,
+                      Except.bind] at hcheck
+                  · simpa using hblock
+                simp [ensure, htrueBlockCheck, hfalseBlockCheck, Bind.bind,
+                  Except.bind] at hcheck
+                have htrueBlock : trueBranch.IsBlock :=
+                  (Term.isBlock_eq_true_iff).mp htrueBlockCheck
+                have hfalseBlock : falseBranch.IsBlock :=
+                  (Term.isBlock_eq_true_iff).mp hfalseBlockCheck
                 cases htrue :
                     checkTerm? fuel conditionResult.env typing lifetime
                       trueBranch with
@@ -5670,6 +5700,7 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
                                 TermTyping.iteDiverging
                                   (by simpa [hconditionTy] using
                                     hconditionSound.1)
+                                  htrueBlock hfalseBlock
                                   hthenSound.1 hfalseSound.1
                                   (termDiverges_sound hdiv)
                               cases hcheck
@@ -5695,6 +5726,7 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
                                         TermTyping.iteDiverging
                                           (by simpa [hconditionTy] using
                                             hconditionSound.1)
+                                          htrueBlock hfalseBlock
                                           hthenSound.1 hfalseSound.1
                                           (termDiverges_sound hdiv)
                                       cases hcheck
@@ -5746,6 +5778,7 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
                                                 TermTyping.ite
                                                   (by simpa [hconditionTy]
                                                     using hconditionSound.1)
+                                                  htrueBlock hfalseBlock
                                                   hthenSound.1 hfalseSound.1
                                                   (partialTyJoin?_sound
                                                     hjoinTy)
@@ -5777,6 +5810,7 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
                                     TermTyping.iteDiverging
                                       (by simpa [hconditionTy] using
                                         hconditionSound.1)
+                                      htrueBlock hfalseBlock
                                       hthenSound.1 hfalseSound.1
                                       (termDiverges_sound hdiv)
                                   cases hcheck
@@ -5795,6 +5829,7 @@ private theorem checkTerm?_sound_at : ∀ fuel, CheckTermSoundAt fuel := by
                                     TermTyping.iteDiverging
                                       (by simpa [hconditionTy] using
                                         hconditionSound.1)
+                                      htrueBlock hfalseBlock
                                       hthenSound.1 hfalseSound.1
                                       (termDiverges_sound hdiv)
                                   cases hcheck

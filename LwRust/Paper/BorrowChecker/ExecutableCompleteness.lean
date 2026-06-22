@@ -346,73 +346,89 @@ mutual
                 cases hconditionTy :
                     decide (conditionResult.ty = .bool)
                 · simp [checkTerm?, ensure, hconditionCheck, hconditionTy]
-                · cases htrueCheck :
-                      checkTerm? fuel conditionResult.env typing lifetime
-                        trueBranch with
-                  | error message =>
-                      have hmessage :=
-                        check_error_ne_fuelExhausted htrueCheck
-                          (htrue (env' := conditionResult.env))
-                      simp [checkTerm?, ensure, hconditionCheck,
-                        hconditionTy, htrueCheck, hmessage]
-                  | ok thenResult =>
-                      cases hfalseCheck :
+                · cases htrueBlockCheck : trueBranch.isBlock
+                  · simp [checkTerm?, ensure, hconditionCheck, hconditionTy,
+                      htrueBlockCheck]
+                  · cases hfalseBlockCheck : falseBranch.isBlock
+                    · simp [checkTerm?, ensure, hconditionCheck, hconditionTy,
+                        htrueBlockCheck, hfalseBlockCheck]
+                    · cases htrueCheck :
                           checkTerm? fuel conditionResult.env typing lifetime
-                            falseBranch with
+                            trueBranch with
                       | error message =>
                           have hmessage :=
-                            check_error_ne_fuelExhausted hfalseCheck
-                              (hfalse (env' := conditionResult.env))
+                            check_error_ne_fuelExhausted htrueCheck
+                              (htrue (env' := conditionResult.env))
                           simp [checkTerm?, ensure, hconditionCheck,
-                            hconditionTy, htrueCheck, hfalseCheck, hmessage]
-                      | ok falseResult =>
-                          cases hjoinTy :
-                              partialTyJoin? (.ty thenResult.ty)
-                                (.ty falseResult.ty) with
-                          | none =>
-                              cases hdiv : termDiverges falseBranch <;>
-                                simp [checkTerm?, ensure, hconditionCheck,
-                                  hconditionTy, htrueCheck, hfalseCheck,
-                                  hjoinTy, hdiv]
-                          | some joinPartial =>
-                              cases joinPartial with
-                              | ty joinTy =>
-                                    cases hjoinEnv :
-                                        envJoin? thenResult.env falseResult.env with
-                                  | none =>
+                            hconditionTy, htrueBlockCheck, hfalseBlockCheck,
+                            htrueCheck, hmessage]
+                      | ok thenResult =>
+                          cases hfalseCheck :
+                              checkTerm? fuel conditionResult.env typing lifetime
+                                falseBranch with
+                          | error message =>
+                              have hmessage :=
+                                check_error_ne_fuelExhausted hfalseCheck
+                                  (hfalse (env' := conditionResult.env))
+                              simp [checkTerm?, ensure, hconditionCheck,
+                                hconditionTy, htrueBlockCheck, hfalseBlockCheck,
+                                htrueCheck, hfalseCheck, hmessage]
+                          | ok falseResult =>
+                              cases hjoinTy :
+                                  partialTyJoin? (.ty thenResult.ty)
+                                    (.ty falseResult.ty) with
+                              | none =>
+                                  cases hdiv : termDiverges falseBranch <;>
+                                    simp [checkTerm?, ensure, hconditionCheck,
+                                      hconditionTy, htrueBlockCheck,
+                                      hfalseBlockCheck, htrueCheck, hfalseCheck,
+                                      hjoinTy, hdiv]
+                              | some joinPartial =>
+                                  cases joinPartial with
+                                  | ty joinTy =>
+                                        cases hjoinEnv :
+                                            envJoin? thenResult.env
+                                              falseResult.env with
+                                      | none =>
+                                          cases hdiv : termDiverges falseBranch <;>
+                                            simp [checkTerm?, ensure,
+                                              hconditionCheck, hconditionTy,
+                                              htrueBlockCheck, hfalseBlockCheck,
+                                              htrueCheck, hfalseCheck, hjoinTy,
+                                              hjoinEnv, hdiv]
+                                      | some joinEnv =>
+                                          cases hthenShape :
+                                              envJoinSameShape thenResult.env
+                                                joinEnv
+                                          <;> cases hfalseShape :
+                                              envJoinSameShape falseResult.env
+                                                joinEnv
+                                          <;> cases hwell :
+                                              wellFormedTy fuel joinEnv joinTy
+                                                lifetime
+                                          <;> cases hkit : wellFormedKit fuel joinEnv
+                                          <;> cases hsafe :
+                                              tyBorrowSafeAgainstEnv joinEnv joinTy
+                                          <;> simp [checkTerm?, ensure,
+                                            hconditionCheck, hconditionTy,
+                                            htrueBlockCheck, hfalseBlockCheck,
+                                            htrueCheck, hfalseCheck, hjoinTy,
+                                            hjoinEnv, hthenShape, hfalseShape,
+                                            hwell, hkit, hsafe]
+                                  | box inner =>
                                       cases hdiv : termDiverges falseBranch <;>
                                         simp [checkTerm?, ensure,
                                           hconditionCheck, hconditionTy,
+                                          htrueBlockCheck, hfalseBlockCheck,
                                           htrueCheck, hfalseCheck, hjoinTy,
-                                          hjoinEnv, hdiv]
-                                  | some joinEnv =>
-                                      cases hthenShape :
-                                          envJoinSameShape thenResult.env
-                                            joinEnv
-                                      <;> cases hfalseShape :
-                                          envJoinSameShape falseResult.env
-                                            joinEnv
-                                      <;> cases hwell :
-                                          wellFormedTy fuel joinEnv joinTy
-                                            lifetime
-                                      <;> cases hkit : wellFormedKit fuel joinEnv
-                                      <;> cases hsafe :
-                                          tyBorrowSafeAgainstEnv joinEnv joinTy
-                                      <;> simp [checkTerm?, ensure,
-                                        hconditionCheck, hconditionTy,
-                                        htrueCheck, hfalseCheck, hjoinTy,
-                                        hjoinEnv, hthenShape, hfalseShape,
-                                        hwell, hkit, hsafe]
-                              | box inner =>
-                                  cases hdiv : termDiverges falseBranch <;>
-                                    simp [checkTerm?, ensure, hconditionCheck,
-                                      hconditionTy, htrueCheck, hfalseCheck,
-                                      hjoinTy, hdiv]
-                              | undef ty =>
-                                  cases hdiv : termDiverges falseBranch <;>
-                                    simp [checkTerm?, ensure, hconditionCheck,
-                                      hconditionTy, htrueCheck, hfalseCheck,
-                                      hjoinTy, hdiv]
+                                          hdiv]
+                                  | undef ty =>
+                                      cases hdiv : termDiverges falseBranch <;>
+                                        simp [checkTerm?, ensure,
+                                          hconditionCheck, hconditionTy,
+                                          htrueBlockCheck, hfalseBlockCheck,
+                                          htrueCheck, hfalseCheck, hjoinTy,
+                                          hdiv]
         | whileLoop bodyLifetime condition body =>
             simp [termContainsWhile?] at hwhile
         | whileCond bodyLifetime conditionInFlight condition body =>

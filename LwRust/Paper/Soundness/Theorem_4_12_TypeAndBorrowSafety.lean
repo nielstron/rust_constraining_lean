@@ -458,11 +458,11 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- T-If.
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin _hcontained
-      _hcoherent _hlinear _hresultSafe ihCondition ihTrue
-      ihFalse htypingEq hsource store store' term' hvalid hvst hwf hsafe
-      hfs hmulti
+      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition
+      _htrueBlock _hfalseBlock _htrue _hfalse _hjoin _henvJoin _hsameLeft
+      _hsameRight _hwellJoin _hcontained _hcoherent _hlinear _hresultSafe
+      ihCondition ihTrue ihFalse htypingEq hsource store store' term'
+      hvalid hvst hwf hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.ite_condition hsource
@@ -534,9 +534,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- typed, so execution inside it keeps progressing.
   case iteDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
-      ihCondition ihTrue ihFalse htypingEq hsource store store' term' hvalid
-      hvst hwf hsafe hfs hmulti
+      _falseBranch _trueTy _falseTy _hcondition _htrueBlock _hfalseBlock
+      _htrue _hfalse _hdiverges ihCondition ihTrue ihFalse htypingEq hsource
+      store store' term' hvalid hvst hwf hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.ite_condition hsource
@@ -609,9 +609,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- applied to the condition run and to the (typed) iteration block.
   case whileLoop =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy hchild _hcondition _hbody _hwellTyBody hdropEq ihCondition
-      ihBody htypingEq hsource store store' term' hvalid hvst hwf hsafe
-      hfs hmulti
+      _bodyTy hchild _hbodyBlock _hcondition _hbody _hwellTyBody hdropEq
+      ihCondition ihBody htypingEq hsource store store' term' hvalid hvst
+      hwf hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.while_condition hsource
@@ -792,8 +792,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- states still progress because the body is fully typed.
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy hchild _hcondition _hbody hdiverges ihCondition ihBody htypingEq
-      hsource store store' term' hvalid hvst hwf hsafe hfs hmulti
+      _bodyTy hchild _hbodyBlock _hcondition _hbody hdiverges ihCondition
+      ihBody htypingEq hsource store store' term' hvalid hvst hwf hsafe
+      hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.while_condition hsource
@@ -909,10 +910,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   case whileLoopJoin =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv _hwellTyBody
-      hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
-      _ihBodyEntry htypingEq hsource store store' term' hvalid hvst hwf
-      hsafe hfs hmulti
+      _hbodyBlock hjoin hss1 hss2 hcbwf hcoh hlin _hcondInv _hbodyInv
+      _hwellTyBody hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv
+      _ihCondEntry _ihBodyEntry htypingEq hsource store store' term'
+      hvalid hvst hwf hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.while_condition hsource

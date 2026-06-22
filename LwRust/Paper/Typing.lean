@@ -1029,9 +1029,10 @@ mutual
         TermTyping env₁ typing lifetime (.eq lhs rhs) .bool env₃
     /-- T-If, Section 6.1.2.
 
-    The condition types as `bool`, both branches are typed in the
-    post-condition environment, and the resulting type/environment are the
-    joins (Definitions 3.8 and 3.10) of the branch results.
+    The condition types as `bool`, both branches must be source blocks, both
+    branches are typed in the post-condition environment, and the resulting
+    type/environment are the joins (Definitions 3.8 and 3.10) of the branch
+    results.
 
     Mechanisation obligations on the joined result, following the repo
     convention of rule-carried obligations (cf. `T-Assign`):
@@ -1054,6 +1055,8 @@ mutual
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy joinTy : Ty} :
         TermTyping env₁ typing lifetime condition .bool env₂ →
+        trueBranch.IsBlock →
+        falseBranch.IsBlock →
         TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
         TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
         PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
@@ -1076,8 +1079,9 @@ mutual
     borrow-state join.  `Term.Diverges` is the syntactic counterpart of that
     `!`-propagation.
 
-    The diverging branch is still fully type- and borrow-checked (premise
-    three) — this is what lets the extractor keep a truncated branch's
+    Both branches are still required to be blocks.  The diverging branch is
+    fully type- and borrow-checked — this is what lets the extractor keep a
+    truncated branch's
     constraints — but the result type and environment are exactly the live
     branch's, and none of `T-If`'s join obligations are needed because no
     join happens.  The mirror-image rule (diverging *true* branch) is
@@ -1086,6 +1090,8 @@ mutual
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy : Ty} :
         TermTyping env₁ typing lifetime condition .bool env₂ →
+        trueBranch.IsBlock →
+        falseBranch.IsBlock →
         TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
         TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
         falseBranch.Diverges →
@@ -1094,9 +1100,10 @@ mutual
     /-- T-While (beyond the paper, which is loop-free): strict-invariant
     while loop.
 
-    The body is scoped under `bodyLifetime` like a block and must restore
-    the loop-entry environment exactly (`env₃.dropLifetime bodyLifetime =
-    env₁`): the back edge then re-enters the same derivation verbatim, so no
+    The body must be source-block-shaped.  It is scoped under `bodyLifetime`
+    like a block and must restore the loop-entry environment exactly
+    (`env₃.dropLifetime bodyLifetime = env₁`): the back edge then re-enters
+    the same derivation verbatim, so no
     environment join or fixpoint is needed.  This deliberately
     under-approximates rustc, whose NLL fixpoint can widen borrow sets
     around the back edge (e.g. a body reassigning an outer `&mut` to a
@@ -1107,6 +1114,7 @@ mutual
         {lifetime bodyLifetime : Lifetime} {condition body : Term}
         {bodyTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
+        body.IsBlock →
         TermTyping env₁ typing lifetime condition .bool env₂ →
         TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
         WellFormedTy env₃ bodyTy lifetime →
@@ -1122,6 +1130,7 @@ mutual
         {lifetime bodyLifetime : Lifetime} {condition body : Term}
         {bodyTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
+        body.IsBlock →
         TermTyping env₁ typing lifetime condition .bool env₂ →
         TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
         body.Diverges →
@@ -1159,6 +1168,7 @@ mutual
         {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
         {condition body : Term} {bodyTy bodyEntryTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
+        body.IsBlock →
         EnvJoin env₁ envBack envInv →
         EnvJoinSameShape env₁ envInv →
         EnvJoinSameShape envBack envInv →

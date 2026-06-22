@@ -96,11 +96,15 @@ def nestedIncoherentJoinProgram : Term :=
     .letMut "d" (.val (.bool true)),                -- Rust: let mut d = true;
     .letMut "a" (.borrow true (.var "c")),          -- Rust: let mut a = &mut c;
     .letMut "b" (.borrow true (.var "d")),          -- Rust: let mut b = &mut d;
-    .letMut "z"                                    -- Rust: let mut z =
-      (.ite
-        (.val (.bool true))                         -- Rust: if true
-        (.borrow true (.var "a"))                   -- Rust: { &mut a }
-        (.borrow true (.var "b")))                  -- Rust: else { &mut b };
+      .letMut "z"                                    -- Rust: let mut z =
+        (.ite
+          (.val (.bool true))                         -- Rust: if true
+          (.block [0, 0] [                            -- Rust: {
+            .borrow true (.var "a")                   -- Rust: &mut a
+          ])
+          (.block [0, 0] [                            -- Rust: else {
+            .borrow true (.var "b")                   -- Rust: &mut b
+          ]))                                         -- Rust: };
   ]                                                 -- Rust: }
 
 theorem nestedIncoherentJoinProgram_failedByChecker :
@@ -115,11 +119,15 @@ def nestedBorrowShapeMismatchProgram : Term :=
     .letMut "d" (.val (.int 0)),                    -- Rust: let mut d = 0;
     .letMut "a" (.borrow false (.var "c")),         -- Rust: let mut a = &c;
     .letMut "b" (.borrow false (.var "d")),         -- Rust: let mut b = &d;
-    .letMut "x"                                    -- Rust: let mut x =
-      (.ite
-        (.val (.bool true))                         -- Rust: if true
-        (.borrow false (.var "a"))                  -- Rust: { &a }
-        (.borrow false (.var "b"))),                -- Rust: else { &b };
+      .letMut "x"                                    -- Rust: let mut x =
+        (.ite
+          (.val (.bool true))                         -- Rust: if true
+          (.block [0, 0] [                            -- Rust: {
+            .borrow false (.var "a")                  -- Rust: &a
+          ])
+          (.block [0, 0] [                            -- Rust: else {
+            .borrow false (.var "b")                  -- Rust: &b
+          ])),                                        -- Rust: };
     .assign
       (.var "x")                                    -- Rust: x
       (.borrow false (.var "a"))                    -- Rust: = &a;
