@@ -1,5 +1,5 @@
 import LwRust.Extractor.Definitions
-import LwRust.Extractor.PartialProgram
+import LwRust.Extractor.CompleteProgram
 import LwRust.Paper.Typing
 
 /-!

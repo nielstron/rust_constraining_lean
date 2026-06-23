@@ -4,7 +4,7 @@ import LwRust.Extractor.Frontier
 Generated FW-Rust grammar for parser frontiers.
 
 This file is generated from the syntax declarations and checked
-`SyntaxCtor` annotations in `LwRust.Extractor.CompleteProgram`.
+`SyntaxSemantics` annotations in `LwRust.Extractor.CompleteProgram`.
 Re-generate it with `scripts/generate_frontier_grammar_from_syntax.py`.
 -/
 
@@ -30,7 +30,6 @@ inductive Terminal where
   | trueLit
   | falseLit
   | amp
-  | ampMut
   | lbrack
   | rbrack
   | comma
@@ -42,7 +41,6 @@ inductive Terminal where
   | letKw
   | mutKw
   | assign
-  | moveKw
   | copyKw
   | eqEq
   | ifKw
@@ -61,7 +59,6 @@ inductive Tok where
   | trueLit
   | falseLit
   | amp
-  | ampMut
   | lbrack
   | rbrack
   | comma
@@ -73,7 +70,6 @@ inductive Tok where
   | letKw
   | mutKw
   | assign
-  | moveKw
   | copyKw
   | eqEq
   | ifKw
@@ -92,7 +88,6 @@ def accepts : Terminal → Tok → Prop
   | .trueLit, .trueLit => True
   | .falseLit, .falseLit => True
   | .amp, .amp => True
-  | .ampMut, .ampMut => True
   | .lbrack, .lbrack => True
   | .rbrack, .rbrack => True
   | .comma, .comma => True
@@ -104,7 +99,6 @@ def accepts : Terminal → Tok → Prop
   | .letKw, .letKw => True
   | .mutKw, .mutKw => True
   | .assign, .assign => True
-  | .moveKw, .moveKw => True
   | .copyKw, .copyKw => True
   | .eqEq, .eqEq => True
   | .ifKw, .ifKw => True
@@ -123,7 +117,6 @@ def acceptsBool : Terminal → Tok → Bool
   | .trueLit, .trueLit => Bool.true
   | .falseLit, .falseLit => Bool.true
   | .amp, .amp => Bool.true
-  | .ampMut, .ampMut => Bool.true
   | .lbrack, .lbrack => Bool.true
   | .rbrack, .rbrack => Bool.true
   | .comma, .comma => Bool.true
@@ -135,7 +128,6 @@ def acceptsBool : Terminal → Tok → Bool
   | .letKw, .letKw => Bool.true
   | .mutKw, .mutKw => Bool.true
   | .assign, .assign => Bool.true
-  | .moveKw, .moveKw => Bool.true
   | .copyKw, .copyKw => Bool.true
   | .eqEq, .eqEq => Bool.true
   | .ifKw, .ifKw => Bool.true
@@ -173,7 +165,7 @@ def ctyBorrowSharedRule : Rule Cat Terminal :=
   { name := "ctyBorrowShared", lhs := .cty, rhs := [.token .amp, .token .lbrack, .cat .clvals, .token .rbrack] }
 
 def ctyBorrowMutRule : Rule Cat Terminal :=
-  { name := "ctyBorrowMut", lhs := .cty, rhs := [.token .ampMut, .token .lbrack, .cat .clvals, .token .rbrack] }
+  { name := "ctyBorrowMut", lhs := .cty, rhs := [.token .amp, .token .mutKw, .token .lbrack, .cat .clvals, .token .rbrack] }
 
 def ctyBoxRule : Rule Cat Terminal :=
   { name := "ctyBox", lhs := .cty, rhs := [.token .box, .cat .cty] }
@@ -212,10 +204,10 @@ def ctermBorrowSharedRule : Rule Cat Terminal :=
   { name := "ctermBorrowShared", lhs := .cterm, rhs := [.token .amp, .cat .clval] }
 
 def ctermBorrowMutRule : Rule Cat Terminal :=
-  { name := "ctermBorrowMut", lhs := .cterm, rhs := [.token .ampMut, .cat .clval] }
+  { name := "ctermBorrowMut", lhs := .cterm, rhs := [.token .amp, .token .mutKw, .cat .clval] }
 
 def ctermMoveRule : Rule Cat Terminal :=
-  { name := "ctermMove", lhs := .cterm, rhs := [.token .moveKw, .cat .clval] }
+  { name := "ctermMove", lhs := .cterm, rhs := [.cat .clval] }
 
 def ctermCopyRule : Rule Cat Terminal :=
   { name := "ctermCopy", lhs := .cterm, rhs := [.token .copyKw, .cat .clval] }
@@ -307,7 +299,6 @@ def defaultToken : Terminal → Tok
   | .trueLit => .trueLit
   | .falseLit => .falseLit
   | .amp => .amp
-  | .ampMut => .ampMut
   | .lbrack => .lbrack
   | .rbrack => .rbrack
   | .comma => .comma
@@ -319,7 +310,6 @@ def defaultToken : Terminal → Tok
   | .letKw => .letKw
   | .mutKw => .mutKw
   | .assign => .assign
-  | .moveKw => .moveKw
   | .copyKw => .copyKw
   | .eqEq => .eqEq
   | .ifKw => .ifKw

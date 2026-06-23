@@ -273,7 +273,7 @@ def qualify_partial_constructors(src: str) -> str:
     return src
 
 
-def rel_ctor_for_rule(rule: Rule, cat: str) -> str:
+def relation_constructor_for_rule(rule: Rule, cat: str) -> str:
     return (
         f"_root_.ConservativeExtractor.Generated.{LOWER_FOR_CAT[cat][2]}."
         f"{rule.production.name}_{rule.state_name}"
@@ -534,15 +534,15 @@ def simp_args_for_rule(prod: Production) -> list[str]:
 
 def render_boundary_soundness_case(rule: Rule, cat: str) -> list[str]:
     prod = rule.production
-    ctor = f"{prod.name}_{rule.state_name}_boundary"
-    rel_ctor = (
+    case_name = f"{prod.name}_{rule.state_name}_boundary"
+    relation_constructor = (
         f"_root_.ConservativeExtractor.Generated.{LOWER_FOR_CAT[cat][2]}."
         f"{prod.name}_{rule.state_name}"
     )
     premise = completion_premise_for_rule(rule)
-    exact = rel_ctor if premise is None else f"{rel_ctor} {premise}"
+    exact = relation_constructor if premise is None else f"{relation_constructor} {premise}"
     return [
-        f"  | {ctor} =>",
+        f"  | {case_name} =>",
         "      simp_all [" + ", ".join(simp_args_for_rule(prod)) + "]",
         "      subst completed",
         f"      exact {exact}",
@@ -853,8 +853,8 @@ def render_descend_soundness_case(rule: Rule, cat: str) -> list[str]:
     elem = prod.elems[rule.index]
     assert elem.kind in {"cat", "list"}
     fname = next(name for i, _elem, name, _typ in field_elems(prod) if i == rule.index)
-    ctor = f"{prod.name}_{rule.state_name}_descend"
-    rel_ctor = (
+    case_name = f"{prod.name}_{rule.state_name}_descend"
+    relation_constructor = (
         f"_root_.ConservativeExtractor.Generated.{LOWER_FOR_CAT[cat][2]}."
         f"{prod.name}_{rule.state_name}"
     )
@@ -877,13 +877,13 @@ def render_descend_soundness_case(rule: Rule, cat: str) -> list[str]:
         case_arg_names = previous_premise_names + [f"{fname}_lower"]
     case_args = " ".join(case_arg_names)
     return [
-        f"  | {ctor} {case_args} =>",
+        f"  | {case_name} {case_args} =>",
         "      simp_all [" + ", ".join(simp_args_for_rule(prod)) + "]",
         "      simp only [Option.bind_eq_some_iff] at hdenotes",
         f"      obtain ⟨{fname}Completed, {fname}_denotes, hcompleted⟩ := hdenotes",
         "      simp at hcompleted",
         "      subst completed",
-        f"      exact {rel_ctor} {child_proof}",
+        f"      exact {relation_constructor} {child_proof}",
     ]
 
 
@@ -1012,7 +1012,13 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
-        "  | ctyBorrowMut_dot4_boundary targets_denotes =>",
+        "  | ctyBorrowMut_dot3_boundary =>",
+        "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
+        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
+        "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
+        "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
+        "  | ctyBorrowMut_dot5_boundary targets_denotes =>",
         "      rename_i stateTargetsTree stateTargets checkedBefore",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
         "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
@@ -1078,21 +1084,16 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "      subst actualElement",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement",
         "        _root_.ConservativeExtractor.Generated.CompletesTy.done",
-        "  | ctyBorrowShared_tokenAmpStart_boundary =>",
+        "  | ctyBorrowShared_borrowSharedStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
         "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
-        "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_tokenAmpStart",
-        "  | ctyBorrowMut_tokenAmpStart_boundary =>",
+        "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedStart",
+        "  | ctyBorrowMut_borrowSharedStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
         "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
-        "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_tokenAmpStart",
-        "  | ctyBorrowMut_borrowMutStart_boundary =>",
-        "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
-        "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
-        "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutStart",
+        "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowSharedStart",
         "  | ctyBox_boxStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
         "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
@@ -1381,6 +1382,12 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
+  | ctermBorrowMut_dot2_boundary =>
+      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
+        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+      cases hdenotes <;> simp [ctermBorrowMutRule] at htree
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand
+        _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermMove_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
@@ -1660,26 +1667,16 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBoxRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxStart
-  | ctermBorrowShared_tokenAmpStart_boundary =>
+  | ctermBorrowShared_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowSharedRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_tokenAmpStart
-  | ctermBorrowMut_tokenAmpStart_boundary =>
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedStart
+  | ctermBorrowMut_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_tokenAmpStart
-  | ctermBorrowMut_borrowMutStart_boundary =>
-      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
-      cases hdenotes <;> simp [ctermBorrowMutRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutStart
-  | ctermMove_moveStart_boundary =>
-      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
-      cases hdenotes <;> simp [ctermMoveRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveStart
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowSharedStart
   | ctermCopy_copyStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
@@ -1870,11 +1867,22 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
 
 def render_decoder_assisted_coverage_theorems() -> list[str]:
     lines: list[str] = []
-    for kind, rule_name, partial_ctor in [
-        ("BorrowShared", "ctyBorrowSharedRule", "borrowSharedTargets"),
-        ("BorrowMut", "ctyBorrowMutRule", "borrowMutTargets"),
+    for kind, rule_name, dot, before_children, partial_constructor in [
+        (
+            "BorrowShared",
+            "ctyBorrowSharedRule",
+            3,
+            "[.token .amp, .token .lbrack, targetsTree]",
+            "borrowSharedTargets",
+        ),
+        (
+            "BorrowMut",
+            "ctyBorrowMutRule",
+            4,
+            "[.token .amp, .token .mutKw, .token .lbrack, targetsTree]",
+            "borrowMutTargets",
+        ),
     ]:
-        token = ".token .amp" if kind == "BorrowShared" else ".token .ampMut"
         theorem_name = (
             f"checkedTyFrontierLower_cty{kind}Targets_boundary_exists"
         )
@@ -1885,27 +1893,25 @@ def render_decoder_assisted_coverage_theorems() -> list[str]:
             "    {targetsTree : Tree Tok}",
             "    {checkedBefore :",
             "      CheckableGrammar.checkSeq checkableGrammar",
-            f"        ({{ rule := {rule_name}, dot := 3 }} : Item Cat Terminal).before",
-            f"        [{token}, .token .lbrack, targetsTree] = Bool.true}} :",
+            f"        ({{ rule := {rule_name}, dot := {dot} }} : Item Cat Terminal).before",
+            f"        {before_children} = Bool.true}} :",
             "    ∃ targets : List LVal,",
             "      CheckedTyFrontierLower",
             "        (CheckableGrammar.CheckedFrontierState.boundary",
-            f"          ({{ rule := {rule_name}, dot := 3 }} : Item Cat Terminal)",
-            f"          (by native_decide) [{token}, .token .lbrack, targetsTree]",
+            f"          ({{ rule := {rule_name}, dot := {dot} }} : Item Cat Terminal)",
+            f"          (by native_decide) {before_children}",
             "          checkedBefore)",
-            f"        (_root_.ConservativeExtractor.Generated.PartialTy.{partial_ctor}",
+            f"        (_root_.ConservativeExtractor.Generated.PartialTy.{partial_constructor}",
             "          (_root_.ConservativeExtractor.Generated.PartialLVals.done targets)) := by",
             "  have htargets :",
             "      CheckableGrammar.checkTree checkableGrammar .clvals targetsTree =",
             "        Bool.true := by",
-            "    have h := checkedBefore",
-            f"    simp [{rule_name}, Item.before, CheckableGrammar.checkSeq,",
-            "      acceptsBool] at h",
-            "    exact h.2.2",
+            f"    simpa [{rule_name}, Item.before, CheckableGrammar.checkSeq,",
+            "      checkableGrammar, acceptsBool] using checkedBefore",
             "  obtain ⟨targets, htargetsDenote⟩ :=",
             "    checkedLValsTree_denote_exists htargets",
             "  exact ⟨targets,",
-            f"    CheckedTyFrontierLower.cty{kind}_{partial_ctor}_boundary",
+            f"    CheckedTyFrontierLower.cty{kind}_{partial_constructor}_boundary",
             "      htargetsDenote⟩",
         ])
     return lines
@@ -1932,17 +1938,17 @@ def partial_expr_for_rule(rule: Rule) -> str:
 
 def render_completion_shape_theorem(rule: Rule, cat: str) -> list[str]:
     prod = rule.production
-    ctor = f"{prod.name}_{rule.state_name}_boundary"
+    theorem_base = f"{prod.name}_{rule.state_name}_boundary"
     binders = "".join(f" {{{name} : {typ}}}" for name, typ in all_field_binders(prod))
-    rel_ctor = (
+    relation_constructor = (
         f"_root_.ConservativeExtractor.Generated.{LOWER_FOR_CAT[cat][2]}."
         f"{prod.name}_{rule.state_name}"
     )
     premise = completion_premise_for_rule(rule)
-    exact = rel_ctor if premise is None else f"{rel_ctor} {premise}"
+    exact = relation_constructor if premise is None else f"{relation_constructor} {premise}"
     return [
         "",
-        f"theorem {ctor}_completes{binders} :",
+        f"theorem {theorem_base}_completes{binders} :",
         f"    {LOWER_FOR_CAT[cat][2]} ({partial_expr_for_rule(rule)})",
         f"      ({complete_term_expr_for_rule(rule)}) := by",
         f"  exact {exact}",
@@ -1950,12 +1956,12 @@ def render_completion_shape_theorem(rule: Rule, cat: str) -> list[str]:
 
 
 def render_done_completion_shape_theorem(prod: Production, cat: str) -> list[str]:
-    ctor = f"{prod.name}_done_boundary"
+    theorem_base = f"{prod.name}_done_boundary"
     complete_rel = LOWER_FOR_CAT[cat][2]
     complete_src = subst(prod.ast, {})
     return [
         "",
-        f"theorem {ctor}_completes :",
+        f"theorem {theorem_base}_completes :",
         f"    {complete_rel} ({done_partial_expr_for_prod(prod)})",
         f"      ({complete_src}) := by",
         f"  exact _root_.ConservativeExtractor.Generated.{complete_rel}.done",
@@ -1967,12 +1973,12 @@ def render_boundary_gap_completion_shape_theorem(
     cat: str,
 ) -> list[str]:
     prod = gap.prod
-    ctor = f"{prod.name}_dot{gap.dot}_boundary"
+    theorem_base = f"{prod.name}_dot{gap.dot}_boundary"
     binders = "".join(f" {{{name} : {typ}}}" for name, typ in all_field_binders(prod))
     complete_src = subst(prod.ast, {name: name for name, _typ in all_field_binders(prod)})
     return [
         "",
-        f"theorem {ctor}_completes{binders} :",
+        f"theorem {theorem_base}_completes{binders} :",
         f"    {LOWER_FOR_CAT[cat][2]} ({gap.partial_src})",
         f"      ({complete_src}) := by",
         f"  exact {gap.exact_src}",
@@ -1985,7 +1991,7 @@ def render_descend_completion_shape_theorem(rule: Rule, cat: str) -> list[str]:
     elem = prod.elems[rule.index]
     assert elem.kind in {"cat", "list"}
     fname = next(name for i, _elem, name, _typ in field_elems(prod) if i == rule.index)
-    ctor = f"{prod.name}_{rule.state_name}_descend"
+    theorem_base = f"{prod.name}_{rule.state_name}_descend"
     binders: list[tuple[str, str]] = []
     names: dict[str, str] = {}
     child_cat, _child_relation, child_partial, child_rel, _child_denote = (
@@ -2008,18 +2014,18 @@ def render_descend_completion_shape_theorem(rule: Rule, cat: str) -> list[str]:
     partial_src = qualify_partial_constructors(
         partial_app(partial, rule.state_name, partial_field_values_for_descend(prod, rule.index)))
     complete_src = subst(prod.ast, names)
-    rel_ctor = (
+    relation_constructor = (
         f"_root_.ConservativeExtractor.Generated.{LOWER_FOR_CAT[cat][2]}."
         f"{prod.name}_{rule.state_name}"
     )
     child_rel = f"_root_.ConservativeExtractor.Generated.{child_rel}"
     return [
         "",
-        f"theorem {ctor}_completes{binders_src}",
+        f"theorem {theorem_base}_completes{binders_src}",
         f"    ({fname}_completes : {child_rel} {fname} {fname}') :",
         f"    {LOWER_FOR_CAT[cat][2]} ({partial_src})",
         f"      ({complete_src}) := by",
-        f"  exact {rel_ctor} {fname}_completes",
+        f"  exact {relation_constructor} {fname}_completes",
     ]
 
 
@@ -2143,7 +2149,7 @@ def boundary_gap_for_dot(
             ]
             partial_src = qualify_partial_constructors(
                 partial_app(partial, active_rule.state_name, fields))
-            exact_src = f"{rel_ctor_for_rule(active_rule, cat)} {active_premise}"
+            exact_src = f"{relation_constructor_for_rule(active_rule, cat)} {active_premise}"
             return BoundaryGap(prod, dot, partial_src, exact_src)
 
     previous = last_field_before(prod, dot)
@@ -2152,8 +2158,11 @@ def boundary_gap_for_dot(
         previous_rule = by_field.get((prod.name, previous_index))
         if previous_rule is not None:
             premise = completion_premise_for_rule(previous_rule)
-            rel_ctor = rel_ctor_for_rule(previous_rule, cat)
-            exact_src = rel_ctor if premise is None else f"{rel_ctor} {premise}"
+            relation_constructor = relation_constructor_for_rule(previous_rule, cat)
+            exact_src = (
+                relation_constructor if premise is None
+                else f"{relation_constructor} {premise}"
+            )
             return BoundaryGap(
                 prod, dot, partial_expr_for_rule(previous_rule), exact_src)
 
@@ -2163,7 +2172,7 @@ def boundary_gap_for_dot(
             prod,
             dot,
             partial_expr_for_rule(start_rule),
-            rel_ctor_for_rule(start_rule, cat),
+            relation_constructor_for_rule(start_rule, cat),
         )
 
     return BoundaryGap(prod, dot, cutoff_partial_expr(cat), cutoff_exact_expr(cat))
@@ -2213,7 +2222,7 @@ def render() -> str:
         "existing generated partial-program frontiers.",
         "",
         "This file is generated from the syntax declarations and checked",
-        "`SyntaxCtor` annotations in `LwRust.Extractor.CompleteProgram`.",
+        "`SyntaxSemantics` annotations in `LwRust.Extractor.CompleteProgram`.",
         "Re-generate it with `scripts/generate_frontier_lower_from_syntax.py`.",
         "-/",
         "",

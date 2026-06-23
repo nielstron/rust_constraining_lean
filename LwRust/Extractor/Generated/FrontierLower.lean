@@ -1,11 +1,12 @@
 import LwRust.Extractor.FrontierSemantics
+import LwRust.Extractor.PartialProgram
 
 /-!
 Generated lowering hooks from checked FW parser frontiers to the
 existing generated partial-program frontiers.
 
 This file is generated from the syntax declarations and checked
-`SyntaxCtor` annotations in `LwRust.Extractor.CompleteProgram`.
+`SyntaxSemantics` annotations in `LwRust.Extractor.CompleteProgram`.
 Re-generate it with `scripts/generate_frontier_lower_from_syntax.py`.
 -/
 
@@ -239,19 +240,19 @@ inductive CheckedTyFrontierLower :
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyUnitRule, dot := 1 } : Item Cat Terminal).before [.token .ctyUnit] = Bool.true} :
       CheckedTyFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyUnitRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ctyUnit] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxCtor.ctyUnit_ctor))
+        (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxSemantics.ctyUnit))
 
   | ctyInt_done_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyIntRule, dot := 1 } : Item Cat Terminal).before [.token .ctyInt] = Bool.true} :
       CheckedTyFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyIntRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ctyInt] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxCtor.ctyInt_ctor))
+        (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxSemantics.ctyInt))
 
   | ctyBool_done_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBoolRule, dot := 1 } : Item Cat Terminal).before [.token .ctyBool] = Bool.true} :
       CheckedTyFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBoolRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ctyBool] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxCtor.ctyBool_ctor))
+        (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxSemantics.ctyBool))
 
   | ctyUnit_dot0_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyUnitRule, dot := 0 } : Item Cat Terminal).before [] = Bool.true} :
@@ -298,17 +299,23 @@ inductive CheckedTyFrontierLower :
         (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
 
   | ctyBorrowMut_dot2_boundary
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 2 } : Item Cat Terminal).before [.token .ampMut, .token .lbrack] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 2 } : Item Cat Terminal).before [.token .amp, .token .mutKw] = Bool.true} :
       CheckedTyFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 2 } : Item Cat Terminal) (by native_decide) [.token .ampMut, .token .lbrack] checkedBefore)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 2 } : Item Cat Terminal) (by native_decide) [.token .amp, .token .mutKw] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
 
-  | ctyBorrowMut_dot4_boundary
+  | ctyBorrowMut_dot3_boundary
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal).before [.token .amp, .token .mutKw, .token .lbrack] = Bool.true} :
+      CheckedTyFrontierLower
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal) (by native_decide) [.token .amp, .token .mutKw, .token .lbrack] checkedBefore)
+        (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
+
+  | ctyBorrowMut_dot5_boundary
       {targetsTree : Tree Tok} {targets : List LVal}
       (targets_denotes : denoteLVals? targetsTree = some targets)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 4 } : Item Cat Terminal).before [.token .ampMut, .token .lbrack, targetsTree, .token .rbrack] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 5 } : Item Cat Terminal).before [.token .amp, .token .mutKw, .token .lbrack, targetsTree, .token .rbrack] = Bool.true} :
       CheckedTyFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 4 } : Item Cat Terminal) (by native_decide) [.token .ampMut, .token .lbrack, targetsTree, .token .rbrack] checkedBefore)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 5 } : Item Cat Terminal) (by native_decide) [.token .amp, .token .mutKw, .token .lbrack, targetsTree, .token .rbrack] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets (_root_.ConservativeExtractor.Generated.PartialLVals.done targets))
 
   | ctyBox_dot0_boundary
@@ -328,9 +335,9 @@ inductive CheckedTyFrontierLower :
   | ctyBorrowMut_borrowMutTargets_boundary
       {targetsTree : Tree Tok} {targets : List LVal}
       (targets_denotes : denoteLVals? targetsTree = some targets)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal).before [.token .ampMut, .token .lbrack, targetsTree] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 4 } : Item Cat Terminal).before [.token .amp, .token .mutKw, .token .lbrack, targetsTree] = Bool.true} :
       CheckedTyFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal) (by native_decide) [.token .ampMut, .token .lbrack, targetsTree] checkedBefore)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 4 } : Item Cat Terminal) (by native_decide) [.token .amp, .token .mutKw, .token .lbrack, targetsTree] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets (_root_.ConservativeExtractor.Generated.PartialLVals.done targets))
 
   | ctyBox_boxElement_boundary
@@ -341,23 +348,17 @@ inductive CheckedTyFrontierLower :
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBoxRule, dot := 2 } : Item Cat Terminal) (by native_decide) [.token .box, elementTree] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTy.boxElement (_root_.ConservativeExtractor.Generated.PartialTy.done element))
 
-  | ctyBorrowShared_tokenAmpStart_boundary
+  | ctyBorrowShared_borrowSharedStart_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowSharedRule, dot := 1 } : Item Cat Terminal).before [.token .amp] = Bool.true} :
       CheckedTyFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowSharedRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .amp] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTy.tokenAmpStart)
+        (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedStart)
 
-  | ctyBorrowMut_tokenAmpStart_boundary
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .ampMut] = Bool.true} :
+  | ctyBorrowMut_borrowSharedStart_boundary
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .amp] = Bool.true} :
       CheckedTyFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ampMut] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTy.tokenAmpStart)
-
-  | ctyBorrowMut_borrowMutStart_boundary
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .ampMut] = Bool.true} :
-      CheckedTyFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ampMut] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutStart)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctyBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .amp] checkedBefore)
+        (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedStart)
 
   | ctyBox_boxStart_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBoxRule, dot := 1 } : Item Cat Terminal).before [.token .box] = Bool.true} :
@@ -378,9 +379,9 @@ inductive CheckedTyFrontierLower :
       {targetsState : CheckableGrammar.CheckedFrontierState checkableGrammar .clvals}
       {targets : PartialLVals}
       (targets_lower : CheckedLValsFrontierLower targetsState targets)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 2 } : Item Cat Terminal).before [.token .ampMut, .token .lbrack] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal).before [.token .amp, .token .mutKw, .token .lbrack] = Bool.true} :
       CheckedTyFrontierLower
-        (CheckableGrammar.CheckedFrontierState.descend ({ rule := ctyBorrowMutRule, dot := 2 } : Item Cat Terminal) (by native_decide) .clvals [.token .rbrack] (by native_decide) [.token .ampMut, .token .lbrack] checkedBefore targetsState)
+        (CheckableGrammar.CheckedFrontierState.descend ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal) (by native_decide) .clvals [.token .rbrack] (by native_decide) [.token .amp, .token .mutKw, .token .lbrack] checkedBefore targetsState)
         (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets targets)
 
   | ctyBox_boxElement_descend
@@ -456,19 +457,19 @@ inductive CheckedTermFrontierLower :
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermUnitRule, dot := 1 } : Item Cat Terminal).before [.token .unit] = Bool.true} :
       CheckedTermFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermUnitRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .unit] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxCtor.ctermUnit_ctor))
+        (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxSemantics.ctermUnit))
 
   | ctermTrue_done_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermTrueRule, dot := 1 } : Item Cat Terminal).before [.token .trueLit] = Bool.true} :
       CheckedTermFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermTrueRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .trueLit] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxCtor.ctermTrue_ctor))
+        (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxSemantics.ctermTrue))
 
   | ctermFalse_done_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermFalseRule, dot := 1 } : Item Cat Terminal).before [.token .falseLit] = Bool.true} :
       CheckedTermFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermFalseRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .falseLit] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxCtor.ctermFalse_ctor))
+        (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxSemantics.ctermFalse))
 
   | ctermUnit_dot0_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermUnitRule, dot := 0 } : Item Cat Terminal).before [] = Bool.true} :
@@ -572,6 +573,12 @@ inductive CheckedTermFrontierLower :
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 0 } : Item Cat Terminal).before [] = Bool.true} :
       CheckedTermFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 0 } : Item Cat Terminal) (by native_decide) [] checkedBefore)
+        (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
+
+  | ctermBorrowMut_dot2_boundary
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 2 } : Item Cat Terminal).before [.token .amp, .token .mutKw] = Bool.true} :
+      CheckedTermFrontierLower
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 2 } : Item Cat Terminal) (by native_decide) [.token .amp, .token .mutKw] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
 
   | ctermMove_dot0_boundary
@@ -698,17 +705,17 @@ inductive CheckedTermFrontierLower :
   | ctermBorrowMut_borrowMutOperand_boundary
       {operandTree : Tree Tok} {operand : LVal}
       (operand_denotes : denoteLVal? operandTree = some operand)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 2 } : Item Cat Terminal).before [.token .ampMut, operandTree] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 3 } : Item Cat Terminal).before [.token .amp, .token .mutKw, operandTree] = Bool.true} :
       CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 2 } : Item Cat Terminal) (by native_decide) [.token .ampMut, operandTree] checkedBefore)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 3 } : Item Cat Terminal) (by native_decide) [.token .amp, .token .mutKw, operandTree] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
 
   | ctermMove_moveOperand_boundary
       {operandTree : Tree Tok} {operand : LVal}
       (operand_denotes : denoteLVal? operandTree = some operand)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermMoveRule, dot := 2 } : Item Cat Terminal).before [.token .moveKw, operandTree] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermMoveRule, dot := 1 } : Item Cat Terminal).before [operandTree] = Bool.true} :
       CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermMoveRule, dot := 2 } : Item Cat Terminal) (by native_decide) [.token .moveKw, operandTree] checkedBefore)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermMoveRule, dot := 1 } : Item Cat Terminal) (by native_decide) [operandTree] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTerm.moveOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
 
   | ctermCopy_copyOperand_boundary
@@ -805,29 +812,17 @@ inductive CheckedTermFrontierLower :
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBoxRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .box] checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTerm.boxStart)
 
-  | ctermBorrowShared_tokenAmpStart_boundary
+  | ctermBorrowShared_borrowSharedStart_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowSharedRule, dot := 1 } : Item Cat Terminal).before [.token .amp] = Bool.true} :
       CheckedTermFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowSharedRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .amp] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.tokenAmpStart)
+        (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedStart)
 
-  | ctermBorrowMut_tokenAmpStart_boundary
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .ampMut] = Bool.true} :
+  | ctermBorrowMut_borrowSharedStart_boundary
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .amp] = Bool.true} :
       CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ampMut] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.tokenAmpStart)
-
-  | ctermBorrowMut_borrowMutStart_boundary
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .ampMut] = Bool.true} :
-      CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .ampMut] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutStart)
-
-  | ctermMove_moveStart_boundary
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermMoveRule, dot := 1 } : Item Cat Terminal).before [.token .moveKw] = Bool.true} :
-      CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermMoveRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .moveKw] checkedBefore)
-        (_root_.ConservativeExtractor.Generated.PartialTerm.moveStart)
+        (CheckableGrammar.CheckedFrontierState.boundary ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) [.token .amp] checkedBefore)
+        (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedStart)
 
   | ctermCopy_copyStart_boundary
       {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermCopyRule, dot := 1 } : Item Cat Terminal).before [.token .copyKw] = Bool.true} :
@@ -909,18 +904,18 @@ inductive CheckedTermFrontierLower :
       {operandState : CheckableGrammar.CheckedFrontierState checkableGrammar .clval}
       {operand : PartialLVal}
       (operand_lower : CheckedLValFrontierLower operandState operand)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal).before [.token .ampMut] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermBorrowMutRule, dot := 2 } : Item Cat Terminal).before [.token .amp, .token .mutKw] = Bool.true} :
       CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.descend ({ rule := ctermBorrowMutRule, dot := 1 } : Item Cat Terminal) (by native_decide) .clval [] (by native_decide) [.token .ampMut] checkedBefore operandState)
+        (CheckableGrammar.CheckedFrontierState.descend ({ rule := ctermBorrowMutRule, dot := 2 } : Item Cat Terminal) (by native_decide) .clval [] (by native_decide) [.token .amp, .token .mutKw] checkedBefore operandState)
         (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand operand)
 
   | ctermMove_moveOperand_descend
       {operandState : CheckableGrammar.CheckedFrontierState checkableGrammar .clval}
       {operand : PartialLVal}
       (operand_lower : CheckedLValFrontierLower operandState operand)
-      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermMoveRule, dot := 1 } : Item Cat Terminal).before [.token .moveKw] = Bool.true} :
+      {checkedBefore : CheckableGrammar.checkSeq checkableGrammar ({ rule := ctermMoveRule, dot := 0 } : Item Cat Terminal).before [] = Bool.true} :
       CheckedTermFrontierLower
-        (CheckableGrammar.CheckedFrontierState.descend ({ rule := ctermMoveRule, dot := 1 } : Item Cat Terminal) (by native_decide) .clval [] (by native_decide) [.token .moveKw] checkedBefore operandState)
+        (CheckableGrammar.CheckedFrontierState.descend ({ rule := ctermMoveRule, dot := 0 } : Item Cat Terminal) (by native_decide) .clval [] (by native_decide) [] checkedBefore operandState)
         (_root_.ConservativeExtractor.Generated.PartialTerm.moveOperand operand)
 
   | ctermCopy_copyOperand_descend
@@ -1299,7 +1294,11 @@ theorem checkedTyFrontierLower_completes_of_rawDenotes
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
       exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
-  | ctyBorrowMut_dot4_boundary =>
+  | ctyBorrowMut_dot3_boundary =>
+      simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
+      subst completed
+      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
+  | ctyBorrowMut_dot5_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
       exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.done
@@ -1319,18 +1318,14 @@ theorem checkedTyFrontierLower_completes_of_rawDenotes
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBoxRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
       exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement _root_.ConservativeExtractor.Generated.CompletesTy.done
-  | ctyBorrowShared_tokenAmpStart_boundary =>
+  | ctyBorrowShared_borrowSharedStart_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBorrowSharedRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_tokenAmpStart
-  | ctyBorrowMut_tokenAmpStart_boundary =>
+      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedStart
+  | ctyBorrowMut_borrowSharedStart_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_tokenAmpStart
-  | ctyBorrowMut_borrowMutStart_boundary =>
-      simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
-      subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutStart
+      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowSharedStart
   | ctyBox_boxStart_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctyBoxRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
@@ -1483,6 +1478,10 @@ theorem checkedTermFrontierLower_completes_of_rawDenotes
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
+  | ctermBorrowMut_dot2_boundary =>
+      simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
+      subst completed
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermMove_dot0_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermMoveRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
@@ -1599,22 +1598,14 @@ theorem checkedTermFrontierLower_completes_of_rawDenotes
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermBoxRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxStart
-  | ctermBorrowShared_tokenAmpStart_boundary =>
+  | ctermBorrowShared_borrowSharedStart_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermBorrowSharedRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_tokenAmpStart
-  | ctermBorrowMut_tokenAmpStart_boundary =>
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedStart
+  | ctermBorrowMut_borrowSharedStart_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_tokenAmpStart
-  | ctermBorrowMut_borrowMutStart_boundary =>
-      simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermBorrowMutRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
-      subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutStart
-  | ctermMove_moveStart_boundary =>
-      simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermMoveRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
-      subst completed
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveStart
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowSharedStart
   | ctermCopy_copyStart_boundary =>
       simp_all [CheckableGrammar.CheckedFrontierState.rawCompletion, CheckableGrammar.Defaults.completeBoundaryRaw, defaults, ctermCopyRule, Item.after, CheckableGrammar.Defaults.defaultSeq, CheckableGrammar.Defaults.defaultSymTree, defaultTree, defaultToken, denoteTerm?, denoteLVal?, denoteTerms?, denoteTermsTail?, denoteLVals?, denoteLValsTail?, denoteTy?]
       subst completed
@@ -1812,7 +1803,13 @@ theorem checkedTyFrontierLower_completes_of_stateCompletes
       cases hdenotes <;> simp [ctyBorrowMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets
         _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
-  | ctyBorrowMut_dot4_boundary targets_denotes =>
+  | ctyBorrowMut_dot3_boundary =>
+      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
+        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+      cases hdenotes <;> simp [ctyBorrowMutRule] at htree
+      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets
+        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
+  | ctyBorrowMut_dot5_boundary targets_denotes =>
       rename_i stateTargetsTree stateTargets checkedBefore
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
@@ -1878,21 +1875,16 @@ theorem checkedTyFrontierLower_completes_of_stateCompletes
       subst actualElement
       exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement
         _root_.ConservativeExtractor.Generated.CompletesTy.done
-  | ctyBorrowShared_tokenAmpStart_boundary =>
+  | ctyBorrowShared_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctyBorrowSharedRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_tokenAmpStart
-  | ctyBorrowMut_tokenAmpStart_boundary =>
+      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedStart
+  | ctyBorrowMut_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctyBorrowMutRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_tokenAmpStart
-  | ctyBorrowMut_borrowMutStart_boundary =>
-      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
-      cases hdenotes <;> simp [ctyBorrowMutRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutStart
+      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowSharedStart
   | ctyBox_boxStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
@@ -2165,6 +2157,12 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermBorrowMut_dot0_boundary =>
+      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
+        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+      cases hdenotes <;> simp [ctermBorrowMutRule] at htree
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand
+        _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
+  | ctermBorrowMut_dot2_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
@@ -2449,26 +2447,16 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBoxRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxStart
-  | ctermBorrowShared_tokenAmpStart_boundary =>
+  | ctermBorrowShared_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowSharedRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_tokenAmpStart
-  | ctermBorrowMut_tokenAmpStart_boundary =>
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedStart
+  | ctermBorrowMut_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_tokenAmpStart
-  | ctermBorrowMut_borrowMutStart_boundary =>
-      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
-      cases hdenotes <;> simp [ctermBorrowMutRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutStart
-  | ctermMove_moveStart_boundary =>
-      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
-      cases hdenotes <;> simp [ctermMoveRule] at htree
-      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveStart
+      exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowSharedStart
   | ctermCopy_copyStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
         CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
@@ -2715,10 +2703,8 @@ theorem checkedTyFrontierLower_ctyBorrowSharedTargets_boundary_exists
   have htargets :
       CheckableGrammar.checkTree checkableGrammar .clvals targetsTree =
         Bool.true := by
-    have h := checkedBefore
-    simp [ctyBorrowSharedRule, Item.before, CheckableGrammar.checkSeq,
-      acceptsBool] at h
-    exact h.2.2
+    simpa [ctyBorrowSharedRule, Item.before, CheckableGrammar.checkSeq,
+      checkableGrammar, acceptsBool] using checkedBefore
   obtain ⟨targets, htargetsDenote⟩ :=
     checkedLValsTree_denote_exists htargets
   exact ⟨targets,
@@ -2730,23 +2716,21 @@ theorem checkedTyFrontierLower_ctyBorrowMutTargets_boundary_exists
     {targetsTree : Tree Tok}
     {checkedBefore :
       CheckableGrammar.checkSeq checkableGrammar
-        ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal).before
-        [.token .ampMut, .token .lbrack, targetsTree] = Bool.true} :
+        ({ rule := ctyBorrowMutRule, dot := 4 } : Item Cat Terminal).before
+        [.token .amp, .token .mutKw, .token .lbrack, targetsTree] = Bool.true} :
     ∃ targets : List LVal,
       CheckedTyFrontierLower
         (CheckableGrammar.CheckedFrontierState.boundary
-          ({ rule := ctyBorrowMutRule, dot := 3 } : Item Cat Terminal)
-          (by native_decide) [.token .ampMut, .token .lbrack, targetsTree]
+          ({ rule := ctyBorrowMutRule, dot := 4 } : Item Cat Terminal)
+          (by native_decide) [.token .amp, .token .mutKw, .token .lbrack, targetsTree]
           checkedBefore)
         (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets
           (_root_.ConservativeExtractor.Generated.PartialLVals.done targets)) := by
   have htargets :
       CheckableGrammar.checkTree checkableGrammar .clvals targetsTree =
         Bool.true := by
-    have h := checkedBefore
-    simp [ctyBorrowMutRule, Item.before, CheckableGrammar.checkSeq,
-      acceptsBool] at h
-    exact h.2.2
+    simpa [ctyBorrowMutRule, Item.before, CheckableGrammar.checkSeq,
+      checkableGrammar, acceptsBool] using checkedBefore
   obtain ⟨targets, htargetsDenote⟩ :=
     checkedLValsTree_denote_exists htargets
   exact ⟨targets,
@@ -2754,523 +2738,518 @@ theorem checkedTyFrontierLower_ctyBorrowMutTargets_boundary_exists
       htargetsDenote⟩
 
 theorem ctyUnit_done_boundary_completes :
-    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxCtor.ctyUnit_ctor))
-      (SyntaxCtor.ctyUnit_ctor) := by
+    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxSemantics.ctyUnit))
+      (SyntaxSemantics.ctyUnit) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.done
 
 theorem ctyInt_done_boundary_completes :
-    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxCtor.ctyInt_ctor))
-      (SyntaxCtor.ctyInt_ctor) := by
+    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxSemantics.ctyInt))
+      (SyntaxSemantics.ctyInt) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.done
 
 theorem ctyBool_done_boundary_completes :
-    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxCtor.ctyBool_ctor))
-      (SyntaxCtor.ctyBool_ctor) := by
+    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.done (SyntaxSemantics.ctyBool))
+      (SyntaxSemantics.ctyBool) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.done
 
 theorem ctyUnit_dot0_boundary_completes :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.cutoff)
-      (SyntaxCtor.ctyUnit_ctor) := by
+      (SyntaxSemantics.ctyUnit) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.cutoff
 
 theorem ctyInt_dot0_boundary_completes :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.cutoff)
-      (SyntaxCtor.ctyInt_ctor) := by
+      (SyntaxSemantics.ctyInt) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.cutoff
 
 theorem ctyBool_dot0_boundary_completes :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.cutoff)
-      (SyntaxCtor.ctyBool_ctor) := by
+      (SyntaxSemantics.ctyBool) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.cutoff
 
 theorem ctyBorrowShared_dot0_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
-      (SyntaxCtor.ctyBorrowShared_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowShared targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
 
 theorem ctyBorrowShared_dot2_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
-      (SyntaxCtor.ctyBorrowShared_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowShared targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
 
 theorem ctyBorrowShared_dot4_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedTargets (_root_.ConservativeExtractor.Generated.PartialLVals.done targets))
-      (SyntaxCtor.ctyBorrowShared_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowShared targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets _root_.ConservativeExtractor.Generated.CompletesLVals.done
 
 theorem ctyBorrowMut_dot0_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
-      (SyntaxCtor.ctyBorrowMut_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowMut targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
 
 theorem ctyBorrowMut_dot2_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
-      (SyntaxCtor.ctyBorrowMut_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowMut targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
 
-theorem ctyBorrowMut_dot4_boundary_completes {targets : List LVal} :
+theorem ctyBorrowMut_dot3_boundary_completes {targets : List LVal} :
+    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets _root_.ConservativeExtractor.Generated.PartialLVals.cutoff)
+      (SyntaxSemantics.ctyBorrowMut targets) := by
+  exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff
+
+theorem ctyBorrowMut_dot5_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets (_root_.ConservativeExtractor.Generated.PartialLVals.done targets))
-      (SyntaxCtor.ctyBorrowMut_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowMut targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.done
 
 theorem ctyBox_dot0_boundary_completes {element : Ty} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.boxElement _root_.ConservativeExtractor.Generated.PartialTy.cutoff)
-      (SyntaxCtor.ctyBox_ctor element) := by
+      (SyntaxSemantics.ctyBox element) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement _root_.ConservativeExtractor.Generated.CompletesTy.cutoff
 
 theorem ctyBorrowShared_borrowSharedTargets_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedTargets (_root_.ConservativeExtractor.Generated.PartialLVals.done targets))
-      (SyntaxCtor.ctyBorrowShared_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowShared targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets _root_.ConservativeExtractor.Generated.CompletesLVals.done
 
 theorem ctyBorrowMut_borrowMutTargets_boundary_completes {targets : List LVal} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets (_root_.ConservativeExtractor.Generated.PartialLVals.done targets))
-      (SyntaxCtor.ctyBorrowMut_ctor targets) := by
+      (SyntaxSemantics.ctyBorrowMut targets) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets _root_.ConservativeExtractor.Generated.CompletesLVals.done
 
 theorem ctyBox_boxElement_boundary_completes {element : Ty} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.boxElement (_root_.ConservativeExtractor.Generated.PartialTy.done element))
-      (SyntaxCtor.ctyBox_ctor element) := by
+      (SyntaxSemantics.ctyBox element) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement _root_.ConservativeExtractor.Generated.CompletesTy.done
 
-theorem ctyBorrowShared_tokenAmpStart_boundary_completes {targets : List LVal} :
-    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.tokenAmpStart)
-      (SyntaxCtor.ctyBorrowShared_ctor targets) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_tokenAmpStart
+theorem ctyBorrowShared_borrowSharedStart_boundary_completes {targets : List LVal} :
+    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedStart)
+      (SyntaxSemantics.ctyBorrowShared targets) := by
+  exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedStart
 
-theorem ctyBorrowMut_tokenAmpStart_boundary_completes {targets : List LVal} :
-    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.tokenAmpStart)
-      (SyntaxCtor.ctyBorrowMut_ctor targets) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_tokenAmpStart
-
-theorem ctyBorrowMut_borrowMutStart_boundary_completes {targets : List LVal} :
-    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutStart)
-      (SyntaxCtor.ctyBorrowMut_ctor targets) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutStart
+theorem ctyBorrowMut_borrowSharedStart_boundary_completes {targets : List LVal} :
+    CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedStart)
+      (SyntaxSemantics.ctyBorrowMut targets) := by
+  exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowSharedStart
 
 theorem ctyBox_boxStart_boundary_completes {element : Ty} :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.boxStart)
-      (SyntaxCtor.ctyBox_ctor element) := by
+      (SyntaxSemantics.ctyBox element) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxStart
 
 theorem ctyBorrowShared_borrowSharedTargets_descend_completes {targets : PartialLVals} {targets' : List LVal}
     (targets_completes : _root_.ConservativeExtractor.Generated.CompletesLVals targets targets') :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowSharedTargets targets)
-      (SyntaxCtor.ctyBorrowShared_ctor targets') := by
+      (SyntaxSemantics.ctyBorrowShared targets') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets targets_completes
 
 theorem ctyBorrowMut_borrowMutTargets_descend_completes {targets : PartialLVals} {targets' : List LVal}
     (targets_completes : _root_.ConservativeExtractor.Generated.CompletesLVals targets targets') :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.borrowMutTargets targets)
-      (SyntaxCtor.ctyBorrowMut_ctor targets') := by
+      (SyntaxSemantics.ctyBorrowMut targets') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets targets_completes
 
 theorem ctyBox_boxElement_descend_completes {element : PartialTy} {element' : Ty}
     (element_completes : _root_.ConservativeExtractor.Generated.CompletesTy element element') :
     CompletesTy (_root_.ConservativeExtractor.Generated.PartialTy.boxElement element)
-      (SyntaxCtor.ctyBox_ctor element') := by
+      (SyntaxSemantics.ctyBox element') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement element_completes
 
 theorem clvalVar_dot0_boundary_completes {x : Name} :
     CompletesLVal (_root_.ConservativeExtractor.Generated.PartialLVal.varX _root_.ConservativeExtractor.Generated.PartialName.cutoff)
-      (SyntaxCtor.clvalVar_ctor x) := by
+      (SyntaxSemantics.clvalVar x) := by
   exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalVar_varX _root_.ConservativeExtractor.Generated.CompletesName.cutoff
 
 theorem clvalDeref_dot0_boundary_completes {operand : LVal} :
     CompletesLVal (_root_.ConservativeExtractor.Generated.PartialLVal.derefOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
-      (SyntaxCtor.clvalDeref_ctor operand) := by
+      (SyntaxSemantics.clvalDeref operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalDeref_derefOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
 
 theorem clvalVar_varX_boundary_completes {x : Name} :
     CompletesLVal (_root_.ConservativeExtractor.Generated.PartialLVal.varX (_root_.ConservativeExtractor.Generated.PartialName.done x))
-      (SyntaxCtor.clvalVar_ctor x) := by
+      (SyntaxSemantics.clvalVar x) := by
   exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalVar_varX _root_.ConservativeExtractor.Generated.CompletesName.done
 
 theorem clvalDeref_derefOperand_boundary_completes {operand : LVal} :
     CompletesLVal (_root_.ConservativeExtractor.Generated.PartialLVal.derefOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
-      (SyntaxCtor.clvalDeref_ctor operand) := by
+      (SyntaxSemantics.clvalDeref operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalDeref_derefOperand _root_.ConservativeExtractor.Generated.CompletesLVal.done
 
 theorem clvalDeref_derefStart_boundary_completes {operand : LVal} :
     CompletesLVal (_root_.ConservativeExtractor.Generated.PartialLVal.derefStart)
-      (SyntaxCtor.clvalDeref_ctor operand) := by
+      (SyntaxSemantics.clvalDeref operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalDeref_derefStart
 
 theorem clvalDeref_derefOperand_descend_completes {operand : PartialLVal} {operand' : LVal}
     (operand_completes : _root_.ConservativeExtractor.Generated.CompletesLVal operand operand') :
     CompletesLVal (_root_.ConservativeExtractor.Generated.PartialLVal.derefOperand operand)
-      (SyntaxCtor.clvalDeref_ctor operand') := by
+      (SyntaxSemantics.clvalDeref operand') := by
   exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalDeref_derefOperand operand_completes
 
 theorem ctermUnit_done_boundary_completes :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxCtor.ctermUnit_ctor))
-      (SyntaxCtor.ctermUnit_ctor) := by
+    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxSemantics.ctermUnit))
+      (SyntaxSemantics.ctermUnit) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermTrue_done_boundary_completes :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxCtor.ctermTrue_ctor))
-      (SyntaxCtor.ctermTrue_ctor) := by
+    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxSemantics.ctermTrue))
+      (SyntaxSemantics.ctermTrue) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermFalse_done_boundary_completes :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxCtor.ctermFalse_ctor))
-      (SyntaxCtor.ctermFalse_ctor) := by
+    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.done (SyntaxSemantics.ctermFalse))
+      (SyntaxSemantics.ctermFalse) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermUnit_dot0_boundary_completes :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermUnit_ctor) := by
+      (SyntaxSemantics.ctermUnit) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermInt_dot0_boundary_completes {n : Int} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermInt_ctor n) := by
+      (SyntaxSemantics.ctermInt n) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermTrue_dot0_boundary_completes :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermTrue_ctor) := by
+      (SyntaxSemantics.ctermTrue) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermFalse_dot0_boundary_completes :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermFalse_ctor) := by
+      (SyntaxSemantics.ctermFalse) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermBlock_dot0_boundary_completes {lifetime : Lifetime} {terms : List Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockStart)
-      (SyntaxCtor.ctermBlock_ctor lifetime terms) := by
+      (SyntaxSemantics.ctermBlock lifetime terms) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockStart
 
 theorem ctermBlock_dot2_boundary_completes {lifetime : Lifetime} {terms : List Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockTerms lifetime _root_.ConservativeExtractor.Generated.PartialTerms.cutoff)
-      (SyntaxCtor.ctermBlock_ctor lifetime terms) := by
+      (SyntaxSemantics.ctermBlock lifetime terms) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockTerms _root_.ConservativeExtractor.Generated.CompletesTerms.cutoff
 
 theorem ctermBlock_dot3_boundary_completes {lifetime : Lifetime} {terms : List Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockTerms lifetime _root_.ConservativeExtractor.Generated.PartialTerms.cutoff)
-      (SyntaxCtor.ctermBlock_ctor lifetime terms) := by
+      (SyntaxSemantics.ctermBlock lifetime terms) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockTerms _root_.ConservativeExtractor.Generated.CompletesTerms.cutoff
 
 theorem ctermBlock_dot5_boundary_completes {lifetime : Lifetime} {terms : List Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockTerms lifetime (_root_.ConservativeExtractor.Generated.PartialTerms.done terms))
-      (SyntaxCtor.ctermBlock_ctor lifetime terms) := by
+      (SyntaxSemantics.ctermBlock lifetime terms) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockTerms _root_.ConservativeExtractor.Generated.CompletesTerms.done
 
 theorem ctermLetMut_dot0_boundary_completes {name : Name} {initialiser : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutName _root_.ConservativeExtractor.Generated.PartialName.cutoff)
-      (SyntaxCtor.ctermLetMut_ctor name initialiser) := by
+      (SyntaxSemantics.ctermLetMut name initialiser) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutName _root_.ConservativeExtractor.Generated.CompletesName.cutoff
 
 theorem ctermLetMut_dot2_boundary_completes {name : Name} {initialiser : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutName _root_.ConservativeExtractor.Generated.PartialName.cutoff)
-      (SyntaxCtor.ctermLetMut_ctor name initialiser) := by
+      (SyntaxSemantics.ctermLetMut name initialiser) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutName _root_.ConservativeExtractor.Generated.CompletesName.cutoff
 
 theorem ctermLetMut_dot4_boundary_completes {name : Name} {initialiser : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutInitialiser name _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermLetMut_ctor name initialiser) := by
+      (SyntaxSemantics.ctermLetMut name initialiser) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutInitialiser _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermAssign_dot0_boundary_completes {lhs : LVal} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.assignLhs _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
-      (SyntaxCtor.ctermAssign_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermAssign lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignLhs _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
 
 theorem ctermAssign_dot2_boundary_completes {lhs : LVal} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.assignRhs lhs _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermAssign_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermAssign lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignRhs _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermBox_dot0_boundary_completes {operand : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.boxOperand _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermBox_ctor operand) := by
+      (SyntaxSemantics.ctermBox operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxOperand _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermBorrowShared_dot0_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
-      (SyntaxCtor.ctermBorrowShared_ctor operand) := by
+      (SyntaxSemantics.ctermBorrowShared operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
 
 theorem ctermBorrowMut_dot0_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
-      (SyntaxCtor.ctermBorrowMut_ctor operand) := by
+      (SyntaxSemantics.ctermBorrowMut operand) := by
+  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
+
+theorem ctermBorrowMut_dot2_boundary_completes {operand : LVal} :
+    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
+      (SyntaxSemantics.ctermBorrowMut operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
 
 theorem ctermMove_dot0_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.moveOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
-      (SyntaxCtor.ctermMove_ctor operand) := by
+      (SyntaxSemantics.ctermMove operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
 
 theorem ctermCopy_dot0_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.copyOperand _root_.ConservativeExtractor.Generated.PartialLVal.cutoff)
-      (SyntaxCtor.ctermCopy_ctor operand) := by
+      (SyntaxSemantics.ctermCopy operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyOperand _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
 
 theorem ctermEq_dot0_boundary_completes {lhs : Term} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.termPrefix _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermEq_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermEq lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_termPrefix _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermEq_dot2_boundary_completes {lhs : Term} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.eqRhs lhs _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermEq_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermEq lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_eqRhs _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermIte_dot0_boundary_completes {condition : Term} {trueBranch : Term} {falseBranch : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteCondition _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteCondition _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermIte_dot4_boundary_completes {condition : Term} {trueBranch : Term} {falseBranch : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteFalseBranch condition trueBranch _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteFalseBranch _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermWhile_dot0_boundary_completes {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileStart)
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body) := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition body) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileStart
 
 theorem ctermWhile_dot2_boundary_completes {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileCondition bodyLifetime _root_.ConservativeExtractor.Generated.PartialTerm.cutoff)
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body) := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition body) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileCondition _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
 
 theorem ctermInt_intN_boundary_completes {n : Int} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.intN n)
-      (SyntaxCtor.ctermInt_ctor n) := by
+      (SyntaxSemantics.ctermInt n) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermInt_intN
 
 theorem ctermBlock_blockTerms_boundary_completes {lifetime : Lifetime} {terms : List Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockTerms lifetime (_root_.ConservativeExtractor.Generated.PartialTerms.done terms))
-      (SyntaxCtor.ctermBlock_ctor lifetime terms) := by
+      (SyntaxSemantics.ctermBlock lifetime terms) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockTerms _root_.ConservativeExtractor.Generated.CompletesTerms.done
 
 theorem ctermLetMut_letMutName_boundary_completes {name : Name} {initialiser : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutName (_root_.ConservativeExtractor.Generated.PartialName.done name))
-      (SyntaxCtor.ctermLetMut_ctor name initialiser) := by
+      (SyntaxSemantics.ctermLetMut name initialiser) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutName _root_.ConservativeExtractor.Generated.CompletesName.done
 
 theorem ctermLetMut_letMutInitialiser_boundary_completes {name : Name} {initialiser : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutInitialiser name (_root_.ConservativeExtractor.Generated.PartialTerm.done initialiser))
-      (SyntaxCtor.ctermLetMut_ctor name initialiser) := by
+      (SyntaxSemantics.ctermLetMut name initialiser) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutInitialiser _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermAssign_assignLhs_boundary_completes {lhs : LVal} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.assignLhs (_root_.ConservativeExtractor.Generated.PartialLVal.done lhs))
-      (SyntaxCtor.ctermAssign_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermAssign lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignLhs _root_.ConservativeExtractor.Generated.CompletesLVal.done
 
 theorem ctermAssign_assignRhs_boundary_completes {lhs : LVal} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.assignRhs lhs (_root_.ConservativeExtractor.Generated.PartialTerm.done rhs))
-      (SyntaxCtor.ctermAssign_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermAssign lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignRhs _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermBox_boxOperand_boundary_completes {operand : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.boxOperand (_root_.ConservativeExtractor.Generated.PartialTerm.done operand))
-      (SyntaxCtor.ctermBox_ctor operand) := by
+      (SyntaxSemantics.ctermBox operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxOperand _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermBorrowShared_borrowSharedOperand_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
-      (SyntaxCtor.ctermBorrowShared_ctor operand) := by
+      (SyntaxSemantics.ctermBorrowShared operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedOperand _root_.ConservativeExtractor.Generated.CompletesLVal.done
 
 theorem ctermBorrowMut_borrowMutOperand_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
-      (SyntaxCtor.ctermBorrowMut_ctor operand) := by
+      (SyntaxSemantics.ctermBorrowMut operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand _root_.ConservativeExtractor.Generated.CompletesLVal.done
 
 theorem ctermMove_moveOperand_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.moveOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
-      (SyntaxCtor.ctermMove_ctor operand) := by
+      (SyntaxSemantics.ctermMove operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveOperand _root_.ConservativeExtractor.Generated.CompletesLVal.done
 
 theorem ctermCopy_copyOperand_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.copyOperand (_root_.ConservativeExtractor.Generated.PartialLVal.done operand))
-      (SyntaxCtor.ctermCopy_ctor operand) := by
+      (SyntaxSemantics.ctermCopy operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyOperand _root_.ConservativeExtractor.Generated.CompletesLVal.done
 
 theorem ctermEq_termPrefix_boundary_completes {lhs : Term} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.termPrefix (_root_.ConservativeExtractor.Generated.PartialTerm.done lhs))
-      (SyntaxCtor.ctermEq_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermEq lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_termPrefix _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermEq_eqRhs_boundary_completes {lhs : Term} {rhs : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.eqRhs lhs (_root_.ConservativeExtractor.Generated.PartialTerm.done rhs))
-      (SyntaxCtor.ctermEq_ctor lhs rhs) := by
+      (SyntaxSemantics.ctermEq lhs rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_eqRhs _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermIte_iteCondition_boundary_completes {condition : Term} {trueBranch : Term} {falseBranch : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteCondition (_root_.ConservativeExtractor.Generated.PartialTerm.done condition))
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteCondition _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermIte_iteTrueBranch_boundary_completes {condition : Term} {trueBranch : Term} {falseBranch : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteTrueBranch condition (_root_.ConservativeExtractor.Generated.PartialTerm.done trueBranch))
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteTrueBranch _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermIte_iteFalseBranch_boundary_completes {condition : Term} {trueBranch : Term} {falseBranch : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteFalseBranch condition trueBranch (_root_.ConservativeExtractor.Generated.PartialTerm.done falseBranch))
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteFalseBranch _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermWhile_whileCondition_boundary_completes {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileCondition bodyLifetime (_root_.ConservativeExtractor.Generated.PartialTerm.done condition))
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body) := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition body) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileCondition _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermWhile_whileBody_boundary_completes {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileBody bodyLifetime condition (_root_.ConservativeExtractor.Generated.PartialTerm.done body))
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body) := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition body) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileBody _root_.ConservativeExtractor.Generated.CompletesTerm.done
 
 theorem ctermBlock_blockStart_boundary_completes {lifetime : Lifetime} {terms : List Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockStart)
-      (SyntaxCtor.ctermBlock_ctor lifetime terms) := by
+      (SyntaxSemantics.ctermBlock lifetime terms) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockStart
 
 theorem ctermLetMut_letMutStart_boundary_completes {name : Name} {initialiser : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutStart)
-      (SyntaxCtor.ctermLetMut_ctor name initialiser) := by
+      (SyntaxSemantics.ctermLetMut name initialiser) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutStart
 
 theorem ctermBox_boxStart_boundary_completes {operand : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.boxStart)
-      (SyntaxCtor.ctermBox_ctor operand) := by
+      (SyntaxSemantics.ctermBox operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxStart
 
-theorem ctermBorrowShared_tokenAmpStart_boundary_completes {operand : LVal} :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.tokenAmpStart)
-      (SyntaxCtor.ctermBorrowShared_ctor operand) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_tokenAmpStart
+theorem ctermBorrowShared_borrowSharedStart_boundary_completes {operand : LVal} :
+    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedStart)
+      (SyntaxSemantics.ctermBorrowShared operand) := by
+  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedStart
 
-theorem ctermBorrowMut_tokenAmpStart_boundary_completes {operand : LVal} :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.tokenAmpStart)
-      (SyntaxCtor.ctermBorrowMut_ctor operand) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_tokenAmpStart
-
-theorem ctermBorrowMut_borrowMutStart_boundary_completes {operand : LVal} :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutStart)
-      (SyntaxCtor.ctermBorrowMut_ctor operand) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutStart
-
-theorem ctermMove_moveStart_boundary_completes {operand : LVal} :
-    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.moveStart)
-      (SyntaxCtor.ctermMove_ctor operand) := by
-  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveStart
+theorem ctermBorrowMut_borrowSharedStart_boundary_completes {operand : LVal} :
+    CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedStart)
+      (SyntaxSemantics.ctermBorrowMut operand) := by
+  exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowSharedStart
 
 theorem ctermCopy_copyStart_boundary_completes {operand : LVal} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.copyStart)
-      (SyntaxCtor.ctermCopy_ctor operand) := by
+      (SyntaxSemantics.ctermCopy operand) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyStart
 
 theorem ctermIte_iteStart_boundary_completes {condition : Term} {trueBranch : Term} {falseBranch : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteStart)
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteStart
 
 theorem ctermWhile_whileStart_boundary_completes {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileStart)
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body) := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition body) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileStart
 
 theorem ctermBlock_blockTerms_descend_completes {lifetime : Lifetime} {terms : PartialTerms} {terms' : List Term}
     (terms_completes : _root_.ConservativeExtractor.Generated.CompletesTerms terms terms') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.blockTerms lifetime terms)
-      (SyntaxCtor.ctermBlock_ctor lifetime terms') := by
+      (SyntaxSemantics.ctermBlock lifetime terms') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockTerms terms_completes
 
 theorem ctermLetMut_letMutInitialiser_descend_completes {name : Name} {initialiser : PartialTerm} {initialiser' : Term}
     (initialiser_completes : _root_.ConservativeExtractor.Generated.CompletesTerm initialiser initialiser') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.letMutInitialiser name initialiser)
-      (SyntaxCtor.ctermLetMut_ctor name initialiser') := by
+      (SyntaxSemantics.ctermLetMut name initialiser') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutInitialiser initialiser_completes
 
 theorem ctermAssign_assignLhs_descend_completes {lhs : PartialLVal} {lhs' : LVal} {rhs : Term}
     (lhs_completes : _root_.ConservativeExtractor.Generated.CompletesLVal lhs lhs') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.assignLhs lhs)
-      (SyntaxCtor.ctermAssign_ctor lhs' rhs) := by
+      (SyntaxSemantics.ctermAssign lhs' rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignLhs lhs_completes
 
 theorem ctermAssign_assignRhs_descend_completes {lhs : LVal} {rhs : PartialTerm} {rhs' : Term}
     (rhs_completes : _root_.ConservativeExtractor.Generated.CompletesTerm rhs rhs') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.assignRhs lhs rhs)
-      (SyntaxCtor.ctermAssign_ctor lhs rhs') := by
+      (SyntaxSemantics.ctermAssign lhs rhs') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignRhs rhs_completes
 
 theorem ctermBox_boxOperand_descend_completes {operand : PartialTerm} {operand' : Term}
     (operand_completes : _root_.ConservativeExtractor.Generated.CompletesTerm operand operand') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.boxOperand operand)
-      (SyntaxCtor.ctermBox_ctor operand') := by
+      (SyntaxSemantics.ctermBox operand') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxOperand operand_completes
 
 theorem ctermBorrowShared_borrowSharedOperand_descend_completes {operand : PartialLVal} {operand' : LVal}
     (operand_completes : _root_.ConservativeExtractor.Generated.CompletesLVal operand operand') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowSharedOperand operand)
-      (SyntaxCtor.ctermBorrowShared_ctor operand') := by
+      (SyntaxSemantics.ctermBorrowShared operand') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedOperand operand_completes
 
 theorem ctermBorrowMut_borrowMutOperand_descend_completes {operand : PartialLVal} {operand' : LVal}
     (operand_completes : _root_.ConservativeExtractor.Generated.CompletesLVal operand operand') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.borrowMutOperand operand)
-      (SyntaxCtor.ctermBorrowMut_ctor operand') := by
+      (SyntaxSemantics.ctermBorrowMut operand') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand operand_completes
 
 theorem ctermMove_moveOperand_descend_completes {operand : PartialLVal} {operand' : LVal}
     (operand_completes : _root_.ConservativeExtractor.Generated.CompletesLVal operand operand') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.moveOperand operand)
-      (SyntaxCtor.ctermMove_ctor operand') := by
+      (SyntaxSemantics.ctermMove operand') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveOperand operand_completes
 
 theorem ctermCopy_copyOperand_descend_completes {operand : PartialLVal} {operand' : LVal}
     (operand_completes : _root_.ConservativeExtractor.Generated.CompletesLVal operand operand') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.copyOperand operand)
-      (SyntaxCtor.ctermCopy_ctor operand') := by
+      (SyntaxSemantics.ctermCopy operand') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyOperand operand_completes
 
 theorem ctermEq_termPrefix_descend_completes {lhs : PartialTerm} {lhs' : Term} {rhs : Term}
     (lhs_completes : _root_.ConservativeExtractor.Generated.CompletesTerm lhs lhs') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.termPrefix lhs)
-      (SyntaxCtor.ctermEq_ctor lhs' rhs) := by
+      (SyntaxSemantics.ctermEq lhs' rhs) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_termPrefix lhs_completes
 
 theorem ctermEq_eqRhs_descend_completes {lhs : Term} {rhs : PartialTerm} {rhs' : Term}
     (rhs_completes : _root_.ConservativeExtractor.Generated.CompletesTerm rhs rhs') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.eqRhs lhs rhs)
-      (SyntaxCtor.ctermEq_ctor lhs rhs') := by
+      (SyntaxSemantics.ctermEq lhs rhs') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_eqRhs rhs_completes
 
 theorem ctermIte_iteCondition_descend_completes {condition : PartialTerm} {condition' : Term} {trueBranch : Term} {falseBranch : Term}
     (condition_completes : _root_.ConservativeExtractor.Generated.CompletesTerm condition condition') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteCondition condition)
-      (SyntaxCtor.ctermIte_ctor condition' trueBranch falseBranch) := by
+      (SyntaxSemantics.ctermIte condition' trueBranch falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteCondition condition_completes
 
 theorem ctermIte_iteTrueBranch_descend_completes {condition : Term} {trueBranch : PartialTerm} {trueBranch' : Term} {falseBranch : Term}
     (trueBranch_completes : _root_.ConservativeExtractor.Generated.CompletesTerm trueBranch trueBranch') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteTrueBranch condition trueBranch)
-      (SyntaxCtor.ctermIte_ctor condition trueBranch' falseBranch) := by
+      (SyntaxSemantics.ctermIte condition trueBranch' falseBranch) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteTrueBranch trueBranch_completes
 
 theorem ctermIte_iteFalseBranch_descend_completes {condition : Term} {trueBranch : Term} {falseBranch : PartialTerm} {falseBranch' : Term}
     (falseBranch_completes : _root_.ConservativeExtractor.Generated.CompletesTerm falseBranch falseBranch') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.iteFalseBranch condition trueBranch falseBranch)
-      (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch') := by
+      (SyntaxSemantics.ctermIte condition trueBranch falseBranch') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteFalseBranch falseBranch_completes
 
 theorem ctermWhile_whileCondition_descend_completes {bodyLifetime : Lifetime} {condition : PartialTerm} {condition' : Term} {body : Term}
     (condition_completes : _root_.ConservativeExtractor.Generated.CompletesTerm condition condition') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileCondition bodyLifetime condition)
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition' body) := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition' body) := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileCondition condition_completes
 
 theorem ctermWhile_whileBody_descend_completes {bodyLifetime : Lifetime} {condition : Term} {body : PartialTerm} {body' : Term}
     (body_completes : _root_.ConservativeExtractor.Generated.CompletesTerm body body') :
     CompletesTerm (_root_.ConservativeExtractor.Generated.PartialTerm.whileBody bodyLifetime condition body)
-      (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body') := by
+      (SyntaxSemantics.ctermWhile bodyLifetime condition body') := by
   exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileBody body_completes
 
 end GeneratedFrontierLower

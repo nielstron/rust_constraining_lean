@@ -290,7 +290,7 @@ theorem relaxedStmtsTyping_missing_closed {env env2 : Env} {typing : StoreTyping
 theorem relaxedMissingBlock_typed {env : Env} {typing : StoreTyping}
     {lifetime : Lifetime} :
     RelaxedTermTyping env typing lifetime
-      (SyntaxCtor.ctermBlock_ctor (childLifetime lifetime) [missingTerm])
+      (SyntaxSemantics.ctermBlock (childLifetime lifetime) [missingTerm])
       .unit (env.dropLifetime (childLifetime lifetime)) :=
   RelaxedTermTyping.block ⟨0, rfl⟩
     (RelaxedTermListTyping.singleton
@@ -399,14 +399,14 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
           simp only [extractTermStmts]
           exact extractTermStmts_relaxedTyped hoperand hoperand'
   case ctermEq_termPrefix hlhs =>
-      simp only [SyntaxCtor.ctermEq_ctor] at htyped
+      simp only [SyntaxSemantics.ctermEq] at htyped
       change RelaxedTermTyping env typing currentLifetime (.eq _ _) ty env2 at htyped
       cases htyped with
       | eq hlhs' =>
           simp only [extractTermStmts]
           exact extractTermStmts_relaxedTyped hlhs hlhs'
   case ctermEq_eqRhs hrhs =>
-      simp only [SyntaxCtor.ctermEq_ctor] at htyped
+      simp only [SyntaxSemantics.ctermEq] at htyped
       change RelaxedTermTyping env typing currentLifetime (.eq _ _) ty env2 at htyped
       cases htyped with
       | eq hlhs' _ _ hrhs' =>

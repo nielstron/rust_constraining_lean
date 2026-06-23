@@ -148,7 +148,9 @@ These deviations from the paper should be kept.
   and all other metatheory cases defer to the premise IHs.  This is what lets
   the conservative extractor rebuild `if c { … } else { …; panic!() }` around
   a truncated branch the way `ast_copier` does
-  (`LwRust/Extractor/Extractors/NestedBlocks.lean`).
+  (`LwRust/Extractor/Extractors/NestedBlocks.lean`).  Parser-frontier
+  completeness for both the strict and relaxed extractor checkers is exposed
+  through `LwRust/Extractor/FrontierExtractorBridge.lean`.
 
 - **Lemma 4.11 (Preservation) carries a premises the paper does not
   have.**

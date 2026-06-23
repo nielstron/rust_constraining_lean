@@ -1,4 +1,8 @@
 import LwRust.Extractor.Checkers
+import LwRust.Extractor.PartialProgram
+
+set_option linter.unusedTactic false
+set_option linter.unreachableTactic false
 
 /-!
 A syntax-directed LwRust frontier extractor mirroring `rust_constraining`'s
@@ -82,11 +86,11 @@ the statement extraction cannot be wrapped in a synthesized block here. -/
 def extractTerm (currentLifetime : Lifetime) : PartialTerm → Term
   | Generated.PartialTerm.cutoff => missingTerm
   | Generated.PartialTerm.done term => term
-  | Generated.PartialTerm.intN n => SyntaxCtor.ctermInt_ctor n
+  | Generated.PartialTerm.intN n => SyntaxSemantics.ctermInt n
   | Generated.PartialTerm.blockStart =>
-      SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime) [missingTerm]
+      SyntaxSemantics.ctermBlock (childLifetime currentLifetime) [missingTerm]
   | Generated.PartialTerm.blockTerms lifetime terms =>
-      SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)
+      SyntaxSemantics.ctermBlock lifetime (extractTerms lifetime terms)
   | frontier =>
       (extractTermStmts currentLifetime frontier).headD missingTerm
 termination_by p => (sizeOf p, 1)
@@ -102,9 +106,9 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | Generated.PartialTerm.done term => [term]
   | Generated.PartialTerm.intN _ => []
   | Generated.PartialTerm.blockStart =>
-      [SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime) [missingTerm]]
+      [SyntaxSemantics.ctermBlock (childLifetime currentLifetime) [missingTerm]]
   | Generated.PartialTerm.blockTerms lifetime terms =>
-      [SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)]
+      [SyntaxSemantics.ctermBlock lifetime (extractTerms lifetime terms)]
   | Generated.PartialTerm.letMutStart => []
   | Generated.PartialTerm.letMutName _ => []
   | Generated.PartialTerm.letMutInitialiser _ initialiser =>
@@ -115,11 +119,9 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | Generated.PartialTerm.boxStart => []
   | Generated.PartialTerm.boxOperand operand =>
       extractTermStmts currentLifetime operand
-  | Generated.PartialTerm.tokenAmpStart => []
+  | Generated.PartialTerm.borrowSharedStart => []
   | Generated.PartialTerm.borrowSharedOperand _ => []
-  | Generated.PartialTerm.borrowMutStart => []
   | Generated.PartialTerm.borrowMutOperand _ => []
-  | Generated.PartialTerm.moveStart => []
   | Generated.PartialTerm.moveOperand _ => []
   | Generated.PartialTerm.copyStart => []
   | Generated.PartialTerm.copyOperand _ => []
@@ -132,13 +134,13 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
       extractTermStmts currentLifetime condition
   | Generated.PartialTerm.iteTrueBranch condition trueBranch =>
       if branchRebuildable trueBranch then
-        [SyntaxCtor.ctermIte_ctor condition
+        [SyntaxSemantics.ctermIte condition
           (extractTerm currentLifetime trueBranch) missingTerm]
       else
         condition :: extractTermStmts currentLifetime trueBranch
   | Generated.PartialTerm.iteFalseBranch condition trueBranch falseBranch =>
       if branchRebuildable falseBranch then
-        [SyntaxCtor.ctermIte_ctor condition trueBranch
+        [SyntaxSemantics.ctermIte condition trueBranch
           (extractTerm currentLifetime falseBranch)]
       else
         condition :: extractTermStmts currentLifetime falseBranch
@@ -147,10 +149,10 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
       extractTermStmts currentLifetime condition
   | Generated.PartialTerm.whileBody bodyLifetime condition body =>
       if branchRebuildable body then
-        [SyntaxCtor.ctermWhile_ctor bodyLifetime condition
+        [SyntaxSemantics.ctermWhile bodyLifetime condition
           (extractTerm bodyLifetime body)]
       else
-        [SyntaxCtor.ctermWhile_ctor bodyLifetime condition missingTerm]
+        [SyntaxSemantics.ctermWhile bodyLifetime condition missingTerm]
 termination_by p => (sizeOf p, 0)
 
 /-- Extract a block body frontier (`ast_copier.visit_stmts`): keep the
@@ -258,7 +260,7 @@ unconditionally. -/
 theorem missingBlock_typed {env : Env} {typing : StoreTyping}
     {lifetime : Lifetime} :
     TermTyping env typing lifetime
-      (SyntaxCtor.ctermBlock_ctor (childLifetime lifetime) [missingTerm])
+      (SyntaxSemantics.ctermBlock (childLifetime lifetime) [missingTerm])
       .unit (env.dropLifetime (childLifetime lifetime)) :=
   TermTyping.block ⟨0, rfl⟩
     (TermListTyping.singleton (TermTyping.missing WellFormedTy.unit tyLoanFree_unit))
@@ -481,7 +483,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
                     · exact hwf
       all_goals
         obtain ⟨env', hstmts⟩ := extractTermStmts_typed hfalse hfalse'
-        simp only [extractTermStmts, branchRebuildable, reduceIte] at hstmts ⊢
+        simp only [extractTermStmts, branchRebuildable] at hstmts ⊢
         exact ⟨env', .cons hcondition' hstmts⟩
   case ctermWhile_whileCondition hcondition =>
       simp only [extractTermStmts]
@@ -549,7 +551,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
                     · exact WellFormedTy.unit
                     · exact hwf
       all_goals
-        simp only [extractTermStmts, branchRebuildable, reduceIte]
+        simp only [branchRebuildable]
         exact ⟨envMid, .cons
           (TermTyping.whileLoopDiverging hchild' hcondition'
             (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)

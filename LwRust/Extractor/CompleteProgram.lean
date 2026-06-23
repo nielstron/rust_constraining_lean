@@ -64,7 +64,7 @@ syntax (name := ctyUnit) "cty_unit" : cty
 syntax (name := ctyInt) "cty_int" : cty
 syntax (name := ctyBool) "cty_bool" : cty
 syntax (name := ctyBorrowShared) "&" "[" clval,* "]" : cty
-syntax (name := ctyBorrowMut) "&mut" "[" clval,* "]" : cty
+syntax (name := ctyBorrowMut) "&" "mut" "[" clval,* "]" : cty
 syntax (name := ctyBox) "box" cty : cty
 
 syntax (name := clvalVar) ident : clval
@@ -79,93 +79,96 @@ syntax (name := ctermLetMut) "let" "mut" ident ":=" cterm : cterm
 syntax (name := ctermAssign) clval ":=" cterm : cterm
 syntax (name := ctermBox) "box" cterm : cterm
 syntax (name := ctermBorrowShared) "&" clval : cterm
-syntax (name := ctermBorrowMut) "&mut" clval : cterm
-syntax (name := ctermMove) "move" clval : cterm
+syntax (name := ctermBorrowMut) "&" "mut" clval : cterm
+syntax (name := ctermMove) clval : cterm
 syntax (name := ctermCopy) "copy" clval : cterm
 syntax (name := ctermEq) cterm "==" cterm : cterm
 syntax (name := ctermIte) "if" cterm cterm "else" cterm : cterm
 syntax (name := ctermWhile) "while" term cterm cterm : cterm
 
 /-!
-Checked constructor annotations for the generator.
+Checked semantic annotations for the generator.
 
 The generator derives partial syntax from the `syntax` declarations above and
-reads these `_ctor` abbreviations for the corresponding complete AST shape.
+reads this namespace for the corresponding complete AST shape.
+
+Each abbrev name must exactly match a `syntax (name := ...)` declaration above.
+That is the marker the generator uses; there is no extra suffix convention.
 Keeping this information in Lean, instead of in the Python script, makes stale
-constructor references fail during the Lean build.
+semantic references fail during the Lean build.
 -/
 
-namespace SyntaxCtor
+namespace SyntaxSemantics
 
-abbrev ctyUnit_ctor : Ty :=
+abbrev ctyUnit : Ty :=
   show Ty from .unit
 
-abbrev ctyInt_ctor : Ty :=
+abbrev ctyInt : Ty :=
   show Ty from .int
 
-abbrev ctyBool_ctor : Ty :=
+abbrev ctyBool : Ty :=
   show Ty from .bool
 
-abbrev ctyBorrowShared_ctor (targets : List LVal) : Ty :=
+abbrev ctyBorrowShared (targets : List LVal) : Ty :=
   LwRust.Core.Ty.borrow Bool.false targets
 
-abbrev ctyBorrowMut_ctor (targets : List LVal) : Ty :=
+abbrev ctyBorrowMut (targets : List LVal) : Ty :=
   LwRust.Core.Ty.borrow Bool.true targets
 
-abbrev ctyBox_ctor (element : Ty) : Ty :=
+abbrev ctyBox (element : Ty) : Ty :=
   show Ty from (.box element)
 
-abbrev clvalVar_ctor (x : Name) : LVal :=
+abbrev clvalVar (x : Name) : LVal :=
   show LVal from (.var x)
 
-abbrev clvalDeref_ctor (operand : LVal) : LVal :=
+abbrev clvalDeref (operand : LVal) : LVal :=
   show LVal from (.deref operand)
 
-abbrev ctermUnit_ctor : Term :=
+abbrev ctermUnit : Term :=
   show Term from .val .unit
 
-abbrev ctermInt_ctor (n : Int) : Term :=
+abbrev ctermInt (n : Int) : Term :=
   show Term from (.val (.int n))
 
-abbrev ctermTrue_ctor : Term :=
+abbrev ctermTrue : Term :=
   LwRust.Core.Term.val (LwRust.Core.Value.bool Bool.true)
 
-abbrev ctermFalse_ctor : Term :=
+abbrev ctermFalse : Term :=
   LwRust.Core.Term.val (LwRust.Core.Value.bool Bool.false)
 
-abbrev ctermBlock_ctor (lifetime : Lifetime) (terms : List Term) : Term :=
+abbrev ctermBlock (lifetime : Lifetime) (terms : List Term) : Term :=
   show Term from (.block lifetime terms)
 
-abbrev ctermLetMut_ctor (name : Name) (initialiser : Term) : Term :=
+abbrev ctermLetMut (name : Name) (initialiser : Term) : Term :=
   show Term from (.letMut name initialiser)
 
-abbrev ctermAssign_ctor (lhs : LVal) (rhs : Term) : Term :=
+abbrev ctermAssign (lhs : LVal) (rhs : Term) : Term :=
   show Term from (.assign lhs rhs)
 
-abbrev ctermBox_ctor (operand : Term) : Term :=
+abbrev ctermBox (operand : Term) : Term :=
   show Term from (.box operand)
 
-abbrev ctermBorrowShared_ctor (operand : LVal) : Term :=
+abbrev ctermBorrowShared (operand : LVal) : Term :=
   LwRust.Core.Term.borrow Bool.false operand
 
-abbrev ctermBorrowMut_ctor (operand : LVal) : Term :=
+abbrev ctermBorrowMut (operand : LVal) : Term :=
   LwRust.Core.Term.borrow Bool.true operand
 
-abbrev ctermMove_ctor (operand : LVal) : Term :=
+abbrev ctermMove (operand : LVal) : Term :=
   show Term from (.move operand)
 
-abbrev ctermCopy_ctor (operand : LVal) : Term :=
+abbrev ctermCopy (operand : LVal) : Term :=
   show Term from (.copy operand)
 
-abbrev ctermEq_ctor (lhs rhs : Term) : Term :=
+abbrev ctermEq (lhs rhs : Term) : Term :=
   show Term from (.eq lhs rhs)
 
-abbrev ctermIte_ctor (condition trueBranch falseBranch : Term) : Term :=
+abbrev ctermIte (condition trueBranch falseBranch : Term) : Term :=
   show Term from (.ite condition trueBranch falseBranch)
 
-abbrev ctermWhile_ctor (bodyLifetime : Lifetime) (condition body : Term) : Term :=
+abbrev ctermWhile (bodyLifetime : Lifetime) (condition body : Term) : Term :=
   show Term from (.whileLoop bodyLifetime condition body)
 
-end SyntaxCtor
+end SyntaxSemantics
 
 end ConservativeExtractor

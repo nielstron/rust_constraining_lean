@@ -144,7 +144,7 @@ theorem checkedTermDecodeCompleteAt :
                                                   simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
                                                 obtain ⟨terms, hterms⟩ :=
                                                   (ih termsTree (by simp)).2.1 hseq
-                                                exact ⟨SyntaxCtor.ctermBlock_ctor lifetime terms, by
+                                                exact ⟨SyntaxSemantics.ctermBlock lifetime terms, by
                                                   simp [denoteTerm?, hterms]⟩
                                             | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
                                         | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -189,7 +189,7 @@ theorem checkedTermDecodeCompleteAt :
                                                   simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
                                                 obtain ⟨init, hinit⟩ :=
                                                   (ih initTree (by simp)).1 hseq
-                                                exact ⟨SyntaxCtor.ctermLetMut_ctor name init, by
+                                                exact ⟨SyntaxSemantics.ctermLetMut name init, by
                                                   simp [denoteTerm?, hinit]⟩
                                             | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
                                     | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -215,7 +215,7 @@ theorem checkedTermDecodeCompleteAt :
                             rcases hseq with ⟨hlhs, hrhs⟩
                             obtain ⟨lhs, hlhs'⟩ := checkedLValTree_denote_exists hlhs
                             obtain ⟨rhs, hrhs'⟩ := (ih rhsTree (by simp)).1 hrhs
-                            exact ⟨SyntaxCtor.ctermAssign_ctor lhs rhs, by
+                            exact ⟨SyntaxSemantics.ctermAssign lhs rhs, by
                               simp [denoteTerm?, hlhs', hrhs']⟩
                         | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
                 | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -233,7 +233,7 @@ theorem checkedTermDecodeCompleteAt :
                     | nil =>
                         cases tok <;> simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
                         obtain ⟨operand, hoperand⟩ := (ih operandTree (by simp)).1 hseq
-                        exact ⟨SyntaxCtor.ctermBox_ctor operand, by
+                        exact ⟨SyntaxSemantics.ctermBox operand, by
                           simp [denoteTerm?, hoperand]⟩
                     | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
             | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -251,7 +251,7 @@ theorem checkedTermDecodeCompleteAt :
                     | nil =>
                         cases tok <;> simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
                         obtain ⟨operand, hoperand⟩ := checkedLValTree_denote_exists hseq
-                        exact ⟨SyntaxCtor.ctermBorrowShared_ctor operand, by
+                        exact ⟨SyntaxSemantics.ctermBorrowShared operand, by
                           simp [denoteTerm?, hoperand]⟩
                     | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
             | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -264,33 +264,50 @@ theorem checkedTermDecodeCompleteAt :
             | token tok =>
                 cases rest1 with
                 | nil => simp [CheckableGrammar.checkSeq] at hseq
-                | cons operandTree rest2 =>
-                    cases rest2 with
-                    | nil =>
-                        cases tok <;> simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
-                        obtain ⟨operand, hoperand⟩ := checkedLValTree_denote_exists hseq
-                        exact ⟨SyntaxCtor.ctermBorrowMut_ctor operand, by
-                          simp [denoteTerm?, hoperand]⟩
-                    | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
+                | cons mutTok rest2 =>
+                    cases mutTok with
+                    | token mutTok =>
+                        cases rest2 with
+                        | nil => simp [CheckableGrammar.checkSeq] at hseq
+                        | cons operandTree rest3 =>
+                            cases rest3 with
+                            | nil =>
+                                cases tok <;> cases mutTok <;>
+                                  simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
+                                obtain ⟨operand, hoperand⟩ :=
+                                  checkedLValTree_denote_exists hseq
+                                exact ⟨SyntaxSemantics.ctermBorrowMut operand, by
+                                  simp [denoteTerm?, hoperand]⟩
+                            | cons _ _ =>
+                                simp [CheckableGrammar.checkSeq] at hseq
+                    | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
             | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
       · rcases hmove with ⟨hrule, hseq⟩
         subst ruleName
         cases children with
         | nil => simp [CheckableGrammar.checkSeq] at hseq
-        | cons moveTok rest1 =>
-            cases moveTok with
-            | token tok =>
-                cases rest1 with
-                | nil => simp [CheckableGrammar.checkSeq] at hseq
-                | cons operandTree rest2 =>
-                    cases rest2 with
-                    | nil =>
-                        cases tok <;> simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
-                        obtain ⟨operand, hoperand⟩ := checkedLValTree_denote_exists hseq
-                        exact ⟨SyntaxCtor.ctermMove_ctor operand, by
-                          simp [denoteTerm?, hoperand]⟩
-                    | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
-            | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
+        | cons operandTree rest1 =>
+            cases rest1 with
+            | nil =>
+                have hoperandTree :
+                    checkableGrammar.checkTree .clval operandTree = Bool.true := by
+                  simpa [checkableGrammar, grammar, CheckableGrammar.checkSeq,
+                    ctyUnitRule, ctyIntRule, ctyBoolRule, ctyBorrowSharedRule,
+                    ctyBorrowMutRule, ctyBoxRule, clvalVarRule,
+                    clvalDerefRule, ctermUnitRule, ctermIntRule,
+                    ctermTrueRule, ctermFalseRule, ctermBlockRule,
+                    ctermLetMutRule, ctermAssignRule, ctermBoxRule,
+                    ctermBorrowSharedRule, ctermBorrowMutRule, ctermMoveRule,
+                    ctermCopyRule, ctermEqRule, ctermIteRule,
+                    ctermWhileRule, clvalsEmptyRule, clvalsConsRule,
+                    clvalsTailEmptyRule, clvalsTailConsRule, ctermsEmptyRule,
+                    ctermsConsRule, ctermsTailEmptyRule, ctermsTailConsRule]
+                    using hseq
+                obtain ⟨operand, hoperand⟩ :=
+                  checkedLValTree_denote_exists hoperandTree
+                exact ⟨SyntaxSemantics.ctermMove operand, by
+                  simp [denoteTerm?, hoperand]⟩
+            | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
       · rcases hcopy with ⟨hrule, hseq⟩
         subst ruleName
         cases children with
@@ -305,7 +322,7 @@ theorem checkedTermDecodeCompleteAt :
                     | nil =>
                         cases tok <;> simp [CheckableGrammar.checkSeq, acceptsBool] at hseq
                         obtain ⟨operand, hoperand⟩ := checkedLValTree_denote_exists hseq
-                        exact ⟨SyntaxCtor.ctermCopy_ctor operand, by
+                        exact ⟨SyntaxSemantics.ctermCopy operand, by
                           simp [denoteTerm?, hoperand]⟩
                     | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
             | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -328,7 +345,7 @@ theorem checkedTermDecodeCompleteAt :
                             rcases hseq with ⟨hlhs, hrhs⟩
                             obtain ⟨lhs, hlhs'⟩ := (ih lhsTree (by simp)).1 hlhs
                             obtain ⟨rhs, hrhs'⟩ := (ih rhsTree (by simp)).1 hrhs
-                            exact ⟨SyntaxCtor.ctermEq_ctor lhs rhs, by
+                            exact ⟨SyntaxSemantics.ctermEq lhs rhs, by
                               simp [denoteTerm?, hlhs', hrhs']⟩
                         | cons _ _ => simp [CheckableGrammar.checkSeq] at hseq
                 | node _ _ => simp [CheckableGrammar.checkSeq] at hseq
@@ -366,7 +383,7 @@ theorem checkedTermDecodeCompleteAt :
                                           (ih trueTree (by simp)).1 htrue
                                         obtain ⟨falseBranch, hfalse'⟩ :=
                                           (ih falseTree (by simp)).1 hfalse
-                                        exact ⟨SyntaxCtor.ctermIte_ctor
+                                        exact ⟨SyntaxSemantics.ctermIte
                                           condition trueBranch falseBranch, by
                                           simp [denoteTerm?, hcondition',
                                             htrue', hfalse']⟩
@@ -403,7 +420,7 @@ theorem checkedTermDecodeCompleteAt :
                                       (ih conditionTree (by simp)).1 hcondition
                                     obtain ⟨body, hbody'⟩ :=
                                       (ih bodyTree (by simp)).1 hbody
-                                    exact ⟨SyntaxCtor.ctermWhile_ctor
+                                    exact ⟨SyntaxSemantics.ctermWhile
                                       lifetime condition body, by
                                       simp [denoteTerm?, hcondition',
                                         hbody']⟩

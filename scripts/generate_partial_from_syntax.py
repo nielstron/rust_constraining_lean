@@ -109,14 +109,16 @@ def ctor_rhs_to_template(rhs: str, fields: list[tuple[str, str]]) -> str:
     return out
 
 
-def parse_ctor_specs() -> dict[str, tuple[str, list[tuple[str, str]]]]:
+def parse_syntax_semantics() -> dict[str, tuple[str, list[tuple[str, str]]]]:
     text = SOURCE.read_text()
-    block_match = re.search(r"namespace SyntaxCtor(?P<body>.*?)end SyntaxCtor", text, re.S)
+    block_match = re.search(
+        r"namespace SyntaxSemantics(?P<body>.*?)end SyntaxSemantics", text, re.S
+    )
     if not block_match:
-        raise ValueError("missing namespace SyntaxCtor in complete syntax file")
+        raise ValueError("missing namespace SyntaxSemantics in complete syntax file")
     body = block_match.group("body")
     pattern = re.compile(
-        r"abbrev\s+(?P<name>\w+)_ctor\s*"
+        r"abbrev\s+(?P<name>\w+)\s*"
         r"(?P<params>(?:\([^)]*\)\s*)*)"
         r":\s*(?P<ret>[^\n]+?)\s*:=\s*"
         r"(?P<rhs>.*?)(?=\n\s*\n|$)",
@@ -127,7 +129,7 @@ def parse_ctor_specs() -> dict[str, tuple[str, list[tuple[str, str]]]]:
         name = match.group("name")
         fields = parse_param_groups(match.group("params"))
         args = " ".join("{" + field + "}" for field, _ in fields)
-        ast = f"SyntaxCtor.{name}_ctor" + (f" {args}" if args else "")
+        ast = f"SyntaxSemantics.{name}" + (f" {args}" if args else "")
         specs[name] = (ast, fields)
     return specs
 
@@ -149,7 +151,7 @@ def parse_elem(tok: str) -> Elem:
 
 def parse_syntax_rules() -> list[Production]:
     pattern = re.compile(r"^syntax \(name := ([^)]+)\) (.*) : (\w+)$")
-    ctor_specs = parse_ctor_specs()
+    semantic_specs = parse_syntax_semantics()
     out: list[Production] = []
     for line in SOURCE.read_text().splitlines():
         m = pattern.match(line.strip())
@@ -158,9 +160,11 @@ def parse_syntax_rules() -> list[Production]:
         name, body, target_cat = m.groups()
         if target_cat not in CATS:
             continue
-        if name not in ctor_specs:
-            raise KeyError(f"missing checked SyntaxCtor annotation for syntax rule {name}")
-        ast, fields = ctor_specs[name]
+        if name not in semantic_specs:
+            raise KeyError(
+                f"missing checked SyntaxSemantics annotation for syntax rule {name}"
+            )
+        ast, fields = semantic_specs[name]
         elems = [parse_elem(tok) for tok in tokenize(body)]
         field_elems = [elem for elem in elems if elem.kind in {"cat", "list", "atom"}]
         if len(field_elems) != len(fields):
@@ -245,7 +249,6 @@ def token_name(raw: str) -> str:
     text = token_text(raw)
     names = {
         "&": "Amp",
-        "&mut": "Ampmut",
         "*": "Star",
         "()": "Unit",
         ":=": "Assign",

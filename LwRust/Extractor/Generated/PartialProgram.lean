@@ -33,26 +33,24 @@ inductive PartialTerms where
 inductive PartialTy where
   | cutoff
   | done (x : Ty)
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
+  -- derived from: SyntaxSemantics.ctyBorrowShared {targets}
   | borrowSharedTargets (targets : PartialLVals)
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
+  -- derived from: SyntaxSemantics.ctyBorrowMut {targets}
   | borrowMutTargets (targets : PartialLVals)
-  -- derived from: SyntaxCtor.ctyBox_ctor {element}
+  -- derived from: SyntaxSemantics.ctyBox {element}
   | boxElement (element : PartialTy)
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
-  | tokenAmpStart
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
-  | borrowMutStart
-  -- derived from: SyntaxCtor.ctyBox_ctor {element}
+  -- derived from: SyntaxSemantics.ctyBorrowShared {targets}
+  | borrowSharedStart
+  -- derived from: SyntaxSemantics.ctyBox {element}
   | boxStart
   deriving Repr
 
 inductive PartialLVal where
   | cutoff
   | done (x : LVal)
-  -- derived from: SyntaxCtor.clvalVar_ctor {x}
+  -- derived from: SyntaxSemantics.clvalVar {x}
   | varX (x : PartialName)
-  -- derived from: SyntaxCtor.clvalDeref_ctor {operand}
+  -- derived from: SyntaxSemantics.clvalDeref {operand}
   | derefOperand (operand : PartialLVal)
   | derefStart
   deriving Repr
@@ -60,53 +58,49 @@ inductive PartialLVal where
 inductive PartialTerm where
   | cutoff
   | done (x : Term)
-  -- derived from: SyntaxCtor.ctermInt_ctor {n}
+  -- derived from: SyntaxSemantics.ctermInt {n}
   | intN (n : Int)
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
+  -- derived from: SyntaxSemantics.ctermBlock {lifetime} {terms}
   | blockTerms (lifetime : Lifetime) (terms : PartialTerms)
-  -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
+  -- derived from: SyntaxSemantics.ctermLetMut {name} {initialiser}
   | letMutName (name : PartialName)
   | letMutInitialiser (name : Name) (initialiser : PartialTerm)
-  -- derived from: SyntaxCtor.ctermAssign_ctor {lhs} {rhs}
+  -- derived from: SyntaxSemantics.ctermAssign {lhs} {rhs}
   | assignLhs (lhs : PartialLVal)
   | assignRhs (lhs : LVal) (rhs : PartialTerm)
-  -- derived from: SyntaxCtor.ctermBox_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermBox {operand}
   | boxOperand (operand : PartialTerm)
-  -- derived from: SyntaxCtor.ctermBorrowShared_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermBorrowShared {operand}
   | borrowSharedOperand (operand : PartialLVal)
-  -- derived from: SyntaxCtor.ctermBorrowMut_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermBorrowMut {operand}
   | borrowMutOperand (operand : PartialLVal)
-  -- derived from: SyntaxCtor.ctermMove_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermMove {operand}
   | moveOperand (operand : PartialLVal)
-  -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermCopy {operand}
   | copyOperand (operand : PartialLVal)
-  -- derived from: SyntaxCtor.ctermEq_ctor {lhs} {rhs}
+  -- derived from: SyntaxSemantics.ctermEq {lhs} {rhs}
   | termPrefix (lhs : PartialTerm)
   | eqRhs (lhs : Term) (rhs : PartialTerm)
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
+  -- derived from: SyntaxSemantics.ctermIte {condition} {trueBranch} {falseBranch}
   | iteCondition (condition : PartialTerm)
   | iteTrueBranch (condition : Term) (trueBranch : PartialTerm)
   | iteFalseBranch (condition : Term) (trueBranch : Term) (falseBranch : PartialTerm)
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
+  -- derived from: SyntaxSemantics.ctermWhile {bodyLifetime} {condition} {body}
   | whileCondition (bodyLifetime : Lifetime) (condition : PartialTerm)
   | whileBody (bodyLifetime : Lifetime) (condition : Term) (body : PartialTerm)
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
+  -- derived from: SyntaxSemantics.ctermBlock {lifetime} {terms}
   | blockStart
-  -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
+  -- derived from: SyntaxSemantics.ctermLetMut {name} {initialiser}
   | letMutStart
-  -- derived from: SyntaxCtor.ctermBox_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermBox {operand}
   | boxStart
-  -- derived from: SyntaxCtor.ctermBorrowShared_ctor {operand}
-  | tokenAmpStart
-  -- derived from: SyntaxCtor.ctermBorrowMut_ctor {operand}
-  | borrowMutStart
-  -- derived from: SyntaxCtor.ctermMove_ctor {operand}
-  | moveStart
-  -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
+  -- derived from: SyntaxSemantics.ctermBorrowShared {operand}
+  | borrowSharedStart
+  -- derived from: SyntaxSemantics.ctermCopy {operand}
   | copyStart
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
+  -- derived from: SyntaxSemantics.ctermIte {condition} {trueBranch} {falseBranch}
   | iteStart
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
+  -- derived from: SyntaxSemantics.ctermWhile {bodyLifetime} {condition} {body}
   | whileStart
   deriving Repr
 
@@ -155,145 +149,138 @@ inductive CompletesTy : PartialTy → Ty → Prop where
       CompletesTy (PartialTy.done x) x
   | cutoff {x} :
       CompletesTy PartialTy.cutoff x
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
+  -- derived from: SyntaxSemantics.ctyBorrowShared {targets}
   | ctyBorrowShared_borrowSharedTargets {targets : PartialLVals} {targets' : List LVal} :
       CompletesLVals targets targets' →
-      CompletesTy (PartialTy.borrowSharedTargets targets) (SyntaxCtor.ctyBorrowShared_ctor targets')
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
+      CompletesTy (PartialTy.borrowSharedTargets targets) (SyntaxSemantics.ctyBorrowShared targets')
+  -- derived from: SyntaxSemantics.ctyBorrowMut {targets}
   | ctyBorrowMut_borrowMutTargets {targets : PartialLVals} {targets' : List LVal} :
       CompletesLVals targets targets' →
-      CompletesTy (PartialTy.borrowMutTargets targets) (SyntaxCtor.ctyBorrowMut_ctor targets')
-  -- derived from: SyntaxCtor.ctyBox_ctor {element}
+      CompletesTy (PartialTy.borrowMutTargets targets) (SyntaxSemantics.ctyBorrowMut targets')
+  -- derived from: SyntaxSemantics.ctyBox {element}
   | ctyBox_boxElement {element : PartialTy} {element' : Ty} :
       CompletesTy element element' →
-      CompletesTy (PartialTy.boxElement element) (SyntaxCtor.ctyBox_ctor element')
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
-  | ctyBorrowShared_tokenAmpStart {targets : List LVal} :
-      CompletesTy (PartialTy.tokenAmpStart) (SyntaxCtor.ctyBorrowShared_ctor targets)
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
-  | ctyBorrowMut_tokenAmpStart {targets : List LVal} :
-      CompletesTy (PartialTy.tokenAmpStart) (SyntaxCtor.ctyBorrowMut_ctor targets)
-  | ctyBorrowMut_borrowMutStart {targets : List LVal} :
-      CompletesTy (PartialTy.borrowMutStart) (SyntaxCtor.ctyBorrowMut_ctor targets)
-  -- derived from: SyntaxCtor.ctyBox_ctor {element}
+      CompletesTy (PartialTy.boxElement element) (SyntaxSemantics.ctyBox element')
+  -- derived from: SyntaxSemantics.ctyBorrowShared {targets}
+  | ctyBorrowShared_borrowSharedStart {targets : List LVal} :
+      CompletesTy (PartialTy.borrowSharedStart) (SyntaxSemantics.ctyBorrowShared targets)
+  -- derived from: SyntaxSemantics.ctyBorrowMut {targets}
+  | ctyBorrowMut_borrowSharedStart {targets : List LVal} :
+      CompletesTy (PartialTy.borrowSharedStart) (SyntaxSemantics.ctyBorrowMut targets)
+  -- derived from: SyntaxSemantics.ctyBox {element}
   | ctyBox_boxStart {element : Ty} :
-      CompletesTy (PartialTy.boxStart) (SyntaxCtor.ctyBox_ctor element)
+      CompletesTy (PartialTy.boxStart) (SyntaxSemantics.ctyBox element)
 
 inductive CompletesLVal : PartialLVal → LVal → Prop where
   | done {x} :
       CompletesLVal (PartialLVal.done x) x
   | cutoff {x} :
       CompletesLVal PartialLVal.cutoff x
-  -- derived from: SyntaxCtor.clvalVar_ctor {x}
+  -- derived from: SyntaxSemantics.clvalVar {x}
   | clvalVar_varX {x : PartialName} {x' : Name} :
       CompletesName x x' →
-      CompletesLVal (PartialLVal.varX x) (SyntaxCtor.clvalVar_ctor x')
-  -- derived from: SyntaxCtor.clvalDeref_ctor {operand}
+      CompletesLVal (PartialLVal.varX x) (SyntaxSemantics.clvalVar x')
+  -- derived from: SyntaxSemantics.clvalDeref {operand}
   | clvalDeref_derefOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
-      CompletesLVal (PartialLVal.derefOperand operand) (SyntaxCtor.clvalDeref_ctor operand')
+      CompletesLVal (PartialLVal.derefOperand operand) (SyntaxSemantics.clvalDeref operand')
   | clvalDeref_derefStart {operand : LVal} :
-      CompletesLVal (PartialLVal.derefStart) (SyntaxCtor.clvalDeref_ctor operand)
+      CompletesLVal (PartialLVal.derefStart) (SyntaxSemantics.clvalDeref operand)
 
 inductive CompletesTerm : PartialTerm → Term → Prop where
   | done {x} :
       CompletesTerm (PartialTerm.done x) x
   | cutoff {x} :
       CompletesTerm PartialTerm.cutoff x
-  -- derived from: SyntaxCtor.ctermInt_ctor {n}
+  -- derived from: SyntaxSemantics.ctermInt {n}
   | ctermInt_intN {n : Int} :
-      CompletesTerm (PartialTerm.intN n) (SyntaxCtor.ctermInt_ctor n)
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
+      CompletesTerm (PartialTerm.intN n) (SyntaxSemantics.ctermInt n)
+  -- derived from: SyntaxSemantics.ctermBlock {lifetime} {terms}
   | ctermBlock_blockTerms {lifetime : Lifetime} {terms : PartialTerms} {terms' : List Term} :
       CompletesTerms terms terms' →
-      CompletesTerm (PartialTerm.blockTerms lifetime terms) (SyntaxCtor.ctermBlock_ctor lifetime terms')
-  -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
+      CompletesTerm (PartialTerm.blockTerms lifetime terms) (SyntaxSemantics.ctermBlock lifetime terms')
+  -- derived from: SyntaxSemantics.ctermLetMut {name} {initialiser}
   | ctermLetMut_letMutName {name : PartialName} {name' : Name} {initialiser : Term} :
       CompletesName name name' →
-      CompletesTerm (PartialTerm.letMutName name) (SyntaxCtor.ctermLetMut_ctor name' initialiser)
+      CompletesTerm (PartialTerm.letMutName name) (SyntaxSemantics.ctermLetMut name' initialiser)
   | ctermLetMut_letMutInitialiser {name : Name} {initialiser : PartialTerm} {initialiser' : Term} :
       CompletesTerm initialiser initialiser' →
-      CompletesTerm (PartialTerm.letMutInitialiser name initialiser) (SyntaxCtor.ctermLetMut_ctor name initialiser')
-  -- derived from: SyntaxCtor.ctermAssign_ctor {lhs} {rhs}
+      CompletesTerm (PartialTerm.letMutInitialiser name initialiser) (SyntaxSemantics.ctermLetMut name initialiser')
+  -- derived from: SyntaxSemantics.ctermAssign {lhs} {rhs}
   | ctermAssign_assignLhs {lhs : PartialLVal} {lhs' : LVal} {rhs : Term} :
       CompletesLVal lhs lhs' →
-      CompletesTerm (PartialTerm.assignLhs lhs) (SyntaxCtor.ctermAssign_ctor lhs' rhs)
+      CompletesTerm (PartialTerm.assignLhs lhs) (SyntaxSemantics.ctermAssign lhs' rhs)
   | ctermAssign_assignRhs {lhs : LVal} {rhs : PartialTerm} {rhs' : Term} :
       CompletesTerm rhs rhs' →
-      CompletesTerm (PartialTerm.assignRhs lhs rhs) (SyntaxCtor.ctermAssign_ctor lhs rhs')
-  -- derived from: SyntaxCtor.ctermBox_ctor {operand}
+      CompletesTerm (PartialTerm.assignRhs lhs rhs) (SyntaxSemantics.ctermAssign lhs rhs')
+  -- derived from: SyntaxSemantics.ctermBox {operand}
   | ctermBox_boxOperand {operand : PartialTerm} {operand' : Term} :
       CompletesTerm operand operand' →
-      CompletesTerm (PartialTerm.boxOperand operand) (SyntaxCtor.ctermBox_ctor operand')
-  -- derived from: SyntaxCtor.ctermBorrowShared_ctor {operand}
+      CompletesTerm (PartialTerm.boxOperand operand) (SyntaxSemantics.ctermBox operand')
+  -- derived from: SyntaxSemantics.ctermBorrowShared {operand}
   | ctermBorrowShared_borrowSharedOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
-      CompletesTerm (PartialTerm.borrowSharedOperand operand) (SyntaxCtor.ctermBorrowShared_ctor operand')
-  -- derived from: SyntaxCtor.ctermBorrowMut_ctor {operand}
+      CompletesTerm (PartialTerm.borrowSharedOperand operand) (SyntaxSemantics.ctermBorrowShared operand')
+  -- derived from: SyntaxSemantics.ctermBorrowMut {operand}
   | ctermBorrowMut_borrowMutOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
-      CompletesTerm (PartialTerm.borrowMutOperand operand) (SyntaxCtor.ctermBorrowMut_ctor operand')
-  -- derived from: SyntaxCtor.ctermMove_ctor {operand}
+      CompletesTerm (PartialTerm.borrowMutOperand operand) (SyntaxSemantics.ctermBorrowMut operand')
+  -- derived from: SyntaxSemantics.ctermMove {operand}
   | ctermMove_moveOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
-      CompletesTerm (PartialTerm.moveOperand operand) (SyntaxCtor.ctermMove_ctor operand')
-  -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
+      CompletesTerm (PartialTerm.moveOperand operand) (SyntaxSemantics.ctermMove operand')
+  -- derived from: SyntaxSemantics.ctermCopy {operand}
   | ctermCopy_copyOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
-      CompletesTerm (PartialTerm.copyOperand operand) (SyntaxCtor.ctermCopy_ctor operand')
-  -- derived from: SyntaxCtor.ctermEq_ctor {lhs} {rhs}
+      CompletesTerm (PartialTerm.copyOperand operand) (SyntaxSemantics.ctermCopy operand')
+  -- derived from: SyntaxSemantics.ctermEq {lhs} {rhs}
   | ctermEq_termPrefix {lhs : PartialTerm} {lhs' : Term} {rhs : Term} :
       CompletesTerm lhs lhs' →
-      CompletesTerm (PartialTerm.termPrefix lhs) (SyntaxCtor.ctermEq_ctor lhs' rhs)
+      CompletesTerm (PartialTerm.termPrefix lhs) (SyntaxSemantics.ctermEq lhs' rhs)
   | ctermEq_eqRhs {lhs : Term} {rhs : PartialTerm} {rhs' : Term} :
       CompletesTerm rhs rhs' →
-      CompletesTerm (PartialTerm.eqRhs lhs rhs) (SyntaxCtor.ctermEq_ctor lhs rhs')
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
+      CompletesTerm (PartialTerm.eqRhs lhs rhs) (SyntaxSemantics.ctermEq lhs rhs')
+  -- derived from: SyntaxSemantics.ctermIte {condition} {trueBranch} {falseBranch}
   | ctermIte_iteCondition {condition : PartialTerm} {condition' : Term} {trueBranch : Term} {falseBranch : Term} :
       CompletesTerm condition condition' →
-      CompletesTerm (PartialTerm.iteCondition condition) (SyntaxCtor.ctermIte_ctor condition' trueBranch falseBranch)
+      CompletesTerm (PartialTerm.iteCondition condition) (SyntaxSemantics.ctermIte condition' trueBranch falseBranch)
   | ctermIte_iteTrueBranch {condition : Term} {trueBranch : PartialTerm} {trueBranch' : Term} {falseBranch : Term} :
       CompletesTerm trueBranch trueBranch' →
-      CompletesTerm (PartialTerm.iteTrueBranch condition trueBranch) (SyntaxCtor.ctermIte_ctor condition trueBranch' falseBranch)
+      CompletesTerm (PartialTerm.iteTrueBranch condition trueBranch) (SyntaxSemantics.ctermIte condition trueBranch' falseBranch)
   | ctermIte_iteFalseBranch {condition : Term} {trueBranch : Term} {falseBranch : PartialTerm} {falseBranch' : Term} :
       CompletesTerm falseBranch falseBranch' →
-      CompletesTerm (PartialTerm.iteFalseBranch condition trueBranch falseBranch) (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch')
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
+      CompletesTerm (PartialTerm.iteFalseBranch condition trueBranch falseBranch) (SyntaxSemantics.ctermIte condition trueBranch falseBranch')
+  -- derived from: SyntaxSemantics.ctermWhile {bodyLifetime} {condition} {body}
   | ctermWhile_whileCondition {bodyLifetime : Lifetime} {condition : PartialTerm} {condition' : Term} {body : Term} :
       CompletesTerm condition condition' →
-      CompletesTerm (PartialTerm.whileCondition bodyLifetime condition) (SyntaxCtor.ctermWhile_ctor bodyLifetime condition' body)
+      CompletesTerm (PartialTerm.whileCondition bodyLifetime condition) (SyntaxSemantics.ctermWhile bodyLifetime condition' body)
   | ctermWhile_whileBody {bodyLifetime : Lifetime} {condition : Term} {body : PartialTerm} {body' : Term} :
       CompletesTerm body body' →
-      CompletesTerm (PartialTerm.whileBody bodyLifetime condition body) (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body')
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
+      CompletesTerm (PartialTerm.whileBody bodyLifetime condition body) (SyntaxSemantics.ctermWhile bodyLifetime condition body')
+  -- derived from: SyntaxSemantics.ctermBlock {lifetime} {terms}
   | ctermBlock_blockStart {lifetime : Lifetime} {terms : List Term} :
-      CompletesTerm (PartialTerm.blockStart) (SyntaxCtor.ctermBlock_ctor lifetime terms)
-  -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
+      CompletesTerm (PartialTerm.blockStart) (SyntaxSemantics.ctermBlock lifetime terms)
+  -- derived from: SyntaxSemantics.ctermLetMut {name} {initialiser}
   | ctermLetMut_letMutStart {name : Name} {initialiser : Term} :
-      CompletesTerm (PartialTerm.letMutStart) (SyntaxCtor.ctermLetMut_ctor name initialiser)
-  -- derived from: SyntaxCtor.ctermBox_ctor {operand}
+      CompletesTerm (PartialTerm.letMutStart) (SyntaxSemantics.ctermLetMut name initialiser)
+  -- derived from: SyntaxSemantics.ctermBox {operand}
   | ctermBox_boxStart {operand : Term} :
-      CompletesTerm (PartialTerm.boxStart) (SyntaxCtor.ctermBox_ctor operand)
-  -- derived from: SyntaxCtor.ctermBorrowShared_ctor {operand}
-  | ctermBorrowShared_tokenAmpStart {operand : LVal} :
-      CompletesTerm (PartialTerm.tokenAmpStart) (SyntaxCtor.ctermBorrowShared_ctor operand)
-  -- derived from: SyntaxCtor.ctermBorrowMut_ctor {operand}
-  | ctermBorrowMut_tokenAmpStart {operand : LVal} :
-      CompletesTerm (PartialTerm.tokenAmpStart) (SyntaxCtor.ctermBorrowMut_ctor operand)
-  | ctermBorrowMut_borrowMutStart {operand : LVal} :
-      CompletesTerm (PartialTerm.borrowMutStart) (SyntaxCtor.ctermBorrowMut_ctor operand)
-  -- derived from: SyntaxCtor.ctermMove_ctor {operand}
-  | ctermMove_moveStart {operand : LVal} :
-      CompletesTerm (PartialTerm.moveStart) (SyntaxCtor.ctermMove_ctor operand)
-  -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
+      CompletesTerm (PartialTerm.boxStart) (SyntaxSemantics.ctermBox operand)
+  -- derived from: SyntaxSemantics.ctermBorrowShared {operand}
+  | ctermBorrowShared_borrowSharedStart {operand : LVal} :
+      CompletesTerm (PartialTerm.borrowSharedStart) (SyntaxSemantics.ctermBorrowShared operand)
+  -- derived from: SyntaxSemantics.ctermBorrowMut {operand}
+  | ctermBorrowMut_borrowSharedStart {operand : LVal} :
+      CompletesTerm (PartialTerm.borrowSharedStart) (SyntaxSemantics.ctermBorrowMut operand)
+  -- derived from: SyntaxSemantics.ctermCopy {operand}
   | ctermCopy_copyStart {operand : LVal} :
-      CompletesTerm (PartialTerm.copyStart) (SyntaxCtor.ctermCopy_ctor operand)
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
+      CompletesTerm (PartialTerm.copyStart) (SyntaxSemantics.ctermCopy operand)
+  -- derived from: SyntaxSemantics.ctermIte {condition} {trueBranch} {falseBranch}
   | ctermIte_iteStart {condition : Term} {trueBranch : Term} {falseBranch : Term} :
-      CompletesTerm (PartialTerm.iteStart) (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch)
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
+      CompletesTerm (PartialTerm.iteStart) (SyntaxSemantics.ctermIte condition trueBranch falseBranch)
+  -- derived from: SyntaxSemantics.ctermWhile {bodyLifetime} {condition} {body}
   | ctermWhile_whileStart {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
-      CompletesTerm (PartialTerm.whileStart) (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body)
+      CompletesTerm (PartialTerm.whileStart) (SyntaxSemantics.ctermWhile bodyLifetime condition body)
 
 end
 

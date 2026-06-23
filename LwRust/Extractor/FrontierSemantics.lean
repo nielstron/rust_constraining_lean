@@ -1,14 +1,12 @@
 import LwRust.Extractor.FrontierParser
 import LwRust.Extractor.Generated.FrontierGrammar
-import LwRust.Extractor.PartialProgram
 
 /-!
 Semantic interpretation of FW-Rust parse trees.
 
 `LwRust.Extractor.Frontier` proves that a token prefix can be completed to a
-grammar parse tree.  This file connects those parse trees back to the existing
-complete AST types (`Ty`, `LVal`, `Term`) and to the old
-`Generated.PartialProgram` completion relation used by the extractor proofs.
+grammar parse tree. This file connects those parse trees back to the complete
+AST types (`Ty`, `LVal`, `Term`).
 -/
 
 namespace ConservativeExtractor
@@ -20,38 +18,39 @@ mutual
 inductive DenotesTy : Tree Tok → Ty → Prop where
   | ctyUnit :
       DenotesTy (.node "ctyUnit" [.token .ctyUnit])
-        SyntaxCtor.ctyUnit_ctor
+        SyntaxSemantics.ctyUnit
   | ctyInt :
       DenotesTy (.node "ctyInt" [.token .ctyInt])
-        SyntaxCtor.ctyInt_ctor
+        SyntaxSemantics.ctyInt
   | ctyBool :
       DenotesTy (.node "ctyBool" [.token .ctyBool])
-        SyntaxCtor.ctyBool_ctor
+        SyntaxSemantics.ctyBool
   | ctyBorrowShared {targetsTree : Tree Tok} {targets : List LVal} :
       DenotesLVals targetsTree targets →
       DenotesTy
         (.node "ctyBorrowShared"
           [.token .amp, .token .lbrack, targetsTree, .token .rbrack])
-        (SyntaxCtor.ctyBorrowShared_ctor targets)
+        (SyntaxSemantics.ctyBorrowShared targets)
   | ctyBorrowMut {targetsTree : Tree Tok} {targets : List LVal} :
       DenotesLVals targetsTree targets →
       DenotesTy
         (.node "ctyBorrowMut"
-          [.token .ampMut, .token .lbrack, targetsTree, .token .rbrack])
-        (SyntaxCtor.ctyBorrowMut_ctor targets)
+          [.token .amp, .token .mutKw, .token .lbrack, targetsTree,
+            .token .rbrack])
+        (SyntaxSemantics.ctyBorrowMut targets)
   | ctyBox {elementTree : Tree Tok} {element : Ty} :
       DenotesTy elementTree element →
       DenotesTy (.node "ctyBox" [.token .box, elementTree])
-        (SyntaxCtor.ctyBox_ctor element)
+        (SyntaxSemantics.ctyBox element)
 
 inductive DenotesLVal : Tree Tok → LVal → Prop where
   | clvalVar {x : Name} :
       DenotesLVal (.node "clvalVar" [.token (.ident x)])
-        (SyntaxCtor.clvalVar_ctor x)
+        (SyntaxSemantics.clvalVar x)
   | clvalDeref {operandTree : Tree Tok} {operand : LVal} :
       DenotesLVal operandTree operand →
       DenotesLVal (.node "clvalDeref" [.token .star, operandTree])
-        (SyntaxCtor.clvalDeref_ctor operand)
+        (SyntaxSemantics.clvalDeref operand)
 
 inductive DenotesLVals : Tree Tok → List LVal → Prop where
   | clvalsEmpty :
@@ -77,16 +76,16 @@ inductive DenotesLValsTail : Tree Tok → List LVal → Prop where
 inductive DenotesTerm : Tree Tok → Term → Prop where
   | ctermUnit :
       DenotesTerm (.node "ctermUnit" [.token .unit])
-        SyntaxCtor.ctermUnit_ctor
+        SyntaxSemantics.ctermUnit
   | ctermInt {n : Int} :
       DenotesTerm (.node "ctermInt" [.token (.num n)])
-        (SyntaxCtor.ctermInt_ctor n)
+        (SyntaxSemantics.ctermInt n)
   | ctermTrue :
       DenotesTerm (.node "ctermTrue" [.token .trueLit])
-        SyntaxCtor.ctermTrue_ctor
+        SyntaxSemantics.ctermTrue
   | ctermFalse :
       DenotesTerm (.node "ctermFalse" [.token .falseLit])
-        SyntaxCtor.ctermFalse_ctor
+        SyntaxSemantics.ctermFalse
   | ctermBlock {lifetime : Lifetime} {termsTree : Tree Tok}
       {terms : List Term} :
       DenotesTerms termsTree terms →
@@ -94,7 +93,7 @@ inductive DenotesTerm : Tree Tok → Term → Prop where
         (.node "ctermBlock"
           [.token .block, .token (.lifetime lifetime), .token .lbrace,
             termsTree, .token .rbrace])
-        (SyntaxCtor.ctermBlock_ctor lifetime terms)
+        (SyntaxSemantics.ctermBlock lifetime terms)
   | ctermLetMut {name : Name} {initialiserTree : Tree Tok}
       {initialiser : Term} :
       DenotesTerm initialiserTree initialiser →
@@ -102,37 +101,38 @@ inductive DenotesTerm : Tree Tok → Term → Prop where
         (.node "ctermLetMut"
           [.token .letKw, .token .mutKw, .token (.ident name),
             .token .assign, initialiserTree])
-        (SyntaxCtor.ctermLetMut_ctor name initialiser)
+        (SyntaxSemantics.ctermLetMut name initialiser)
   | ctermAssign {lhsTree rhsTree : Tree Tok} {lhs : LVal} {rhs : Term} :
       DenotesLVal lhsTree lhs →
       DenotesTerm rhsTree rhs →
       DenotesTerm (.node "ctermAssign" [lhsTree, .token .assign, rhsTree])
-        (SyntaxCtor.ctermAssign_ctor lhs rhs)
+        (SyntaxSemantics.ctermAssign lhs rhs)
   | ctermBox {operandTree : Tree Tok} {operand : Term} :
       DenotesTerm operandTree operand →
       DenotesTerm (.node "ctermBox" [.token .box, operandTree])
-        (SyntaxCtor.ctermBox_ctor operand)
+        (SyntaxSemantics.ctermBox operand)
   | ctermBorrowShared {operandTree : Tree Tok} {operand : LVal} :
       DenotesLVal operandTree operand →
       DenotesTerm (.node "ctermBorrowShared" [.token .amp, operandTree])
-        (SyntaxCtor.ctermBorrowShared_ctor operand)
+        (SyntaxSemantics.ctermBorrowShared operand)
   | ctermBorrowMut {operandTree : Tree Tok} {operand : LVal} :
       DenotesLVal operandTree operand →
-      DenotesTerm (.node "ctermBorrowMut" [.token .ampMut, operandTree])
-        (SyntaxCtor.ctermBorrowMut_ctor operand)
+      DenotesTerm
+        (.node "ctermBorrowMut" [.token .amp, .token .mutKw, operandTree])
+        (SyntaxSemantics.ctermBorrowMut operand)
   | ctermMove {operandTree : Tree Tok} {operand : LVal} :
       DenotesLVal operandTree operand →
-      DenotesTerm (.node "ctermMove" [.token .moveKw, operandTree])
-        (SyntaxCtor.ctermMove_ctor operand)
+      DenotesTerm (.node "ctermMove" [operandTree])
+        (SyntaxSemantics.ctermMove operand)
   | ctermCopy {operandTree : Tree Tok} {operand : LVal} :
       DenotesLVal operandTree operand →
       DenotesTerm (.node "ctermCopy" [.token .copyKw, operandTree])
-        (SyntaxCtor.ctermCopy_ctor operand)
+        (SyntaxSemantics.ctermCopy operand)
   | ctermEq {lhsTree rhsTree : Tree Tok} {lhs rhs : Term} :
       DenotesTerm lhsTree lhs →
       DenotesTerm rhsTree rhs →
       DenotesTerm (.node "ctermEq" [lhsTree, .token .eqEq, rhsTree])
-        (SyntaxCtor.ctermEq_ctor lhs rhs)
+        (SyntaxSemantics.ctermEq lhs rhs)
   | ctermIte {conditionTree trueTree falseTree : Tree Tok}
       {condition trueBranch falseBranch : Term} :
       DenotesTerm conditionTree condition →
@@ -142,7 +142,7 @@ inductive DenotesTerm : Tree Tok → Term → Prop where
         (.node "ctermIte"
           [.token .ifKw, conditionTree, trueTree, .token .elseKw,
             falseTree])
-        (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch)
+        (SyntaxSemantics.ctermIte condition trueBranch falseBranch)
   | ctermWhile {bodyLifetime : Lifetime} {conditionTree bodyTree : Tree Tok}
       {condition body : Term} :
       DenotesTerm conditionTree condition →
@@ -151,7 +151,7 @@ inductive DenotesTerm : Tree Tok → Term → Prop where
         (.node "ctermWhile"
           [.token .whileKw, .token (.lifetime bodyLifetime), conditionTree,
             bodyTree])
-        (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body)
+        (SyntaxSemantics.ctermWhile bodyLifetime condition body)
 
 inductive DenotesTerms : Tree Tok → List Term → Prop where
   | ctermsEmpty :
@@ -520,26 +520,27 @@ mutual
 
 def denoteTy? : Tree Tok → Option Ty
   | .node "ctyUnit" [.token .ctyUnit] =>
-      some SyntaxCtor.ctyUnit_ctor
+      some SyntaxSemantics.ctyUnit
   | .node "ctyInt" [.token .ctyInt] =>
-      some SyntaxCtor.ctyInt_ctor
+      some SyntaxSemantics.ctyInt
   | .node "ctyBool" [.token .ctyBool] =>
-      some SyntaxCtor.ctyBool_ctor
+      some SyntaxSemantics.ctyBool
   | .node "ctyBorrowShared"
       [.token .amp, .token .lbrack, targetsTree, .token .rbrack] =>
-      return SyntaxCtor.ctyBorrowShared_ctor (← denoteLVals? targetsTree)
+      return SyntaxSemantics.ctyBorrowShared (← denoteLVals? targetsTree)
   | .node "ctyBorrowMut"
-      [.token .ampMut, .token .lbrack, targetsTree, .token .rbrack] =>
-      return SyntaxCtor.ctyBorrowMut_ctor (← denoteLVals? targetsTree)
+      [.token .amp, .token .mutKw, .token .lbrack, targetsTree,
+        .token .rbrack] =>
+      return SyntaxSemantics.ctyBorrowMut (← denoteLVals? targetsTree)
   | .node "ctyBox" [.token .box, elementTree] =>
-      return SyntaxCtor.ctyBox_ctor (← denoteTy? elementTree)
+      return SyntaxSemantics.ctyBox (← denoteTy? elementTree)
   | _ => none
 
 def denoteLVal? : Tree Tok → Option LVal
   | .node "clvalVar" [.token (.ident x)] =>
-      some (SyntaxCtor.clvalVar_ctor x)
+      some (SyntaxSemantics.clvalVar x)
   | .node "clvalDeref" [.token .star, operandTree] =>
-      return SyntaxCtor.clvalDeref_ctor (← denoteLVal? operandTree)
+      return SyntaxSemantics.clvalDeref (← denoteLVal? operandTree)
   | _ => none
 
 def denoteLVals? : Tree Tok → Option (List LVal)
@@ -558,48 +559,48 @@ def denoteLValsTail? : Tree Tok → Option (List LVal)
 
 def denoteTerm? : Tree Tok → Option Term
   | .node "ctermUnit" [.token .unit] =>
-      some SyntaxCtor.ctermUnit_ctor
+      some SyntaxSemantics.ctermUnit
   | .node "ctermInt" [.token (.num n)] =>
-      some (SyntaxCtor.ctermInt_ctor n)
+      some (SyntaxSemantics.ctermInt n)
   | .node "ctermTrue" [.token .trueLit] =>
-      some SyntaxCtor.ctermTrue_ctor
+      some SyntaxSemantics.ctermTrue
   | .node "ctermFalse" [.token .falseLit] =>
-      some SyntaxCtor.ctermFalse_ctor
+      some SyntaxSemantics.ctermFalse
   | .node "ctermBlock"
       [.token .block, .token (.lifetime lifetime), .token .lbrace,
         termsTree, .token .rbrace] =>
-      return SyntaxCtor.ctermBlock_ctor lifetime (← denoteTerms? termsTree)
+      return SyntaxSemantics.ctermBlock lifetime (← denoteTerms? termsTree)
   | .node "ctermLetMut"
       [.token .letKw, .token .mutKw, .token (.ident name), .token .assign,
         initialiserTree] =>
-      return SyntaxCtor.ctermLetMut_ctor name (← denoteTerm? initialiserTree)
+      return SyntaxSemantics.ctermLetMut name (← denoteTerm? initialiserTree)
   | .node "ctermAssign" [lhsTree, .token .assign, rhsTree] =>
-      return SyntaxCtor.ctermAssign_ctor
+      return SyntaxSemantics.ctermAssign
         (← denoteLVal? lhsTree) (← denoteTerm? rhsTree)
   | .node "ctermBox" [.token .box, operandTree] =>
-      return SyntaxCtor.ctermBox_ctor (← denoteTerm? operandTree)
+      return SyntaxSemantics.ctermBox (← denoteTerm? operandTree)
   | .node "ctermBorrowShared" [.token .amp, operandTree] =>
-      return SyntaxCtor.ctermBorrowShared_ctor (← denoteLVal? operandTree)
-  | .node "ctermBorrowMut" [.token .ampMut, operandTree] =>
-      return SyntaxCtor.ctermBorrowMut_ctor (← denoteLVal? operandTree)
-  | .node "ctermMove" [.token .moveKw, operandTree] =>
-      return SyntaxCtor.ctermMove_ctor (← denoteLVal? operandTree)
+      return SyntaxSemantics.ctermBorrowShared (← denoteLVal? operandTree)
+  | .node "ctermBorrowMut" [.token .amp, .token .mutKw, operandTree] =>
+      return SyntaxSemantics.ctermBorrowMut (← denoteLVal? operandTree)
+  | .node "ctermMove" [operandTree] =>
+      return SyntaxSemantics.ctermMove (← denoteLVal? operandTree)
   | .node "ctermCopy" [.token .copyKw, operandTree] =>
-      return SyntaxCtor.ctermCopy_ctor (← denoteLVal? operandTree)
+      return SyntaxSemantics.ctermCopy (← denoteLVal? operandTree)
   | .node "ctermEq" [lhsTree, .token .eqEq, rhsTree] =>
-      return SyntaxCtor.ctermEq_ctor
+      return SyntaxSemantics.ctermEq
         (← denoteTerm? lhsTree) (← denoteTerm? rhsTree)
   | .node "ctermIte"
       [.token .ifKw, conditionTree, trueBranchTree, .token .elseKw,
         falseBranchTree] =>
-      return SyntaxCtor.ctermIte_ctor
+      return SyntaxSemantics.ctermIte
         (← denoteTerm? conditionTree)
         (← denoteTerm? trueBranchTree)
         (← denoteTerm? falseBranchTree)
   | .node "ctermWhile"
       [.token .whileKw, .token (.lifetime bodyLifetime), conditionTree,
         bodyTree] =>
-      return SyntaxCtor.ctermWhile_ctor bodyLifetime
+      return SyntaxSemantics.ctermWhile bodyLifetime
         (← denoteTerm? conditionTree) (← denoteTerm? bodyTree)
   | _ => none
 
@@ -646,8 +647,9 @@ theorem denoteTy?_sound :
           subst ty
           exact DenotesTy.ctyBorrowShared
             (denoteLVals?_sound htargets)
-  | .node "ctyBorrowMut"
-      [.token .ampMut, .token .lbrack, targetsTree, .token .rbrack], ty, h => by
+    | .node "ctyBorrowMut"
+        [.token .amp, .token .mutKw, .token .lbrack, targetsTree,
+          .token .rbrack], ty, h => by
       cases htargets : denoteLVals? targetsTree with
       | none =>
           simp [denoteTy?, htargets] at h
@@ -899,7 +901,7 @@ theorem denoteTerm?_sound :
           subst term
           exact DenotesTerm.ctermBorrowShared
             (denoteLVal?_sound hoperand)
-  | .node "ctermBorrowMut" [.token .ampMut, operandTree], term, h => by
+    | .node "ctermBorrowMut" [.token .amp, .token .mutKw, operandTree], term, h => by
       cases hoperand : denoteLVal? operandTree with
       | none =>
           simp [denoteTerm?, hoperand] at h
@@ -908,7 +910,7 @@ theorem denoteTerm?_sound :
           subst term
           exact DenotesTerm.ctermBorrowMut
             (denoteLVal?_sound hoperand)
-  | .node "ctermMove" [.token .moveKw, operandTree], term, h => by
+    | .node "ctermMove" [operandTree], term, h => by
       cases hoperand : denoteLVal? operandTree with
       | none =>
           simp [denoteTerm?, hoperand] at h
@@ -1393,7 +1395,7 @@ theorem checkedLValTree_denote_exists {tree : Tree Tok}
                               .clval operand = Bool.true :=
                           hseq
                         obtain ⟨operand', hopen⟩ := ih operand (by simp) hop
-                        exact ⟨SyntaxCtor.clvalDeref_ctor operand', by
+                        exact ⟨SyntaxSemantics.clvalDeref operand', by
                           simp [denoteLVal?, hopen]⟩
                     | cons _ _ =>
                         simp [CheckableGrammar.checkSeq] at hseq
@@ -1658,25 +1660,40 @@ noncomputable def ctermParserFromRawSpec :
 def xTok : Tok := .ident "x"
 
 def moveXPrefix : List Tok :=
-  [.moveKw, xTok]
+  [xTok]
 
 def xPrefix : List Tok :=
   [xTok]
 
 def moveStarPrefix : List Tok :=
-  [.moveKw, .star]
+  [.star]
+
+def ampPrefix : List Tok :=
+  [.amp]
 
 def clvalXTree : Tree Tok :=
   .node "clvalVar" [.token xTok]
 
+def clvalStarXTree : Tree Tok :=
+  .node "clvalDeref" [.token .star, clvalXTree]
+
 def moveXTree : Tree Tok :=
-  .node "ctermMove" [.token .moveKw, clvalXTree]
+  .node "ctermMove" [clvalXTree]
+
+def moveStarXTree : Tree Tok :=
+  .node "ctermMove" [clvalStarXTree]
 
 def moveXEqMoveXTree : Tree Tok :=
   .node "ctermEq" [moveXTree, .token .eqEq, moveXTree]
 
 def assignXMoveXTree : Tree Tok :=
   .node "ctermAssign" [clvalXTree, .token .assign, moveXTree]
+
+def borrowSharedXTree : Tree Tok :=
+  .node "ctermBorrowShared" [.token .amp, clvalXTree]
+
+def borrowMutXTree : Tree Tok :=
+  .node "ctermBorrowMut" [.token .amp, .token .mutKw, clvalXTree]
 
 theorem clvalX_derives :
     Derives grammar .clval [xTok] clvalXTree := by
@@ -1687,15 +1704,36 @@ theorem clvalX_derives :
   · simp [clvalVarRule, xTok]
     exact DerivesSeq.token (by simp [grammar, accepts]) DerivesSeq.nil
 
+theorem clvalStarX_derives :
+    Derives grammar .clval (moveStarPrefix ++ [xTok])
+      clvalStarXTree := by
+  change Derives grammar .clval (moveStarPrefix ++ [xTok])
+    (.node "clvalDeref" [.token .star, clvalXTree])
+  refine Derives.rule (rule := clvalDerefRule) ?_ rfl ?_
+  · simp [grammar, clvalDerefRule]
+  · simp [moveStarPrefix, clvalDerefRule]
+    exact DerivesSeq.token (by simp [grammar, accepts])
+      (DerivesSeq.cat clvalX_derives DerivesSeq.nil)
+
 theorem moveX_derives :
     Derives grammar .cterm moveXPrefix moveXTree := by
   change Derives grammar .cterm moveXPrefix
-    (.node "ctermMove" [.token .moveKw, clvalXTree])
+    (.node "ctermMove" [clvalXTree])
   refine Derives.rule (rule := ctermMoveRule) ?_ rfl ?_
   · simp [grammar, ctermMoveRule]
   · simp [moveXPrefix, ctermMoveRule]
-    exact DerivesSeq.token (by simp [grammar, accepts])
-      (DerivesSeq.cat clvalX_derives DerivesSeq.nil)
+    exact DerivesSeq.cat clvalX_derives DerivesSeq.nil
+
+theorem moveStarX_derives :
+    Derives grammar .cterm (moveStarPrefix ++ [xTok])
+      moveStarXTree := by
+  change Derives grammar .cterm (moveStarPrefix ++ [xTok])
+    (.node "ctermMove" [clvalStarXTree])
+  refine Derives.rule (rule := ctermMoveRule) ?_ rfl ?_
+  · simp [grammar, ctermMoveRule]
+  · simp [ctermMoveRule]
+    exact DerivesSeq.cat (catTokens := moveStarPrefix ++ [xTok])
+      (restTokens := []) clvalStarX_derives DerivesSeq.nil
 
 theorem moveXEqMoveX_derives :
     Derives grammar .cterm (moveXPrefix ++ ([Tok.eqEq] ++ moveXPrefix))
@@ -1720,6 +1758,29 @@ theorem assignXMoveX_derives :
     exact DerivesSeq.cat clvalX_derives
       (DerivesSeq.token (by simp [grammar, accepts])
         (DerivesSeq.cat moveX_derives DerivesSeq.nil))
+
+theorem borrowSharedX_derives :
+    Derives grammar .cterm (ampPrefix ++ [xTok])
+      borrowSharedXTree := by
+  change Derives grammar .cterm (ampPrefix ++ [xTok])
+    (.node "ctermBorrowShared" [.token .amp, clvalXTree])
+  refine Derives.rule (rule := ctermBorrowSharedRule) ?_ rfl ?_
+  · simp [grammar, ctermBorrowSharedRule]
+  · simp [ampPrefix, ctermBorrowSharedRule]
+    exact DerivesSeq.token (by simp [grammar, accepts])
+      (DerivesSeq.cat clvalX_derives DerivesSeq.nil)
+
+theorem borrowMutX_derives :
+    Derives grammar .cterm (ampPrefix ++ [Tok.mutKw, xTok])
+      borrowMutXTree := by
+  change Derives grammar .cterm (ampPrefix ++ [Tok.mutKw, xTok])
+    (.node "ctermBorrowMut" [.token .amp, .token .mutKw, clvalXTree])
+  refine Derives.rule (rule := ctermBorrowMutRule) ?_ rfl ?_
+  · simp [grammar, ctermBorrowMutRule]
+  · simp [ampPrefix, ctermBorrowMutRule]
+    exact DerivesSeq.token (by simp [grammar, accepts])
+      (DerivesSeq.token (by simp [grammar, accepts])
+        (DerivesSeq.cat clvalX_derives DerivesSeq.nil))
 
 def rawMoveXEqMoveXCompletion : CheckableGrammar.RawCompletion Tok :=
   { suffix := [Tok.eqEq] ++ moveXPrefix
@@ -1750,14 +1811,14 @@ def checkedAssignXMoveXCompletion :
     rawAssignXMoveXCompletion_valid
 
 def moveXDoneItem : Item Cat Terminal :=
-  { rule := ctermMoveRule, dot := 2 }
+  { rule := ctermMoveRule, dot := 1 }
 
 def moveXDoneState :
     CheckableGrammar.CheckedBoundaryState checkableGrammar :=
-  { item := moveXDoneItem
-    item_mem := by native_decide
-    doneChildren := [.token .moveKw, clvalXTree]
-    checkedBefore := by native_decide }
+    { item := moveXDoneItem
+      item_mem := by native_decide
+      doneChildren := [clvalXTree]
+      checkedBefore := by native_decide }
 
 theorem moveXDoneState_pref :
     moveXDoneState.pref = moveXPrefix := by
@@ -1784,8 +1845,8 @@ def checkedMoveXDoneDefaultCompletion :
 
 def moveXDoneFrontierState :
     CheckableGrammar.CheckedFrontierState checkableGrammar .cterm :=
-  CheckableGrammar.CheckedFrontierState.boundary moveXDoneItem
-    (by native_decide) [.token .moveKw, clvalXTree] (by native_decide)
+    CheckableGrammar.CheckedFrontierState.boundary moveXDoneItem
+      (by native_decide) [clvalXTree] (by native_decide)
 
 theorem moveXDoneFrontierState_pref :
     moveXDoneFrontierState.pref = moveXPrefix := by
@@ -1952,7 +2013,6 @@ def tokSource : Tok → String
   | .trueLit => "true"
   | .falseLit => "false"
   | .amp => "&"
-  | .ampMut => "&mut"
   | .lbrack => "["
   | .rbrack => "]"
   | .comma => ","
@@ -1964,7 +2024,6 @@ def tokSource : Tok → String
   | .letKw => "let"
   | .mutKw => "mut"
   | .assign => ":="
-  | .moveKw => "move"
   | .copyKw => "copy"
   | .eqEq => "=="
   | .ifKw => "if"
@@ -2325,16 +2384,6 @@ theorem generatedFrontierEnumerator_finds_examples :
     (ctermFrontierStatesFuel 5 moveStarPrefix).length > 0 := by
   native_decide
 
-theorem firstCtermCompletedTokens?_moveStarPrefix :
-    firstCtermCompletedTokens? 5 moveStarPrefix =
-      some [.moveKw, .star, .ident "__fw_default"] := by
-  native_decide
-
-theorem completeTermSourceFuel?_moveStarPrefix :
-    completeTermSourceFuel? 5 moveStarPrefix =
-      some "move * __fw_default" := by
-  native_decide
-
 theorem exactParser_eventually_finds_moveX :
     ∃ minFuel,
       ∀ fuel, minFuel ≤ fuel →
@@ -2413,41 +2462,78 @@ theorem ctermParserFromRawSpec_completes_xPrefix :
         by simpa [checkableGrammar] using assignXMoveX_derives⟩⟩
 
 def xLVal : LVal :=
-  SyntaxCtor.clvalVar_ctor "x"
+  SyntaxSemantics.clvalVar "x"
+
+def starXLVal : LVal :=
+  SyntaxSemantics.clvalDeref xLVal
 
 def moveXTerm : Term :=
-  SyntaxCtor.ctermMove_ctor xLVal
+  SyntaxSemantics.ctermMove xLVal
+
+def moveStarXTerm : Term :=
+  SyntaxSemantics.ctermMove starXLVal
 
 def moveXEqMoveXTerm : Term :=
-  SyntaxCtor.ctermEq_ctor moveXTerm moveXTerm
+  SyntaxSemantics.ctermEq moveXTerm moveXTerm
 
 def assignXMoveXTerm : Term :=
-  SyntaxCtor.ctermAssign_ctor xLVal moveXTerm
+  SyntaxSemantics.ctermAssign xLVal moveXTerm
+
+def borrowSharedXTerm : Term :=
+  SyntaxSemantics.ctermBorrowShared xLVal
+
+def borrowMutXTerm : Term :=
+  SyntaxSemantics.ctermBorrowMut xLVal
 
 theorem clvalX_denotes :
     DenotesLVal clvalXTree xLVal := by
   change DenotesLVal (.node "clvalVar" [.token (.ident "x")])
-    (SyntaxCtor.clvalVar_ctor "x")
+    (SyntaxSemantics.clvalVar "x")
   exact DenotesLVal.clvalVar
+
+theorem clvalStarX_denotes :
+    DenotesLVal clvalStarXTree starXLVal := by
+  change DenotesLVal (.node "clvalDeref" [.token .star, clvalXTree])
+    (SyntaxSemantics.clvalDeref xLVal)
+  exact DenotesLVal.clvalDeref clvalX_denotes
 
 theorem moveX_denotes :
     DenotesTerm moveXTree moveXTerm := by
-  change DenotesTerm (.node "ctermMove" [.token .moveKw, clvalXTree])
-    (SyntaxCtor.ctermMove_ctor xLVal)
+  change DenotesTerm (.node "ctermMove" [clvalXTree])
+    (SyntaxSemantics.ctermMove xLVal)
   exact DenotesTerm.ctermMove clvalX_denotes
+
+theorem moveStarX_denotes :
+    DenotesTerm moveStarXTree moveStarXTerm := by
+  change DenotesTerm (.node "ctermMove" [clvalStarXTree])
+    (SyntaxSemantics.ctermMove starXLVal)
+  exact DenotesTerm.ctermMove clvalStarX_denotes
 
 theorem moveXEqMoveX_denotes :
     DenotesTerm moveXEqMoveXTree moveXEqMoveXTerm := by
   change DenotesTerm (.node "ctermEq" [moveXTree, .token .eqEq, moveXTree])
-    (SyntaxCtor.ctermEq_ctor moveXTerm moveXTerm)
+    (SyntaxSemantics.ctermEq moveXTerm moveXTerm)
   exact DenotesTerm.ctermEq moveX_denotes moveX_denotes
 
 theorem assignXMoveX_denotes :
     DenotesTerm assignXMoveXTree assignXMoveXTerm := by
   change DenotesTerm
     (.node "ctermAssign" [clvalXTree, .token .assign, moveXTree])
-    (SyntaxCtor.ctermAssign_ctor xLVal moveXTerm)
+    (SyntaxSemantics.ctermAssign xLVal moveXTerm)
   exact DenotesTerm.ctermAssign clvalX_denotes moveX_denotes
+
+theorem borrowSharedX_denotes :
+    DenotesTerm borrowSharedXTree borrowSharedXTerm := by
+  change DenotesTerm (.node "ctermBorrowShared" [.token .amp, clvalXTree])
+    (SyntaxSemantics.ctermBorrowShared xLVal)
+  exact DenotesTerm.ctermBorrowShared clvalX_denotes
+
+theorem borrowMutX_denotes :
+    DenotesTerm borrowMutXTree borrowMutXTerm := by
+  change DenotesTerm
+    (.node "ctermBorrowMut" [.token .amp, .token .mutKw, clvalXTree])
+    (SyntaxSemantics.ctermBorrowMut xLVal)
+  exact DenotesTerm.ctermBorrowMut clvalX_denotes
 
 def moveXTermCompletion :
     ValidTermCompletion moveXPrefix :=
@@ -2456,6 +2542,14 @@ def moveXTermCompletion :
     term := moveXTerm
     derives := by simpa using moveX_derives
     denotes := moveX_denotes }
+
+def moveStarXTermCompletion :
+    ValidTermCompletion moveStarPrefix :=
+  { suffix := [xTok]
+    tree := moveStarXTree
+    term := moveStarXTerm
+    derives := by simpa using moveStarX_derives
+    denotes := moveStarX_denotes }
 
 def moveXEqMoveXTermCompletion :
     ValidTermCompletion moveXPrefix :=
@@ -2473,6 +2567,22 @@ def assignXMoveXTermCompletion :
     derives := assignXMoveX_derives
     denotes := assignXMoveX_denotes }
 
+def borrowSharedXTermCompletion :
+    ValidTermCompletion ampPrefix :=
+  { suffix := [xTok]
+    tree := borrowSharedXTree
+    term := borrowSharedXTerm
+    derives := borrowSharedX_derives
+    denotes := borrowSharedX_denotes }
+
+def borrowMutXTermCompletion :
+    ValidTermCompletion ampPrefix :=
+  { suffix := [Tok.mutKw, xTok]
+    tree := borrowMutXTree
+    term := borrowMutXTerm
+    derives := borrowMutX_derives
+    denotes := borrowMutX_denotes }
+
 theorem moveXPrefix_codeCompletes_as_eq :
     CodeCompletesTerm moveXPrefix moveXEqMoveXTerm :=
   moveXEqMoveXTermCompletion.codeCompletes
@@ -2481,6 +2591,10 @@ theorem moveXPrefix_codeCompletes_as_move :
     CodeCompletesTerm moveXPrefix moveXTerm :=
   moveXTermCompletion.codeCompletes
 
+theorem moveStarPrefix_codeCompletes_as_move :
+    CodeCompletesTerm moveStarPrefix moveStarXTerm :=
+  moveStarXTermCompletion.codeCompletes
+
 theorem moveXPrefix_has_move_and_eq_completions :
     CodeCompletesTerm moveXPrefix moveXTerm ∧
     CodeCompletesTerm moveXPrefix moveXEqMoveXTerm ∧
@@ -2488,6 +2602,13 @@ theorem moveXPrefix_has_move_and_eq_completions :
   exact ⟨moveXPrefix_codeCompletes_as_move,
     moveXPrefix_codeCompletes_as_eq,
     by simp [moveXTerm, moveXEqMoveXTerm]⟩
+
+theorem completeTermSourceParser_eventually_valid_moveStarPrefix :
+    ∃ fuel completion,
+      completeTermSourceParser.complete fuel moveStarPrefix = some
+        (completion : ValidTermSourceCompletion moveStarPrefix).source := by
+  exact completeTermSourceParser_eventually_valid_of_codeCompletes
+    moveStarPrefix_codeCompletes_as_move
 
 theorem frontierEnumerator_complete_for_moveX_ambiguity :
     ∃ minFuel,
@@ -2506,6 +2627,39 @@ theorem frontierEnumerator_complete_for_moveX_ambiguity :
     moveXPrefix_codeCompletes_as_move
     moveXPrefix_codeCompletes_as_eq
 
+theorem ampPrefix_codeCompletes_as_shared_borrow :
+    CodeCompletesTerm ampPrefix borrowSharedXTerm :=
+  borrowSharedXTermCompletion.codeCompletes
+
+theorem ampPrefix_codeCompletes_as_mut_borrow :
+    CodeCompletesTerm ampPrefix borrowMutXTerm :=
+  borrowMutXTermCompletion.codeCompletes
+
+theorem ampPrefix_has_shared_and_mut_borrow_completions :
+    CodeCompletesTerm ampPrefix borrowSharedXTerm ∧
+    CodeCompletesTerm ampPrefix borrowMutXTerm ∧
+    borrowSharedXTerm ≠ borrowMutXTerm := by
+  exact ⟨ampPrefix_codeCompletes_as_shared_borrow,
+    ampPrefix_codeCompletes_as_mut_borrow,
+    by simp [borrowSharedXTerm, borrowMutXTerm]⟩
+
+theorem frontierEnumerator_complete_for_amp_borrow_ambiguity :
+    ∃ minFuel,
+      ∀ fuel, minFuel ≤ fuel →
+        (∃ parsed tree,
+          parsed ∈ ctermFrontierStatesFuel fuel ampPrefix ∧
+          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+            parsed.state tree ∧
+          DenotesTerm tree borrowSharedXTerm) ∧
+        (∃ parsed tree,
+          parsed ∈ ctermFrontierStatesFuel fuel ampPrefix ∧
+          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+            parsed.state tree ∧
+          DenotesTerm tree borrowMutXTerm) := by
+  exact ctermFrontierStatesFuel_complete_for_completion_pair
+    ampPrefix_codeCompletes_as_shared_borrow
+    ampPrefix_codeCompletes_as_mut_borrow
+
 theorem xPrefix_codeCompletes_as_assignment :
     CodeCompletesTerm xPrefix assignXMoveXTerm :=
   assignXMoveXTermCompletion.codeCompletes
@@ -2519,41 +2673,6 @@ theorem completeTermParserBySpec_completes_xPrefix :
     ∃ result, completeTermParserBySpec.complete xPrefix = some result := by
   exact completeTermParserBySpec.complete_if_completable xPrefix
     ⟨assignXMoveXTerm, xPrefix_codeCompletes_as_assignment⟩
-
-def oldPartialMoveX : PartialTerm :=
-  .moveOperand (.varX (.done "x"))
-
-def oldPartialMoveXAsEqLhs : PartialTerm :=
-  .termPrefix oldPartialMoveX
-
-def oldPartialXAsAssignmentLhs : PartialTerm :=
-  .assignLhs (.varX (.done "x"))
-
-theorem oldPartialMoveX_completes :
-    CompletesTerm oldPartialMoveX moveXTerm := by
-  change CompletesTerm
-    (.moveOperand (.varX (.done "x")))
-    (SyntaxCtor.ctermMove_ctor (SyntaxCtor.clvalVar_ctor "x"))
-  exact ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveOperand
-    (ConservativeExtractor.Generated.CompletesLVal.clvalVar_varX
-      ConservativeExtractor.Generated.CompletesName.done)
-
-theorem oldPartialMoveXAsEqLhs_completes :
-    CompletesTerm oldPartialMoveXAsEqLhs moveXEqMoveXTerm := by
-  change CompletesTerm
-    (.termPrefix (.moveOperand (.varX (.done "x"))))
-    (SyntaxCtor.ctermEq_ctor moveXTerm moveXTerm)
-  exact ConservativeExtractor.Generated.CompletesTerm.ctermEq_termPrefix
-    oldPartialMoveX_completes
-
-theorem oldPartialXAsAssignmentLhs_completes :
-    CompletesTerm oldPartialXAsAssignmentLhs assignXMoveXTerm := by
-  change CompletesTerm
-    (.assignLhs (.varX (.done "x")))
-    (SyntaxCtor.ctermAssign_ctor (SyntaxCtor.clvalVar_ctor "x") moveXTerm)
-  exact ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignLhs
-    (ConservativeExtractor.Generated.CompletesLVal.clvalVar_varX
-      ConservativeExtractor.Generated.CompletesName.done)
 
 end FwRust
 end GrammarFrontier

@@ -3,10 +3,10 @@ import LwRust.Extractor.CompleteProgram
 /-!
 Grammar-derived parser frontiers.
 
-This file is a first, isolated version of the "partial program as parser
-frontier" model.  It deliberately does not replace
-`LwRust.Extractor.Generated.PartialProgram` yet; the existing extractor proofs
-still use that representation.
+This file is the generic "partial program as parser frontier" model.  The
+user-facing prefix interface works with checked frontier states; extractor
+wrappers may still use generated internal views to reuse existing typing
+proofs.
 
 The trusted part here is a small grammar semantics:
 
@@ -1744,7 +1744,6 @@ inductive Cat where
 
 inductive Tok where
   | ident (name : Name)
-  | move
   | eqEq
   | assign
   deriving Repr, DecidableEq
@@ -1755,7 +1754,7 @@ def clvalVar : Rule Cat Tok :=
   { name := "clvalVar", lhs := .clval, rhs := [.token (.ident "x")] }
 
 def ctermMove : Rule Cat Tok :=
-  { name := "ctermMove", lhs := .cterm, rhs := [.token .move, .cat .clval] }
+  { name := "ctermMove", lhs := .cterm, rhs := [.cat .clval] }
 
 def ctermEq : Rule Cat Tok :=
   { name := "ctermEq", lhs := .cterm,
@@ -1772,13 +1771,13 @@ def grammar : Grammar Cat Tok Tok :=
 def xTok : Tok := .ident "x"
 
 def prefixMoveX : List Tok :=
-  [.move, xTok]
+  [xTok]
 
 def clvalXTree : Tree Tok :=
   .node "clvalVar" [.token xTok]
 
 def moveXTree : Tree Tok :=
-  .node "ctermMove" [.token .move, clvalXTree]
+  .node "ctermMove" [clvalXTree]
 
 def moveXEqMoveXTree : Tree Tok :=
   .node "ctermEq" [moveXTree, .token .eqEq, moveXTree]
@@ -1787,7 +1786,7 @@ def moveXAssignMoveXTree : Tree Tok :=
   .node "ctermAssignFromTerm" [moveXTree, .token .assign, moveXTree]
 
 def itemCtermMoveDone : Item Cat Tok :=
-  { rule := ctermMove, dot := 2 }
+  { rule := ctermMove, dot := 1 }
 
 def itemCtermEqAfterLhs : Item Cat Tok :=
   { rule := ctermEq, dot := 1 }
@@ -1807,12 +1806,11 @@ theorem clvalX_derives :
 theorem moveX_derives :
     Derives grammar .cterm prefixMoveX moveXTree := by
   change Derives grammar .cterm prefixMoveX
-    (.node "ctermMove" [.token .move, clvalXTree])
+    (.node "ctermMove" [clvalXTree])
   refine Derives.rule (rule := ctermMove) ?_ rfl ?_
   · simp [grammar, ctermMove]
   · simp [prefixMoveX, ctermMove]
-    exact DerivesSeq.token rfl
-      (DerivesSeq.cat clvalX_derives DerivesSeq.nil)
+    exact DerivesSeq.cat clvalX_derives DerivesSeq.nil
 
 theorem moveXEqMoveX_derives :
     Derives grammar .cterm (prefixMoveX ++ ([Tok.eqEq] ++ prefixMoveX))
@@ -1838,14 +1836,13 @@ theorem itemCtermMoveDone_completes :
     BoundaryCompletesItem grammar itemCtermMoveDone prefixMoveX moveXTree := by
   rw [show moveXTree =
       Tree.node itemCtermMoveDone.rule.name
-        ([Tree.token Tok.move, clvalXTree] ++ []) by
+        ([clvalXTree] ++ []) by
     simp [moveXTree, itemCtermMoveDone, ctermMove]]
   have hbefore :
       DerivesSeq grammar itemCtermMoveDone.before prefixMoveX
-        [Tree.token Tok.move, clvalXTree] := by
+        [clvalXTree] := by
     simp [itemCtermMoveDone, Item.before, ctermMove, prefixMoveX]
-    exact DerivesSeq.token rfl
-      (DerivesSeq.cat clvalX_derives DerivesSeq.nil)
+    exact DerivesSeq.cat clvalX_derives DerivesSeq.nil
   have hafter :
       DerivesSeq grammar itemCtermMoveDone.after [] [] := by
     simpa [itemCtermMoveDone, Item.after, ctermMove] using
