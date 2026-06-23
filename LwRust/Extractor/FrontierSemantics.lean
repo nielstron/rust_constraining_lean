@@ -1814,11 +1814,11 @@ def moveXDoneItem : Item Cat Terminal :=
   { rule := ctermMoveRule, dot := 1 }
 
 def moveXDoneState :
-    CheckableGrammar.CheckedBoundaryState checkableGrammar :=
+    CheckableGrammar.BoundaryState checkableGrammar :=
     { item := moveXDoneItem
       item_mem := by native_decide
       doneChildren := [clvalXTree]
-      checkedBefore := by native_decide }
+      before_ok := by native_decide }
 
 theorem moveXDoneState_pref :
     moveXDoneState.pref = moveXPrefix := by
@@ -1844,8 +1844,8 @@ def checkedMoveXDoneDefaultCompletion :
     rawMoveXDoneDefaultCompletion_valid
 
 def moveXDoneFrontierState :
-    CheckableGrammar.CheckedFrontierState checkableGrammar .cterm :=
-    CheckableGrammar.CheckedFrontierState.boundary moveXDoneItem
+    CheckableGrammar.FrontierState checkableGrammar .cterm :=
+    CheckableGrammar.FrontierState.boundary moveXDoneItem
       (by native_decide) [clvalXTree] (by native_decide)
 
 theorem moveXDoneFrontierState_pref :
@@ -1856,11 +1856,11 @@ def moveXEqAfterLhsItem : Item Cat Terminal :=
   { rule := ctermEqRule, dot := 1 }
 
 def moveXEqAfterLhsState :
-    CheckableGrammar.CheckedBoundaryState checkableGrammar :=
+    CheckableGrammar.BoundaryState checkableGrammar :=
   { item := moveXEqAfterLhsItem
     item_mem := by native_decide
     doneChildren := [moveXTree]
-    checkedBefore := by native_decide }
+    before_ok := by native_decide }
 
 theorem moveXEqAfterLhsState_pref :
     moveXEqAfterLhsState.pref = moveXPrefix := by
@@ -1887,8 +1887,8 @@ def checkedMoveXEqDefaultCompletion :
     rawMoveXEqDefaultCompletion_valid
 
 def moveXEqAfterLhsFrontierState :
-    CheckableGrammar.CheckedFrontierState checkableGrammar .cterm :=
-  CheckableGrammar.CheckedFrontierState.boundary moveXEqAfterLhsItem
+    CheckableGrammar.FrontierState checkableGrammar .cterm :=
+  CheckableGrammar.FrontierState.boundary moveXEqAfterLhsItem
     (by native_decide) [moveXTree] (by native_decide)
 
 theorem moveXEqAfterLhsFrontierState_pref :
@@ -1899,11 +1899,11 @@ def xAssignAfterLhsItem : Item Cat Terminal :=
   { rule := ctermAssignRule, dot := 1 }
 
 def xAssignAfterLhsState :
-    CheckableGrammar.CheckedBoundaryState checkableGrammar :=
+    CheckableGrammar.BoundaryState checkableGrammar :=
   { item := xAssignAfterLhsItem
     item_mem := by native_decide
     doneChildren := [clvalXTree]
-    checkedBefore := by native_decide }
+    before_ok := by native_decide }
 
 theorem xAssignAfterLhsState_pref :
     xAssignAfterLhsState.pref = xPrefix := by
@@ -1930,8 +1930,8 @@ def checkedXAssignDefaultCompletion :
     rawXAssignDefaultCompletion_valid
 
 def xAssignAfterLhsFrontierState :
-    CheckableGrammar.CheckedFrontierState checkableGrammar .cterm :=
-  CheckableGrammar.CheckedFrontierState.boundary xAssignAfterLhsItem
+    CheckableGrammar.FrontierState checkableGrammar .cterm :=
+  CheckableGrammar.FrontierState.boundary xAssignAfterLhsItem
     (by native_decide) [clvalXTree] (by native_decide)
 
 theorem xAssignAfterLhsFrontierState_pref :
@@ -1950,15 +1950,15 @@ def ctermFrontierStatesFuel (fuel : Nat) (pref : List Tok) :
     List (CheckableGrammar.ParsedFrontierState checkableGrammar .cterm pref) :=
   CheckableGrammar.frontierStatesFuel checkableGrammar fuel .cterm pref
 
-theorem ctermFrontierStatesFuel_complete_checked_exact
-    (state : CheckableGrammar.CheckedFrontierState checkableGrammar .cterm) :
+theorem ctermFrontierStatesFuel_complete_state_exact
+    (state : CheckableGrammar.FrontierState checkableGrammar .cterm) :
     ∃ minFuel,
       ∀ fuel, minFuel ≤ fuel →
         ∃ parsed,
           parsed.state = state ∧
           parsed ∈ ctermFrontierStatesFuel fuel state.pref := by
   simpa [ctermFrontierStatesFuel] using
-    CheckableGrammar.frontierStatesFuel_complete_checked_exact
+    CheckableGrammar.frontierStatesFuel_complete_state_exact
       checkableGrammar state
 
 def firstCtermRawCompletion? (fuel : Nat) (pref : List Tok) :
@@ -2306,11 +2306,11 @@ theorem ctermFrontierStatesFuel_complete_of_codeCompletes
       PrefixCompletes checkableGrammar.toGrammar .cterm pref tree := by
     exact ⟨suffix, by simpa [checkableGrammar] using hderive⟩
   obtain ⟨state, hpref⟩ :=
-    CheckableGrammar.checkedFrontierState_of_prefixCompletes
+    CheckableGrammar.frontierState_of_prefixCompletes
       checkableGrammar hprefix
   subst pref
   obtain ⟨minFuel, hfound⟩ :=
-    CheckableGrammar.frontierStatesFuel_complete_checked checkableGrammar state
+    CheckableGrammar.frontierStatesFuel_complete_state checkableGrammar state
   refine ⟨minFuel, ?_⟩
   intro fuel hle
   obtain ⟨parsed, hparsed⟩ := hfound fuel hle
@@ -2323,7 +2323,7 @@ theorem ctermFrontierStatesFuel_complete_of_codeCompletes_with_completion
       ∀ fuel, minFuel ≤ fuel →
         ∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel pref ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree term := by
   obtain ⟨suffix, tree, hderive, hdenotes⟩ := hcompletion
@@ -2331,11 +2331,11 @@ theorem ctermFrontierStatesFuel_complete_of_codeCompletes_with_completion
       PrefixCompletes checkableGrammar.toGrammar .cterm pref tree := by
     exact ⟨suffix, by simpa [checkableGrammar] using hderive⟩
   obtain ⟨state, hpref, hstateCompletes⟩ :=
-    CheckableGrammar.checkedFrontierState_of_prefixCompletes_with_completion
+    CheckableGrammar.frontierState_of_prefixCompletes_with_completion
       checkableGrammar hprefix
   subst pref
   obtain ⟨minFuel, hfound⟩ :=
-    ctermFrontierStatesFuel_complete_checked_exact state
+    ctermFrontierStatesFuel_complete_state_exact state
   refine ⟨minFuel, ?_⟩
   intro fuel hle
   obtain ⟨parsed, hstate, hmem⟩ := hfound fuel hle
@@ -2356,12 +2356,12 @@ theorem ctermFrontierStatesFuel_complete_for_completion_pair
       ∀ fuel, minFuel ≤ fuel →
         (∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel pref ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree left) ∧
         (∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel pref ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree right) := by
   obtain ⟨leftFuel, hleftFound⟩ :=
@@ -2400,7 +2400,7 @@ theorem frontierEnumerator_eventually_finds_moveXEqState :
           parsed ∈ ctermFrontierStatesFuel fuel moveXPrefix := by
   rw [← moveXEqAfterLhsFrontierState_pref]
   simpa [ctermFrontierStatesFuel] using
-    CheckableGrammar.frontierStatesFuel_complete_checked checkableGrammar
+    CheckableGrammar.frontierStatesFuel_complete_state checkableGrammar
       moveXEqAfterLhsFrontierState
 
 theorem frontierEnumerator_eventually_finds_xAssignState :
@@ -2410,7 +2410,7 @@ theorem frontierEnumerator_eventually_finds_xAssignState :
           parsed ∈ ctermFrontierStatesFuel fuel xPrefix := by
   rw [← xAssignAfterLhsFrontierState_pref]
   simpa [ctermFrontierStatesFuel] using
-    CheckableGrammar.frontierStatesFuel_complete_checked checkableGrammar
+    CheckableGrammar.frontierStatesFuel_complete_state checkableGrammar
       xAssignAfterLhsFrontierState
 
 theorem fuelCompleter_eventually_completes_moveXPrefix :
@@ -2420,7 +2420,7 @@ theorem fuelCompleter_eventually_completes_moveXPrefix :
       ∃ suffix tree,
         tokens = moveXPrefix ++ suffix ∧
         Derives checkableGrammar.toGrammar .cterm tokens tree := by
-  exact CheckableGrammar.completeTokensFuel?_complete_of_checked
+  exact CheckableGrammar.completeTokensFuel?_complete_of_state
     checkableGrammar defaults moveXEqAfterLhsFrontierState
     moveXEqAfterLhsFrontierState_pref
 
@@ -2431,7 +2431,7 @@ theorem fuelCompleter_eventually_completes_xPrefix :
       ∃ suffix tree,
         tokens = xPrefix ++ suffix ∧
         Derives checkableGrammar.toGrammar .cterm tokens tree := by
-  exact CheckableGrammar.completeTokensFuel?_complete_of_checked
+  exact CheckableGrammar.completeTokensFuel?_complete_of_state
     checkableGrammar defaults xAssignAfterLhsFrontierState
     xAssignAfterLhsFrontierState_pref
 
@@ -2615,12 +2615,12 @@ theorem frontierEnumerator_complete_for_moveX_ambiguity :
       ∀ fuel, minFuel ≤ fuel →
         (∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel moveXPrefix ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree moveXTerm) ∧
         (∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel moveXPrefix ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree moveXEqMoveXTerm) := by
   exact ctermFrontierStatesFuel_complete_for_completion_pair
@@ -2648,12 +2648,12 @@ theorem frontierEnumerator_complete_for_amp_borrow_ambiguity :
       ∀ fuel, minFuel ≤ fuel →
         (∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel ampPrefix ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree borrowSharedXTerm) ∧
         (∃ parsed tree,
           parsed ∈ ctermFrontierStatesFuel fuel ampPrefix ∧
-          CheckableGrammar.CheckedFrontierStateCompletes checkableGrammar
+          CheckableGrammar.FrontierStateCompletes checkableGrammar
             parsed.state tree ∧
           DenotesTerm tree borrowMutXTerm) := by
   exact ctermFrontierStatesFuel_complete_for_completion_pair

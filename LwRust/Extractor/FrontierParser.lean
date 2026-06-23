@@ -9,12 +9,12 @@ The parser is fuel-indexed but total in the limit:
   are real grammar derivations.
 * `parseCatFuel_complete` / `parseSeqFuel_complete` show that every grammar
   derivation is eventually returned for enough fuel.
-* `frontierStatesFuel_complete_checked_exact` shows that every checked
-  grammar frontier state is eventually returned exactly.
+* `frontierStatesFuel_complete_state_exact` shows that every grammar frontier
+  state is eventually returned exactly.
 
 The trusted base is therefore the small grammar checker in `Frontier.lean`.
 The executable enumeration can be audited as ordinary search over grammar
-rules, token splits, and checked dotted items.
+rules, token splits, and grammar-validated dotted items.
 -/
 
 namespace ConservativeExtractor
@@ -240,10 +240,10 @@ def boundaryState? {Cat Terminal Tok : Type}
           subst cat
           exact
             { state :=
-                CheckedFrontierState.boundary item itemWithMem.property
+                FrontierState.boundary item itemWithMem.property
                   doneChildren hchecked
               pref_eq := by
-                simpa [CheckedFrontierState.pref] using hpref })
+                simpa [FrontierState.pref] using hpref })
       else
         none
     else
@@ -271,10 +271,10 @@ def descendState? {Cat Terminal Tok : Type}
             subst cat
             exact
               { state :=
-                  CheckedFrontierState.descend item itemWithMem.property
+                  FrontierState.descend item itemWithMem.property
                     activeCat todo hafter doneChildren hchecked child.state
                 pref_eq := by
-                  simpa [CheckedFrontierState.pref] using hpref })
+                  simpa [FrontierState.pref] using hpref })
         else
           none
       else
@@ -312,10 +312,10 @@ def frontierStatesFuel {Cat Terminal Tok : Type}
               | _ => []
           boundaryStates ++ descendStates
 
-theorem frontierStatesFuel_complete_checked_exact {Cat Terminal Tok : Type}
+theorem frontierStatesFuel_complete_state_exact {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Terminal] [DecidableEq Tok]
     (G : CheckableGrammar Cat Terminal Tok) :
-    ∀ {cat : Cat} (state : CheckedFrontierState G cat),
+    ∀ {cat : Cat} (state : FrontierState G cat),
       ∃ minFuel,
         ∀ fuel, minFuel ≤ fuel →
           ∃ parsed,
@@ -323,11 +323,11 @@ theorem frontierStatesFuel_complete_checked_exact {Cat Terminal Tok : Type}
             parsed ∈ frontierStatesFuel G fuel cat state.pref := by
   intro cat state
   induction state with
-  | boundary item item_mem doneChildren checkedBefore =>
+  | boundary item item_mem doneChildren before_ok =>
       have hbefore :
           DerivesSeq G.toGrammar item.before
             (doneChildren.flatMap Tree.tokens) doneChildren :=
-        checkSeq_sound G checkedBefore
+        checkSeq_sound G before_ok
       obtain ⟨minBeforeFuel, hbeforeComplete⟩ :=
         parseSeqFuel_complete G hbefore
       refine ⟨minBeforeFuel, ?_⟩
@@ -336,14 +336,14 @@ theorem frontierStatesFuel_complete_checked_exact {Cat Terminal Tok : Type}
           ParsedFrontierState G item.rule.lhs
             (doneChildren.flatMap Tree.tokens) :=
         { state :=
-            CheckedFrontierState.boundary item item_mem doneChildren
-              checkedBefore
+            FrontierState.boundary item item_mem doneChildren
+              before_ok
           pref_eq := rfl }
       have hsome :
           boundaryState? G item.rule.lhs
             (doneChildren.flatMap Tree.tokens) ⟨item, item_mem⟩
             doneChildren = some parsed := by
-        simp [boundaryState?, parsed, checkedBefore]
+        simp [boundaryState?, parsed, before_ok]
       have hboundary :
           parsed ∈
             (items G.toGrammar).attach.flatMap fun itemWithMem =>
@@ -381,12 +381,12 @@ theorem frontierStatesFuel_complete_checked_exact {Cat Terminal Tok : Type}
                     (doneChildren.flatMap Tree.tokens) itemWithMem
                     doneChildren') ++ _
             exact List.mem_append_left _ hboundary⟩
-  | descend item item_mem activeCat todo after_eq doneChildren checkedBefore
+  | descend item item_mem activeCat todo after_eq doneChildren before_ok
       child ih =>
       have hbefore :
           DerivesSeq G.toGrammar item.before
             (doneChildren.flatMap Tree.tokens) doneChildren :=
-        checkSeq_sound G checkedBefore
+        checkSeq_sound G before_ok
       obtain ⟨minBeforeFuel, hbeforeComplete⟩ :=
         parseSeqFuel_complete G hbefore
       obtain ⟨minChildFuel, hchildComplete⟩ := ih
@@ -407,16 +407,16 @@ theorem frontierStatesFuel_complete_checked_exact {Cat Terminal Tok : Type}
           let pref := doneChildren.flatMap Tree.tokens ++ child.pref
           let parsed : ParsedFrontierState G item.rule.lhs pref :=
             { state :=
-                CheckedFrontierState.descend item item_mem activeCat todo
-                  after_eq doneChildren checkedBefore childParsed.state
+                FrontierState.descend item item_mem activeCat todo
+                  after_eq doneChildren before_ok childParsed.state
               pref_eq := by
-                simp [pref, CheckedFrontierState.pref, childParsed.pref_eq] }
+                simp [pref, FrontierState.pref, childParsed.pref_eq] }
           have hsome :
               descendState? G item.rule.lhs pref ⟨item, item_mem⟩
                 activeCat todo doneChildren child.pref childParsed =
                   some parsed := by
             simp [descendState?, parsed, pref, after_eq,
-              checkedBefore, childParsed.pref_eq]
+              before_ok, childParsed.pref_eq]
           have hdescend :
               parsed ∈
                 (items G.toGrammar).attach.flatMap fun itemWithMem =>
@@ -461,17 +461,17 @@ theorem frontierStatesFuel_complete_checked_exact {Cat Terminal Tok : Type}
                 | _ => [])
             exact List.mem_append_right _ hdescend⟩
 
-theorem frontierStatesFuel_complete_checked {Cat Terminal Tok : Type}
+theorem frontierStatesFuel_complete_state {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Terminal] [DecidableEq Tok]
     (G : CheckableGrammar Cat Terminal Tok) :
-    ∀ {cat : Cat} (state : CheckedFrontierState G cat),
+    ∀ {cat : Cat} (state : FrontierState G cat),
       ∃ minFuel,
         ∀ fuel, minFuel ≤ fuel →
           ∃ parsed,
             parsed ∈ frontierStatesFuel G fuel cat state.pref := by
   intro cat state
   obtain ⟨minFuel, hfound⟩ :=
-    frontierStatesFuel_complete_checked_exact G state
+    frontierStatesFuel_complete_state_exact G state
   exact ⟨minFuel, by
     intro fuel hle
     obtain ⟨parsed, _hstate, hmem⟩ := hfound fuel hle
@@ -531,18 +531,18 @@ theorem completeTokensFuel?_sound {Cat Terminal Tok : Type}
       exact ⟨raw.suffix, raw.tree, rfl,
         RawCompletion.valid_sound G hvalid⟩
 
-theorem completeRawFuel?_complete_of_checked {Cat Terminal Tok : Type}
+theorem completeRawFuel?_complete_of_state {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Terminal] [DecidableEq Tok]
     (G : CheckableGrammar Cat Terminal Tok) (defaults : Defaults G)
     {cat : Cat} {pref : List Tok}
-    (state : CheckedFrontierState G cat)
+    (state : FrontierState G cat)
     (hpref : state.pref = pref) :
     ∃ fuel raw,
       completeRawFuel? G defaults fuel cat pref = some raw ∧
       raw.valid G cat pref = Bool.true := by
   subst pref
   obtain ⟨minFuel, hcomplete⟩ :=
-    frontierStatesFuel_complete_checked G state
+    frontierStatesFuel_complete_state G state
   obtain ⟨parsed, hparsed⟩ := hcomplete minFuel (Nat.le_refl _)
   cases hstates : frontierStatesFuel G minFuel cat state.pref with
   | nil =>
@@ -554,11 +554,11 @@ theorem completeRawFuel?_complete_of_checked {Cat Terminal Tok : Type}
       · have hvalid := head.state.rawCompletion_valid defaults
         simpa [head.pref_eq] using hvalid
 
-theorem completeTokensFuel?_complete_of_checked {Cat Terminal Tok : Type}
+theorem completeTokensFuel?_complete_of_state {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Terminal] [DecidableEq Tok]
     (G : CheckableGrammar Cat Terminal Tok) (defaults : Defaults G)
     {cat : Cat} {pref : List Tok}
-    (state : CheckedFrontierState G cat)
+    (state : FrontierState G cat)
     (hpref : state.pref = pref) :
     ∃ fuel tokens,
       completeTokensFuel? G defaults fuel cat pref = some tokens ∧
@@ -566,7 +566,7 @@ theorem completeTokensFuel?_complete_of_checked {Cat Terminal Tok : Type}
         tokens = pref ++ suffix ∧
         Derives G.toGrammar cat tokens tree := by
   obtain ⟨fuel, raw, hraw, hvalid⟩ :=
-    completeRawFuel?_complete_of_checked G defaults state hpref
+    completeRawFuel?_complete_of_state G defaults state hpref
   refine ⟨fuel, pref ++ raw.suffix, ?_, ?_⟩
   · simp [completeTokensFuel?, hraw]
   · exact ⟨raw.suffix, raw.tree, rfl,
@@ -581,8 +581,8 @@ theorem completeRawFuel?_complete_of_prefixCompletes {Cat Terminal Tok : Type}
       completeRawFuel? G defaults fuel cat pref = some raw ∧
       raw.valid G cat pref = Bool.true := by
   obtain ⟨state, hpref⟩ :=
-    checkedFrontierState_of_prefixCompletes G hcomplete
-  exact completeRawFuel?_complete_of_checked G defaults state hpref
+    frontierState_of_prefixCompletes G hcomplete
+  exact completeRawFuel?_complete_of_state G defaults state hpref
 
 theorem completeTokensFuel?_complete_of_prefixCompletes {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Terminal] [DecidableEq Tok]
@@ -595,8 +595,8 @@ theorem completeTokensFuel?_complete_of_prefixCompletes {Cat Terminal Tok : Type
         tokens = pref ++ suffix ∧
         Derives G.toGrammar cat tokens tree' := by
   obtain ⟨state, hpref⟩ :=
-    checkedFrontierState_of_prefixCompletes G hcomplete
-  exact completeTokensFuel?_complete_of_checked G defaults state hpref
+    frontierState_of_prefixCompletes G hcomplete
+  exact completeTokensFuel?_complete_of_state G defaults state hpref
 
 end CheckableGrammar
 end GrammarFrontier

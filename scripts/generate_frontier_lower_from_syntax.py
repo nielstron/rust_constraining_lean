@@ -45,9 +45,9 @@ DENOTE_FOR_LIST = {
 
 
 LOWER_FOR_CAT = {
-    "cty": ("CheckedTyFrontierLower", "PartialTy", "CompletesTy", "denoteTy?"),
-    "clval": ("CheckedLValFrontierLower", "PartialLVal", "CompletesLVal", "denoteLVal?"),
-    "cterm": ("CheckedTermFrontierLower", "PartialTerm", "CompletesTerm", "denoteTerm?"),
+    "cty": ("TyFrontierLower", "PartialTy", "CompletesTy", "denoteTy?"),
+    "clval": ("LValFrontierLower", "PartialLVal", "CompletesLVal", "denoteLVal?"),
+    "cterm": ("TermFrontierLower", "PartialTerm", "CompletesTerm", "denoteTerm?"),
 }
 
 
@@ -55,8 +55,8 @@ LIST_LOWER_FOR_CAT = {
     "clval": {
         "full_cat": "clvals",
         "tail_cat": "clvalsTail",
-        "full_relation": "CheckedLValsFrontierLower",
-        "tail_relation": "CheckedLValsTailFrontierLower",
+        "full_relation": "LValsFrontierLower",
+        "tail_relation": "LValsTailFrontierLower",
         "partial": "PartialLVals",
         "complete": "List LVal",
         "complete_rel": "CompletesLVals",
@@ -72,8 +72,8 @@ LIST_LOWER_FOR_CAT = {
     "cterm": {
         "full_cat": "cterms",
         "tail_cat": "ctermsTail",
-        "full_relation": "CheckedTermsFrontierLower",
-        "tail_relation": "CheckedTermsTailFrontierLower",
+        "full_relation": "TermsFrontierLower",
+        "tail_relation": "TermsTailFrontierLower",
         "partial": "PartialTerms",
         "complete": "List Term",
         "complete_rel": "CompletesTerms",
@@ -173,16 +173,16 @@ def checked_before_type_for_rule(rule_name: str, dot: int, children: list[str]) 
 def boundary_state_expr(prod: Production, dot: int, children: list[str]) -> str:
     item = item_expr(prod, dot)
     return (
-        "(CheckableGrammar.CheckedFrontierState.boundary "
-        f"{item} (by native_decide) {lean_list(children)} checkedBefore)"
+        "(CheckableGrammar.FrontierState.boundary "
+        f"{item} (by native_decide) {lean_list(children)} before_ok)"
     )
 
 
 def boundary_state_expr_for_rule(rule_name: str, dot: int, children: list[str]) -> str:
     item = item_expr_for_rule(rule_name, dot)
     return (
-        "(CheckableGrammar.CheckedFrontierState.boundary "
-        f"{item} (by native_decide) {lean_list(children)} checkedBefore)"
+        "(CheckableGrammar.FrontierState.boundary "
+        f"{item} (by native_decide) {lean_list(children)} before_ok)"
     )
 
 
@@ -196,9 +196,9 @@ def descend_state_expr(
 ) -> str:
     item = item_expr(prod, dot)
     return (
-        "(CheckableGrammar.CheckedFrontierState.descend "
+        "(CheckableGrammar.FrontierState.descend "
         f"{item} (by native_decide) .{active_cat} {lean_list(todo)} "
-        f"(by native_decide) {lean_list(children)} checkedBefore {child_state})"
+        f"(by native_decide) {lean_list(children)} before_ok {child_state})"
     )
 
 
@@ -212,9 +212,9 @@ def descend_state_expr_for_rule(
 ) -> str:
     item = item_expr_for_rule(rule_name, dot)
     return (
-        "(CheckableGrammar.CheckedFrontierState.descend "
+        "(CheckableGrammar.FrontierState.descend "
         f"{item} (by native_decide) .{active_cat} {lean_list(todo)} "
-        f"(by native_decide) {lean_list(children)} checkedBefore {child_state})"
+        f"(by native_decide) {lean_list(children)} before_ok {child_state})"
     )
 
 
@@ -402,7 +402,7 @@ def render_boundary_constructor(rule: Rule, cat: str) -> list[str]:
         f"  | {prod.name}_{rule.state_name}_boundary",
         *binders_for_done_children(prod, rule.index),
         *premises_for_done_children(prod, rule.index),
-        f"      {{checkedBefore : {checked_before_type(prod, dot, children)}}} :",
+        f"      {{before_ok : {checked_before_type(prod, dot, children)}}} :",
         f"      {relation}",
         f"        {boundary_state_expr(prod, dot, children)}",
         f"        ({state})",
@@ -418,7 +418,7 @@ def render_start_constructor(rule: Rule, cat: str) -> list[str]:
         partial_app(partial, rule.state_name, rule.fields))
     lines = [
         f"  | {prod.name}_{rule.state_name}_boundary",
-        f"      {{checkedBefore : {checked_before_type(prod, 1, children)}}} :",
+        f"      {{before_ok : {checked_before_type(prod, 1, children)}}} :",
         f"      {relation}",
         f"        {boundary_state_expr(prod, 1, children)}",
         f"        ({state})",
@@ -439,7 +439,7 @@ def render_done_constructor(prod: Production, cat: str) -> list[str]:
     state = done_partial_expr_for_prod(prod)
     lines = [
         f"  | {prod.name}_done_boundary",
-        f"      {{checkedBefore : {checked_before_type(prod, dot, children)}}} :",
+        f"      {{before_ok : {checked_before_type(prod, dot, children)}}} :",
         f"      {relation}",
         f"        {boundary_state_expr(prod, dot, children)}",
         f"        ({state})",
@@ -455,7 +455,7 @@ def render_boundary_gap_constructor(gap: BoundaryGap, cat: str) -> list[str]:
         f"  | {prod.name}_dot{gap.dot}_boundary",
         *binders_for_previous_children(prod, gap.dot),
         *premises_for_previous_children(prod, gap.dot),
-        f"      {{checkedBefore : {checked_before_type(prod, gap.dot, children)}}} :",
+        f"      {{before_ok : {checked_before_type(prod, gap.dot, children)}}} :",
         f"      {relation}",
         f"        {boundary_state_expr(prod, gap.dot, children)}",
         f"        ({gap.partial_src})",
@@ -483,10 +483,10 @@ def render_descend_constructor(rule: Rule, cat: str) -> list[str]:
         f"  | {prod.name}_{rule.state_name}_descend",
         *binders_for_previous_children(prod, rule.index),
         *premises_for_previous_children(prod, rule.index),
-        f"      {{{fname}State : CheckableGrammar.CheckedFrontierState checkableGrammar .{child_cat}}}",
+        f"      {{{fname}State : CheckableGrammar.FrontierState checkableGrammar .{child_cat}}}",
         f"      {{{fname} : {child_partial}}}",
         f"      ({fname}_lower : {child_relation} {fname}State {fname})",
-        f"      {{checkedBefore : {checked_before_type(prod, dot, done_children)}}} :",
+        f"      {{before_ok : {checked_before_type(prod, dot, done_children)}}} :",
         f"      {relation}",
         f"        {descend_state_expr(prod, dot, child_cat, todo, done_children, f'{fname}State')}",
         f"        ({state})",
@@ -513,7 +513,7 @@ def completion_premise_for_rule(rule: Rule) -> str | None:
 
 def simp_args_for_rule(prod: Production) -> list[str]:
     return [
-        "CheckableGrammar.CheckedFrontierState.rawCompletion",
+        "CheckableGrammar.FrontierState.rawCompletion",
         "CheckableGrammar.Defaults.completeBoundaryRaw",
         "defaults",
         f"{prod.name}Rule",
@@ -571,13 +571,13 @@ def render_boundary_gap_soundness_case(gap: BoundaryGap) -> list[str]:
 
 def child_soundness_theorem(cat: str) -> str:
     return {
-        "cty": "checkedTyFrontierLower_completes_of_rawDenotes",
-        "clval": "checkedLValFrontierLower_completes_of_rawDenotes",
-        "cterm": "checkedTermFrontierLower_completes_of_rawDenotes",
-        "clvals": "checkedLValsFrontierLower_completes_of_rawDenotes",
-        "clvalsTail": "checkedLValsTailFrontierLower_completes_of_rawDenotes",
-        "cterms": "checkedTermsFrontierLower_completes_of_rawDenotes",
-        "ctermsTail": "checkedTermsTailFrontierLower_completes_of_rawDenotes",
+        "cty": "tyFrontierLower_completes_of_rawDenotes",
+        "clval": "lValFrontierLower_completes_of_rawDenotes",
+        "cterm": "termFrontierLower_completes_of_rawDenotes",
+        "clvals": "lValsFrontierLower_completes_of_rawDenotes",
+        "clvalsTail": "lValsTailFrontierLower_completes_of_rawDenotes",
+        "cterms": "termsFrontierLower_completes_of_rawDenotes",
+        "ctermsTail": "termsTailFrontierLower_completes_of_rawDenotes",
     }[cat]
 
 
@@ -590,15 +590,16 @@ def list_relation_stem(item_cat: str) -> str:
 
 def list_state_soundness_theorem(item_cat: str, tail: bool) -> str:
     suffix = "Tail" if tail else ""
-    return (
-        f"checked{list_relation_stem(item_cat)}{suffix}"
-        "FrontierLower_completes_of_stateCompletes"
-    )
+    stem = {
+        "clval": "lVals",
+        "cterm": "terms",
+    }[item_cat]
+    return f"{stem}{suffix}FrontierLower_completes_of_stateCompletes"
 
 
 def list_simp_args(rule_name: str) -> list[str]:
     return [
-        "CheckableGrammar.CheckedFrontierState.rawCompletion",
+        "CheckableGrammar.FrontierState.rawCompletion",
         "CheckableGrammar.Defaults.completeBoundaryRaw",
         "defaults",
         rule_name,
@@ -629,22 +630,22 @@ def render_list_lower_inductive(item_cat: str, tail: bool) -> list[str]:
 
     lines = [
         f"inductive {relation} :",
-        f"    CheckableGrammar.CheckedFrontierState checkableGrammar .{cat} →",
+        f"    CheckableGrammar.FrontierState checkableGrammar .{cat} →",
         f"    {partial} → Prop where",
         f"  | fallback",
-        f"      {{state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}}} :",
+        f"      {{state : CheckableGrammar.FrontierState checkableGrammar .{cat}}} :",
         f"      {relation}",
         f"        state",
         f"        (_root_.ConservativeExtractor.Generated.{partial}.cutoff)",
         "",
         f"  | {empty_rule[:-4]}_done_boundary",
-        f"      {{checkedBefore : {checked_before_type_for_rule(empty_rule, 0, [])}}} :",
+        f"      {{before_ok : {checked_before_type_for_rule(empty_rule, 0, [])}}} :",
         f"      {relation}",
         f"        {boundary_state_expr_for_rule(empty_rule, 0, [])}",
         f"        (_root_.ConservativeExtractor.Generated.{partial}.done [])",
         "",
         f"  | {cons_rule[:-4]}_start_boundary",
-        f"      {{checkedBefore : {checked_before_type_for_rule(cons_rule, 0, [])}}} :",
+        f"      {{before_ok : {checked_before_type_for_rule(cons_rule, 0, [])}}} :",
         f"      {relation}",
         f"        {boundary_state_expr_for_rule(cons_rule, 0, [])}",
         f"        (_root_.ConservativeExtractor.Generated.{partial}.elems [] none)",
@@ -655,7 +656,7 @@ def render_list_lower_inductive(item_cat: str, tail: bool) -> list[str]:
             [
                 "",
                 f"  | {cons_rule[:-4]}_comma_boundary",
-                f"      {{checkedBefore : {checked_before_type_for_rule(cons_rule, 1, comma_children)}}} :",
+                f"      {{before_ok : {checked_before_type_for_rule(cons_rule, 1, comma_children)}}} :",
                 f"      {relation}",
                 f"        {boundary_state_expr_for_rule(cons_rule, 1, comma_children)}",
                 f"        (_root_.ConservativeExtractor.Generated.{partial}.elems [] none)",
@@ -684,29 +685,29 @@ def render_list_lower_inductive(item_cat: str, tail: bool) -> list[str]:
             "",
             f"  | {cons_rule[:-4]}_head_boundary",
             f"      {{headTree : Tree Tok}}",
-            f"      {{checkedBefore : {checked_before_type_for_rule(cons_rule, head_dot, head_children)}}} :",
+            f"      {{before_ok : {checked_before_type_for_rule(cons_rule, head_dot, head_children)}}} :",
             f"      {relation}",
             f"        {boundary_state_expr_for_rule(cons_rule, head_dot, head_children)}",
             f"        (_root_.ConservativeExtractor.Generated.{partial}.elems [] none)",
             "",
             f"  | {cons_rule[:-4]}_done_boundary",
             f"      {{headTree tailTree : Tree Tok}}",
-            f"      {{checkedBefore : {checked_before_type_for_rule(cons_rule, done_dot, done_children)}}} :",
+            f"      {{before_ok : {checked_before_type_for_rule(cons_rule, done_dot, done_children)}}} :",
             f"      {relation}",
             f"        {boundary_state_expr_for_rule(cons_rule, done_dot, done_children)}",
             f"        (_root_.ConservativeExtractor.Generated.{partial}.elems [] none)",
             "",
             f"  | {cons_rule[:-4]}_head_descend",
-            f"      {{headState : CheckableGrammar.CheckedFrontierState checkableGrammar .{item_cat_name}}}",
-            f"      {{checkedBefore : {checked_before_type_for_rule(cons_rule, descend_head_dot, descend_head_children)}}} :",
+            f"      {{headState : CheckableGrammar.FrontierState checkableGrammar .{item_cat_name}}}",
+            f"      {{before_ok : {checked_before_type_for_rule(cons_rule, descend_head_dot, descend_head_children)}}} :",
             f"      {relation}",
             f"        {descend_state_expr_for_rule(cons_rule, descend_head_dot, item_cat_name, ['.cat .' + info['tail_cat']], descend_head_children, 'headState')}",
             f"        (_root_.ConservativeExtractor.Generated.{partial}.elems [] none)",
             "",
             f"  | {cons_rule[:-4]}_tail_descend",
             f"      {{headTree : Tree Tok}}",
-            f"      {{tailState : CheckableGrammar.CheckedFrontierState checkableGrammar .{info['tail_cat']}}}",
-            f"      {{checkedBefore : {checked_before_type_for_rule(cons_rule, descend_tail_dot, descend_tail_children)}}} :",
+            f"      {{tailState : CheckableGrammar.FrontierState checkableGrammar .{info['tail_cat']}}}",
+            f"      {{before_ok : {checked_before_type_for_rule(cons_rule, descend_tail_dot, descend_tail_children)}}} :",
             f"      {relation}",
             f"        {descend_state_expr_for_rule(cons_rule, descend_tail_dot, info['tail_cat'], [], descend_tail_children, 'tailState')}",
             f"        (_root_.ConservativeExtractor.Generated.{partial}.elems [] none)",
@@ -741,7 +742,7 @@ def render_list_soundness_theorem(item_cat: str, tail: bool) -> list[str]:
         "",
         "set_option linter.unusedSimpArgs false in",
         f"theorem {child_soundness_theorem(cat)}",
-        f"    {{state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}}}",
+        f"    {{state : CheckableGrammar.FrontierState checkableGrammar .{cat}}}",
         f"    {{frontier : {partial}}} {{completed : {complete}}}",
         f"    (hlower : {relation} state frontier)",
         "    (hdenotes :",
@@ -797,10 +798,10 @@ def render_list_state_completion_soundness_theorem(
         "",
         "set_option linter.unusedSimpArgs false in",
         f"theorem {list_state_soundness_theorem(item_cat, tail)}",
-        f"    {{state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}}}",
+        f"    {{state : CheckableGrammar.FrontierState checkableGrammar .{cat}}}",
         f"    {{frontier : {partial}}} {{tree : Tree Tok}} {{completed : {complete}}}",
         f"    (hlower : {relation} state frontier)",
-        "    (hcomplete : CheckableGrammar.CheckedFrontierStateCompletes",
+        "    (hcomplete : CheckableGrammar.FrontierStateCompletes",
         "      checkableGrammar state tree)",
         f"    (hdenotes : {denotes_rel} tree completed) :",
         f"    {complete_rel} frontier completed := by",
@@ -810,7 +811,7 @@ def render_list_state_completion_soundness_theorem(
         f"{complete_rel}.cutoff",
         f"  | {empty_prefix}_done_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes with",
         f"      | {empty_prefix} =>",
         "          exact _root_.ConservativeExtractor.Generated."
@@ -835,12 +836,12 @@ def render_list_coverage_theorem(item_cat: str, tail: bool) -> list[str]:
     relation = info["tail_relation"] if tail else info["full_relation"]
     partial = info["partial"]
     suffix = "Tail" if tail else ""
-    item_suffix = "LVal" if item_cat == "clval" else "Term"
-    theorem_name = f"checked{item_suffix}s{suffix}FrontierLower_exists"
+    stem = "lVals" if item_cat == "clval" else "terms"
+    theorem_name = f"{stem}{suffix}FrontierLower_exists"
     return [
         "",
         f"theorem {theorem_name}",
-        f"    (state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}) :",
+        f"    (state : CheckableGrammar.FrontierState checkableGrammar .{cat}) :",
         f"    ∃ frontier : {partial}, {relation} state frontier := by",
         f"  exact ⟨_root_.ConservativeExtractor.Generated.{partial}.cutoff,",
         f"    {relation}.fallback⟩",
@@ -899,7 +900,7 @@ def render_soundness_theorem(
         "",
         "set_option linter.unusedSimpArgs false in",
         f"theorem {child_soundness_theorem(cat)}",
-        f"    {{state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}}}",
+        f"    {{state : CheckableGrammar.FrontierState checkableGrammar .{cat}}}",
         f"    {{frontier : {partial}}} {{completed : {CATS[cat][0]}}}",
         f"    (hlower : {relation} state frontier)",
         "    (hdenotes :",
@@ -922,15 +923,15 @@ def render_soundness_theorem(
 
 def render_coverage_theorem(cat: str) -> list[str]:
     relation, partial, _complete_rel, _denote = LOWER_FOR_CAT[cat]
-    cat_title = {
-        "cty": "Ty",
-        "clval": "LVal",
-        "cterm": "Term",
+    theorem_stem = {
+        "cty": "ty",
+        "clval": "lVal",
+        "cterm": "term",
     }[cat]
     return [
         "",
-        f"theorem checked{cat_title}FrontierLower_exists",
-        f"    (state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}) :",
+        f"theorem {theorem_stem}FrontierLower_exists",
+        f"    (state : CheckableGrammar.FrontierState checkableGrammar .{cat}) :",
         f"    ∃ frontier : {partial}, {relation} state frontier := by",
         f"  exact ⟨_root_.ConservativeExtractor.Generated.{partial}.cutoff,",
         f"    {relation}.fallback⟩",
@@ -941,11 +942,11 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
     return [
         "",
         "set_option linter.unusedSimpArgs false in",
-        "theorem checkedTyFrontierLower_completes_of_stateCompletes",
-        "    {state : CheckableGrammar.CheckedFrontierState checkableGrammar .cty}",
+        "theorem tyFrontierLower_completes_of_stateCompletes",
+        "    {state : CheckableGrammar.FrontierState checkableGrammar .cty}",
         "    {frontier : PartialTy} {tree : Tree Tok} {completed : Ty}",
-        "    (hlower : CheckedTyFrontierLower state frontier)",
-        "    (hcomplete : CheckableGrammar.CheckedFrontierStateCompletes",
+        "    (hlower : TyFrontierLower state frontier)",
+        "    (hcomplete : CheckableGrammar.FrontierStateCompletes",
         "      checkableGrammar state tree)",
         "    (hdenotes : DenotesTy tree completed) :",
         "    CompletesTy frontier completed := by",
@@ -954,17 +955,17 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.cutoff",
         "  | ctyUnit_done_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyUnitRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.done",
         "  | ctyInt_done_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyIntRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.done",
         "  | ctyBool_done_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBoolRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.done",
         "  | ctyUnit_dot0_boundary =>",
@@ -975,20 +976,20 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.cutoff",
         "  | ctyBorrowShared_dot0_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
         "  | ctyBorrowShared_dot2_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
         "  | ctyBorrowShared_dot4_boundary targets_denotes =>",
-        "      rename_i stateTargetsTree stateTargets checkedBefore",
+        "      rename_i stateTargetsTree stateTargets before_ok",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
         "      rename_i actualTargetsTree actualTargets htargets",
         "      rcases htree with ⟨hTreeEq, _⟩",
@@ -1002,26 +1003,26 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.done",
         "  | ctyBorrowMut_dot0_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
         "  | ctyBorrowMut_dot2_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
         "  | ctyBorrowMut_dot3_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.cutoff",
         "  | ctyBorrowMut_dot5_boundary targets_denotes =>",
-        "      rename_i stateTargetsTree stateTargets checkedBefore",
+        "      rename_i stateTargetsTree stateTargets before_ok",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      rename_i actualTargetsTree actualTargets htargets",
         "      rcases htree with ⟨hTreeEq, _⟩",
@@ -1035,14 +1036,14 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.done",
         "  | ctyBox_dot0_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBoxRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxElement",
         "        _root_.ConservativeExtractor.Generated.CompletesTy.cutoff",
         "  | ctyBorrowShared_borrowSharedTargets_boundary targets_denotes =>",
-        "      rename_i stateTargetsTree stateTargets checkedBefore",
+        "      rename_i stateTargetsTree stateTargets before_ok",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
         "      rename_i actualTargetsTree actualTargets htargets",
         "      rcases htree with ⟨hTreeEq, _⟩",
@@ -1055,9 +1056,9 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.done",
         "  | ctyBorrowMut_borrowMutTargets_boundary targets_denotes =>",
-        "      rename_i stateTargetsTree stateTargets checkedBefore",
+        "      rename_i stateTargetsTree stateTargets before_ok",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      rename_i actualTargetsTree actualTargets htargets",
         "      rcases htree with ⟨hTreeEq, _⟩",
@@ -1070,9 +1071,9 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
         "        _root_.ConservativeExtractor.Generated.CompletesLVals.done",
         "  | ctyBox_boxElement_boundary element_denotes =>",
-        "      rename_i stateElementTree stateElement checkedBefore",
+        "      rename_i stateElementTree stateElement before_ok",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBoxRule] at htree",
         "      rename_i actualElementTree actualElement helement",
         "      rcases htree with ⟨hTreeEq, _⟩",
@@ -1086,42 +1087,42 @@ def render_ty_state_completion_soundness_theorem() -> list[str]:
         "        _root_.ConservativeExtractor.Generated.CompletesTy.done",
         "  | ctyBorrowShared_borrowSharedStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedStart",
         "  | ctyBorrowMut_borrowSharedStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowSharedStart",
         "  | ctyBox_boxStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBoxRule] at htree",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBox_boxStart",
         "  | ctyBorrowShared_borrowSharedTargets_descend targets_lower =>",
         "      obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowSharedRule] at htree",
         "      rename_i actualTargetsTree actualTargets htargets",
         "      rcases htree with ⟨hchildEq, _⟩",
         "      rw [← hchildEq] at hchild",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowShared_borrowSharedTargets",
-        "        (checkedLValsFrontierLower_completes_of_stateCompletes",
+        "        (lValsFrontierLower_completes_of_stateCompletes",
         "          targets_lower hchild htargets)",
         "  | ctyBorrowMut_borrowMutTargets_descend targets_lower =>",
         "      obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBorrowMutRule] at htree",
         "      rename_i actualTargetsTree actualTargets htargets",
         "      rcases htree with ⟨hchildEq, _⟩",
         "      rw [← hchildEq] at hchild",
         "      exact _root_.ConservativeExtractor.Generated.CompletesTy.ctyBorrowMut_borrowMutTargets",
-        "        (checkedLValsFrontierLower_completes_of_stateCompletes",
+        "        (lValsFrontierLower_completes_of_stateCompletes",
         "          targets_lower hchild htargets)",
         "  | ctyBox_boxElement_descend element_lower element_ih =>",
         "      obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete",
         "      cases hdenotes <;> simp [ctyBoxRule] at htree",
         "      rename_i actualElementTree actualElement helement",
         "      rcases htree with ⟨hchildEq, _⟩",
@@ -1135,11 +1136,11 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
     return [
         "",
         "set_option linter.unusedSimpArgs false in",
-        "theorem checkedLValFrontierLower_completes_of_stateCompletes",
-        "    {state : CheckableGrammar.CheckedFrontierState checkableGrammar .clval}",
+        "theorem lValFrontierLower_completes_of_stateCompletes",
+        "    {state : CheckableGrammar.FrontierState checkableGrammar .clval}",
         "    {frontier : PartialLVal} {tree : Tree Tok} {completed : LVal}",
-        "    (hlower : CheckedLValFrontierLower state frontier)",
-        "    (hcomplete : CheckableGrammar.CheckedFrontierStateCompletes",
+        "    (hlower : LValFrontierLower state frontier)",
+        "    (hcomplete : CheckableGrammar.FrontierStateCompletes",
         "      checkableGrammar state tree)",
         "    (hdenotes : DenotesLVal tree completed) :",
         "    CompletesLVal frontier completed := by",
@@ -1148,7 +1149,7 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
         "      exact _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff",
         "  | clvalVar_dot0_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes with",
         "      | clvalVar =>",
         "          exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalVar_varX",
@@ -1157,7 +1158,7 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
         "          simp [clvalVarRule] at htree",
         "  | clvalDeref_dot0_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes with",
         "      | clvalVar =>",
         "          simp [clvalDerefRule] at htree",
@@ -1166,7 +1167,7 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
         "            _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff",
         "  | clvalVar_varX_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes with",
         "      | clvalVar =>",
         "          simp [clvalVarRule] at htree",
@@ -1177,9 +1178,9 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
         "      | clvalDeref hoperand =>",
         "          simp [clvalVarRule] at htree",
         "  | clvalDeref_derefOperand_boundary operand_denotes =>",
-        "      rename_i stateOperandTree stateOperand checkedBefore",
+        "      rename_i stateOperandTree stateOperand before_ok",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes with",
         "      | clvalVar =>",
         "          simp [clvalDerefRule] at htree",
@@ -1197,7 +1198,7 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
         "            _root_.ConservativeExtractor.Generated.CompletesLVal.done",
         "  | clvalDeref_derefStart_boundary =>",
         "      obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete",
         "      cases hdenotes with",
         "      | clvalVar =>",
         "          simp [clvalDerefRule] at htree",
@@ -1205,7 +1206,7 @@ def render_lval_state_completion_soundness_theorem() -> list[str]:
         "          exact _root_.ConservativeExtractor.Generated.CompletesLVal.clvalDeref_derefStart",
         "  | clvalDeref_derefOperand_descend operand_lower operand_ih =>",
         "      obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=",
-        "        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete",
+        "        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete",
         "      cases hdenotes with",
         "      | clvalVar =>",
         "          simp [clvalDerefRule] at htree",
@@ -1259,11 +1260,11 @@ private theorem terms_eq_of_denote_eq {stateTree actualTree : Tree Tok}
   simpa using hactual'
 
 set_option linter.unusedSimpArgs false in
-theorem checkedTermFrontierLower_completes_of_stateCompletes
-    {state : CheckableGrammar.CheckedFrontierState checkableGrammar .cterm}
+theorem termFrontierLower_completes_of_stateCompletes
+    {state : CheckableGrammar.FrontierState checkableGrammar .cterm}
     {frontier : PartialTerm} {tree : Tree Tok} {completed : Term}
-    (hlower : CheckedTermFrontierLower state frontier)
-    (hcomplete : CheckableGrammar.CheckedFrontierStateCompletes
+    (hlower : TermFrontierLower state frontier)
+    (hcomplete : CheckableGrammar.FrontierStateCompletes
       checkableGrammar state tree)
     (hdenotes : DenotesTerm tree completed) :
     CompletesTerm frontier completed := by
@@ -1272,17 +1273,17 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermUnit_done_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermUnitRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermTrue_done_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermTrueRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermFalse_done_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermFalseRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermUnit_dot0_boundary =>
@@ -1295,12 +1296,12 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermBlock_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockStart
   | ctermBlock_dot2_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       rename_i actualLifetime actualTermsTree actualTerms hterms
       rcases htree with ⟨hlifetimeEq, _⟩
@@ -1309,7 +1310,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerms.cutoff
   | ctermBlock_dot3_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       rename_i actualLifetime actualTermsTree actualTerms hterms
       rcases htree with ⟨hlifetimeEq, _⟩
@@ -1318,7 +1319,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerms.cutoff
   | ctermBlock_dot5_boundary terms_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       rename_i actualLifetime actualTermsTree actualTerms hterms
       rcases htree with ⟨hlifetimeEq, htermsTreeEq, _⟩
@@ -1329,19 +1330,19 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerms.done
   | ctermLetMut_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutName
         _root_.ConservativeExtractor.Generated.CompletesName.cutoff
   | ctermLetMut_dot2_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutName
         _root_.ConservativeExtractor.Generated.CompletesName.cutoff
   | ctermLetMut_dot4_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       rename_i actualName actualInitialiserTree actualInitialiser hinitialiser
       rcases htree with ⟨hnameEq, _⟩
@@ -1350,13 +1351,13 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermAssign_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermAssignRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignLhs
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermAssign_dot2_boundary lhs_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermAssignRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, _⟩
@@ -1366,49 +1367,49 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermBox_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBoxRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxOperand
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermBorrowShared_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowSharedRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermBorrowMut_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermBorrowMut_dot2_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermMove_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermMoveRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermCopy_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermCopyRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyOperand
         _root_.ConservativeExtractor.Generated.CompletesLVal.cutoff
   | ctermEq_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermEqRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermEq_termPrefix
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermEq_dot2_boundary lhs_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermEqRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, _⟩
@@ -1418,13 +1419,13 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermIte_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteCondition
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermIte_dot4_boundary condition_denotes trueBranch_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hconditionTreeEq, htrueTreeEq, _⟩
@@ -1438,12 +1439,12 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermWhile_dot0_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileStart
   | ctermWhile_dot2_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       rename_i actualBodyLifetime actualConditionTree actualBodyTree actualCondition actualBody hcondition hbody
       rcases htree with ⟨hlifetimeEq, _⟩
@@ -1452,7 +1453,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.cutoff
   | ctermInt_intN_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIntRule] at htree
       rename_i actualN
       rcases htree with ⟨hnEq, _⟩
@@ -1460,7 +1461,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermInt_intN
   | ctermBlock_blockTerms_boundary terms_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       rename_i actualLifetime actualTermsTree actualTerms hterms
       rcases htree with ⟨hlifetimeEq, htermsTreeEq, _⟩
@@ -1471,7 +1472,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerms.done
   | ctermLetMut_letMutName_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       rename_i actualName actualInitialiserTree actualInitialiser hinitialiser
       rcases htree with ⟨hnameEq, _⟩
@@ -1480,7 +1481,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesName.done
   | ctermLetMut_letMutInitialiser_boundary initialiser_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       rename_i actualName actualInitialiserTree actualInitialiser hinitialiser
       rcases htree with ⟨hnameEq, hinitialiserTreeEq, _⟩
@@ -1492,7 +1493,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermAssign_assignLhs_boundary lhs_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermAssignRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, _⟩
@@ -1502,7 +1503,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesLVal.done
   | ctermAssign_assignRhs_boundary lhs_denotes rhs_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermAssignRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, hrhsTreeEq, _⟩
@@ -1514,7 +1515,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermBox_boxOperand_boundary operand_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBoxRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hoperandTreeEq, _⟩
@@ -1524,7 +1525,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermBorrowShared_borrowSharedOperand_boundary operand_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowSharedRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hoperandTreeEq, _⟩
@@ -1534,7 +1535,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesLVal.done
   | ctermBorrowMut_borrowMutOperand_boundary operand_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hoperandTreeEq, _⟩
@@ -1544,7 +1545,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesLVal.done
   | ctermMove_moveOperand_boundary operand_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermMoveRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hoperandTreeEq, _⟩
@@ -1554,7 +1555,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesLVal.done
   | ctermCopy_copyOperand_boundary operand_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermCopyRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hoperandTreeEq, _⟩
@@ -1564,7 +1565,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesLVal.done
   | ctermEq_termPrefix_boundary lhs_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermEqRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, _⟩
@@ -1574,7 +1575,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermEq_eqRhs_boundary lhs_denotes rhs_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermEqRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, hrhsTreeEq, _⟩
@@ -1586,7 +1587,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermIte_iteCondition_boundary condition_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hconditionTreeEq, _⟩
@@ -1597,7 +1598,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermIte_iteTrueBranch_boundary condition_denotes trueBranch_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hconditionTreeEq, htrueTreeEq, _⟩
@@ -1611,7 +1612,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermIte_iteFalseBranch_boundary condition_denotes trueBranch_denotes falseBranch_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hconditionTreeEq, htrueTreeEq, hfalseTreeEq, _⟩
@@ -1628,7 +1629,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermWhile_whileCondition_boundary condition_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       rename_i actualBodyLifetime actualConditionTree actualBodyTree actualCondition actualBody hcondition hbody
       rcases htree with ⟨hlifetimeEq, hconditionTreeEq, _⟩
@@ -1640,7 +1641,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermWhile_whileBody_boundary condition_denotes body_denotes =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       rename_i actualBodyLifetime actualConditionTree actualBodyTree actualCondition actualBody hcondition hbody
       rcases htree with ⟨hlifetimeEq, hconditionTreeEq, hbodyTreeEq, _⟩
@@ -1654,58 +1655,58 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         _root_.ConservativeExtractor.Generated.CompletesTerm.done
   | ctermBlock_blockStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockStart
   | ctermLetMut_letMutStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermLetMut_letMutStart
   | ctermBox_boxStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBoxRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBox_boxStart
   | ctermBorrowShared_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowSharedRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedStart
   | ctermBorrowMut_borrowSharedStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowSharedStart
   | ctermCopy_copyStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermCopyRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyStart
   | ctermIte_iteStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermIte_iteStart
   | ctermWhile_whileStart_boundary =>
       obtain ⟨_suffix, _futureChildren, htree, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.boundary_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.boundary_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermWhile_whileStart
   | ctermBlock_blockTerms_descend terms_lower =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermBlockRule] at htree
       rename_i actualLifetime actualTermsTree actualTerms hterms
       rcases htree with ⟨hlifetimeEq, hchildEq, _⟩
       subst actualLifetime
       rw [← hchildEq] at hchild
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBlock_blockTerms
-        (checkedTermsFrontierLower_completes_of_stateCompletes
+        (termsFrontierLower_completes_of_stateCompletes
           terms_lower hchild hterms)
   | ctermLetMut_letMutInitialiser_descend initialiser_lower initialiser_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermLetMutRule] at htree
       rename_i actualName actualInitialiserTree actualInitialiser hinitialiser
       rcases htree with ⟨hnameEq, hchildEq, _⟩
@@ -1715,17 +1716,17 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (initialiser_ih hchild hinitialiser)
   | ctermAssign_assignLhs_descend lhs_lower =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermAssignRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hchildEq, _⟩
       rw [← hchildEq] at hchild
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermAssign_assignLhs
-        (checkedLValFrontierLower_completes_of_stateCompletes
+        (lValFrontierLower_completes_of_stateCompletes
           lhs_lower hchild hlhs)
   | ctermAssign_assignRhs_descend lhs_denotes rhs_lower rhs_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermAssignRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, hchildEq, _⟩
@@ -1736,7 +1737,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (rhs_ih hchild hrhs)
   | ctermBox_boxOperand_descend operand_lower operand_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermBoxRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hchildEq, _⟩
@@ -1745,47 +1746,47 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (operand_ih hchild hoperand)
   | ctermBorrowShared_borrowSharedOperand_descend operand_lower =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowSharedRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hchildEq, _⟩
       rw [← hchildEq] at hchild
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowShared_borrowSharedOperand
-        (checkedLValFrontierLower_completes_of_stateCompletes
+        (lValFrontierLower_completes_of_stateCompletes
           operand_lower hchild hoperand)
   | ctermBorrowMut_borrowMutOperand_descend operand_lower =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermBorrowMutRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hchildEq, _⟩
       rw [← hchildEq] at hchild
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermBorrowMut_borrowMutOperand
-        (checkedLValFrontierLower_completes_of_stateCompletes
+        (lValFrontierLower_completes_of_stateCompletes
           operand_lower hchild hoperand)
   | ctermMove_moveOperand_descend operand_lower =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermMoveRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hchildEq, _⟩
       rw [← hchildEq] at hchild
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermMove_moveOperand
-        (checkedLValFrontierLower_completes_of_stateCompletes
+        (lValFrontierLower_completes_of_stateCompletes
           operand_lower hchild hoperand)
   | ctermCopy_copyOperand_descend operand_lower =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermCopyRule] at htree
       rename_i actualOperandTree actualOperand hoperand
       rcases htree with ⟨hchildEq, _⟩
       rw [← hchildEq] at hchild
       exact _root_.ConservativeExtractor.Generated.CompletesTerm.ctermCopy_copyOperand
-        (checkedLValFrontierLower_completes_of_stateCompletes
+        (lValFrontierLower_completes_of_stateCompletes
           operand_lower hchild hoperand)
   | ctermEq_termPrefix_descend lhs_lower lhs_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermEqRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hchildEq, _⟩
@@ -1794,7 +1795,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (lhs_ih hchild hlhs)
   | ctermEq_eqRhs_descend lhs_denotes rhs_lower rhs_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermEqRule] at htree
       rename_i actualLhsTree actualRhsTree actualLhs actualRhs hlhs hrhs
       rcases htree with ⟨hlhsTreeEq, hchildEq, _⟩
@@ -1805,7 +1806,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (rhs_ih hchild hrhs)
   | ctermIte_iteCondition_descend condition_lower condition_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hchildEq, _⟩
@@ -1814,7 +1815,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (condition_ih hchild hcondition)
   | ctermIte_iteTrueBranch_descend condition_denotes trueBranch_lower trueBranch_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hconditionTreeEq, hchildEq, _⟩
@@ -1826,7 +1827,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (trueBranch_ih hchild htrue)
   | ctermIte_iteFalseBranch_descend condition_denotes trueBranch_denotes falseBranch_lower falseBranch_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermIteRule] at htree
       rename_i actualConditionTree actualTrueTree actualFalseTree actualCondition actualTrue actualFalse hcondition htrue hfalse
       rcases htree with ⟨hconditionTreeEq, htrueTreeEq, hchildEq, _⟩
@@ -1841,7 +1842,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (falseBranch_ih hchild hfalse)
   | ctermWhile_whileCondition_descend condition_lower condition_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       rename_i actualBodyLifetime actualConditionTree actualBodyTree actualCondition actualBody hcondition hbody
       rcases htree with ⟨hlifetimeEq, hchildEq, _⟩
@@ -1851,7 +1852,7 @@ theorem checkedTermFrontierLower_completes_of_stateCompletes
         (condition_ih hchild hcondition)
   | ctermWhile_whileBody_descend condition_denotes body_lower body_ih =>
       obtain ⟨childTree, _suffix, futureChildren, htree, hchild, _hfuture⟩ :=
-        CheckableGrammar.CheckedFrontierStateCompletes.descend_inv hcomplete
+        CheckableGrammar.FrontierStateCompletes.descend_inv hcomplete
       cases hdenotes <;> simp [ctermWhileRule] at htree
       rename_i actualBodyLifetime actualConditionTree actualBodyTree actualCondition actualBody hcondition hbody
       rcases htree with ⟨hlifetimeEq, hconditionTreeEq, hchildEq, _⟩
@@ -1884,34 +1885,34 @@ def render_decoder_assisted_coverage_theorems() -> list[str]:
         ),
     ]:
         theorem_name = (
-            f"checkedTyFrontierLower_cty{kind}Targets_boundary_exists"
+            f"tyFrontierLower_cty{kind}Targets_boundary_exists"
         )
         lines.extend([
             "",
             "set_option linter.unusedSimpArgs false in",
             f"theorem {theorem_name}",
             "    {targetsTree : Tree Tok}",
-            "    {checkedBefore :",
+            "    {before_ok :",
             "      CheckableGrammar.checkSeq checkableGrammar",
             f"        ({{ rule := {rule_name}, dot := {dot} }} : Item Cat Terminal).before",
             f"        {before_children} = Bool.true}} :",
             "    ∃ targets : List LVal,",
-            "      CheckedTyFrontierLower",
-            "        (CheckableGrammar.CheckedFrontierState.boundary",
+            "      TyFrontierLower",
+            "        (CheckableGrammar.FrontierState.boundary",
             f"          ({{ rule := {rule_name}, dot := {dot} }} : Item Cat Terminal)",
             f"          (by native_decide) {before_children}",
-            "          checkedBefore)",
+            "          before_ok)",
             f"        (_root_.ConservativeExtractor.Generated.PartialTy.{partial_constructor}",
             "          (_root_.ConservativeExtractor.Generated.PartialLVals.done targets)) := by",
             "  have htargets :",
             "      CheckableGrammar.checkTree checkableGrammar .clvals targetsTree =",
             "        Bool.true := by",
             f"    simpa [{rule_name}, Item.before, CheckableGrammar.checkSeq,",
-            "      checkableGrammar, acceptsBool] using checkedBefore",
+            "      checkableGrammar, acceptsBool] using before_ok",
             "  obtain ⟨targets, htargetsDenote⟩ :=",
             "    checkedLValsTree_denote_exists htargets",
             "  exact ⟨targets,",
-            f"    CheckedTyFrontierLower.cty{kind}_{partial_constructor}_boundary",
+            f"    TyFrontierLower.cty{kind}_{partial_constructor}_boundary",
             "      htargetsDenote⟩",
         ])
     return lines
@@ -2216,12 +2217,13 @@ def render() -> str:
 
     lines: list[str] = [
         "import LwRust.Extractor.FrontierSemantics",
+        "import LwRust.Extractor.PartialProgram",
         "",
         "/-!",
-        "Generated lowering hooks from checked FW parser frontiers to the",
+        "Generated lowering hooks from grammar-validated FW parser frontiers to the",
         "existing generated partial-program frontiers.",
         "",
-        "This file is generated from the syntax declarations and checked",
+        "This file is generated from the syntax declarations and",
         "`SyntaxSemantics` annotations in `LwRust.Extractor.CompleteProgram`.",
         "Re-generate it with `scripts/generate_frontier_lower_from_syntax.py`.",
         "-/",
@@ -2244,10 +2246,10 @@ def render() -> str:
         lines.extend(
             [
                 f"inductive {relation} :",
-                f"    CheckableGrammar.CheckedFrontierState checkableGrammar .{cat} →",
+                f"    CheckableGrammar.FrontierState checkableGrammar .{cat} →",
                 f"    {partial} → Prop where",
                 f"  | fallback",
-                f"      {{state : CheckableGrammar.CheckedFrontierState checkableGrammar .{cat}}} :",
+                f"      {{state : CheckableGrammar.FrontierState checkableGrammar .{cat}}} :",
                 f"      {relation}",
                 f"        state",
                 f"        (_root_.ConservativeExtractor.Generated.{partial}.cutoff)",

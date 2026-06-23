@@ -4,9 +4,8 @@ import LwRust.Extractor.CompleteProgram
 Grammar-derived parser frontiers.
 
 This file is the generic "partial program as parser frontier" model.  The
-user-facing prefix interface works with checked frontier states; extractor
-wrappers may still use generated internal views to reuse existing typing
-proofs.
+user-facing prefix interface works with grammar frontier states; extractor
+wrappers may still use generated internal views to reuse existing typing proofs.
 
 The trusted part here is a small grammar semantics:
 
@@ -24,6 +23,12 @@ If `cterm` can be followed by `== cterm`, or if `clval` can be followed by
 
 namespace ConservativeExtractor
 namespace GrammarFrontier
+
+structure Bijection (α : Type u) (β : Type v) where
+  toFun : α → β
+  invFun : β → α
+  left_inv : ∀ x, invFun (toFun x) = x
+  right_inv : ∀ y, toFun (invFun y) = y
 
 inductive Sym (Cat Terminal : Type) where
   | token (terminal : Terminal)
@@ -110,6 +115,10 @@ namespace CheckableGrammar
 
 mutual
 
+/--
+Boolean validation that a parse tree has the shape required by the grammar.
+This is syntactic grammar validation only; it is not Rust type checking.
+-/
 def checkTree {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok) :
     Cat → Tree Tok → Bool
@@ -818,41 +827,41 @@ theorem RawCompletion.checked?_sound {Cat Terminal Tok : Type}
     Derives G.toGrammar cat completion.completedTokens completion.tree := by
   exact completion.completedTokens_derives
 
-structure CheckedBoundaryState {Cat Terminal Tok : Type}
+structure BoundaryState {Cat Terminal Tok : Type}
     [DecidableEq Cat] (G : CheckableGrammar Cat Terminal Tok) where
   item : Item Cat Terminal
   item_mem : item ∈ items G.toGrammar
   doneChildren : List (Tree Tok)
-  checkedBefore : checkSeq G item.before doneChildren = Bool.true
+  before_ok : checkSeq G item.before doneChildren = Bool.true
 
-namespace CheckedBoundaryState
+namespace BoundaryState
 
 def pref {Cat Terminal Tok : Type} [DecidableEq Cat]
     {G : CheckableGrammar Cat Terminal Tok}
-    (state : CheckedBoundaryState G) : List Tok :=
+    (state : BoundaryState G) : List Tok :=
   state.doneChildren.flatMap Tree.tokens
 
 def rawCompletion {Cat Terminal Tok : Type} [DecidableEq Cat]
     {G : CheckableGrammar Cat Terminal Tok}
-    (state : CheckedBoundaryState G) (defaults : Defaults G) :
+    (state : BoundaryState G) (defaults : Defaults G) :
     RawCompletion Tok :=
   defaults.completeBoundaryRaw state.item state.doneChildren
 
 theorem rawCompletion_valid {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
-    (state : CheckedBoundaryState G) (defaults : Defaults G) :
+    (state : BoundaryState G) (defaults : Defaults G) :
     (state.rawCompletion defaults).valid G state.item.rule.lhs
       state.pref = Bool.true := by
   unfold rawCompletion pref
   exact Defaults.completeBoundaryRaw_valid defaults
     (by simpa using rule_mem_of_mem_items state.item_mem)
-    state.checkedBefore rfl
+    state.before_ok rfl
 
 def completion {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
-    (state : CheckedBoundaryState G) (defaults : Defaults G) :
+    (state : BoundaryState G) (defaults : Defaults G) :
     ValidCompletion G.toGrammar state.item.rule.lhs state.pref :=
   (state.rawCompletion defaults).toValidCompletion G
     (state.rawCompletion_valid defaults)
@@ -860,43 +869,43 @@ def completion {Cat Terminal Tok : Type}
 def completedTokens {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
-    (state : CheckedBoundaryState G) (defaults : Defaults G) :
+    (state : BoundaryState G) (defaults : Defaults G) :
     List Tok :=
   (state.completion defaults).completedTokens
 
 theorem completedTokens_derives {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
-    (state : CheckedBoundaryState G) (defaults : Defaults G) :
+    (state : BoundaryState G) (defaults : Defaults G) :
     Derives G.toGrammar state.item.rule.lhs
       (state.completedTokens defaults)
       (state.completion defaults).tree :=
   (state.completion defaults).completedTokens_derives
 
-end CheckedBoundaryState
+end BoundaryState
 
-inductive CheckedFrontierState {Cat Terminal Tok : Type}
+inductive FrontierState {Cat Terminal Tok : Type}
     [DecidableEq Cat] (G : CheckableGrammar Cat Terminal Tok) :
     Cat → Type where
   | boundary (item : Item Cat Terminal)
       (item_mem : item ∈ items G.toGrammar)
       (doneChildren : List (Tree Tok))
-      (checkedBefore : checkSeq G item.before doneChildren = Bool.true) :
-      CheckedFrontierState G item.rule.lhs
+      (before_ok : checkSeq G item.before doneChildren = Bool.true) :
+      FrontierState G item.rule.lhs
   | descend (item : Item Cat Terminal)
       (item_mem : item ∈ items G.toGrammar)
       (activeCat : Cat) (todo : List (Sym Cat Terminal))
       (after_eq : item.after = .cat activeCat :: todo)
       (doneChildren : List (Tree Tok))
-      (checkedBefore : checkSeq G item.before doneChildren = Bool.true)
-      (child : CheckedFrontierState G activeCat) :
-      CheckedFrontierState G item.rule.lhs
+      (before_ok : checkSeq G item.before doneChildren = Bool.true)
+      (child : FrontierState G activeCat) :
+      FrontierState G item.rule.lhs
 
-namespace CheckedFrontierState
+namespace FrontierState
 
 def pref {Cat Terminal Tok : Type} [DecidableEq Cat]
     {G : CheckableGrammar Cat Terminal Tok} :
-    {cat : Cat} → CheckedFrontierState G cat → List Tok
+    {cat : Cat} → FrontierState G cat → List Tok
   | _, .boundary _ _ doneChildren _ =>
       doneChildren.flatMap Tree.tokens
   | _, .descend _ _ _ _ _ doneChildren _ child =>
@@ -905,7 +914,7 @@ def pref {Cat Terminal Tok : Type} [DecidableEq Cat]
 def rawCompletion {Cat Terminal Tok : Type} [DecidableEq Cat]
     {G : CheckableGrammar Cat Terminal Tok}
     (defaults : Defaults G) :
-    {cat : Cat} → CheckedFrontierState G cat → RawCompletion Tok
+    {cat : Cat} → FrontierState G cat → RawCompletion Tok
   | _, .boundary item _ doneChildren _ =>
       defaults.completeBoundaryRaw item doneChildren
   | _, .descend item _ _ todo _ doneChildren _ child =>
@@ -921,17 +930,17 @@ theorem rawCompletion_valid {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
     (defaults : Defaults G) :
-    ∀ {cat : Cat} (state : CheckedFrontierState G cat),
+    ∀ {cat : Cat} (state : FrontierState G cat),
       (rawCompletion defaults state).valid G cat (pref state) =
         Bool.true := by
   intro cat state
   induction state with
-  | boundary item item_mem doneChildren checkedBefore =>
+  | boundary item item_mem doneChildren before_ok =>
       unfold rawCompletion pref
       exact Defaults.completeBoundaryRaw_valid defaults
         (by simpa using rule_mem_of_mem_items item_mem)
-        checkedBefore rfl
-  | descend item item_mem activeCat todo after_eq doneChildren checkedBefore
+        before_ok rfl
+  | descend item item_mem activeCat todo after_eq doneChildren before_ok
       child ih =>
       unfold rawCompletion pref
       let childRaw := rawCompletion defaults child
@@ -939,7 +948,7 @@ theorem rawCompletion_valid {Cat Terminal Tok : Type}
       have hbefore :
           DerivesSeq G.toGrammar item.before
             (doneChildren.flatMap Tree.tokens) doneChildren :=
-        checkSeq_sound G checkedBefore
+        checkSeq_sound G before_ok
       have hchild :
           Derives G.toGrammar activeCat
             (pref child ++ childRaw.suffix) childRaw.tree := by
@@ -1004,7 +1013,7 @@ def completion {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
     (defaults : Defaults G) {cat : Cat}
-    (state : CheckedFrontierState G cat) :
+    (state : FrontierState G cat) :
     ValidCompletion G.toGrammar cat state.pref :=
   (rawCompletion defaults state).toValidCompletion G
     (rawCompletion_valid defaults state)
@@ -1013,17 +1022,114 @@ theorem completedTokens_derives {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok}
     (defaults : Defaults G) {cat : Cat}
-    (state : CheckedFrontierState G cat) :
+    (state : FrontierState G cat) :
     Derives G.toGrammar cat
       (completion defaults state).completedTokens
       (completion defaults state).tree :=
   (completion defaults state).completedTokens_derives
 
-end CheckedFrontierState
+end FrontierState
 
 /--
-A checked frontier state is not just a prefix: it also describes where that
-prefix sits inside a full parse tree.
+A partial frontier tree is the tree-shaped presentation of a parser frontier.
+It carries the same data as `FrontierState`; the equivalence below is the
+formal statement that no hand-written partial-term syntax has to be trusted.
+
+The `before_ok` proofs are grammar well-formedness proofs for already parsed
+children, not Rust typing facts.
+-/
+inductive PartialFrontierTree {Cat Terminal Tok : Type}
+    [DecidableEq Cat] (G : CheckableGrammar Cat Terminal Tok) :
+    Cat → Type where
+  | boundary (item : Item Cat Terminal)
+      (item_mem : item ∈ items G.toGrammar)
+      (doneChildren : List (Tree Tok))
+      (before_ok : checkSeq G item.before doneChildren = Bool.true) :
+      PartialFrontierTree G item.rule.lhs
+  | descend (item : Item Cat Terminal)
+      (item_mem : item ∈ items G.toGrammar)
+      (activeCat : Cat) (todo : List (Sym Cat Terminal))
+      (after_eq : item.after = .cat activeCat :: todo)
+      (doneChildren : List (Tree Tok))
+      (before_ok : checkSeq G item.before doneChildren = Bool.true)
+      (child : PartialFrontierTree G activeCat) :
+      PartialFrontierTree G item.rule.lhs
+
+namespace PartialFrontierTree
+
+def toFrontierState {Cat Terminal Tok : Type} [DecidableEq Cat]
+    {G : CheckableGrammar Cat Terminal Tok} :
+    {cat : Cat} → PartialFrontierTree G cat → FrontierState G cat
+  | _, .boundary item item_mem doneChildren before_ok =>
+      .boundary item item_mem doneChildren before_ok
+  | _, .descend item item_mem activeCat todo after_eq doneChildren
+      before_ok child =>
+      .descend item item_mem activeCat todo after_eq doneChildren
+        before_ok (toFrontierState child)
+
+def ofFrontierState {Cat Terminal Tok : Type} [DecidableEq Cat]
+    {G : CheckableGrammar Cat Terminal Tok} :
+    {cat : Cat} → FrontierState G cat → PartialFrontierTree G cat
+  | _, .boundary item item_mem doneChildren before_ok =>
+      .boundary item item_mem doneChildren before_ok
+  | _, .descend item item_mem activeCat todo after_eq doneChildren
+      before_ok child =>
+      .descend item item_mem activeCat todo after_eq doneChildren
+        before_ok (ofFrontierState child)
+
+@[simp] theorem of_toFrontierState {Cat Terminal Tok : Type}
+    [DecidableEq Cat] {G : CheckableGrammar Cat Terminal Tok} :
+    ∀ {cat : Cat} (frontierTree : PartialFrontierTree G cat),
+      ofFrontierState (toFrontierState frontierTree) = frontierTree := by
+  intro cat frontierTree
+  induction frontierTree with
+  | boundary item item_mem doneChildren before_ok =>
+      rfl
+  | descend item item_mem activeCat todo after_eq doneChildren
+      before_ok child ih =>
+      simp [toFrontierState, ofFrontierState, ih]
+
+@[simp] theorem to_ofFrontierState {Cat Terminal Tok : Type}
+    [DecidableEq Cat] {G : CheckableGrammar Cat Terminal Tok} :
+    ∀ {cat : Cat} (state : FrontierState G cat),
+      toFrontierState (ofFrontierState state) = state := by
+  intro cat state
+  induction state with
+  | boundary item item_mem doneChildren before_ok =>
+      rfl
+  | descend item item_mem activeCat todo after_eq doneChildren
+      before_ok child ih =>
+      simp [toFrontierState, ofFrontierState, ih]
+
+def equivFrontierState {Cat Terminal Tok : Type}
+    [DecidableEq Cat] {G : CheckableGrammar Cat Terminal Tok}
+    {cat : Cat} :
+    Bijection (PartialFrontierTree G cat) (FrontierState G cat) where
+  toFun := toFrontierState
+  invFun := ofFrontierState
+  left_inv := by
+    intro frontierTree
+    exact of_toFrontierState frontierTree
+  right_inv := by
+    intro state
+    exact to_ofFrontierState state
+
+def pref {Cat Terminal Tok : Type} [DecidableEq Cat]
+    {G : CheckableGrammar Cat Terminal Tok} {cat : Cat}
+    (frontierTree : PartialFrontierTree G cat) : List Tok :=
+  (toFrontierState frontierTree).pref
+
+@[simp] theorem pref_ofFrontierState {Cat Terminal Tok : Type}
+    [DecidableEq Cat] {G : CheckableGrammar Cat Terminal Tok}
+    {cat : Cat} (state : FrontierState G cat) :
+    pref (ofFrontierState state) = state.pref := by
+  simp [pref]
+
+end PartialFrontierTree
+
+/--
+A frontier state is not just a prefix: it also describes where that prefix sits
+inside a full parse tree.
 
 `boundary` means the prefix ended between grammar symbols, so the remaining
 children are parsed by the dotted item's `after` symbols.  `descend` means the
@@ -1031,9 +1137,9 @@ prefix ended inside the active child, so the child state recursively completes
 to the child tree and the dotted item's remaining `todo` symbols complete the
 rest of the parent.
 -/
-def CheckedFrontierStateCompletes {Cat Terminal Tok : Type}
+def FrontierStateCompletes {Cat Terminal Tok : Type}
     [DecidableEq Cat] (G : CheckableGrammar Cat Terminal Tok) :
-    {cat : Cat} → CheckedFrontierState G cat → Tree Tok → Prop
+    {cat : Cat} → FrontierState G cat → Tree Tok → Prop
   | _, .boundary item _ doneChildren _, tree =>
       ∃ suffix futureChildren,
         tree = .node item.rule.name (doneChildren ++ futureChildren) ∧
@@ -1042,23 +1148,23 @@ def CheckedFrontierStateCompletes {Cat Terminal Tok : Type}
       ∃ childTree suffix futureChildren,
         tree = .node item.rule.name
           (doneChildren ++ childTree :: futureChildren) ∧
-        CheckedFrontierStateCompletes G childState childTree ∧
+        FrontierStateCompletes G childState childTree ∧
         DerivesSeq G.toGrammar todo suffix futureChildren
 
-namespace CheckedFrontierStateCompletes
+namespace FrontierStateCompletes
 
 theorem boundary_inv {Cat Terminal Tok : Type} [DecidableEq Cat]
     {G : CheckableGrammar Cat Terminal Tok}
     {item : Item Cat Terminal}
     {item_mem : item ∈ items G.toGrammar}
     {doneChildren : List (Tree Tok)}
-    {checkedBefore :
+    {before_ok :
       checkSeq G item.before doneChildren = Bool.true}
     {tree : Tree Tok}
     (hcomplete :
-      CheckedFrontierStateCompletes G
-        (CheckedFrontierState.boundary item item_mem doneChildren
-          checkedBefore)
+      FrontierStateCompletes G
+        (FrontierState.boundary item item_mem doneChildren
+          before_ok)
         tree) :
     ∃ suffix futureChildren,
       tree = .node item.rule.name (doneChildren ++ futureChildren) ∧
@@ -1072,37 +1178,37 @@ theorem descend_inv {Cat Terminal Tok : Type} [DecidableEq Cat]
     {activeCat : Cat} {todo : List (Sym Cat Terminal)}
     {after_eq : item.after = .cat activeCat :: todo}
     {doneChildren : List (Tree Tok)}
-    {checkedBefore :
+    {before_ok :
       checkSeq G item.before doneChildren = Bool.true}
-    {childState : CheckedFrontierState G activeCat}
+    {childState : FrontierState G activeCat}
     {tree : Tree Tok}
     (hcomplete :
-      CheckedFrontierStateCompletes G
-        (CheckedFrontierState.descend item item_mem activeCat todo
-          after_eq doneChildren checkedBefore childState)
+      FrontierStateCompletes G
+        (FrontierState.descend item item_mem activeCat todo
+          after_eq doneChildren before_ok childState)
         tree) :
     ∃ childTree suffix futureChildren,
       tree = .node item.rule.name
         (doneChildren ++ childTree :: futureChildren) ∧
-      CheckedFrontierStateCompletes G childState childTree ∧
+      FrontierStateCompletes G childState childTree ∧
       DerivesSeq G.toGrammar todo suffix futureChildren :=
   hcomplete
 
 theorem prefixCompletes {Cat Terminal Tok : Type} [DecidableEq Cat]
     {G : CheckableGrammar Cat Terminal Tok} :
-    ∀ {cat : Cat} {state : CheckedFrontierState G cat} {tree : Tree Tok},
-      CheckedFrontierStateCompletes G state tree →
+    ∀ {cat : Cat} {state : FrontierState G cat} {tree : Tree Tok},
+      FrontierStateCompletes G state tree →
         PrefixCompletes G.toGrammar cat state.pref tree := by
   intro cat state tree hcomplete
   induction state generalizing tree with
-  | boundary item item_mem doneChildren checkedBefore =>
+  | boundary item item_mem doneChildren before_ok =>
       obtain ⟨suffix, futureChildren, htree, hfuture⟩ := hcomplete
       subst tree
       refine ⟨suffix, ?_⟩
       have hbefore :
           DerivesSeq G.toGrammar item.before
             (doneChildren.flatMap Tree.tokens) doneChildren :=
-        checkSeq_sound G checkedBefore
+        checkSeq_sound G before_ok
       have hseq0 :
           DerivesSeq G.toGrammar (item.before ++ item.after)
             ((doneChildren.flatMap Tree.tokens) ++ suffix)
@@ -1113,9 +1219,9 @@ theorem prefixCompletes {Cat Terminal Tok : Type} [DecidableEq Cat]
             ((doneChildren.flatMap Tree.tokens) ++ suffix)
             (doneChildren ++ futureChildren) := by
         simpa [Item.before_append_after item] using hseq0
-      simpa [CheckedFrontierState.pref] using
+      simpa [FrontierState.pref] using
         Derives.rule (by simpa using rule_mem_of_mem_items item_mem) rfl hseq
-  | descend item item_mem activeCat todo after_eq doneChildren checkedBefore
+  | descend item item_mem activeCat todo after_eq doneChildren before_ok
       childState ih =>
       obtain ⟨childTree, suffix, futureChildren, htree, hchild,
         hfuture⟩ := hcomplete
@@ -1126,7 +1232,7 @@ theorem prefixCompletes {Cat Terminal Tok : Type} [DecidableEq Cat]
       have hbefore :
           DerivesSeq G.toGrammar item.before
             (doneChildren.flatMap Tree.tokens) doneChildren :=
-        checkSeq_sound G checkedBefore
+        checkSeq_sound G before_ok
       have htail :
           DerivesSeq G.toGrammar (.cat activeCat :: todo)
             ((childState.pref ++ childSuffix) ++ suffix)
@@ -1150,12 +1256,28 @@ theorem prefixCompletes {Cat Terminal Tok : Type} [DecidableEq Cat]
             (doneChildren ++ childTree :: futureChildren) := by
         rw [← hsplit]
         simpa [List.append_assoc] using hseq0
-      simpa [CheckedFrontierState.pref, List.append_assoc] using
+      simpa [FrontierState.pref, List.append_assoc] using
         Derives.rule (by simpa using rule_mem_of_mem_items item_mem) rfl hseq
 
-end CheckedFrontierStateCompletes
+end FrontierStateCompletes
 
-theorem checkedFrontierState_of_boundarySplit {Cat Terminal Tok : Type}
+namespace PartialFrontierTree
+
+def Completes {Cat Terminal Tok : Type} [DecidableEq Cat]
+    (G : CheckableGrammar Cat Terminal Tok) {cat : Cat}
+    (frontierTree : PartialFrontierTree G cat) (tree : Tree Tok) : Prop :=
+  FrontierStateCompletes G (toFrontierState frontierTree) tree
+
+@[simp] theorem completes_ofFrontierState {Cat Terminal Tok : Type}
+    [DecidableEq Cat] {G : CheckableGrammar Cat Terminal Tok}
+    {cat : Cat} (state : FrontierState G cat) (tree : Tree Tok) :
+    Completes G (ofFrontierState state) tree ↔
+      FrontierStateCompletes G state tree := by
+  simp [Completes]
+
+end PartialFrontierTree
+
+theorem frontierState_of_boundarySplit {Cat Terminal Tok : Type}
     [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     {rule : Rule Cat Terminal} {done todo : List (Sym Cat Terminal)}
@@ -1163,7 +1285,7 @@ theorem checkedFrontierState_of_boundarySplit {Cat Terminal Tok : Type}
     (hrule : rule ∈ G.rules)
     (hrhs : rule.rhs = done ++ todo)
     (hdone : DerivesSeq G.toGrammar done pref doneChildren) :
-    ∃ state : CheckedFrontierState G rule.lhs,
+    ∃ state : FrontierState G rule.lhs,
       state.pref = pref := by
   let item : Item Cat Terminal := { rule := rule, dot := done.length }
   have hitem : item ∈ items G.toGrammar :=
@@ -1176,11 +1298,11 @@ theorem checkedFrontierState_of_boundarySplit {Cat Terminal Tok : Type}
       checkSeq G item.before doneChildren = Bool.true := by
     rw [hbefore]
     exact checkSeq_complete G hdone
-  refine ⟨CheckedFrontierState.boundary item hitem doneChildren hchecked,
+  refine ⟨FrontierState.boundary item hitem doneChildren hchecked,
     ?_⟩
-  simpa [CheckedFrontierState.pref] using DerivesSeq.tokens_eq hdone
+  simpa [FrontierState.pref] using DerivesSeq.tokens_eq hdone
 
-theorem checkedFrontierState_of_descendSplit {Cat Terminal Tok : Type}
+theorem frontierState_of_descendSplit {Cat Terminal Tok : Type}
     [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     {rule : Rule Cat Terminal} {done todo : List (Sym Cat Terminal)}
@@ -1189,9 +1311,9 @@ theorem checkedFrontierState_of_descendSplit {Cat Terminal Tok : Type}
     (hrule : rule ∈ G.rules)
     (hrhs : rule.rhs = done ++ .cat activeCat :: todo)
     (hdone : DerivesSeq G.toGrammar done doneTokens doneChildren)
-    (childState : CheckedFrontierState G activeCat)
+    (childState : FrontierState G activeCat)
     (hchildPref : childState.pref = activePref) :
-    ∃ state : CheckedFrontierState G rule.lhs,
+    ∃ state : FrontierState G rule.lhs,
       state.pref = doneTokens ++ activePref := by
   let item : Item Cat Terminal := { rule := rule, dot := done.length }
   have hitem : item ∈ items G.toGrammar :=
@@ -1208,19 +1330,19 @@ theorem checkedFrontierState_of_descendSplit {Cat Terminal Tok : Type}
       checkSeq G item.before doneChildren = Bool.true := by
     rw [hbefore]
     exact checkSeq_complete G hdone
-  refine ⟨CheckedFrontierState.descend item hitem activeCat todo hafter
+  refine ⟨FrontierState.descend item hitem activeCat todo hafter
     doneChildren hchecked childState, ?_⟩
   have hdoneTokens : doneChildren.flatMap Tree.tokens = doneTokens :=
     DerivesSeq.tokens_eq hdone
-  simp [CheckedFrontierState.pref, hdoneTokens, hchildPref]
+  simp [FrontierState.pref, hdoneTokens, hchildPref]
 
-theorem checkedFrontierState_of_frontierCompletesSeqWithAux
+theorem frontierState_of_frontierCompletesSeqWithAux
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     (hchildComplete :
       ∀ {activeCat : Cat} {activePref : List Tok} {child : Tree Tok},
         PrefixCompletes G.toGrammar activeCat activePref child →
-          ∃ state : CheckedFrontierState G activeCat,
+          ∃ state : FrontierState G activeCat,
             state.pref = activePref)
     {rule : Rule Cat Terminal} {syms : List (Sym Cat Terminal)}
     {pref : List Tok}
@@ -1228,70 +1350,70 @@ theorem checkedFrontierState_of_frontierCompletesSeqWithAux
     (hrule : rule ∈ G.rules)
     (hrhs : rule.rhs = syms)
     (hseq : FrontierCompletesSeq G.toGrammar syms pref children) :
-    ∃ state : CheckedFrontierState G rule.lhs,
+    ∃ state : FrontierState G rule.lhs,
       state.pref = pref := by
   cases hseq with
   | boundary suffix hdone htodo =>
-      exact checkedFrontierState_of_boundarySplit G hrule hrhs hdone
+      exact frontierState_of_boundarySplit G hrule hrhs hdone
   | cat suffix hdone hchild htodo =>
       obtain ⟨childState, hchildPref⟩ := hchildComplete hchild
-      exact checkedFrontierState_of_descendSplit G hrule hrhs hdone
+      exact frontierState_of_descendSplit G hrule hrhs hdone
         childState hchildPref
 
-theorem checkedFrontierState_of_frontierCompletesSeqWith
+theorem frontierState_of_frontierCompletesSeqWith
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     (hchildComplete :
       ∀ {activeCat : Cat} {activePref : List Tok} {child : Tree Tok},
         PrefixCompletes G.toGrammar activeCat activePref child →
-          ∃ state : CheckedFrontierState G activeCat,
+          ∃ state : FrontierState G activeCat,
             state.pref = activePref)
     {rule : Rule Cat Terminal} {pref : List Tok}
     {children : List (Tree Tok)}
     (hrule : rule ∈ G.rules)
     (hseq : FrontierCompletesSeq G.toGrammar rule.rhs pref children) :
-    ∃ state : CheckedFrontierState G rule.lhs,
+    ∃ state : FrontierState G rule.lhs,
       state.pref = pref :=
-  checkedFrontierState_of_frontierCompletesSeqWithAux G hchildComplete
+  frontierState_of_frontierCompletesSeqWithAux G hchildComplete
     hrule rfl hseq
 
-theorem checkedFrontierState_of_frontierCompletesWith
+theorem frontierState_of_frontierCompletesWith
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     (hchildComplete :
       ∀ {activeCat : Cat} {activePref : List Tok} {child : Tree Tok},
         PrefixCompletes G.toGrammar activeCat activePref child →
-          ∃ state : CheckedFrontierState G activeCat,
+          ∃ state : FrontierState G activeCat,
             state.pref = activePref)
     {cat : Cat} {pref : List Tok} {tree : Tree Tok}
     (hfrontier : FrontierCompletes G.toGrammar cat pref tree) :
-    ∃ state : CheckedFrontierState G cat,
+    ∃ state : FrontierState G cat,
       state.pref = pref := by
   cases hfrontier with
   | rule hrule hlhs hseq =>
       subst cat
-      exact checkedFrontierState_of_frontierCompletesSeqWith G
+      exact frontierState_of_frontierCompletesSeqWith G
         hchildComplete hrule hseq
 
 mutual
 
-def checkedFrontierStateOfPrefixCompletes
+def frontierStateOfPrefixCompletes
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok) :
     ∀ {cat : Cat} {pref : List Tok} {tree : Tree Tok},
       PrefixCompletes G.toGrammar cat pref tree →
-        ∃ state : CheckedFrontierState G cat,
+        ∃ state : FrontierState G cat,
           state.pref = pref
   | _cat, _pref, _tree, hcomplete => by
       have hfrontier := frontierCompletes_complete hcomplete
       cases hfrontier with
       | rule hrule hlhs hseq =>
           subst _cat
-          exact checkedFrontierStateOfFrontierCompletesSeq G
+          exact frontierStateOfFrontierCompletesSeq G
             hrule rfl hseq
 termination_by _cat _pref tree _hcomplete => (sizeOf tree, 1)
 
-def checkedFrontierStateOfFrontierCompletesSeq
+def frontierStateOfFrontierCompletesSeq
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok) :
     ∀ {rule : Rule Cat Terminal} {syms : List (Sym Cat Terminal)}
@@ -1299,16 +1421,16 @@ def checkedFrontierStateOfFrontierCompletesSeq
       rule ∈ G.rules →
       rule.rhs = syms →
       FrontierCompletesSeq G.toGrammar syms pref children →
-        ∃ state : CheckedFrontierState G rule.lhs,
+        ∃ state : FrontierState G rule.lhs,
           state.pref = pref
   | _rule, _syms, _pref, _children, hrule, hrhs, hseq => by
       cases hseq with
       | boundary suffix hdone htodo =>
-          exact checkedFrontierState_of_boundarySplit G hrule hrhs hdone
+          exact frontierState_of_boundarySplit G hrule hrhs hdone
       | cat suffix hdone hchild htodo =>
           obtain ⟨childState, hchildPref⟩ :=
-            checkedFrontierStateOfPrefixCompletes G hchild
-          exact checkedFrontierState_of_descendSplit G hrule hrhs hdone
+            frontierStateOfPrefixCompletes G hchild
+          exact frontierState_of_descendSplit G hrule hrhs hdone
             childState hchildPref
 termination_by _rule _syms _pref children _hrule _hrhs _hseq =>
   (sizeOf children, 0)
@@ -1320,35 +1442,35 @@ decreasing_by
 
 end
 
-theorem checkedFrontierState_of_prefixCompletes
+theorem frontierState_of_prefixCompletes
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     {cat : Cat} {pref : List Tok} {tree : Tree Tok}
     (hcomplete : PrefixCompletes G.toGrammar cat pref tree) :
-    ∃ state : CheckedFrontierState G cat,
+    ∃ state : FrontierState G cat,
       state.pref = pref :=
-  checkedFrontierStateOfPrefixCompletes G hcomplete
+  frontierStateOfPrefixCompletes G hcomplete
 
 mutual
 
-def checkedFrontierStateOfPrefixCompletesWithCompletion
+def frontierStateOfPrefixCompletesWithCompletion
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok) :
     ∀ {cat : Cat} {pref : List Tok} {tree : Tree Tok},
       PrefixCompletes G.toGrammar cat pref tree →
-        ∃ state : CheckedFrontierState G cat,
+        ∃ state : FrontierState G cat,
           state.pref = pref ∧
-          CheckedFrontierStateCompletes G state tree
+          FrontierStateCompletes G state tree
   | _cat, _pref, _tree, hcomplete => by
       have hfrontier := frontierCompletes_complete hcomplete
       cases hfrontier with
       | rule hrule hlhs hseq =>
           subst _cat
-          exact checkedFrontierStateOfFrontierCompletesSeqWithCompletion G
+          exact frontierStateOfFrontierCompletesSeqWithCompletion G
             hrule rfl hseq
 termination_by _cat _pref tree _hcomplete => (sizeOf tree, 1)
 
-def checkedFrontierStateOfFrontierCompletesSeqWithCompletion
+def frontierStateOfFrontierCompletesSeqWithCompletion
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok) :
     ∀ {rule : Rule Cat Terminal} {syms : List (Sym Cat Terminal)}
@@ -1356,9 +1478,9 @@ def checkedFrontierStateOfFrontierCompletesSeqWithCompletion
       rule ∈ G.rules →
       rule.rhs = syms →
       FrontierCompletesSeq G.toGrammar syms pref children →
-        ∃ state : CheckedFrontierState G rule.lhs,
+        ∃ state : FrontierState G rule.lhs,
           state.pref = pref ∧
-          CheckedFrontierStateCompletes G state (.node rule.name children)
+          FrontierStateCompletes G state (.node rule.name children)
   | rule, _syms, _pref, _children, hrule, hrhs, hseq => by
       cases hseq with
       | boundary suffix hdone htodo =>
@@ -1378,19 +1500,19 @@ def checkedFrontierStateOfFrontierCompletesSeqWithCompletion
               checkSeq G item.before doneChildren = Bool.true := by
             rw [hbefore]
             exact checkSeq_complete G hdone
-          let state : CheckedFrontierState G rule.lhs :=
-            CheckedFrontierState.boundary item hitem doneChildren hchecked
+          let state : FrontierState G rule.lhs :=
+            FrontierState.boundary item hitem doneChildren hchecked
           refine ⟨state, ?_, ?_⟩
-          · simpa [state, CheckedFrontierState.pref] using
+          · simpa [state, FrontierState.pref] using
               DerivesSeq.tokens_eq hdone
-          · simp [state, CheckedFrontierStateCompletes]
+          · simp [state, FrontierStateCompletes]
             exact ⟨suffix, futureChildren, by simp [item],
               by simpa [hafter] using htodo⟩
       | cat suffix hdone hchild htodo =>
           rename_i done todo activeCat doneTokens activePref
             doneChildren futureChildren child
           obtain ⟨childState, hchildPref, hchildComplete⟩ :=
-            checkedFrontierStateOfPrefixCompletesWithCompletion G hchild
+            frontierStateOfPrefixCompletesWithCompletion G hchild
           let item : Item Cat Terminal := { rule := rule, dot := done.length }
           have hitem : item ∈ items G.toGrammar :=
             item_mem_of_rule_split (G := G.toGrammar) hrule hrhs
@@ -1406,15 +1528,15 @@ def checkedFrontierStateOfFrontierCompletesSeqWithCompletion
               checkSeq G item.before doneChildren = Bool.true := by
             rw [hbefore]
             exact checkSeq_complete G hdone
-          let state : CheckedFrontierState G rule.lhs :=
-            CheckedFrontierState.descend item hitem activeCat todo hafter
+          let state : FrontierState G rule.lhs :=
+            FrontierState.descend item hitem activeCat todo hafter
               doneChildren
               hchecked childState
           refine ⟨state, ?_, ?_⟩
           · have hdoneTokens : doneChildren.flatMap Tree.tokens = doneTokens :=
               DerivesSeq.tokens_eq hdone
-            simp [state, CheckedFrontierState.pref, hdoneTokens, hchildPref]
-          · simp [state, CheckedFrontierStateCompletes]
+            simp [state, FrontierState.pref, hdoneTokens, hchildPref]
+          · simp [state, FrontierStateCompletes]
             exact ⟨child, suffix, futureChildren, by simp [item],
               hchildComplete, by simpa using htodo⟩
 termination_by _rule _syms _pref children _hrule _hrhs _hseq =>
@@ -1427,48 +1549,48 @@ decreasing_by
 
 end
 
-theorem checkedFrontierState_of_prefixCompletes_with_completion
+theorem frontierState_of_prefixCompletes_with_completion
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     {cat : Cat} {pref : List Tok} {tree : Tree Tok}
     (hcomplete : PrefixCompletes G.toGrammar cat pref tree) :
-    ∃ state : CheckedFrontierState G cat,
+    ∃ state : FrontierState G cat,
       state.pref = pref ∧
-      CheckedFrontierStateCompletes G state tree :=
-  checkedFrontierStateOfPrefixCompletesWithCompletion G hcomplete
+      FrontierStateCompletes G state tree :=
+  frontierStateOfPrefixCompletesWithCompletion G hcomplete
 
-theorem checkedFrontierState_of_frontierCompletes
+theorem frontierState_of_frontierCompletes
     {Cat Terminal Tok : Type} [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     {cat : Cat} {pref : List Tok} {tree : Tree Tok}
     (hfrontier : FrontierCompletes G.toGrammar cat pref tree) :
-    ∃ state : CheckedFrontierState G cat,
+    ∃ state : FrontierState G cat,
       state.pref = pref :=
-  checkedFrontierState_of_prefixCompletes G
+  frontierState_of_prefixCompletes G
     (frontierCompletes_sound hfrontier)
 
-theorem checkedFrontierState_of_boundaryItem {Cat Terminal Tok : Type}
+theorem frontierState_of_boundaryItem {Cat Terminal Tok : Type}
     [DecidableEq Cat]
     (G : CheckableGrammar Cat Terminal Tok)
     {item : Item Cat Terminal} {pref : List Tok} {tree : Tree Tok}
     (hitem : item ∈ items G.toGrammar)
     (hcomplete : BoundaryCompletesItem G.toGrammar item pref tree) :
-    ∃ state : CheckedFrontierState G item.rule.lhs,
+    ∃ state : FrontierState G item.rule.lhs,
       state.pref = pref := by
   cases hcomplete with
   | mk suffix hbefore hafter =>
-      refine ⟨CheckedFrontierState.boundary item hitem _
+      refine ⟨FrontierState.boundary item hitem _
         (checkSeq_complete G hbefore), ?_⟩
-      simpa [CheckedFrontierState.pref] using
+      simpa [FrontierState.pref] using
         DerivesSeq.tokens_eq hbefore
 
 structure ParsedFrontierState {Cat Terminal Tok : Type}
     [DecidableEq Cat] (G : CheckableGrammar Cat Terminal Tok)
     (cat : Cat) (pref : List Tok) where
-  state : CheckedFrontierState G cat
+  state : FrontierState G cat
   pref_eq : state.pref = pref
 
-structure CheckedFrontierParser {Cat Terminal Tok : Type}
+structure FrontierParser {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     (G : CheckableGrammar Cat Terminal Tok) (defaults : Defaults G)
     (cat : Cat) where
@@ -1478,22 +1600,22 @@ structure CheckedFrontierParser {Cat Terminal Tok : Type}
     ∀ pref, (∃ tree, PrefixCompletes G.toGrammar cat pref tree) →
       ∃ state, state ∈ parseStates pref
 
-namespace CheckedFrontierParser
+namespace FrontierParser
 
 def completeRaw? {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok} {defaults : Defaults G}
-    {cat : Cat} (parser : CheckedFrontierParser G defaults cat)
+    {cat : Cat} (parser : FrontierParser G defaults cat)
     (pref : List Tok) : Option (RawCompletion Tok) :=
   match parser.parseStates pref with
   | [] => none
   | parsed :: _ =>
-      some (CheckedFrontierState.rawCompletion defaults parsed.state)
+      some (FrontierState.rawCompletion defaults parsed.state)
 
 theorem completeRaw?_sound {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok} {defaults : Defaults G}
-    {cat : Cat} (parser : CheckedFrontierParser G defaults cat)
+    {cat : Cat} (parser : FrontierParser G defaults cat)
     {pref : List Tok} {raw : RawCompletion Tok}
     (hraw : parser.completeRaw? pref = some raw) :
     raw.valid G cat pref = Bool.true := by
@@ -1505,10 +1627,10 @@ theorem completeRaw?_sound {Cat Terminal Tok : Type}
       simp [hstates] at hraw
       subst raw
       have hvalid :=
-        CheckedFrontierState.rawCompletion_valid defaults state.state
+        FrontierState.rawCompletion_valid defaults state.state
       simpa [state.pref_eq] using hvalid
 
-end CheckedFrontierParser
+end FrontierParser
 
 structure RawCompleteParser {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
@@ -1548,12 +1670,12 @@ theorem complete?_sound {Cat Terminal Tok : Type}
 
 end RawCompleteParser
 
-namespace CheckedFrontierParser
+namespace FrontierParser
 
 def toRawCompleteParser {Cat Terminal Tok : Type}
     [DecidableEq Cat] [DecidableEq Tok]
     {G : CheckableGrammar Cat Terminal Tok} {defaults : Defaults G}
-    {cat : Cat} (parser : CheckedFrontierParser G defaults cat) :
+    {cat : Cat} (parser : FrontierParser G defaults cat) :
     RawCompleteParser G cat where
   completeRaw pref := parser.completeRaw? pref
   completeRaw_if_completable := by
@@ -1564,14 +1686,14 @@ def toRawCompleteParser {Cat Terminal Tok : Type}
     | nil =>
         simp [hstates] at hstate
     | cons head tail =>
-        refine ⟨CheckedFrontierState.rawCompletion defaults head.state,
+        refine ⟨FrontierState.rawCompletion defaults head.state,
           ?_, ?_⟩
         · simp [completeRaw?, hstates]
         · have hvalid :=
-            CheckedFrontierState.rawCompletion_valid defaults head.state
+            FrontierState.rawCompletion_valid defaults head.state
           simpa [head.pref_eq] using hvalid
 
-end CheckedFrontierParser
+end FrontierParser
 
 end CheckableGrammar
 
