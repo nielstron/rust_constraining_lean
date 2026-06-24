@@ -107,9 +107,9 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
       [SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)]
   | Generated.PartialTerm.letMutStart => []
   | Generated.PartialTerm.letMutName _ => []
-  | Generated.PartialTerm.letMutInitialiser _ initialiser =>
-      extractTermStmts currentLifetime initialiser
-  | Generated.PartialTerm.assignLhs _ => []
+  | Generated.PartialTerm.letMutRhs _ term =>
+      extractTermStmts currentLifetime term
+  | Generated.PartialTerm.lvalStart _ => []
   | Generated.PartialTerm.assignRhs _ rhs =>
       extractTermStmts currentLifetime rhs
   | Generated.PartialTerm.boxStart => []
@@ -117,10 +117,7 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
       extractTermStmts currentLifetime operand
   | Generated.PartialTerm.tokenAmpStart => []
   | Generated.PartialTerm.borrowSharedOperand _ => []
-  | Generated.PartialTerm.borrowMutStart => []
   | Generated.PartialTerm.borrowMutOperand _ => []
-  | Generated.PartialTerm.moveStart => []
-  | Generated.PartialTerm.moveOperand _ => []
   | Generated.PartialTerm.copyStart => []
   | Generated.PartialTerm.copyOperand _ => []
   | Generated.PartialTerm.termPrefix lhs =>
@@ -366,7 +363,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           rcases hdisj with rfl | ⟨rfl, rfl⟩
           · exact WellFormedTy.unit
           · exact hwf
-  case ctermLetMut_letMutInitialiser hinit =>
+  case ctermLetMut_letMutRhs hinit =>
       cases htyped with
       | declare _ hinit' _ _ _ =>
           simp only [extractTermStmts]

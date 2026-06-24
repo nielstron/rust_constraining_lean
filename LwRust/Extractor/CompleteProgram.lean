@@ -64,7 +64,7 @@ syntax (name := ctyUnit) "cty_unit" : cty
 syntax (name := ctyInt) "cty_int" : cty
 syntax (name := ctyBool) "cty_bool" : cty
 syntax (name := ctyBorrowShared) "&" "[" clval,* "]" : cty
-syntax (name := ctyBorrowMut) "&mut" "[" clval,* "]" : cty
+syntax (name := ctyBorrowMut) "&" "mut" "[" clval,* "]" : cty
 syntax (name := ctyBox) "box" cty : cty
 
 syntax (name := clvalVar) ident : clval
@@ -79,8 +79,8 @@ syntax (name := ctermLetMut) "let" "mut" ident ":=" cterm : cterm
 syntax (name := ctermAssign) clval ":=" cterm : cterm
 syntax (name := ctermBox) "box" cterm : cterm
 syntax (name := ctermBorrowShared) "&" clval : cterm
-syntax (name := ctermBorrowMut) "&mut" clval : cterm
-syntax (name := ctermMove) "move" clval : cterm
+syntax (name := ctermBorrowMut) "&" "mut" clval : cterm
+syntax (name := ctermMove) clval : cterm
 syntax (name := ctermCopy) "copy" clval : cterm
 syntax (name := ctermEq) cterm "==" cterm : cterm
 syntax (name := ctermIte) "if" cterm cterm "else" cterm : cterm

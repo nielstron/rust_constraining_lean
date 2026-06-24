@@ -383,7 +383,7 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
           rcases hdisj with rfl | ⟨rfl, rfl⟩
           · exact WellFormedTy.unit
           · exact hwf
-  case ctermLetMut_letMutInitialiser hinit =>
+  case ctermLetMut_letMutRhs hinit =>
       cases htyped with
       | declare _ hinit' _ _ _ =>
           simp only [extractTermStmts]
