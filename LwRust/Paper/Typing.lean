@@ -963,7 +963,6 @@ mutual
     | assign {env₁ env₂ env₃ : Env} {typing : StoreTyping}
         {lifetime targetLifetime : Lifetime} {lhs : LVal}
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
-        LValTyping env₁ lhs oldTy targetLifetime →
         TermTyping env₁ typing lifetime rhs rhsTy env₂ →
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →

@@ -1088,9 +1088,9 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
       TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
         hfreshOut hcoh henv)
-    (fun hLhs _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
+    (fun _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
         hnotWrite ih hsource =>
-      TermTyping.assign hLhs (ih (SourceTerm.assign_inner hsource)) hLhsPost
+      TermTyping.assign (ih (SourceTerm.assign_inner hsource)) hLhsPost
         hshape hwf hwrite hranked hcoh hcontained hnotWrite)
     (fun _hLhs hfresh _hghostRhs _hRhs hcopyL hcopyR hshape ihL ihGhost ihR
         hsource =>
@@ -2771,7 +2771,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hLhs hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+        hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
         hnotWrite ih
         htypingEq hwellFormed =>
       by

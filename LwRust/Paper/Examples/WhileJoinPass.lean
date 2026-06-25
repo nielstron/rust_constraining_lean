@@ -841,7 +841,6 @@ theorem whileJoinBody_typing (targets : List LVal)
       whileJoinBody .unit whileJoinBackEnv := by
   unfold whileJoinBody
   exact TermTyping.assign
-    (whileJoin_q_typing targets)
     (TermTyping.immBorrow (whileJoin_y_typing targets)
       (whileJoin_not_readProhibited targets _))
     (whileJoin_q_typing targets)

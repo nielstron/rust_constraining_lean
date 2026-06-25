@@ -99,7 +99,7 @@ theorem invalidBorrowExample_rejected :
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   cases hassign with
-                                  | assign _hLhs _hRhs _hLhsPost _hshape _hwell
+                                  | assign _hRhs _hLhsPost _hshape _hwell
                                       hwrite _hranked _hcoh _hcontained hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>

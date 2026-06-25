@@ -346,7 +346,7 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- is a value), or the assignment redex ended the run.
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy _hLhs hRhs hLhsPost _hshape _hwellTy _hwrite _hranked _hcoh
+      _rhsTy hRhs hLhsPost _hshape _hwellTy _hwrite _hranked _hcoh
       _hcontained _hnotWrite ih htypingEq hsource store store' term' hvalid
       hvst hwf hbs hsafe hfs hmulti
     cases htypingEq

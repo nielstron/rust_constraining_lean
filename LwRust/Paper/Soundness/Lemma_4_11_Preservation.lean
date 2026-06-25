@@ -3801,7 +3801,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
   -- T-Assign
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hLhs hRhs hLhsPost hshape hwellTy hwrite hranked hcoh hcontained
+      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hcoh hcontained
       hnotWrite _ih htypingEq hsource store finalStore finalValue
       hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
     cases htypingEq
@@ -3815,7 +3815,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     rcases hterminalInner with
       ⟨hvalidInner, hsafeInner, hvalidValue⟩
     have htermTyping :=
-      TermTyping.assign hLhs hRhs hLhsPost hshape hwellTy hwrite
+      TermTyping.assign hRhs hLhsPost hshape hwellTy hwrite
         hranked hcoh hcontained hnotWrite
     have hwellOut :=
       (typingPreservesWellFormed_of_sourceTerm hsource

@@ -810,7 +810,6 @@ theorem pointerRetargetBranch_typing :
       pointerRetargetBranch .unit pointerIfRetargetEnv := by
   unfold pointerRetargetBranch
   exact TermTyping.assign
-    pointerIf_p_typing
     (TermTyping.mutBorrow pointerIf_y_typing pointerIf_y_mutable
       pointerIf_not_writeProhibited_y)
     pointerIf_p_typing
@@ -1085,7 +1084,6 @@ theorem pointerWriteBranch_typing :
       pointerWriteBranch .unit pointerIfWriteEnv := by
   unfold pointerWriteBranch
   exact TermTyping.assign
-    pointerIf_deref_p_typing
     (TermTyping.const ValueTyping.int)
     pointerIf_deref_p_typing
     ShapeCompatible.int

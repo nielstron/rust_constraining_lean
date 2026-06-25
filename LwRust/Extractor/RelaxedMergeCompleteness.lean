@@ -93,7 +93,6 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
   | assign {env1 env2 env3 : Env} {typing : StoreTyping}
       {lifetime targetLifetime : Lifetime} {lhs : LVal}
       {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
-      LValTyping env1 lhs oldTy targetLifetime →
       RelaxedTermTyping env1 typing lifetime rhs rhsTy env2 →
       LValTyping env2 lhs oldTy targetLifetime →
       ShapeCompatible env2 oldTy (.ty rhsTy) →
@@ -390,7 +389,7 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
           exact extractTermStmts_relaxedTyped hinit hinit'
   case ctermAssign_assignRhs hrhs =>
       cases htyped with
-      | assign _ hrhs' _ _ _ _ _ _ _ _ =>
+      | assign hrhs' _ _ _ _ _ _ _ _ =>
           simp only [extractTermStmts]
           exact extractTermStmts_relaxedTyped hrhs hrhs'
   case ctermBox_boxOperand hoperand =>

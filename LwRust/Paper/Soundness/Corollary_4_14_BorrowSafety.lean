@@ -1427,7 +1427,7 @@ def AssignmentWriteCoherenceObligations : Prop :=
     WellFormedEnv env₂ lifetime →
     LinearizedBy φ env₂ →
     EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
-    LValTyping env₁ lhs oldTy targetLifetime →
+    LValTyping env₂ lhs oldTy targetLifetime →
     targetLifetime ≤ lifetime →
     TermTyping env₁ typing lifetime rhs rhsTy env₂ →
     ShapeCompatible env₂ oldTy (.ty rhsTy) →
@@ -1442,7 +1442,7 @@ def AssignmentRhsEdgesRanked : Prop :=
     {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty},
     WellFormedEnv env₁ lifetime →
     WellFormedEnv env₂ lifetime →
-    LValTyping env₁ lhs oldTy targetLifetime →
+    LValTyping env₂ lhs oldTy targetLifetime →
     targetLifetime ≤ lifetime →
     TermTyping env₁ typing lifetime rhs rhsTy env₂ →
     ShapeCompatible env₂ oldTy (.ty rhsTy) →
@@ -1538,7 +1538,7 @@ structure BorrowSafetyPreservationObligations : Prop where
       {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
       BorrowSafeEnv env₂ →
       TyBorrowSafeAgainstEnv env₂ rhsTy →
-      LValTyping env₁ lhs oldTy targetLifetime →
+      LValTyping env₂ lhs oldTy targetLifetime →
       TermTyping env₁ typing lifetime rhs rhsTy env₂ →
       ShapeCompatible env₂ oldTy (.ty rhsTy) →
       WellFormedTy env₂ rhsTy targetLifetime →
@@ -1601,7 +1601,7 @@ theorem borrowSafetyPreservation_envWrite
     {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
     BorrowSafeEnv env₂ →
     TyBorrowSafeAgainstEnv env₂ rhsTy →
-    LValTyping env₁ lhs oldTy targetLifetime →
+    LValTyping env₂ lhs oldTy targetLifetime →
     TermTyping env₁ typing lifetime rhs rhsTy env₂ →
     ShapeCompatible env₂ oldTy (.ty rhsTy) →
     WellFormedTy env₂ rhsTy targetLifetime →
@@ -1610,7 +1610,7 @@ theorem borrowSafetyPreservation_envWrite
     EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
     ¬ WriteProhibited env₃ lhs →
     BorrowSafeEnv env₃ := by
-  intro hborrowSafe hsafeTy _hLhs _hRhs _hshape _hwellTy hwrite hranked _hcoh
+  intro hborrowSafe hsafeTy _hLhsPost _hRhs _hshape _hwellTy hwrite hranked _hcoh
     _hnotWrite x y mutable targetsMutable targetsOther targetMutable targetOther
     hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
   rcases hranked with ⟨_φ, _hlinBy, hbelow⟩
@@ -1853,12 +1853,12 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
     exact borrowSafeResult_of_borrowFree hdeclaredSafe tyBorrowFree_unit
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hLhs hRhs _hLhsPost hshape hwellTy hwrite hranked hcoh
+      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hcoh
       _hcontained hnotWrite _ih hsource hborrowSafe
     have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe
     have hwriteSafe :
         BorrowSafeEnv _env₃ :=
-      hobligations.envWrite hRhsSafe.1 hRhsSafe.2.1 hLhs hRhs hshape hwellTy
+      hobligations.envWrite hRhsSafe.1 hRhsSafe.2.1 hLhsPost hRhs hshape hwellTy
         hwrite hranked hcoh hnotWrite
     exact borrowSafeResult_of_borrowFree hwriteSafe tyBorrowFree_unit
   case eq =>
