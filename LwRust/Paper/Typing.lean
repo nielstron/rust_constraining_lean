@@ -983,7 +983,7 @@ mutual
     (safe abstraction `S ∼ Γ` demands two-way domain agreement), and
     eliminating it afterwards would need the fresh-slot thinning
     metatheorem, which the paper does not provide.  Following the
-    rule-carried-obligation convention (cf. `T-WhileJoin`), the rule
+    rule-carried-obligation convention (cf. `T-While`), the rule
     therefore *also* carries the eliminated form (fourth premise) — in the
     paper's system it is implied by the ghost form, and it is what the
     metatheory threads.  The ghost premise is a pure filter restoring the
@@ -1087,7 +1087,7 @@ mutual
         body.Diverges →
         TermTyping env₁ typing lifetime
           (.whileLoop bodyLifetime condition body) .unit env₂
-    /-- T-WhileJoin: NLL-style loop invariant.
+    /-- T-While: NLL-style loop invariant.
 
     The loop is checked against an invariant environment `envInv` solving the
     fixpoint equation `envInv = env₁ ⊔ envBack`: the condition is typed from
@@ -1114,7 +1114,7 @@ mutual
     conservative extractor's transport relies on them: a truncated loop
     re-rooted at the loop's position reuses the entry-side derivations
     verbatim. -/
-    | whileLoopJoin {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
+    | whileLoop {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
         {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
         {condition body : Term} {bodyTy bodyEntryTy : Ty} :
         LifetimeChild lifetime bodyLifetime →

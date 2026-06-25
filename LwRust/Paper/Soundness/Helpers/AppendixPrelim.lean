@@ -1445,7 +1445,7 @@ theorem EnvJoin.le_right {left right join : Env}
 branch slot is `sameShape` to the join slot (the `EnvJoinSameShape` rule
 premises), and shapes compose through the join.  This is the cross-branch
 fact needed by the same-shape strengthening maps of `T-IfJoin` and
-`T-WhileJoin`. -/
+`T-While`. -/
 theorem EnvJoin.branches_sameShape {left right join : Env}
     (hjoin : EnvJoin left right join)
     (hsameLeft : EnvJoinSameShape left join)

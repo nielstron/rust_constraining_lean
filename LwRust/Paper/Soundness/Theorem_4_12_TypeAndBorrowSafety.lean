@@ -205,7 +205,7 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         ProgressResult store' outerLifetime term')
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons
     htyping rfl hsource store store' term' hvalidRuntime hvalidStoreTyping
     hwellFormed hborrowSafe hsafe hfinite hmulti
   -- T-Const: values are terminal; runs from them are empty.
@@ -752,9 +752,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
               cases heq
         exact hmain _ _ _ _ hreaches rfl hsafe
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid) hfs
-  -- T-WhileJoin: reachable loop states progress; the package carries
+  -- T-While: reachable loop states progress; the package carries
   -- `∼ₛ envInv`, with entry/back-edge transports via the same-shape maps.
-  case whileLoopJoin =>
+  case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
       hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv _hwellTyBody

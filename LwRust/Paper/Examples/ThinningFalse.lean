@@ -8,7 +8,7 @@ Thinning would say: a typing derivation survives re-basing on a ⊑-stronger
 input environment (`EnvStrengthens envStrong envWeak`).  This is the
 "thinning metatheorem the paper does not provide" already noted for `T-Eq`
 in the README, and it is what an NLL-style join-invariant while rule
-(`T-WhileJoin`) would need in order to keep the conservative extractor's
+(`T-While`) would need in order to keep the conservative extractor's
 transport working: a join-typed loop types its condition from the *widened*
 invariant environment, while a truncated rebuild needs it from the
 un-widened entry environment.

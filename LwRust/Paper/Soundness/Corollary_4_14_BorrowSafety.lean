@@ -1734,7 +1734,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
           TyBorrowSafeAgainstEnv env₂ _ty)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons
     htyping hsource hborrowSafe
   case const =>
     intro _env _typing _lifetime _value _ty hvalueTyping hsource hborrowSafe
@@ -1893,7 +1893,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
     exact borrowSafeResult_of_borrowFree
       (ihCond (SourceTerm.while_condition hsource) hborrowSafe).1
       tyBorrowFree_unit
-  case whileLoopJoin =>
+  case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy _hchild
       _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hcondInv _hbodyInv _hwellTy

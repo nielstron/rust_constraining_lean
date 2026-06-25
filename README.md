@@ -82,21 +82,25 @@ stated; the deviation then documents the corrected claim).
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
 
-- **Join-invariant loops (`T-WhileJoin`) with rule-carried monotonicity.**
-  Beyond the strict rule below, `TermTyping.whileLoopJoin` checks a loop
-  against an invariant environment solving `Γ_inv = Γ_entry ⊔ Γ_back`
-  (NLL-style: loops may widen borrow target lists across iterations, e.g.
-  re-point an outer `&mut` inside the body), with the `T-If` obligation kit
-  for the join.  Its final two premises re-type the condition and body from
-  the *entry-side* environments.  In rustc this is implied — per-code borrow
-  checking is monotone under removing loans — but in this calculus it is
+- **While loops (`T-While`, `T-WhileDiv`), beyond the paper.**  The paper's
+  calculus is loop-free (its original termination argument depended on it).
+  `Term.whileLoop` adds `while cond { body }` with two in-flight runtime forms
+  (`whileCond`, `whileBody`) instead of syntactic unfolding — unfolding is
+  unsound here: the copied continuation would nest inside the iteration block,
+  so body locals would leak across iterations and the copied loop would sit at
+  lifetimes violating the lexical `LifetimeChild` discipline.  `T-While` checks
+  a loop against an invariant environment solving `Γ_inv = Γ_entry ⊔ Γ_back`.
+  The identity-invariant case covers strict loops, and the general join accepts
+  NLL-style loops that widen borrow target lists across iterations.  The rule
+  carries the `T-If` obligation kit for the join plus final entry-side typings
+  of the condition and body.  In rustc those entry-side typings are implied by
+  monotonicity under removing loans, but in this calculus that implication is
   unprovable (`Examples/ThinningFalse.lean`: borrow types carry pointee
   information in their target lists, so shrinking a target list can make a
-  dereference typeless), so the monotonicity fact is carried as premises,
-  following the rule-carried-obligation convention.  The conservative
-  extractor's transport re-roots truncated loops at the loop position using
-  exactly these entry-side derivations, which is what lets partial loop
-  conditions keep their statement extraction with no precision loss.
+  dereference typeless).  `T-WhileDiv` types a loop whose body is checked but
+  diverges (`…; panic!()`) with no back-edge obligation — what `ast_copier`
+  relies on when rebuilding a truncated loop body — and the extractor rebuilds
+  partial loop bodies this way (`while c { …stmts…; missing }`).
 
 - **`T-Eq` keeps the paper's ghost-slot check, rule-carried.**  The paper
   types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and
@@ -112,28 +116,10 @@ These deviations from the paper should be kept.
   thinning metatheorem is in the same family as the false environment
   weakening of `Examples/ThinningFalse.lean` (target-list borrow types make
   dereferences environment-sensitive).  Following the
-  rule-carried-obligation convention (cf. `T-WhileJoin`), the monotonicity
+  rule-carried-obligation convention (cf. `T-While`), the monotonicity
   fact is carried as a premise rather than proven; no precision is lost
   relative to the paper, and right operands conflicting with lhs-result
   borrows are rejected as the paper intends.
-
-- **While loops (`T-While`, `T-WhileDiv`), beyond the paper.**  The paper's
-  calculus is loop-free (its original termination argument depended on it).
-  `Term.whileLoop` adds `while cond { body }` with two in-flight runtime
-  forms (`whileCond`, `whileBody`) instead of syntactic unfolding — unfolding
-  is unsound here: the copied continuation would nest inside the iteration
-  block, so body locals would leak across iterations and the copied loop
-  would sit at lifetimes violating the lexical `LifetimeChild` discipline.
-  `T-While` uses a *strict* loop invariant: the body must restore the
-  loop-entry environment exactly (`Γ₃.dropLifetime = Γ₁`), so the back edge
-  re-enters the same derivation verbatim and terminal-run preservation is an
-  induction over the iteration structure (`WhileRunEnds`,
-  `WhileRunReaches`).  This under-approximates rustc's NLL fixpoint (loops
-  that widen borrow sets across iterations are rejected).  `T-WhileDiv`
-  types a loop whose body is checked but diverges (`…; panic!()`) with no
-  back-edge obligation — what `ast_copier` relies on when rebuilding a
-  truncated loop body — and the extractor rebuilds partial loop bodies this
-  way (`while c { …stmts…; missing }`).
 
 - **Divergence-aware conditionals (`T-IfDiv`), modelling real Rust.**  The
   paper's `T-If` always joins both branch environments; rustc instead lets a

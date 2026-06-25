@@ -1,8 +1,8 @@
 import LwRust.Paper.Examples.TypeSafetyPass
 
 /-!
-End-to-end accepted example for the NLL-style loop rule `T-WhileJoin`
-(`TermTyping.whileLoopJoin`).
+End-to-end accepted example for the NLL-style loop rule `T-While`
+(`TermTyping.whileLoop`).
 
 The program is the loop
 
@@ -14,7 +14,7 @@ started from `x : int`, `y : int`, `q : & [x]`.  The body re-points `q` from
 `x` to `y`, so the back-edge environment `q : & [y]` differs from the entry
 environment `q : & [x]`; `whileJoinBackEnv_ne_entry` below witnesses that the
 loop cannot be checked with an identity invariant.
-`T-WhileJoin` accepts it against the join invariant `q : & [x, y]`, the least
+`T-While` accepts it against the join invariant `q : & [x, y]`, the least
 upper bound of the entry and back-edge environments, exactly rustc's NLL
 fixpoint state for this loop.  The condition reads through `q`, which forces
 the condition derivation to type the dereference against the *widened* target
@@ -28,7 +28,7 @@ calculus has no NLL-style loan-kill on overwrite that would let the borrow
 checker disregard a loan about to die with the assignment.  `ReadProhibited`
 only counts mutable loans, so the immutable retarget `q = & y` is typeable
 from `q : & [x, y]`, which makes the immutable loop the canonical
-target-list-widening example for `T-WhileJoin`.
+target-list-widening example for `T-While`.
 
 A pleasant economy: the post-body environment is `q : & [y]` from *both* the
 invariant-side derivation (premise 10) and the entry-side derivation
@@ -858,7 +858,7 @@ theorem whileRetargetLoop_typing :
     TermTyping whileJoinEntryEnv StoreTyping.empty Lifetime.root
       whileRetargetLoop .unit whileJoinInvEnv := by
   unfold whileRetargetLoop
-  exact TermTyping.whileLoopJoin
+  exact TermTyping.whileLoop
     whileJoin_lifetimeChild
     whileJoin_envJoin
     whileJoinEntry_join_sameShape

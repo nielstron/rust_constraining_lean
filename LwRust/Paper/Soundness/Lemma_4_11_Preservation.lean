@@ -3459,7 +3459,7 @@ theorem safeAbstraction_seq_value_drop
     exact ⟨oldValue, hstoreSlot', hvalidOld'⟩
 
 /--
-Shared run induction for the two while rules (`T-WhileDiv`, `T-WhileJoin`): a
+Shared run induction for the two while rules (`T-WhileDiv`, `T-While`): a
 `WhileRunEnds` derivation that starts at the condition
 phase, in a store abstracted by the loop's invariant environment `envInv`,
 ends in a unit terminal state safe for the post-condition environment
@@ -3469,7 +3469,7 @@ The rule-specific content enters through the two induction hypotheses,
 which are the outer preservation IHs for the condition and body with their
 environment bookkeeping already fixed.  `ihBody`'s last component
 re-establishes the invariant once the body scope is dropped — via the back-edge
-same-shape strengthening map for `T-WhileJoin`, and vacuously for `T-WhileDiv`
+same-shape strengthening map for `T-While`, and vacuously for `T-WhileDiv`
 (whose body never terminates, so `ihBody` is refuted by divergence).
 -/
 theorem preservation_whileRunEnds
@@ -3621,7 +3621,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
           (env₂.dropLifetime blockLifetime) ty)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons
     htyping rfl hsource store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
     hborrowSafe hsafe hmulti).2
   -- T-Val: a value is already terminal.
@@ -4001,10 +4001,10 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         absurd hm (diverges_multistep_not_value hdiverges))
       _ _ _ hends rfl hsafe
       (validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime)
-  -- T-WhileJoin: like the strict case, but the shared run induction
+  -- T-While: like the strict case, but the shared run induction
   -- carries `∼ₛ envInv`; the entry and back-edge states transport into the
   -- invariant via the same-shape strengthening maps (the T-If pattern).
-  case whileLoopJoin =>
+  case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
       hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv _hwellTyBody

@@ -231,7 +231,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       typing = StoreTyping.empty → SourceTerm (.block lifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons
     htyping rfl
   case const =>
     intro _env _typing _lifetime value _ty hvalueTyping htypingEq
@@ -317,7 +317,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     rcases hmem with hconditionMem | hbodyMem
     · exact ihCondition htypingEq candidate hconditionMem
     · exact ihBody htypingEq candidate hbodyMem
-  case whileLoopJoin =>
+  case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
       _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse

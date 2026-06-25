@@ -1118,7 +1118,7 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv
         hwellTy hdrop _hcondEntry _hbodyEntry
         ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
-      TermTyping.whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
+      TermTyping.whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
         hwellTy hdrop
