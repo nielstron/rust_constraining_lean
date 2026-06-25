@@ -1110,11 +1110,6 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
         hdiverges)
-    (fun hchild _hcond _hbody hwellTy hdrop ihCond ihBody hsource =>
-      TermTyping.whileLoop hchild
-        (ihCond (SourceTerm.while_condition hsource))
-        (ihBody (SourceTerm.while_body hsource))
-        hwellTy hdrop)
     (fun hchild _hcond _hbody hdiverges ihCond ihBody hsource =>
       TermTyping.whileLoopDiverging hchild
         (ihCond (SourceTerm.while_condition hsource))
@@ -2813,12 +2808,6 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       ihTrue htypingEq conditionResult.1)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-          _bodyTy}
-        _hchild _hcond _hbody _hwellTy _hdrop ihCond _ihBody
-        htypingEq hwellFormed =>
-      let conditionResult := ihCond htypingEq hwellFormed
-      ⟨conditionResult.1, WellFormedTy.unit⟩)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
           _bodyTy}
         _hchild _hcond _hbody _hdiverges ihCond _ihBody

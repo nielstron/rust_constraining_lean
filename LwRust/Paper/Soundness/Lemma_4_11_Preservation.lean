@@ -3459,8 +3459,8 @@ theorem safeAbstraction_seq_value_drop
     exact ⟨oldValue, hstoreSlot', hvalidOld'⟩
 
 /--
-Shared run induction for the three while rules (`T-While`, `T-WhileDiv`,
-`T-WhileJoin`): a `WhileRunEnds` derivation that starts at the condition
+Shared run induction for the two while rules (`T-WhileDiv`, `T-WhileJoin`): a
+`WhileRunEnds` derivation that starts at the condition
 phase, in a store abstracted by the loop's invariant environment `envInv`,
 ends in a unit terminal state safe for the post-condition environment
 `env₂`.
@@ -3468,11 +3468,9 @@ ends in a unit terminal state safe for the post-condition environment
 The rule-specific content enters through the two induction hypotheses,
 which are the outer preservation IHs for the condition and body with their
 environment bookkeeping already fixed.  `ihBody`'s last component
-re-establishes the invariant once the body scope is dropped — trivially for
-`T-While` (`env₃.dropLifetime bodyLifetime = env₁` exactly), via the
-back-edge same-shape strengthening map for `T-WhileJoin`, and vacuously for
-`T-WhileDiv` (whose body never terminates, so `ihBody` is refuted by
-divergence).
+re-establishes the invariant once the body scope is dropped — via the back-edge
+same-shape strengthening map for `T-WhileJoin`, and vacuously for `T-WhileDiv`
+(whose body never terminates, so `ihBody` is refuted by divergence).
 -/
 theorem preservation_whileRunEnds
     {lifetime bodyLifetime : Lifetime} {condition body : Term}
@@ -3622,7 +3620,7 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         TerminalStateSafe finalStore finalValue
           (env₂.dropLifetime blockLifetime) ty)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging ?whileLoop
+    ?declare ?assign ?eq ?ite ?iteDiverging
     ?whileLoopDiverging ?whileLoopJoin ?singleton ?cons
     htyping rfl hsource store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
     hborrowSafe hsafe hmulti).2
@@ -3975,42 +3973,6 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
         hterminalCondition.2.1 htrueMulti
     · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
       exact absurd hfalseMulti (diverges_multistep_not_value hdiverges)
-  -- T-While (strict invariant): a terminating run decomposes into complete
-  -- iterations; each iteration restores `_env₁` exactly (`hdropEq`), so the
-  -- shared run induction carries only `∼ₛ _env₁`.
-  case whileLoop =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy hchild _hcondition _hbody _hwellTyBody hdropEq ihCondition
-      ihBody htypingEq hsource store finalStore finalValue hvalidRuntime
-      hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
-    cases htypingEq
-    have hsourceCondition : SourceTerm _condition :=
-      SourceTerm.while_condition hsource
-    have hsourceBody : SourceTerm _body :=
-      SourceTerm.while_body hsource
-    have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeResult_global hsourceCondition hborrowSafe
-        _hcondition).1
-    rcases multistep_first_step_of_not_terminal (by simp [Terminal])
-        hmulti with ⟨store', term', hstep, hrest⟩
-    cases hstep
-    obtain ⟨hvalue, hends⟩ :=
-      multistep_while_form_to_value_inv hrest (WhileForm.cond _)
-    subst hvalue
-    exact preservation_whileRunEnds hchild hsourceCondition hsourceBody
-      (fun s fs fv hvalid hsafe' hm =>
-        ihCondition rfl hsourceCondition s fs fv hvalid
-          (validStoreTyping_sourceTerm_of_validStoreTyping
-            hsourceCondition hvalidStoreTyping.while_condition)
-          hwellFormed hborrowSafe hsafe' hm)
-      (fun s fs fv hvalid hwf hsafe' hm => by
-        rcases ihBody rfl hsourceBody s fs fv hvalid
-            (validStoreTyping_sourceTerm_of_validStoreTyping hsourceBody
-              hvalidStoreTyping.while_body)
-            hwf hborrowSafeCondition hsafe' hm with ⟨hwell, hterm⟩
-        exact ⟨hwell, hterm, fun endStore h => hdropEq ▸ h⟩)
-      _ _ _ hends rfl hsafe
-      (validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime)
   -- T-WhileDiv: the diverging body never completes an iteration, so the
   -- run can only exit through a false condition; the body IH of the shared
   -- run induction is refuted by divergence.

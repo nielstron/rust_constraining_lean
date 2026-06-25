@@ -144,17 +144,6 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       falseBranch.Diverges →
       RelaxedTermTyping env1 typing lifetime
         (.ite condition trueBranch falseBranch) trueTy env3
-  /-- T-While. -/
-  | whileLoop {env1 env2 env3 : Env} {typing : StoreTyping}
-      {lifetime bodyLifetime : Lifetime} {condition body : Term}
-      {bodyTy : Ty} :
-      LifetimeChild lifetime bodyLifetime →
-      RelaxedTermTyping env1 typing lifetime condition .bool env2 →
-      RelaxedTermTyping env2 typing bodyLifetime body bodyTy env3 →
-      WellFormedTy env3 bodyTy lifetime →
-      env3.dropLifetime bodyLifetime = env1 →
-      RelaxedTermTyping env1 typing lifetime
-        (.whileLoop bodyLifetime condition body) .unit env2
   /-- T-WhileDiv. -/
   | whileLoopDiverging {env1 env2 env3 : Env} {typing : StoreTyping}
       {lifetime bodyLifetime : Lifetime} {condition body : Term}
@@ -506,8 +495,6 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
   case ctermWhile_whileCondition hcondition =>
       simp only [extractTermStmts]
       cases htyped with
-      | whileLoop hchild hcondition' hbody hwellTy hdropEq =>
-          exact extractTermStmts_relaxedTyped hcondition hcondition'
       | whileLoopDiverging hchild hcondition' hbody hdiverges =>
           exact extractTermStmts_relaxedTyped hcondition hcondition'
       | whileLoopJoin hchild hjoin hss1 hss2 hcbwf hcoh hlin hcondInv
@@ -523,8 +510,6 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
               RelaxedTermTyping envMid typing bodyLifetime bodyCompletion tyBody
                 envBody := by
         cases htyped with
-        | whileLoop hchild hcondition' hbody' _ _ =>
-            exact ⟨_, hchild, hcondition', _, _, hbody'⟩
         | whileLoopDiverging hchild hcondition' hbody' _ =>
             exact ⟨_, hchild, hcondition', _, _, hbody'⟩
         | whileLoopJoin hchild _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>

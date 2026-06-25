@@ -1073,28 +1073,6 @@ mutual
         falseBranch.Diverges →
         TermTyping env₁ typing lifetime
           (.ite condition trueBranch falseBranch) trueTy env₃
-    /-- T-While (beyond the paper, which is loop-free): strict-invariant
-    while loop.
-
-    The body is scoped under `bodyLifetime` like a block and must restore
-    the loop-entry environment exactly (`env₃.dropLifetime bodyLifetime =
-    env₁`): the back edge then re-enters the same derivation verbatim, so no
-    environment join or fixpoint is needed.  This deliberately
-    under-approximates rustc, whose NLL fixpoint can widen borrow sets
-    around the back edge (e.g. a body reassigning an outer `&mut` to a
-    different target); such loops are rejected here.  The loop exits when
-    the condition evaluates to `false`, so the result environment is the
-    post-condition environment and the result type is `unit`. -/
-    | whileLoop {env₁ env₂ env₃ : Env} {typing : StoreTyping}
-        {lifetime bodyLifetime : Lifetime} {condition body : Term}
-        {bodyTy : Ty} :
-        LifetimeChild lifetime bodyLifetime →
-        TermTyping env₁ typing lifetime condition .bool env₂ →
-        TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
-        WellFormedTy env₃ bodyTy lifetime →
-        env₃.dropLifetime bodyLifetime = env₁ →
-        TermTyping env₁ typing lifetime
-          (.whileLoop bodyLifetime condition body) .unit env₂
     /-- T-WhileDiv: while loop with a diverging body — the loop-body
     counterpart of `T-IfDiv`.  A body ending in `panic!()` never reaches the
     back edge, so no re-entry invariant is required; the body is still fully
@@ -1116,7 +1094,7 @@ mutual
     the invariant, and the back edge (post-body, after the body-scope drop)
     must be exactly the `envBack` that closes the join.  This accepts loops
     that widen borrow target lists across iterations (e.g. re-pointing an
-    outer `&mut` inside the body), which the strict rule `T-While` rejects.
+    outer `&mut` inside the body).
 
     Obligations follow the `T-If` convention: joins merge borrow target
     lists, so shape agreement and the well-formedness/borrow-safety kit for

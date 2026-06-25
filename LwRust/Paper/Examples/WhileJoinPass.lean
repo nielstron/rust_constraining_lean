@@ -12,8 +12,8 @@ while *q == 0 { q = & y }
 
 started from `x : int`, `y : int`, `q : & [x]`.  The body re-points `q` from
 `x` to `y`, so the back-edge environment `q : & [y]` differs from the entry
-environment `q : & [x]` and the strict rule `T-While` rejects the loop
-(`whileJoinBackEnv_ne_entry` below witnesses the failed strict invariant).
+environment `q : & [x]`; `whileJoinBackEnv_ne_entry` below witnesses that the
+loop cannot be checked with an identity invariant.
 `T-WhileJoin` accepts it against the join invariant `q : & [x, y]`, the least
 upper bound of the entry and back-edge environments, exactly rustc's NLL
 fixpoint state for this loop.  The condition reads through `q`, which forces
@@ -123,8 +123,7 @@ theorem whileJoinEnv_update_q (targets targets' : List LVal) :
   by_cases hq : name = "q" <;>
     simp [whileJoinEnv, Env.update, hq]
 
-/-- The strict rule `T-While` cannot type the loop: the back edge does not
-restore the entry environment. -/
+/-- The back edge does not restore the entry environment. -/
 theorem whileJoinBackEnv_ne_entry : whileJoinBackEnv ≠ whileJoinEntryEnv := by
   intro h
   have hq := congrArg (fun env => Env.slotAt env "q") h

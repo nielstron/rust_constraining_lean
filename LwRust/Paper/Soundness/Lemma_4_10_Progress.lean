@@ -904,7 +904,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
-    ?iteDiverging ?whileLoop ?whileLoopDiverging ?whileLoopJoin
+    ?iteDiverging ?whileLoopDiverging ?whileLoopJoin
     ?singleton ?cons htyping
   case const =>
     intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
@@ -996,11 +996,6 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
       | const hvalueTyping =>
           exact progress_ite_value hvalueTyping hvst.ite_condition
     · exact progress_subIte hstepCondition
-  case whileLoop =>
-    intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
-      _bodyTy _hchild _hcond _hbody _hwellTy _hdrop _ihCond _ihBody
-      _hvst _hwf _hsafe _hstore
-    exact Or.inr ⟨store, _, Step.whileStart⟩
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
       _bodyTy _hchild _hcond _hbody _hdiverges _ihCond _ihBody
