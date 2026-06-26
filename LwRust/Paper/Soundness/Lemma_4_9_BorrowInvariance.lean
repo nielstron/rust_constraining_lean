@@ -3103,6 +3103,108 @@ theorem lvalTyping_transport_of_sameShapeStrengthening {source result : Env}
     show PartialTy.sameShape (.ty tyS) (.ty tyJ)
     simpa [PartialTy.sameShape] using Ty.sameShape_trans hS1 hS2
 
+/-- Per-target borrow well-formedness transports across a same-shape
+strengthening whose result is coherent, linearizable, and has the base-outlives
+half of CBWF (`hdecomp`), with the result slot lifetime equal to the source. -/
+theorem borrowTargetWellFormed_transport {source result : Env} {T : LVal}
+    {sourceSlotLife resultSlotLife : Lifetime}
+    (hmap : EnvSameShapeStrengthening source result)
+    (hcoh : Coherent result) (hlin : Linearizable result)
+    (hdecomp : ∀ z zslot m W, result.slotAt z = some zslot →
+      PartialTyContains zslot.ty (.borrow m W) →
+      ∀ w, w ∈ W → ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
+        wbs.lifetime ≤ zslot.lifetime)
+    (hlifeEq : sourceSlotLife = resultSlotLife)
+    (hsrc : ∃ tTy tLf, LValTyping source T (.ty tTy) tLf ∧
+      tLf ≤ sourceSlotLife ∧ LValBaseOutlives source T sourceSlotLife) :
+    ∃ tTy' tLf', LValTyping result T (.ty tTy') tLf' ∧
+      tLf' ≤ resultSlotLife ∧ LValBaseOutlives result T resultSlotLife := by
+  obtain ⟨tTy, tLf, htyp, _htLe, hbase⟩ := hsrc
+  obtain ⟨pty', lf', htyp', _hstr', hshape'⟩ :=
+    lvalTyping_transport_of_sameShapeStrengthening hmap hcoh hlin htyp
+  obtain ⟨tTy', hpty'⟩ : ∃ tTy', pty' = .ty tTy' := by
+    cases pty' with
+    | ty t => exact ⟨t, rfl⟩
+    | box _ => simp [PartialTy.sameShape] at hshape'
+    | undef _ => simp [PartialTy.sameShape] at hshape'
+  subst hpty'
+  obtain ⟨bs, hbs, hbsLe⟩ := hbase
+  rcases hmap.2 (LVal.base T) bs hbs with ⟨bs', hbs', hbsLife⟩
+  have hbsLe' : bs'.lifetime ≤ resultSlotLife := by
+    rw [← hbsLife, ← hlifeEq]; exact hbsLe
+  have hbound := (lvalTyping_lifetime_le_baseSlot hdecomp htyp' bs' hbs').1
+  exact ⟨tTy', lf', htyp', LifetimeOutlives.trans hbound hbsLe', bs', hbs', hbsLe'⟩
+
+/-- The slot-local borrow invariant transports across a same-shape
+strengthening, by transporting each target. -/
+theorem borrowTargetsWellFormedInSlot_transport {source result : Env}
+    {targets : List LVal} {sourceSlotLife resultSlotLife : Lifetime}
+    (hmap : EnvSameShapeStrengthening source result)
+    (hcoh : Coherent result) (hlin : Linearizable result)
+    (hdecomp : ∀ z zslot m W, result.slotAt z = some zslot →
+      PartialTyContains zslot.ty (.borrow m W) →
+      ∀ w, w ∈ W → ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
+        wbs.lifetime ≤ zslot.lifetime)
+    (hlifeEq : sourceSlotLife = resultSlotLife)
+    (hsrc : BorrowTargetsWellFormedInSlot source sourceSlotLife targets) :
+    BorrowTargetsWellFormedInSlot result resultSlotLife targets := by
+  intro T hT
+  exact borrowTargetWellFormed_transport hmap hcoh hlin hdecomp hlifeEq (hsrc T hT)
+
+/-- **CBWF of an environment join**, derived from the branch invariants and the
+kept `T-If` premises (`EnvJoinSameShape`, `Coherent`, `Linearizable`). -/
+theorem containedBorrowsWellFormed_join {left right join : Env}
+    (hjoin : EnvJoin left right join)
+    (hssLeft : EnvJoinSameShape left join) (hssRight : EnvJoinSameShape right join)
+    (hcbwfL : ContainedBorrowsWellFormed left)
+    (hcbwfR : ContainedBorrowsWellFormed right)
+    (hcoh : Coherent join) (hlin : Linearizable join) :
+    ContainedBorrowsWellFormed join := by
+  have hbranch := EnvJoin.branches_sameShape hjoin hssLeft hssRight
+  have hmapL : EnvSameShapeStrengthening left join :=
+    EnvJoin.left_sameShapeStrengthening hjoin hbranch
+  have hmapR : EnvSameShapeStrengthening right join :=
+    EnvJoin.right_sameShapeStrengthening hjoin hbranch
+  have hdecomp : ∀ z zslot m W, join.slotAt z = some zslot →
+      PartialTyContains zslot.ty (.borrow m W) →
+      ∀ w, w ∈ W → ∃ wbs, join.slotAt (LVal.base w) = some wbs ∧
+        wbs.lifetime ≤ zslot.lifetime := by
+    intro z zslot m W hz hcontains w hw
+    rcases EnvJoin.contained_borrow_member hjoin hz hcontains hw with
+      ⟨lslot, lW, hlslot, hlc, hlw⟩ | ⟨rslot, rW, hrslot, hrc, hrw⟩
+    · obtain ⟨_, _, _, _, hbase⟩ :=
+        (hcbwfL z lslot m lW hlslot ⟨lslot, hlslot, hlc⟩) w hlw
+      obtain ⟨bs, hbs, hbsLe⟩ := hbase
+      rcases hmapL.2 (LVal.base w) bs hbs with ⟨bs', hbs', hbsLife⟩
+      rcases hmapL.1 z zslot hz with ⟨ls0, hls0, hls0life, _, _⟩
+      have hlsEq : ls0 = lslot := Option.some.inj (hls0.symm.trans hlslot)
+      subst hlsEq
+      refine ⟨bs', hbs', ?_⟩
+      rw [← hbsLife, ← hls0life]; exact hbsLe
+    · obtain ⟨_, _, _, _, hbase⟩ :=
+        (hcbwfR z rslot m rW hrslot ⟨rslot, hrslot, hrc⟩) w hrw
+      obtain ⟨bs, hbs, hbsLe⟩ := hbase
+      rcases hmapR.2 (LVal.base w) bs hbs with ⟨bs', hbs', hbsLife⟩
+      rcases hmapR.1 z zslot hz with ⟨rs0, hrs0, hrs0life, _, _⟩
+      have hrsEq : rs0 = rslot := Option.some.inj (hrs0.symm.trans hrslot)
+      subst hrsEq
+      refine ⟨bs', hbs', ?_⟩
+      rw [← hbsLife, ← hrs0life]; exact hbsLe
+  refine EnvJoin.preserves_containedBorrowsWellFormed_of_target_transport
+    hjoin hcbwfL hcbwfR ?_ ?_
+  · intro x joinSlot leftSlot mutable targets hjs hls _hcontains hbtw
+    have hlifeEq : leftSlot.lifetime = joinSlot.lifetime := by
+      rcases hmapL.1 x joinSlot hjs with ⟨ls, hls', hlife, _, _⟩
+      have : ls = leftSlot := Option.some.inj (hls'.symm.trans hls)
+      subst this; exact hlife
+    exact borrowTargetsWellFormedInSlot_transport hmapL hcoh hlin hdecomp hlifeEq hbtw
+  · intro x joinSlot rightSlot mutable targets hjs hrs _hcontains hbtw
+    have hlifeEq : rightSlot.lifetime = joinSlot.lifetime := by
+      rcases hmapR.1 x joinSlot hjs with ⟨rs, hrs', hlife, _, _⟩
+      have : rs = rightSlot := Option.some.inj (hrs'.symm.trans hrs)
+      subst this; exact hlife
+    exact borrowTargetsWellFormedInSlot_transport hmapR hcoh hlin hdecomp hlifeEq hbtw
+
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
