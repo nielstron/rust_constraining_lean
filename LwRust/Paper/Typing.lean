@@ -606,6 +606,39 @@ def PartialTyBorrowsWellFormedInSlot
     PartialTyContains partialTy (.borrow mutable targets) →
     BorrowTargetsWellFormedInSlot env slotLifetime targets
 
+/--
+Minimal lifetime obligation for assignment writes.
+
+This is the strictly-weaker replacement for carrying the broad
+`ContainedBorrowsWellFormed` of the write result on `T-Assign`: only the borrow
+edges *installed from the RHS type* must be well formed against the slot they are
+injected into.  Each RHS-origin borrow target appearing in a result slot must
+outlive *that slot* (its pointee typeable with a lifetime `≤` the slot lifetime,
+plus the base-slot survival of Definition 4.8(i)).
+
+This is exactly what the broad result CBWF demands of the RHS-origin borrows; the
+old-origin borrows are *derived* from `ContainedBorrowsWellFormed` of the
+pre-write environment via the borrow-invariance keystone.  It is genuinely needed
+(and not derivable from `WellFormedTy env₂ rhsTy targetLifetime`): a write through
+a multi-target borrow `&mut[x,z]` whose targets have different lifetimes fans the
+RHS into both slots, but `targetLifetime` is only the *intersection* of the
+targets' lifetimes, so it cannot bound the RHS by the longer-lived slot's
+lifetime — see the deviation note in the README and the `example` below the rule.
+This mirrors `EnvWriteRhsBorrowTargetsBelow`'s first conjunct, with a lifetime
+conclusion in place of the rank one. -/
+def EnvWriteRhsTargetsWellFormed (result : Env) (rhsTy : Ty) : Prop :=
+  ∀ x slot mutable targets target,
+    result.slotAt x = some slot →
+    PartialTyContains slot.ty (.borrow mutable targets) →
+    target ∈ targets →
+    (∃ rhsMutable rhsTargets,
+      PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
+        target ∈ rhsTargets) →
+    ∃ targetTy targetLifetime,
+      LValTyping result target (.ty targetTy) targetLifetime ∧
+        targetLifetime ≤ slot.lifetime ∧
+        LValBaseOutlives result target slot.lifetime
+
 /-- Every borrow contained in every environment slot has well-formed targets. -/
 def ContainedBorrowsWellFormed (env : Env) : Prop :=
   ∀ x slot mutable targets,

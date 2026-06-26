@@ -3449,6 +3449,104 @@ theorem UpdateAtPath.throughBorrow_dichotomy {rank : Nat} {env env' : Env}
   case cons => intro _ _ _ _ _ _ _ _ _ _ _ _ _ _; trivial
   case intro => intro _ _ _ _ _ _ _ _ _ _; trivial
 
+/-- An assignment write (rank 0) is either a whole-environment same-shape
+strengthening (it crossed a borrow → positive-rank fan-out, leaving the base
+slot's type unchanged) or a single-slot strong/weak update of the base slot. -/
+theorem EnvWrite.sameShapeStrengthening_or_singleSlot {env result : Env}
+    {lhs : LVal} {rhsTy : Ty} (hwrite : EnvWrite 0 env lhs rhsTy result) :
+    EnvSameShapeStrengthening env result ∨
+      (∃ slot updatedTy, env.slotAt (LVal.base lhs) = some slot ∧
+        result = env.update (LVal.base lhs) { slot with ty := updatedTy }) := by
+  cases hwrite with
+  | intro hslot hupdate =>
+    rename_i intermediate slot updatedTy
+    rcases UpdateAtPath.throughBorrow_dichotomy hupdate with ⟨hess0, hupdEq⟩ | hinterEq
+    · refine Or.inl (EnvSameShapeStrengthening.update_result_strengthening hess0 hslot rfl ?_ ?_)
+      · rw [hupdEq]
+      · rw [hupdEq]
+    · exact Or.inr ⟨slot, updatedTy, hslot, by rw [hinterEq]⟩
+
+/-- **CBWF of an assignment write result**, derived from `ContainedBorrowsWellFormed`
+of the pre-write environment, the kept `T-Assign` premises (`Coherent`,
+`Linearizable` of the result, `¬WriteProhibited`), and the *minimal* RHS-target
+obligation `EnvWriteRhsTargetsWellFormed`.  The old-origin borrows transport via
+the borrow-invariance keystone; the RHS-origin borrows are supplied by the
+minimal obligation. -/
+theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
+    {lhs : LVal} {rhsTy : Ty}
+    (hcbwf₂ : ContainedBorrowsWellFormed env₂)
+    (hcoh₃ : Coherent env₃) (hlin₃ : Linearizable env₃)
+    (hrhsWF : EnvWriteRhsTargetsWellFormed env₃ rhsTy)
+    (hwrite : EnvWrite 0 env₂ lhs rhsTy env₃)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs) :
+    ContainedBorrowsWellFormed env₃ := by
+  have hlifePres := EnvWrite.lifetimesPreserved hwrite
+  rcases EnvWrite.sameShapeStrengthening_or_singleSlot hwrite with hess | ⟨wslot, updatedTy, hwslot, henv₃⟩
+  · -- fan-out: env₃ is a same-shape strengthening of env₂
+    have hdecomp : ∀ z zslot m W, env₃.slotAt z = some zslot →
+        PartialTyContains zslot.ty (.borrow m W) →
+        ∀ w, w ∈ W → ∃ wbs, env₃.slotAt (LVal.base w) = some wbs ∧
+          wbs.lifetime ≤ zslot.lifetime := by
+      intro z zslot m W hz hcontains w hw
+      rcases EnvWrite.borrowTargetOrigin_all hwrite z zslot m W hz hcontains w hw with
+        ⟨srcSlot, srcT, hsrcSlot, hcontainsSrc, hwSrc⟩ | ⟨rhsT, hcontainsRhs, hwRhs⟩
+      · obtain ⟨_, _, _, _, bs, hbs, hble⟩ :=
+          (hcbwf₂ z srcSlot m srcT hsrcSlot ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) w hwSrc
+        rcases hess.2 (LVal.base w) bs hbs with ⟨bs', hbs', hbsLife⟩
+        rcases hess.1 z zslot hz with ⟨z₂, hz₂, hz₂Life, _, _⟩
+        have hz₂Eq : z₂ = srcSlot := Option.some.inj (hz₂.symm.trans hsrcSlot)
+        subst hz₂Eq
+        exact ⟨bs', hbs', by rw [← hbsLife, ← hz₂Life]; exact hble⟩
+      · obtain ⟨_, _, _, _, bs, hbs, hble⟩ :=
+          hrhsWF z zslot m W w hz hcontains hw ⟨m, rhsT, hcontainsRhs, hwRhs⟩
+        exact ⟨bs, hbs, hble⟩
+    intro x rslot m T hrslot hcontainsX
+    obtain ⟨s, hs, hcTy⟩ := hcontainsX
+    have hsEq : rslot = s := Option.some.inj (hrslot.symm.trans hs)
+    subst hsEq
+    intro t ht
+    rcases EnvWrite.borrowTargetOrigin_all hwrite x rslot m T hrslot hcTy t ht with
+      ⟨srcSlot, srcT, hsrcSlot, hcontainsSrc, htSrc⟩ | ⟨rhsT, hcontainsRhs, htRhs⟩
+    · have hlife : srcSlot.lifetime = rslot.lifetime := by
+        rcases hlifePres x rslot hrslot with ⟨s₂, hs₂, hs₂Life⟩
+        have : s₂ = srcSlot := Option.some.inj (hs₂.symm.trans hsrcSlot)
+        subst this; exact hs₂Life
+      exact borrowTargetWellFormed_transport hess hcoh₃ hlin₃ hdecomp hlife
+        ((hcbwf₂ x srcSlot m srcT hsrcSlot ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) t htSrc)
+    · exact hrhsWF x rslot m T t hrslot hcTy ht ⟨m, rhsT, hcontainsRhs, htRhs⟩
+  · -- single-slot update: env₃ = env₂.update (base lhs) {wslot with ty := updatedTy}
+    have hnotWriteVar : ¬ WriteProhibited env₃ (.var (LVal.base lhs)) :=
+      not_writeProhibited_var_base hnotWrite
+    intro x rslot m T hrslot hcontainsX
+    obtain ⟨s, hs, hcTy⟩ := hcontainsX
+    have hsEq : rslot = s := Option.some.inj (hrslot.symm.trans hs)
+    subst hsEq
+    intro t ht
+    have hnoconf : ¬ t ⋈ (.var (LVal.base lhs)) := by
+      have := not_pathConflicts_of_not_writeProhibited_contains hnotWrite
+        ⟨rslot, hrslot, hcTy⟩ ht
+      simpa [PathConflicts, LVal.base] using this
+    rcases EnvWrite.borrowTargetOrigin_all hwrite x rslot m T hrslot hcTy t ht with
+      ⟨srcSlot, srcT, hsrcSlot, hcontainsSrc, htSrc⟩ | ⟨rhsT, hcontainsRhs, htRhs⟩
+    · have hlife : srcSlot.lifetime = rslot.lifetime := by
+        rcases hlifePres x rslot hrslot with ⟨s₂, hs₂, hs₂Life⟩
+        have : s₂ = srcSlot := Option.some.inj (hs₂.symm.trans hsrcSlot)
+        subst this; exact hs₂Life
+      obtain ⟨tTy, tLf, htyp, hle, hbase⟩ :=
+        (hcbwf₂ x srcSlot m srcT hsrcSlot ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) t htSrc
+      refine ⟨tTy, tLf, ?_, by rw [← hlife]; exact hle, ?_⟩
+      · rw [henv₃]
+        exact (LValTyping.update_of_not_pathConflicts
+          (slot := { wslot with ty := updatedTy }) (by rw [← henv₃]; exact hnotWriteVar)).1
+          htyp hnoconf
+      · obtain ⟨bs, hbs, hble⟩ := hbase
+        have hbaseNe : LVal.base t ≠ LVal.base lhs := by
+          intro hbaseEq
+          exact hnoconf (by simpa [PathConflicts, LVal.base] using hbaseEq)
+        refine ⟨bs, ?_, by rw [← hlife]; exact hble⟩
+        rw [henv₃]; simpa [Env.update, hbaseNe] using hbs
+    · exact hrhsWF x rslot m T t hrslot hcTy ht ⟨m, rhsT, hcontainsRhs, htRhs⟩
+
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
