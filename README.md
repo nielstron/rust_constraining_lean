@@ -17,7 +17,9 @@ stated; the deviation then documents the corrected claim).
   no admissibility theorem bridges the gap.**  `T-Assign` carries extra
   obligations (the lhs re-typeable after the rhs, a linearization/rank witness
   `∃ φ, LinearizedBy φ ∧ EnvWriteRhsBorrowTargetsBelow`,
-  `EnvWriteCoherenceObligations`, `ContainedBorrowsWellFormed` for the result,
+  `EnvWriteCoherenceObligations`, and the minimal `EnvWriteRhsTargetsWellFormed`
+  for the result (the broad result `ContainedBorrowsWellFormed` is now derived;
+  see the coherence-obligations deviation below),
   plus per-branch typing witnesses and weak-update shape premises inside
   `EnvWrite` itself); `T-Declare` carries `FreshUpdateCoherenceObligations`
   and a second freshness check on the post-initialiser environment; `T-Block`
@@ -59,9 +61,23 @@ stated; the deviation then documents the corrected claim).
     (`lvalTyping_eqv_of_linearizedBy`, by strong induction on the
     linearization rank), an lvalue-typing transport across same-shape
     strengthenings (`lvalTyping_transport_of_sameShapeStrengthening`), and a
-    base-slot lifetime bound (`lvalTyping_lifetime_le_baseSlot`).  `T-Assign`
-    still carries `ContainedBorrowsWellFormed` for its write result, and
-    `T-While` keeps it as an irreducible loop fixpoint (deriving it for
+    base-slot lifetime bound (`lvalTyping_lifetime_le_baseSlot`).
+
+    `T-Assign`'s result CBWF is now **also derived** (by
+    `containedBorrowsWellFormed_assign`), but it is *not* derivable from the old
+    premises alone: a write through a multi-target mutable borrow `&mut[x,z]`
+    whose targets have different lifetimes fans the RHS into both slots, while
+    `targetLifetime` is only the *intersection* of the targets' lifetimes, so it
+    cannot bound the RHS by the longer-lived slot — the broad result CBWF was
+    genuinely load-bearing there.  `T-Assign` therefore now carries the strictly
+    *minimal* obligation `EnvWriteRhsTargetsWellFormed env₃ rhsTy` (only the
+    RHS-origin borrow edges must outlive the slot they are injected into; the
+    old-origin borrows are derived via the keystone).  That minimal obligation is
+    much weaker than the broad result CBWF (e.g. it follows from it via
+    `EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed`) and is shown to
+    reject the multi-target counterexample
+    (`Examples/TypeSafetyReject.lean`).  Only `T-While` still carries the full
+    `ContainedBorrowsWellFormed`, as an irreducible loop fixpoint (deriving it for
     `envInv = env₁ ⊔ envBack` is circular: it needs the back edge, which needs
     the body result, which needs `envInv`).
   - *`EnvWrite` internals* (fan-out initialized-typing witnesses, weak-update
@@ -186,8 +202,11 @@ These deviations from the paper should be kept.
 - **Assignment is strengthened.**  `T-Assign` rechecks that the lhs is typeable
   after typing the rhs, requires shape compatibility and rhs well-formedness at
   the target lifetime, and carries explicit rank/coherence obligations:
-  `EnvWriteRhsBorrowTargetsBelow`, `EnvWriteCoherenceObligations`, and
-  `ContainedBorrowsWellFormed` for the result.  These avoid borrow cycles and
+  `EnvWriteRhsBorrowTargetsBelow`, `EnvWriteCoherenceObligations`, and the
+  minimal `EnvWriteRhsTargetsWellFormed` for the result (the RHS-origin borrow
+  edges must outlive the slot they are injected into — strictly weaker than the
+  broad result `ContainedBorrowsWellFormed`, which is *derived* from it via
+  `containedBorrowsWellFormed_assign`).  These avoid borrow cycles and
   supply the facts needed by preservation.  The result-side obligations are
   rule-carried invariants, not extra premises on the final safety statements.
 

@@ -100,7 +100,7 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       EnvWrite 0 env2 lhs rhsTy env3 →
       (∃ phi, LinearizedBy phi env2 ∧ EnvWriteRhsBorrowTargetsBelow phi env3 rhsTy) →
       EnvWriteCoherenceObligations env2 env3 (LVal.base lhs) →
-      ContainedBorrowsWellFormed env3 →
+      EnvWriteRhsTargetsWellFormed env3 rhsTy →
       ¬ WriteProhibited env3 lhs →
       RelaxedTermTyping env1 typing lifetime (.assign lhs rhs) .unit env3
   /-- T-Eq. -/
@@ -133,7 +133,6 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       EnvJoinSameShape env3 env5 →
       EnvJoinSameShape env4 env5 →
       WellFormedTy env5 joinTy lifetime →
-      ContainedBorrowsWellFormed env5 →
       Coherent env5 →
       Linearizable env5 →
       RelaxedTermTyping env1 typing lifetime (.ite condition trueBranch falseBranch)

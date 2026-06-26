@@ -825,7 +825,7 @@ theorem pointerRetargetBranch_typing :
     pointerIf_retarget_write
     pointerIf_retarget_ranked
     pointerIfRetarget_coherent
-    pointerIfRetarget_contained
+    (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed pointerIfRetarget_contained)
     pointerIfRetarget_not_writeProhibited_p
 
 theorem pointerIf_write_x :
@@ -1098,7 +1098,8 @@ theorem pointerWriteBranch_typing :
     pointerIf_write_deref_p
     pointerIf_write_ranked
     pointerIf_write_coherent
-    (by simpa [pointerIfWriteEnv_eq] using pointerIfEnv_contained)
+    (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
+      (by simpa [pointerIfWriteEnv_eq] using pointerIfEnv_contained))
     pointerIf_not_writeProhibited_deref_p
 
 /-- Two borrow types strengthening into the same partial type can be merged:

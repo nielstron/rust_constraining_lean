@@ -1214,6 +1214,26 @@ theorem ContainedBorrowsWellFormed.erase_ghost {env : Env} {ghost : Name} :
       ⟨slot, hslotOrig, hcontainsTy⟩)
     hfresh htargetsNot
 
+theorem EnvWriteRhsTargetsWellFormed.erase_ghost {result : Env} {rhsTy : Ty}
+    {ghost : Name} :
+    EnvWriteRhsTargetsWellFormed result rhsTy →
+    Env.TypeNameFresh (result.erase ghost) ghost →
+    EnvWriteRhsTargetsWellFormed (result.erase ghost) rhsTy := by
+  intro hrhs hfresh x slot mutable targets target hslot hcontains htarget hrhsOrigin
+  have hslotOrig : result.slotAt x = some slot := by
+    by_cases hx : x = ghost
+    · subst hx; simp [Env.erase] at hslot
+    · simpa [Env.erase, hx] using hslot
+  have hslotFresh : ghost ∉ PartialTy.allVars slot.ty := hfresh x slot hslot
+  have hnotTarget : ¬ LVal.Mentions ghost target :=
+    not_mentions_of_partialTy_contains_allVars hslotFresh hcontains target htarget
+  rcases hrhs x slot mutable targets target hslotOrig hcontains htarget hrhsOrigin with
+    ⟨tTy, tLf, htyp, hle, hbase⟩
+  exact ⟨tTy, tLf,
+    LValTyping.erase_ghost.1 htyp hfresh hnotTarget,
+    hle,
+    LValBaseOutlives.erase_ghost hnotTarget hbase⟩
+
 theorem Coherent.erase_ghost {env : Env} {ghost : Name} :
     Coherent env →
     Env.TypeNameFresh (env.erase ghost) ghost →
@@ -2241,7 +2261,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
           EnvWriteRhsBorrowTargetsBelow.erase_ghost hrhsBelow⟩
         (EnvWriteCoherenceObligations.erase_ghost hcoh hfreshRhs
           hfreshWrite hbaseNe)
-        (ContainedBorrowsWellFormed.erase_ghost hcontained hfreshWrite)
+        (EnvWriteRhsTargetsWellFormed.erase_ghost hcontained hfreshWrite)
         (by
           intro hwriteProhibited
           exact hnotWrite (WriteProhibited.erase_to_env hwriteProhibited)),
