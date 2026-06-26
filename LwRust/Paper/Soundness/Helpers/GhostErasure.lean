@@ -1454,53 +1454,6 @@ theorem FreshUpdateCoherenceObligations.erase_ghost {env : Env}
         htargetsNot
     simpa [hupdateErase] using htargetsErased
 
-theorem EnvWriteCoherenceObligations.erase_ghost {env result : Env}
-    {writeBase ghost : Name} :
-    EnvWriteCoherenceObligations env result writeBase →
-    Env.TypeNameFresh (env.erase ghost) ghost →
-    Env.TypeNameFresh (result.erase ghost) ghost →
-    writeBase ≠ ghost →
-    EnvWriteCoherenceObligations (env.erase ghost) (result.erase ghost)
-      writeBase := by
-  intro hoblig hfreshEnv hfreshResult hbaseGhost
-  constructor
-  · intro lv mutable targets borrowLifetime hbaseNe htyping
-    have htypingResult : LValTyping result lv (.ty (.borrow mutable targets))
-        borrowLifetime :=
-      LValTyping.erase_to_env.1 htyping
-    rcases hoblig.old_root_transport hbaseNe htypingResult with
-      ⟨⟨oldBorrowLifetime, holdTyping⟩, htransport⟩
-    have hnot : ¬ LVal.Mentions ghost lv :=
-      LValTyping.not_mentions_of_fresh (Env.fresh_erase result ghost) htyping
-    constructor
-    · exact ⟨oldBorrowLifetime,
-        LValTyping.erase_ghost.1 holdTyping hfreshEnv hnot⟩
-    · intro targetTy targetLifetime htargets
-      have htargetsEnv : LValTargetsTyping env targets (.ty targetTy)
-          targetLifetime :=
-        LValTyping.erase_to_env.2 htargets
-      rcases htransport targetTy targetLifetime htargetsEnv with
-        ⟨resultTargetTy, resultTargetLifetime, htargetsResult⟩
-      have htargetsNot :
-          ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
-        LValTargetsTyping.not_mentions_of_fresh
-          (Env.fresh_erase env ghost) htargets
-      exact ⟨resultTargetTy, resultTargetLifetime,
-        LValTyping.erase_ghost.2 htargetsResult hfreshResult htargetsNot⟩
-  · intro lv mutable targets borrowLifetime hbaseEq htyping
-    have htypingResult : LValTyping result lv (.ty (.borrow mutable targets))
-        borrowLifetime :=
-      LValTyping.erase_to_env.1 htyping
-    rcases hoblig.written_root_coherent hbaseEq htypingResult with
-      ⟨targetTy, targetLifetime, htargets⟩
-    have hborrowFresh :
-        ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets)) :=
-      LValTyping.typeNameFresh.1 htyping hfreshResult
-    have htargetsNot :
-        ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
-      not_mentions_of_mem_borrow_allVars hborrowFresh
-    exact ⟨targetTy, targetLifetime,
-      LValTyping.erase_ghost.2 htargets hfreshResult htargetsNot⟩
 
 theorem EnvWriteRhsBorrowTargetsBelow.erase_ghost {φ : Name → Nat}
     {result : Env} {rhsTy : Ty} {ghost : Name} :

@@ -874,35 +874,6 @@ def EnvWriteRhsBorrowTargetsBelow (φ : Name → Nat) (result : Env) (rhsTy : Ty
           targetOther ∈ rhsTargets) →
       x = y)
 
-/--
-Coherence obligations for assignment writes.
-
-For old roots, borrow typings in the result must transport back to the pre-write
-environment, and coherent target lists from that environment must transport
-forward.  For the written root, the updated path must directly provide the
-joint target-list typing required by coherence.
--/
-structure EnvWriteCoherenceObligations
-    (env result : Env) (writeBase : Name) : Prop where
-  old_root_transport
-    {lv : LVal} {mutable : Bool} {targets : List LVal}
-    {borrowLifetime : Lifetime} :
-    LVal.base lv ≠ writeBase →
-    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
-    (∃ oldBorrowLifetime,
-      LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime) ∧
-      (∀ targetTy targetLifetime,
-        LValTargetsTyping env targets (.ty targetTy) targetLifetime →
-        ∃ resultTargetTy resultTargetLifetime,
-          LValTargetsTyping result targets (.ty resultTargetTy) resultTargetLifetime)
-  written_root_coherent
-    {lv : LVal} {mutable : Bool} {targets : List LVal}
-    {borrowLifetime : Lifetime} :
-    LVal.base lv = writeBase →
-    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
-    ∃ targetTy targetLifetime,
-      LValTargetsTyping result targets (.ty targetTy) targetLifetime
-
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
   ∃ x targets target,

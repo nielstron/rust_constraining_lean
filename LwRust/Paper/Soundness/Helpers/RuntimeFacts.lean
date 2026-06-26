@@ -62,21 +62,6 @@ theorem EnvJoin.preserves_coherent_of_obligations {left right join : Env} :
       ⟨targetTy, targetLifetime, htargetsRight⟩
     exact htargetsTransport targetTy targetLifetime htargetsRight
 
-theorem EnvWrite.preserves_coherent_of_obligations {env result : Env}
-    {writeBase : Name} :
-    Coherent env →
-    EnvWriteCoherenceObligations env result writeBase →
-    Coherent result := by
-  intro hcoh hobligations lv mutable targets borrowLifetime htyping
-  by_cases hbase : LVal.base lv = writeBase
-  · exact hobligations.written_root_coherent hbase htyping
-  · rcases hobligations.old_root_transport hbase htyping with
-      ⟨⟨oldBorrowLifetime, htypingOld⟩, htargetsTransport⟩
-    exact hcoh lv mutable targets oldBorrowLifetime htypingOld
-      |>.elim (fun targetTy htarget =>
-        htarget.elim (fun targetLifetime htargetsOld =>
-          htargetsTransport targetTy targetLifetime htargetsOld))
-
 /-- Under a *shape-preserving* strengthening the occurring variables only grow:
 `a ⊑ b` and `a ≈shape b` give `vars a ⊆ vars b`.  (`sameShape` rules out the
 `undef`-introducing strengthening cases, which would erase variables.) -/
