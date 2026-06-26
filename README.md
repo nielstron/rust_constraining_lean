@@ -49,6 +49,21 @@ stated; the deviation then documents the corrected claim).
     source programs from the empty environment.  For *arbitrary* well-formed
     starting environments these are likely genuinely necessary, since such
     environments admit pathologies the core never creates.
+
+    *Update (now mechanised for `T-If`):* `ContainedBorrowsWellFormed` of the
+    `T-If` join is no longer a carried premise — it is **derived** by
+    `containedBorrowsWellFormed_join` from the kept join premises
+    (`EnvJoinSameShape`, `Coherent`, `Linearizable`) and the branch
+    invariants.  This rests on a now-proven, unconditional keystone:
+    single-lval typing determinism up to `eqv`
+    (`lvalTyping_eqv_of_linearizedBy`, by strong induction on the
+    linearization rank), an lvalue-typing transport across same-shape
+    strengthenings (`lvalTyping_transport_of_sameShapeStrengthening`), and a
+    base-slot lifetime bound (`lvalTyping_lifetime_le_baseSlot`).  `T-Assign`
+    still carries `ContainedBorrowsWellFormed` for its write result, and
+    `T-While` keeps it as an irreducible loop fixpoint (deriving it for
+    `envInv = env₁ ⊔ envBack` is circular: it needs the back edge, which needs
+    the body result, which needs `envInv`).
   - *`EnvWrite` internals* (fan-out initialized-typing witnesses, weak-update
     `ShapeCompatible`) — **formalised paper prose**: the paper asserts
     "borrowed locations cannot have partial types"; for pipeline

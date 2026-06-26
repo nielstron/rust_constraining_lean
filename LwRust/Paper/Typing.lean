@@ -1128,7 +1128,6 @@ mutual
         EnvJoinSameShape env₃ env₅ →
         EnvJoinSameShape env₄ env₅ →
         WellFormedTy env₅ joinTy lifetime →
-        ContainedBorrowsWellFormed env₅ →
         Coherent env₅ →
         Linearizable env₅ →
         BorrowSafeEnv env₅ →

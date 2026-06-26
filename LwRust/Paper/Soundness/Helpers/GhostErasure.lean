@@ -2349,8 +2349,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ env₃ env₄ env₅ typing lifetime condition trueBranch
         falseBranch trueTy falseTy joinTy hcondition htrue hfalse htyJoin
-        henvJoin hsameLeft hsameRight hwellJoin hcontained hcoherent
-        hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse
+        henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear
+        hborrowSafe hresultSafe ihCondition ihTrue ihFalse
         hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
@@ -2376,7 +2376,6 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         (EnvJoinSameShape.erase_ghost hsameLeft)
         (EnvJoinSameShape.erase_ghost hsameRight)
         (WellFormedTy.erase_ghost hwellJoin hfreshJoin hjoinTyFresh)
-        (ContainedBorrowsWellFormed.erase_ghost hcontained hfreshJoin)
         (Coherent.erase_ghost hcoherent hfreshJoin)
         (Linearizable.erase_ghost hlinear)
         (BorrowSafeEnv.erase hborrowSafe)

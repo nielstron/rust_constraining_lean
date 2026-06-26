@@ -3907,7 +3907,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin hcontained
+      _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin
       hcoherent hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
       ihFalse hsize htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
@@ -3944,6 +3944,14 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           hstoreTypingTrue hwellCondition hborrowSafeCondition
           hterminalCondition.2.1 htrueMulti with
         ⟨hwellTrue, hterminalTrue⟩
+      have hvalidFalse4 : ValidRuntimeState midStore _falseBranch :=
+        validRuntimeState_of_sourceTerm (SourceTerm.ite_falseBranch hsource)
+          hterminalCondition.1
+      have hwellFalse4 :=
+        (typingPreservesWellFormed_of_sourceTerm (SourceTerm.ite_falseBranch hsource)
+          hvalidFalse4.1 hwellCondition hterminalCondition.2.1 _hfalse).1
+      have hcontained := containedBorrowsWellFormed_join henvJoin hsameLeft hsameRight
+        hwellTrue.1 hwellFalse4.1 hcoherent hlinear
       exact TerminalStateSafe.strengthen_join hcontained hcoherent hlinear
         (EnvJoin.lifetimesPreserved_left henvJoin)
         (EnvJoin.left_sameShapeStrengthening henvJoin hbranchShape)
@@ -3966,6 +3974,14 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           hstoreTypingFalse hwellCondition hborrowSafeCondition
           hterminalCondition.2.1 hfalseMulti with
         ⟨hwellFalse, hterminalFalse⟩
+      have hvalidTrue3 : ValidRuntimeState midStore _trueBranch :=
+        validRuntimeState_of_sourceTerm (SourceTerm.ite_trueBranch hsource)
+          hterminalCondition.1
+      have hwellTrue3 :=
+        (typingPreservesWellFormed_of_sourceTerm (SourceTerm.ite_trueBranch hsource)
+          hvalidTrue3.1 hwellCondition hterminalCondition.2.1 _htrue).1
+      have hcontained := containedBorrowsWellFormed_join henvJoin hsameLeft hsameRight
+        hwellTrue3.1 hwellFalse.1 hcoherent hlinear
       exact TerminalStateSafe.strengthen_join hcontained hcoherent hlinear
         (EnvJoin.lifetimesPreserved_right henvJoin)
         (EnvJoin.right_sameShapeStrengthening henvJoin hbranchShape)

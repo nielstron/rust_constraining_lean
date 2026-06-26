@@ -509,7 +509,7 @@ theorem reachable_progress_bounded (fuel : Nat)
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin _hcontained
+      _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin
       _hcoherent _hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
       ihFalse hsize htypingEq hsource store store' term' hvalid hvst hwf hbs
       hsafe hfs hmulti
