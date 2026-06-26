@@ -3301,12 +3301,13 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
           _falseBranch _trueTy _falseTy _joinTy}
         _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
-        hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        _hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1
       let falseResult := ihFalse htypingEq conditionResult.1
-      ⟨⟨hcontained, by
+      ⟨⟨containedBorrowsWellFormed_join _henvJoin _hsameLeft _hsameRight
+          trueResult.1.1 falseResult.1.1 hcoherent hlinear, by
           exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
             (EnvJoin.lifetimesPreserved_left _henvJoin),
         hcoherent, hlinear⟩, hwellJoin⟩)
