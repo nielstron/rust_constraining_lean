@@ -1,3 +1,4 @@
+import Mathlib.Data.Set.Finite.Basic
 import Mathlib.Order.Bounds.Basic
 import LwRust.Paper.Runtime
 
@@ -52,6 +53,16 @@ def eraseMany (env : Env) : List Name → Env
   intro hne
   simp [update, hne]
 
+@[simp] theorem erase_slotAt_same (env : Env) (x : Name) :
+    (env.erase x).slotAt x = none := by
+  simp [erase]
+
+@[simp] theorem erase_slotAt_ne (env : Env) {x y : Name} :
+    y ≠ x →
+    (env.erase x).slotAt y = env.slotAt y := by
+  intro hne
+  simp [erase, hne]
+
 @[simp] theorem erase_update_fresh (env : Env) (x : Name) (slot : EnvSlot) :
     env.fresh x →
     (env.update x slot).erase x = env := by
@@ -64,6 +75,36 @@ def eraseMany (env : Env) : List Name → Env
       · subst hy
         simpa using hfresh.symm
       · simp [hy]
+
+/-- The abstract environment has only finitely many defined variable slots. -/
+def FiniteSupport (env : Env) : Prop :=
+  ∃ support : Finset Name,
+    ∀ x slot, env.slotAt x = some slot → x ∈ support
+
+theorem finiteSupport_empty : FiniteSupport Env.empty :=
+  ⟨∅, by intro x slot hslot; simp [Env.empty] at hslot⟩
+
+theorem FiniteSupport.update {env : Env} {x : Name} {slot : EnvSlot} :
+    FiniteSupport env → FiniteSupport (env.update x slot) := by
+  rintro ⟨support, hsupport⟩
+  refine ⟨insert x support, ?_⟩
+  intro y slot' hslot'
+  by_cases hy : y = x
+  · subst hy
+    exact Finset.mem_insert_self _ _
+  · rw [Env.update_slotAt_ne _ _ hy] at hslot'
+    exact Finset.mem_insert_of_mem (hsupport y slot' hslot')
+
+theorem FiniteSupport.erase {env : Env} {x : Name} :
+    FiniteSupport env → FiniteSupport (env.erase x) := by
+  rintro ⟨support, hsupport⟩
+  refine ⟨support, ?_⟩
+  intro y slot hslot
+  by_cases hy : y = x
+  · subst hy
+    simp at hslot
+  · rw [Env.erase_slotAt_ne _ hy] at hslot
+    exact hsupport y slot hslot
 
 end Env
 
@@ -82,6 +123,26 @@ def empty : StoreTyping :=
 def update (typing : StoreTyping) (location : Location) (ty : Ty) : StoreTyping :=
   { tyOf := fun candidate =>
       if candidate = location then some ty else typing.tyOf candidate }
+
+/-- The abstract store typing has only finitely many typed locations. -/
+def FiniteSupport (typing : StoreTyping) : Prop :=
+  ∃ support : Finset Location,
+    ∀ location ty, typing.tyOf location = some ty → location ∈ support
+
+theorem finiteSupport_empty : FiniteSupport StoreTyping.empty :=
+  ⟨∅, by intro location ty hlookup; simp [StoreTyping.empty] at hlookup⟩
+
+theorem FiniteSupport.update {typing : StoreTyping}
+    {location : Location} {ty : Ty} :
+    FiniteSupport typing → FiniteSupport (typing.update location ty) := by
+  rintro ⟨support, hsupport⟩
+  refine ⟨insert location support, ?_⟩
+  intro candidate ty' hlookup
+  by_cases hsame : candidate = location
+  · subst hsame
+    exact Finset.mem_insert_self _ _
+  · simp [StoreTyping.update, hsame] at hlookup
+    exact Finset.mem_insert_of_mem (hsupport candidate ty' hlookup)
 
 end StoreTyping
 
@@ -339,6 +400,11 @@ def LVal.Mentions (x : Name) : LVal → Prop
   | .var y => y = x
   | .deref lv => LVal.Mentions x lv
 
+/-- The finite set of variable names syntactically mentioned by an lvalue. -/
+def LVal.names : LVal → Finset Name
+  | .var x => {x}
+  | .deref lv => LVal.names lv
+
 mutual
   /-- Syntactic occurrence of a variable name in a term. -/
   def Term.Mentions (x : Name) : Term → Prop
@@ -369,6 +435,147 @@ mutual
     | [] => False
     | term :: rest => Term.Mentions x term ∨ TermList.Mentions x rest
 end
+
+/- The finite set of variable names syntactically mentioned by a term. -/
+mutual
+  def Term.names : Term → Finset Name
+    | .block _ terms => TermList.names terms
+    | .letMut x initialiser => {x} ∪ Term.names initialiser
+    | .assign lhs rhs => LVal.names lhs ∪ Term.names rhs
+    | .box operand => Term.names operand
+    | .borrow _ operand => LVal.names operand
+    | .move operand => LVal.names operand
+    | .copy operand => LVal.names operand
+    | .val _ => ∅
+    | .missing => ∅
+    | .eq lhs rhs => Term.names lhs ∪ Term.names rhs
+    | .ite condition trueBranch falseBranch =>
+        Term.names condition ∪ Term.names trueBranch ∪ Term.names falseBranch
+    | .whileLoop _ condition body =>
+        Term.names condition ∪ Term.names body
+    | .whileCond _ conditionInFlight condition body =>
+        Term.names conditionInFlight ∪ Term.names condition ∪ Term.names body
+    | .whileBody _ bodyInFlight condition body =>
+        Term.names bodyInFlight ∪ Term.names condition ∪ Term.names body
+
+  def TermList.names : List Term → Finset Name
+    | [] => ∅
+    | term :: rest => Term.names term ∪ TermList.names rest
+end
+
+theorem LVal.mentions_mem_names {x : Name} :
+    ∀ {lv : LVal}, LVal.Mentions x lv → x ∈ LVal.names lv
+  | .var y, hmentions => by
+      simp [LVal.Mentions, LVal.names] at hmentions ⊢
+      exact hmentions.symm
+  | .deref lv, hmentions => by
+      induction lv with
+      | var y =>
+          simp [LVal.Mentions, LVal.names] at hmentions ⊢
+          exact hmentions.symm
+      | deref lv ih =>
+          exact ih hmentions
+
+theorem Term.mentions_mem_names {x : Name} {term : Term}
+    (hmentions : Term.Mentions x term) : x ∈ Term.names term := by
+  revert hmentions
+  refine Term.rec
+    (motive_1 := fun term => Term.Mentions x term → x ∈ Term.names term)
+    (motive_2 := fun terms => TermList.Mentions x terms → x ∈ TermList.names terms)
+    ?block ?letMut ?assign ?box ?borrow ?move ?copy ?val ?missing ?eq ?ite
+    ?whileLoop ?whileCond ?whileBody ?nil ?cons term
+  case block =>
+    intro _lifetime _terms ih hmentions
+    exact ih hmentions
+  case letMut =>
+    intro y _initialiser ih hmentions
+    rcases hmentions with hdecl | hinitialiser
+    · exact Finset.mem_union.mpr (Or.inl (by simp [hdecl]))
+    · exact Finset.mem_union.mpr (Or.inr (ih hinitialiser))
+  case assign =>
+    intro _lhs _rhs ih hmentions
+    rcases hmentions with hlhs | hrhs
+    · exact Finset.mem_union.mpr (Or.inl (LVal.mentions_mem_names hlhs))
+    · exact Finset.mem_union.mpr (Or.inr (ih hrhs))
+  case box =>
+    intro _operand ih hmentions
+    exact ih hmentions
+  case borrow =>
+    intro _mutable _operand hmentions
+    exact LVal.mentions_mem_names hmentions
+  case move =>
+    intro _operand hmentions
+    exact LVal.mentions_mem_names hmentions
+  case copy =>
+    intro _operand hmentions
+    exact LVal.mentions_mem_names hmentions
+  case val =>
+    intro _value hmentions
+    cases hmentions
+  case missing =>
+    intro hmentions
+    cases hmentions
+  case eq =>
+    intro _lhs _rhs ihLhs ihRhs hmentions
+    rcases hmentions with hlhs | hrhs
+    · exact Finset.mem_union.mpr (Or.inl (ihLhs hlhs))
+    · exact Finset.mem_union.mpr (Or.inr (ihRhs hrhs))
+  case ite =>
+    intro _condition _trueBranch _falseBranch ihCondition ihTrue ihFalse
+      hmentions
+    rcases hmentions with hcondition | htrue | hfalse
+    · exact Finset.mem_union.mpr (Or.inl
+        (Finset.mem_union.mpr (Or.inl (ihCondition hcondition))))
+    · exact Finset.mem_union.mpr (Or.inl
+        (Finset.mem_union.mpr (Or.inr (ihTrue htrue))))
+    · exact Finset.mem_union.mpr (Or.inr (ihFalse hfalse))
+  case whileLoop =>
+    intro _bodyLifetime _condition _body ihCondition ihBody hmentions
+    rcases hmentions with hcondition | hbody
+    · exact Finset.mem_union.mpr (Or.inl (ihCondition hcondition))
+    · exact Finset.mem_union.mpr (Or.inr (ihBody hbody))
+  case whileCond =>
+    intro _bodyLifetime _conditionInFlight _condition _body ihInFlight
+      ihCondition ihBody hmentions
+    rcases hmentions with hinFlight | hcondition | hbody
+    · exact Finset.mem_union.mpr (Or.inl
+        (Finset.mem_union.mpr (Or.inl (ihInFlight hinFlight))))
+    · exact Finset.mem_union.mpr (Or.inl
+        (Finset.mem_union.mpr (Or.inr (ihCondition hcondition))))
+    · exact Finset.mem_union.mpr (Or.inr (ihBody hbody))
+  case whileBody =>
+    intro _bodyLifetime _bodyInFlight _condition _body ihInFlight
+      ihCondition ihBody hmentions
+    rcases hmentions with hinFlight | hcondition | hbody
+    · exact Finset.mem_union.mpr (Or.inl
+        (Finset.mem_union.mpr (Or.inl (ihInFlight hinFlight))))
+    · exact Finset.mem_union.mpr (Or.inl
+        (Finset.mem_union.mpr (Or.inr (ihCondition hcondition))))
+    · exact Finset.mem_union.mpr (Or.inr (ihBody hbody))
+  case nil =>
+    intro hmentions
+    cases hmentions
+  case cons =>
+    intro _head _tail ihHead ihTail hmentions
+    rcases hmentions with hhead | htail
+    · exact Finset.mem_union.mpr (Or.inl (ihHead hhead))
+    · exact Finset.mem_union.mpr (Or.inr (ihTail htail))
+
+theorem TermList.mentions_mem_names {x : Name} :
+    ∀ {terms : List Term}, TermList.Mentions x terms → x ∈ TermList.names terms
+  | [], hmentions => by
+      cases hmentions
+  | term :: rest, hmentions => by
+      rcases hmentions with hterm | hrest
+      · exact Finset.mem_union.mpr
+          (Or.inl (Term.mentions_mem_names hterm))
+      · exact Finset.mem_union.mpr
+          (Or.inr (TermList.mentions_mem_names hrest))
+
+theorem Term.not_mentions_of_not_mem_names {x : Name} {term : Term} :
+    x ∉ Term.names term → ¬ Term.Mentions x term := by
+  intro hnot hmentions
+  exact hnot (Term.mentions_mem_names hmentions)
 
 /-- Variables occurring in a full type (the base names of all borrow targets). -/
 def Ty.vars : Ty → List Name
@@ -415,6 +622,118 @@ def TypeNameFresh (typing : StoreTyping) (x : Name) : Prop :=
   simp [StoreTyping.empty] at hlookup
 
 end StoreTyping
+
+/-- Finite environment domains mention only finitely many names inside slot types. -/
+theorem Env.FiniteSupport.typeNameSupport {env : Env} :
+    Env.FiniteSupport env →
+    ∃ support : Finset Name,
+      ∀ y slot x,
+        env.slotAt y = some slot →
+        x ∈ PartialTy.allVars slot.ty →
+        x ∈ support := by
+  rintro ⟨domain, hdomain⟩
+  let support : Finset Name :=
+    domain.biUnion (fun y =>
+      match env.slotAt y with
+      | some slot => (PartialTy.allVars slot.ty).toFinset
+      | none => ∅)
+  refine ⟨support, ?_⟩
+  intro y slot x hslot hmem
+  dsimp [support]
+  exact Finset.mem_biUnion.mpr ⟨y, hdomain y slot hslot, by
+    simp [hslot, hmem]⟩
+
+/-- Finite store-typing domains mention only finitely many variable names in types. -/
+theorem StoreTyping.FiniteSupport.typeNameSupport {typing : StoreTyping} :
+    StoreTyping.FiniteSupport typing →
+    ∃ support : Finset Name,
+      ∀ location ty x,
+        typing.tyOf location = some ty →
+        x ∈ Ty.vars ty →
+        x ∈ support := by
+  rintro ⟨domain, hdomain⟩
+  let support : Finset Name :=
+    domain.biUnion (fun location =>
+      match typing.tyOf location with
+      | some ty => (Ty.vars ty).toFinset
+      | none => ∅)
+  refine ⟨support, ?_⟩
+  intro location ty x hlookup hmem
+  dsimp [support]
+  exact Finset.mem_biUnion.mpr ⟨location, hdomain location ty hlookup, by
+    simp [hlookup, hmem]⟩
+
+/--
+Finite environment/store typing support gives a genuinely fresh equality ghost.
+
+The chosen name is fresh as an environment slot, absent from all names stored in
+environment/store types, absent from the left type, and absent from the right
+operand syntax.
+-/
+theorem exists_fresh_eq_ghost {env : Env} {typing : StoreTyping}
+    {lhsTy : Ty} {rhs : Term} :
+    Env.FiniteSupport env →
+    StoreTyping.FiniteSupport typing →
+    ∃ ghost,
+      env.fresh ghost ∧
+      Env.TypeNameFresh env ghost ∧
+      ghost ∉ Ty.vars lhsTy ∧
+      StoreTyping.TypeNameFresh typing ghost ∧
+      ¬ Term.Mentions ghost rhs := by
+  rintro ⟨envDomain, henvDomain⟩ ⟨typingDomain, htypingDomain⟩
+  let envTypeNames : Finset Name :=
+    envDomain.biUnion (fun y =>
+      match env.slotAt y with
+      | some slot => (PartialTy.allVars slot.ty).toFinset
+      | none => ∅)
+  let storeTypeNames : Finset Name :=
+    typingDomain.biUnion (fun location =>
+      match typing.tyOf location with
+      | some ty => (Ty.vars ty).toFinset
+      | none => ∅)
+  let forbidden : Finset Name :=
+    envDomain ∪ envTypeNames ∪ storeTypeNames ∪
+      (Ty.vars lhsTy).toFinset ∪ Term.names rhs
+  rcases Finset.exists_notMem forbidden with ⟨ghost, hghost⟩
+  have hnotEnvDomain : ghost ∉ envDomain := by
+    intro hmem
+    exact hghost (by simp [forbidden, hmem])
+  have hnotEnvTypeNames : ghost ∉ envTypeNames := by
+    intro hmem
+    exact hghost (by simp [forbidden, hmem])
+  have hnotStoreTypeNames : ghost ∉ storeTypeNames := by
+    intro hmem
+    exact hghost (by simp [forbidden, hmem])
+  have hnotLhsVarsFinset : ghost ∉ (Ty.vars lhsTy).toFinset := by
+    intro hmem
+    exact hghost (by simp [forbidden, hmem])
+  have hnotRhsNames : ghost ∉ Term.names rhs := by
+    intro hmem
+    exact hghost (by simp [forbidden, hmem])
+  have henvFresh : env.fresh ghost := by
+    unfold Env.fresh
+    cases hslot : env.slotAt ghost with
+    | none => rfl
+    | some slot =>
+        exact False.elim (hnotEnvDomain (henvDomain ghost slot hslot))
+  have henvTypeFresh : Env.TypeNameFresh env ghost := by
+    intro y slot hslot hmem
+    exact hnotEnvTypeNames (by
+      dsimp [envTypeNames]
+      exact Finset.mem_biUnion.mpr ⟨y, henvDomain y slot hslot, by
+        simp [hslot, hmem]⟩)
+  have hnotLhsVars : ghost ∉ Ty.vars lhsTy := by
+    intro hmem
+    exact hnotLhsVarsFinset (List.mem_toFinset.mpr hmem)
+  have hstoreTypeFresh : StoreTyping.TypeNameFresh typing ghost := by
+    intro location ty hlookup hmem
+    exact hnotStoreTypeNames (by
+      dsimp [storeTypeNames]
+      exact Finset.mem_biUnion.mpr
+        ⟨location, htypingDomain location ty hlookup, by
+          simp [hlookup, hmem]⟩)
+  exact ⟨ghost, henvFresh, henvTypeFresh, hnotLhsVars, hstoreTypeFresh,
+    Term.not_mentions_of_not_mem_names hnotRhsNames⟩
 
 /-- A fixed rank function witnessing linearizability of an environment. -/
 def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
@@ -611,6 +930,14 @@ def EnvMove (env : Env) (lv : LVal) (moved : Env) : Prop :=
     Strike (LVal.path lv) slot.ty struck ∧
     moved = env.update (LVal.base lv) { slot with ty := struck }
 
+theorem EnvMove.finiteSupport {env moved : Env} {lv : LVal} :
+    EnvMove env lv moved →
+    Env.FiniteSupport env →
+    Env.FiniteSupport moved := by
+  rintro ⟨slot, struck, _hslot, _hstrike, hmoved⟩ hfinite
+  subst hmoved
+  exact hfinite.update
+
 /-- Definition 3.19, `mut(Γ, w)`. -/
 inductive Mutable : Env → LVal → Prop where
   | var {env : Env} {x : Name} {slot : EnvSlot} :
@@ -633,6 +960,21 @@ def dropLifetime (env : Env) (lifetime : Lifetime) : Env :=
       match env.slotAt x with
       | some slot => if slot.lifetime = lifetime then none else some slot
       | none => none }
+
+theorem FiniteSupport.dropLifetime {env : Env} {lifetime : Lifetime} :
+    FiniteSupport env → FiniteSupport (env.dropLifetime lifetime) := by
+  rintro ⟨support, hsupport⟩
+  refine ⟨support, ?_⟩
+  intro x slot hslot
+  cases horig : env.slotAt x with
+  | none =>
+      change (match env.slotAt x with
+        | some slot => if slot.lifetime = lifetime then none else some slot
+        | none => none) = some slot at hslot
+      rw [horig] at hslot
+      cases hslot
+  | some origSlot =>
+      exact hsupport x origSlot horig
 
 end Env
 
@@ -805,6 +1147,38 @@ theorem EnvJoin.right_le {left right join : Env} :
   intro hjoin
   exact hjoin.1 (by simp)
 
+theorem EnvJoin.finiteSupport_left {left right join : Env} :
+    EnvJoin left right join →
+    Env.FiniteSupport left →
+    Env.FiniteSupport join := by
+  intro hjoin hfinite
+  rcases hfinite with ⟨support, hsupport⟩
+  refine ⟨support, ?_⟩
+  intro x joinSlot hjoinSlot
+  have hstrength := EnvJoin.left_le hjoin x
+  cases hleft : left.slotAt x with
+  | none =>
+      rw [hleft, hjoinSlot] at hstrength
+      exact False.elim hstrength
+  | some leftSlot =>
+      exact hsupport x leftSlot hleft
+
+theorem EnvJoin.finiteSupport_right {left right join : Env} :
+    EnvJoin left right join →
+    Env.FiniteSupport right →
+    Env.FiniteSupport join := by
+  intro hjoin hfinite
+  rcases hfinite with ⟨support, hsupport⟩
+  refine ⟨support, ?_⟩
+  intro x joinSlot hjoinSlot
+  have hstrength := EnvJoin.right_le hjoin x
+  cases hright : right.slotAt x with
+  | none =>
+      rw [hright, hjoinSlot] at hstrength
+      exact False.elim hstrength
+  | some rightSlot =>
+      exact hsupport x rightSlot hright
+
 /-- `EnvStrengthens` componentwise view: slots of the weaker environment are
 matched by slots of the stronger one with equal lifetimes. -/
 theorem EnvStrengthens.slot_forward {left right : Env} {x : Name}
@@ -955,6 +1329,35 @@ mutual
         EnvWrite rank env₁ lv ty
           (env₂.update (LVal.base lv) { slot with ty := updatedTy })
 end
+
+theorem EnvWrite.finiteSupport {rank : Nat} {env result : Env}
+    {lv : LVal} {ty : Ty} :
+    EnvWrite rank env lv ty result →
+    Env.FiniteSupport env →
+    Env.FiniteSupport result := by
+  intro hwrite
+  exact EnvWrite.rec
+    (motive_1 := fun _ env _ _ _ result _ _ =>
+      Env.FiniteSupport env → Env.FiniteSupport result)
+    (motive_2 := fun _ env _ _ _ result _ =>
+      Env.FiniteSupport env → Env.FiniteSupport result)
+    (motive_3 := fun _ env _ _ result _ =>
+      Env.FiniteSupport env → Env.FiniteSupport result)
+    (fun {env old ty} hfinite => hfinite)
+    (fun {env rank old joined ty} _hshape _hjoin hfinite => hfinite)
+    (fun {env₁ env₂ rank path inner updatedInner ty} _hupdate ih hfinite =>
+      ih hfinite)
+    (fun {env₁ env₂ rank path targets ty} _htargets ih hfinite =>
+      ih hfinite)
+    (fun {rank env path ty} hfinite => hfinite)
+    (fun {rank env updated path target ty} _hwrite _hleafTyping ih hfinite =>
+      ih hfinite)
+    (fun {rank env updated restEnv result path target rest ty} _hwrite
+        _hleafTyping _hrest hjoin ihWrite _ihRest hfinite =>
+      EnvJoin.finiteSupport_left hjoin (ihWrite hfinite))
+    (fun {rank env₁ env₂ lv slot ty updatedTy} _hslot _hupdate ih hfinite =>
+      (ih hfinite).update)
+    hwrite
 
 /-- Value typing premise `σ ⊢ v : T` from T-Const. -/
 inductive ValueTyping : StoreTyping → Value → Ty → Prop where
@@ -1233,6 +1636,57 @@ mutual
         TermListTyping env₂ typing lifetime rest finalTy env₃ →
         TermListTyping env₁ typing lifetime (term :: rest) finalTy env₃
 end
+
+theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    TermTyping env₁ typing lifetime term ty env₂ →
+    Env.FiniteSupport env₁ →
+    Env.FiniteSupport env₂ := by
+  intro htyping
+  exact TermTyping.rec
+    (motive_1 := fun env _typing _lifetime _term _ty result _ =>
+      Env.FiniteSupport env → Env.FiniteSupport result)
+    (motive_2 := fun env _typing _lifetime _terms _ty result _ =>
+      Env.FiniteSupport env → Env.FiniteSupport result)
+    (fun _hvalue hfinite => hfinite)
+    (fun _hwellTy _hloanFree hfinite => hfinite)
+    (fun _hlv _hcopy _hnotRead hfinite => hfinite)
+    (fun _hlv _hnotWrite hmove hfinite =>
+      EnvMove.finiteSupport hmove hfinite)
+    (fun _hlv _hmutable _hnotWrite hfinite => hfinite)
+    (fun _hlv _hnotRead hfinite => hfinite)
+    (fun _hterm ih hfinite => ih hfinite)
+    (fun _hchild _hterms _hwellTy henvEq ih hfinite => by
+      rw [henvEq]
+      exact (ih hfinite).dropLifetime)
+    (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
+      rw [henvEq]
+      exact (ih hfinite).update)
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcoherence
+        _hcontained _hnotWrite ih hfinite =>
+      EnvWrite.finiteSupport hwrite (ih hfinite))
+    (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs
+        _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
+      rw [henvEq]
+      exact (ihRhs (ihLhs hfinite).update).erase)
+    (fun _hcondition _htrue _hfalse _htyJoin henvJoin _hsameLeft
+        _hsameRight _hwellTy _hcoherent _hlinear _hborrowSafe _htySafe
+        ihCondition ihTrue _ihFalse hfinite =>
+      EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
+    (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
+        _ihFalse hfinite =>
+      ihTrue (ihCondition hfinite))
+    (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
+      ihCondition hfinite)
+    (fun _hchild hjoin _hsameEntry _hsameBack _hcontained _hcoherent
+        _hlinear _hborrowSafe _hnameFresh _hcondition _hbody _hwellTy
+        _hback _hentryCondition _hentryBody ihCondition _ihBody
+        _ihEntryCondition _ihEntryBody hfinite =>
+      ihCondition (EnvJoin.finiteSupport_left hjoin hfinite))
+    (fun _hterm ih hfinite => ih hfinite)
+    (fun _hterm _hrest ihTerm ihRest hfinite =>
+      ihRest (ihTerm hfinite))
+    htyping
 
 theorem BorrowSafeEnv.erase {env : Env} {ghost : Name} :
     BorrowSafeEnv env →

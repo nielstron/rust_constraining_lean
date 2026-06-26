@@ -16,16 +16,6 @@ open Core
 
 namespace Env
 
-@[simp] theorem erase_slotAt_same (env : Env) (x : Name) :
-    (env.erase x).slotAt x = none := by
-  simp [Env.erase]
-
-@[simp] theorem erase_slotAt_ne (env : Env) {x y : Name} :
-    y ≠ x →
-    (env.erase x).slotAt y = env.slotAt y := by
-  intro hne
-  simp [Env.erase, hne]
-
 theorem fresh_erase (env : Env) (x : Name) :
     (env.erase x).fresh x := by
   simp [Env.fresh]
