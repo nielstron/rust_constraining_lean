@@ -1204,7 +1204,7 @@ theorem EnvWriteRhsTargetsWellFormed.erase_ghost {result : Env} {rhsTy : Ty}
     EnvWriteRhsTargetsWellFormed result rhsTy →
     Env.TypeNameFresh (result.erase ghost) ghost →
     EnvWriteRhsTargetsWellFormed (result.erase ghost) rhsTy := by
-  intro hrhs hfresh x slot mutable targets target hslot hcontains htarget hrhsOrigin
+  intro hrhs hfresh x slot mutable targets pointee target hslot hcontains htarget hrhsOrigin
   have hslotOrig : result.slotAt x = some slot := by
     by_cases hx : x = ghost
     · subst hx; simp [Env.erase] at hslot
@@ -1212,7 +1212,7 @@ theorem EnvWriteRhsTargetsWellFormed.erase_ghost {result : Env} {rhsTy : Ty}
   have hslotFresh : ghost ∉ PartialTy.allVars slot.ty := hfresh x slot hslot
   have hnotTarget : ¬ LVal.Mentions ghost target :=
     not_mentions_of_partialTy_contains_allVars hslotFresh hcontains target htarget
-  rcases hrhs x slot mutable targets target hslotOrig hcontains htarget hrhsOrigin with
+  rcases hrhs x slot mutable targets pointee target hslotOrig hcontains htarget hrhsOrigin with
     ⟨tTy, tLf, htyp, hle, hbase⟩
   exact ⟨tTy, tLf,
     LValTyping.erase_ghost.1 htyp hfresh hnotTarget,

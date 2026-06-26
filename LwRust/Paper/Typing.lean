@@ -1109,12 +1109,12 @@ lifetime — see the deviation note in the README and the `example` below the ru
 This mirrors `EnvWriteRhsBorrowTargetsBelow`'s first conjunct, with a lifetime
 conclusion in place of the rank one. -/
 def EnvWriteRhsTargetsWellFormed (result : Env) (rhsTy : Ty) : Prop :=
-  ∀ x slot mutable targets target,
+  ∀ x slot mutable targets pointee target,
     result.slotAt x = some slot →
-    PartialTyContains slot.ty (.borrow mutable targets) →
+    PartialTyContains slot.ty (.borrow mutable targets pointee) →
     target ∈ targets →
-    (∃ rhsMutable rhsTargets,
-      PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
+    (∃ rhsMutable rhsTargets rhsPointee,
+      PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets rhsPointee) ∧
         target ∈ rhsTargets) →
     ∃ targetTy targetLifetime,
       LValTyping result target (.ty targetTy) targetLifetime ∧
@@ -1135,8 +1135,8 @@ the stronger fact. -/
 theorem EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
     {result : Env} {rhsTy : Ty} :
     ContainedBorrowsWellFormed result → EnvWriteRhsTargetsWellFormed result rhsTy := by
-  intro hcbwf x slot mutable targets target hslot hcontains htarget _hrhs
-  exact (hcbwf x slot mutable targets hslot ⟨slot, hslot, hcontains⟩) target htarget
+  intro hcbwf x slot mutable targets pointee target hslot hcontains htarget _hrhs
+  exact (hcbwf x slot mutable targets pointee hslot ⟨slot, hslot, hcontains⟩) target htarget
 
 /-- Definition 4.8(ii). Every environment slot lives at least as long as `lifetime`. -/
 def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=

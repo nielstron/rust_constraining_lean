@@ -3293,8 +3293,9 @@ assignment from the rank-0 deref-of-box assignment (whose leaf is strongly
 replaced).
 -/
 inductive PathThroughBorrow : PartialTy → List Unit → Prop where
-  | borrowHere {mutable : Bool} {targets : List LVal} {path : List Unit} :
-      PathThroughBorrow (.ty (.borrow mutable targets)) (() :: path)
+  | borrowHere {mutable : Bool} {targets : List LVal} {pointee : Ty}
+      {path : List Unit} :
+      PathThroughBorrow (.ty (.borrow mutable targets pointee)) (() :: path)
   | box {inner : PartialTy} {path : List Unit} :
       PathThroughBorrow inner path →
       PathThroughBorrow (.box inner) (() :: path)
@@ -3330,7 +3331,7 @@ theorem UpdateAtPath.sameShapeStrengthening_of_throughBorrow {rank : Nat}
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
         cases htyEq
         cases hupdatedEq
         refine ⟨?_, PartialTyStrengthens.reflex, PartialTy.sameShape_refl _⟩
@@ -3345,7 +3346,7 @@ theorem UpdateAtPath.sameShapeStrengthening_of_throughBorrow {rank : Nat}
         rcases ih hinnerUpdate with ⟨hmap, hstrength, hshape⟩
         exact ⟨hmap, PartialTyStrengthens.box hstrength,
           by simpa [PartialTy.sameShape] using hshape⟩
-      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+      · rcases hborrow with ⟨targets, oldPointee, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
 
 /--
@@ -3368,7 +3369,7 @@ theorem LValTyping.pathThroughBorrow_append {env : Env} {lv : LVal}
         PathThroughBorrow pt suffix →
         PathThroughBorrow slot.ty (LVal.path lv ++ suffix))
     (motive_2 := fun _targets _pt _lifetime _ => True)
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
   case var =>
     intro x slot hslot slot' hslot' suffix hsuffix
     simp only [LVal.base] at hslot'
@@ -3388,6 +3389,9 @@ theorem LValTyping.pathThroughBorrow_append {env : Env} {lv : LVal}
     have hsource :=
       ihSource hslot (() :: suffix) PathThroughBorrow.borrowHere
     simpa [LVal.path, List.append_assoc, List.Unit_append_cons] using hsource
+  case empty =>
+    intros
+    trivial
   case singleton =>
     intros
     trivial
@@ -3417,7 +3421,7 @@ theorem UpdateAtPath.throughBorrow_dichotomy {rank : Nat} {env env' : Env}
     · exact Or.inl ⟨hess, by rw [hupd]⟩
     · exact Or.inr henv
   case mutBorrow =>
-    intro env₁ env₂ rank path targets ty hwrites _ih
+    intro env₁ env₂ rank path targets oldPointee ty hwrites _ih
     exact Or.inl ⟨WriteBorrowTargets.sameShapeStrengthening_init (Nat.succ_pos _)
       hwrites (WriteBorrowTargets.initialized_leaves_of_typed hwrites), rfl⟩
   case nil => intro _ _ _ _; trivial
@@ -3459,41 +3463,47 @@ theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
   have hlifePres := EnvWrite.lifetimesPreserved hwrite
   rcases EnvWrite.sameShapeStrengthening_or_singleSlot hwrite with hess | ⟨wslot, updatedTy, hwslot, henv₃⟩
   · -- fan-out: env₃ is a same-shape strengthening of env₂
-    have hdecomp : ∀ z zslot m W, env₃.slotAt z = some zslot →
-        PartialTyContains zslot.ty (.borrow m W) →
+    have hdecomp : ∀ z zslot m W pointee, env₃.slotAt z = some zslot →
+        PartialTyContains zslot.ty (.borrow m W pointee) →
         ∀ w, w ∈ W → ∃ wbs, env₃.slotAt (LVal.base w) = some wbs ∧
           wbs.lifetime ≤ zslot.lifetime := by
-      intro z zslot m W hz hcontains w hw
-      rcases EnvWrite.borrowTargetOrigin_all hwrite z zslot m W hz hcontains w hw with
-        ⟨srcSlot, srcT, hsrcSlot, hcontainsSrc, hwSrc⟩ | ⟨rhsT, hcontainsRhs, hwRhs⟩
+      intro z zslot m W pointee hz hcontains w hw
+      rcases EnvWrite.borrowTargetOrigin_all hwrite z zslot m W pointee hz hcontains w hw with
+        ⟨srcSlot, srcT, srcPointee, hsrcSlot, hcontainsSrc, hwSrc⟩ |
+        ⟨rhsT, rhsPointee, hcontainsRhs, hwRhs⟩
       · obtain ⟨_, _, _, _, bs, hbs, hble⟩ :=
-          (hcbwf₂ z srcSlot m srcT hsrcSlot ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) w hwSrc
+          (hcbwf₂ z srcSlot m srcT srcPointee hsrcSlot
+            ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) w hwSrc
         rcases hess.2 (LVal.base w) bs hbs with ⟨bs', hbs', hbsLife⟩
         rcases hess.1 z zslot hz with ⟨z₂, hz₂, hz₂Life, _, _⟩
         have hz₂Eq : z₂ = srcSlot := Option.some.inj (hz₂.symm.trans hsrcSlot)
         subst hz₂Eq
         exact ⟨bs', hbs', by rw [← hbsLife, ← hz₂Life]; exact hble⟩
       · obtain ⟨_, _, _, _, bs, hbs, hble⟩ :=
-          hrhsWF z zslot m W w hz hcontains hw ⟨m, rhsT, hcontainsRhs, hwRhs⟩
+          hrhsWF z zslot m W pointee w hz hcontains hw
+            ⟨m, rhsT, rhsPointee, hcontainsRhs, hwRhs⟩
         exact ⟨bs, hbs, hble⟩
-    intro x rslot m T hrslot hcontainsX
+    intro x rslot m T pointee hrslot hcontainsX
     obtain ⟨s, hs, hcTy⟩ := hcontainsX
     have hsEq : rslot = s := Option.some.inj (hrslot.symm.trans hs)
     subst hsEq
     intro t ht
-    rcases EnvWrite.borrowTargetOrigin_all hwrite x rslot m T hrslot hcTy t ht with
-      ⟨srcSlot, srcT, hsrcSlot, hcontainsSrc, htSrc⟩ | ⟨rhsT, hcontainsRhs, htRhs⟩
+    rcases EnvWrite.borrowTargetOrigin_all hwrite x rslot m T pointee hrslot hcTy t ht with
+      ⟨srcSlot, srcT, srcPointee, hsrcSlot, hcontainsSrc, htSrc⟩ |
+      ⟨rhsT, rhsPointee, hcontainsRhs, htRhs⟩
     · have hlife : srcSlot.lifetime = rslot.lifetime := by
         rcases hlifePres x rslot hrslot with ⟨s₂, hs₂, hs₂Life⟩
         have : s₂ = srcSlot := Option.some.inj (hs₂.symm.trans hsrcSlot)
         subst this; exact hs₂Life
       exact borrowTargetWellFormed_transport hess hcoh₃ hlin₃ hdecomp hlife
-        ((hcbwf₂ x srcSlot m srcT hsrcSlot ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) t htSrc)
-    · exact hrhsWF x rslot m T t hrslot hcTy ht ⟨m, rhsT, hcontainsRhs, htRhs⟩
+        ((hcbwf₂ x srcSlot m srcT srcPointee hsrcSlot
+          ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) t htSrc)
+    · exact hrhsWF x rslot m T pointee t hrslot hcTy ht
+        ⟨m, rhsT, rhsPointee, hcontainsRhs, htRhs⟩
   · -- single-slot update: env₃ = env₂.update (base lhs) {wslot with ty := updatedTy}
     have hnotWriteVar : ¬ WriteProhibited env₃ (.var (LVal.base lhs)) :=
       not_writeProhibited_var_base hnotWrite
-    intro x rslot m T hrslot hcontainsX
+    intro x rslot m T pointee hrslot hcontainsX
     obtain ⟨s, hs, hcTy⟩ := hcontainsX
     have hsEq : rslot = s := Option.some.inj (hrslot.symm.trans hs)
     subst hsEq
@@ -3502,14 +3512,16 @@ theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
       have := not_pathConflicts_of_not_writeProhibited_contains hnotWrite
         ⟨rslot, hrslot, hcTy⟩ ht
       simpa [PathConflicts, LVal.base] using this
-    rcases EnvWrite.borrowTargetOrigin_all hwrite x rslot m T hrslot hcTy t ht with
-      ⟨srcSlot, srcT, hsrcSlot, hcontainsSrc, htSrc⟩ | ⟨rhsT, hcontainsRhs, htRhs⟩
+    rcases EnvWrite.borrowTargetOrigin_all hwrite x rslot m T pointee hrslot hcTy t ht with
+      ⟨srcSlot, srcT, srcPointee, hsrcSlot, hcontainsSrc, htSrc⟩ |
+      ⟨rhsT, rhsPointee, hcontainsRhs, htRhs⟩
     · have hlife : srcSlot.lifetime = rslot.lifetime := by
         rcases hlifePres x rslot hrslot with ⟨s₂, hs₂, hs₂Life⟩
         have : s₂ = srcSlot := Option.some.inj (hs₂.symm.trans hsrcSlot)
         subst this; exact hs₂Life
       obtain ⟨tTy, tLf, htyp, hle, hbase⟩ :=
-        (hcbwf₂ x srcSlot m srcT hsrcSlot ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) t htSrc
+        (hcbwf₂ x srcSlot m srcT srcPointee hsrcSlot
+          ⟨srcSlot, hsrcSlot, hcontainsSrc⟩) t htSrc
       refine ⟨tTy, tLf, ?_, by rw [← hlife]; exact hle, ?_⟩
       · rw [henv₃]
         exact (LValTyping.update_of_not_pathConflicts
@@ -3521,7 +3533,8 @@ theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
           exact hnoconf (by simpa [PathConflicts, LVal.base] using hbaseEq)
         refine ⟨bs, ?_, by rw [← hlife]; exact hble⟩
         rw [henv₃]; simpa [Env.update, hbaseNe] using hbs
-    · exact hrhsWF x rslot m T t hrslot hcTy ht ⟨m, rhsT, hcontainsRhs, htRhs⟩
+    · exact hrhsWF x rslot m T pointee t hrslot hcTy ht
+        ⟨m, rhsT, rhsPointee, hcontainsRhs, htRhs⟩
 
 theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
     (fuel : Nat) {env₁ env₂ : Env}
