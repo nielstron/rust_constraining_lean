@@ -1,4 +1,5 @@
 import LwRust.Paper.Soundness.Helpers.ValuePreservation
+import LwRust.Paper.Soundness.Helpers.GhostErasure
 
 /-!
 # Lemma 4.10 (Progress)
@@ -879,24 +880,33 @@ The paper states well-formedness for the current lifetime; blocks step their
 body under the block lifetime, where well-formedness follows from the
 enclosing lifetime by downward monotonicity (`WellFormedEnv.of_outlives`).
 -/
-theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    term.size ≤ fuel →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
-  intro hvalidStoreTyping hwellFormed hsafe hstore htyping
-  revert hvalidStoreTyping hwellFormed hsafe hstore
+  induction fuel generalizing env₁ env₂ typing lifetime term ty with
+  | zero =>
+      intro hsize _hvalidStoreTyping _hwellFormed _hsafe _hstore _htyping
+      cases term <;> simp [Term.size] at hsize
+  | succ fuel ihFuel =>
+  intro hsize hvalidStoreTyping hwellFormed hsafe hstore htyping
+  revert hsize hvalidStoreTyping hwellFormed hsafe hstore
   refine TermTyping.rec
     (motive_1 := fun env typing lifetime term ty env₂ _ =>
+      term.size ≤ fuel.succ →
       ValidStoreTyping store term typing →
       WellFormedEnv env lifetime →
       store ∼ₛ env →
       OperationalStoreProgress store →
       ProgressResult store lifetime term)
     (motive_2 := fun env typing blockLifetime terms ty env₂ _ =>
+      Term.size (.block blockLifetime terms) ≤ fuel.succ →
       ValidStoreTyping store (.block blockLifetime terms) typing →
       ∀ lifetime,
         WellFormedEnv env blockLifetime →
@@ -907,63 +917,75 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     ?iteDiverging ?whileLoopDiverging ?whileLoop
     ?singleton ?cons htyping
   case const =>
-    intro _env _typing lifetime value _ty _hvalue _hvst _hwf _hsafe _hstore
+    intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
   case missing =>
-    intro _env _typing lifetime _ty _hwellTy _hloanFree _hvst _hwf _hsafe _hstore
+    intro _env _typing lifetime _ty _hwellTy _hloanFree _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, .missing, Step.missing⟩
   case copy =>
     intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy hreadProhibited
-      _hvst hwf hsafe _hstore
+      _hsize _hvst hwf hsafe _hstore
     exact progress_copy_typing (typing := _typing) hwf hsafe
       (TermTyping.copy (typing := _typing) hLv hcopy hreadProhibited)
   case move =>
     intro _env₁ _env₂ _typing lifetime _valueLifetime _lv _ty hLv hwriteProhibited hmove
-      _hvst hwf hsafe _hstore
+      _hsize _hvst hwf hsafe _hstore
     exact progress_move_typing (typing := _typing) hwf hsafe
       (TermTyping.move (typing := _typing) hLv hwriteProhibited hmove)
   case mutBorrow =>
     intro _env _typing lifetime _valueLifetime _lv _ty hLv hmutable hwriteProhibited
-      _hvst hwf hsafe _hstore
+      _hsize _hvst hwf hsafe _hstore
     exact progress_borrow_typing (typing := _typing) hwf hsafe
       (TermTyping.mutBorrow (typing := _typing) hLv hmutable hwriteProhibited)
   case immBorrow =>
     intro _env _typing lifetime _valueLifetime _lv _ty hLv hreadProhibited
-      _hvst hwf hsafe _hstore
+      _hsize _hvst hwf hsafe _hstore
     exact progress_borrow_typing (typing := _typing) hwf hsafe
       (TermTyping.immBorrow (typing := _typing) hLv hreadProhibited)
   case box =>
-    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hvst hwf hsafe hstore
+    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hsize hvst hwf hsafe hstore
     exact progress_box_typing hstore (TermTyping.box hterm)
-      (ih (validStoreTyping_box_inner hvst) hwf hsafe hstore)
+      (ih (by simp [Term.size] at hsize ⊢; omega)
+        (validStoreTyping_box_inner hvst) hwf hsafe hstore)
   case block =>
     intro _env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty hchild _hterms
-      _hwellTy _hdrop ih hvst hwf hsafe hstore
-    exact ih hvst lifetime
+      _hwellTy _hdrop ih hsize hvst hwf hsafe hstore
+    exact ih hsize hvst lifetime
       (WellFormedEnv.of_outlives hwf (LifetimeChild.outlives hchild)) hsafe hstore
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm hfreshOut
-      hcoh henv ih hvst hwf hsafe hstore
+      hcoh henv ih hsize hvst hwf hsafe hstore
     exact progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
-      (ih (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
+      (ih (by simp [Term.size] at hsize ⊢; omega)
+        (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
       hRhs hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
-      hvst hwf hsafe hstore
+      hsize hvst hwf hsafe hstore
     exact progress_assign_typing hwf hsafe hstore
       (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
         hcontained hnotWrite)
-      (ih (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
+      (ih (by simp [Term.size] at hsize ⊢; omega)
+        (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing lifetime lhs rhs lhsTy
-      rhsTy _ghostRhsTy hLhs _hfresh _hghostRhs hRhs _hcopyL
-      _hcopyR _hshape ihL _ihGhost ihR hvst hwf hsafe hstore
-    rcases ihL hvst.eq_lhs hwf hsafe hstore with hterminalL | hstepL
+      rhsTy hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs hnotMention _henvEq
+      _hcopyL _hcopyR _hshape ihL _ihGhost hsize hvst hwf hsafe hstore
+    rcases ihL (by simp [Term.size] at hsize ⊢; omega) hvst.eq_lhs hwf hsafe hstore with
+      hterminalL | hstepL
     · rcases (terminal_iff_value lhs).mp hterminalL with ⟨lhsValue, hlhs⟩
       subst hlhs
       cases hLhs with
       | const _hvalueL =>
-          rcases ihR hvst.eq_rhs hwf hsafe hstore with hterminalR | hstepR
+          have hRhs :=
+            TermTyping.erase_ghost
+              (env := _env₁)
+              (ghostSlot := { ty := .ty lhsTy, lifetime := lifetime })
+              hfresh htypeFresh (by simpa [PartialTy.vars] using htyFresh)
+              hstoreFresh hnotMention hghostRhs
+          rcases ihFuel (by simp [Term.size] at hsize ⊢; omega)
+              hvst.eq_rhs hwf hsafe hstore hRhs with
+            hterminalR | hstepR
           · rcases (terminal_iff_value rhs).mp hterminalR with ⟨rhsValue, hrhs⟩
             subst hrhs
             exact progress_eq_values
@@ -973,8 +995,9 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
       _hsameLeft _hsameRight _hwellJoin _hcontained _hcoherent _hlinear _hborrowSafe
-      _hresultSafe ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
-    rcases ihCondition hvst.ite_condition hwf hsafe hstore with
+      _hresultSafe ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
+    rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
+        hvst.ite_condition hwf hsafe hstore with
       hterminalCondition | hstepCondition
     · rcases (terminal_iff_value condition).mp hterminalCondition with
         ⟨conditionValue, hconditionValue⟩
@@ -986,8 +1009,9 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
   case iteDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy hcondition _htrue _hfalse _hdiverges
-      ihCondition _ihTrue _ihFalse hvst hwf hsafe hstore
-    rcases ihCondition hvst.ite_condition hwf hsafe hstore with
+      ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
+    rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
+        hvst.ite_condition hwf hsafe hstore with
       hterminalCondition | hstepCondition
     · rcases (terminal_iff_value condition).mp hterminalCondition with
         ⟨conditionValue, hconditionValue⟩
@@ -999,26 +1023,40 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
       _bodyTy _hchild _hcond _hbody _hdiverges _ihCond _ihBody
-      _hvst _hwf _hsafe _hstore
+      _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
       _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-      _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       _ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
-      _hvst _hwf _hsafe _hstore
+      _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
   case singleton =>
-    intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hvst outerLifetime
+    intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hsize hvst outerLifetime
       hwf hsafe hstore
     exact progress_block_of_head_progress hstore
-      (ih (validStoreTyping_block_singleton_inner hvst) hwf hsafe hstore)
+      (ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        (validStoreTyping_block_singleton_inner hvst) hwf hsafe hstore)
   case cons =>
     intro _env₁ _env₂ _env₃ _typing _blockLifetime _term _rest _termTy _finalTy
-      _hterm _hrest ihHead _ihRest hvst outerLifetime hwf hsafe hstore
+      _hterm _hrest ihHead _ihRest hsize hvst outerLifetime hwf hsafe hstore
     exact progress_block_of_head_progress hstore
-      (ihHead (validStoreTyping_block_head hvst) hwf hsafe hstore)
+      (ihHead (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        (validStoreTyping_block_head hvst) hwf hsafe hstore)
+
+theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  intro hvalidStoreTyping hwellFormed hsafe hstore htyping
+  exact progress_typing_bounded term.size (Nat.le_refl _)
+    hvalidStoreTyping hwellFormed hsafe hstore htyping
 
 /-- Lemma 4.10, Progress for a non-empty typed sequence represented as a block body. -/
 theorem progress_termList_typing {store : ProgramStore} {env₁ env₂ : Env}

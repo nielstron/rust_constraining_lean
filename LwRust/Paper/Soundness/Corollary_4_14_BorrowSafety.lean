@@ -1863,11 +1863,14 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
     exact borrowSafeResult_of_borrowFree hwriteSafe tyBorrowFree_unit
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy _ghostRhsTy _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR
-      _hshape ihL _ihGhost ihR hsource hborrowSafe
+      _lhsTy _rhsTy _hLhs hfresh _htypeFresh _htyFresh _hstoreFresh _hghostRhs
+      _hnotMention henvEq _hcopyL _hcopyR _hshape ihL ihGhost hsource hborrowSafe
     have hleft := ihL (SourceTerm.eq_lhs hsource) hborrowSafe
-    have hright := ihR (SourceTerm.eq_rhs hsource) hleft.1
-    exact borrowSafeResult_of_borrowFree hright.1 tyBorrowFree_bool
+    have hghostSafe := hleft.2.2 _ghost hfresh
+    have hright := ihGhost (SourceTerm.eq_rhs hsource) hghostSafe
+    exact borrowSafeResult_of_borrowFree
+      (by simpa [henvEq] using (BorrowSafeEnv.erase (ghost := _ghost) hright.1))
+      tyBorrowFree_bool
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
@@ -1896,7 +1899,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy _hchild
-      _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hcondInv _hbodyInv _hwellTy
+      _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hnameFresh _hcondInv _hbodyInv _hwellTy
       _hdrop _hcondEntry _hbodyEntry ihCondInv _ihBodyInv _ihCondEntry
       _ihBodyEntry hsource _hborrowSafe
     exact borrowSafeResult_of_borrowFree

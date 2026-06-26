@@ -122,8 +122,8 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | Generated.PartialTerm.copyOperand _ => []
   | Generated.PartialTerm.termPrefix lhs =>
       extractTermStmts currentLifetime lhs
-  | Generated.PartialTerm.eqRhs lhs rhs =>
-      lhs :: extractTermStmts currentLifetime rhs
+  | Generated.PartialTerm.eqRhs lhs _ =>
+      [lhs]
   | Generated.PartialTerm.iteStart => []
   | Generated.PartialTerm.iteCondition condition =>
       extractTermStmts currentLifetime condition
@@ -385,10 +385,9 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           exact extractTermStmts_typed hlhs hlhs'
   case ctermEq_eqRhs hrhs =>
       cases htyped with
-      | eq hlhs' _ _ hrhs' =>
-          obtain ⟨env', hstmts⟩ := extractTermStmts_typed hrhs hrhs'
+      | eq hlhs' =>
           simp only [extractTermStmts]
-          exact ⟨env', .cons hlhs' hstmts⟩
+          exact ⟨_, .cons hlhs' .nil⟩
   case ctermIte_iteCondition hcondition =>
       simp only [extractTermStmts]
       cases htyped with
@@ -485,8 +484,8 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
       cases htyped with
       | whileLoopDiverging hchild hcondition' hbody hdiverges =>
           exact extractTermStmts_typed hcondition hcondition'
-      | whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse hcondInv
-          hbodyInv hwellTy hdropEq hcondEntry hbodyEntry =>
+      | whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh
+          hcondInv hbodyInv hwellTy hdropEq hcondEntry hbodyEntry =>
           exact extractTermStmts_typed hcondition hcondEntry
   case ctermWhile_whileBody bodyLifetime condition body bodyCompletion
       hbody =>
@@ -500,7 +499,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
         cases htyped with
         | whileLoopDiverging hchild hcondition' hbody' _ =>
             exact ⟨_, hchild, hcondition', _, _, hbody'⟩
-        | whileLoop hchild _ _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
+        | whileLoop hchild _ _ _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
             exact ⟨_, hchild, hcondEntry, _, _, hbodyEntry⟩
       simp only [extractTermStmts]
       cases body

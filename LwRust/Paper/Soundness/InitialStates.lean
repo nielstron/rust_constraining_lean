@@ -279,13 +279,14 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy _ghostRhsTy
-      _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
-      ihL _ihGhost ihR htypingEq candidate hmem
+      _lhsTy _rhsTy
+      _hLhs _hfresh _htypeFresh _htyFresh _hstoreFresh _hghostRhs _hnotMention
+      _henvEq
+      _hcopyL _hcopyR _hshape ihL ihGhost htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hleft | hright
     · exact ihL htypingEq candidate hleft
-    · exact ihR htypingEq candidate hright
+    · exact ihGhost htypingEq candidate hright
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy
@@ -321,7 +322,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
       _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-      _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbodyMem

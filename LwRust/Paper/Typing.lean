@@ -38,6 +38,10 @@ def update (env : Env) (x : Name) (slot : EnvSlot) : Env :=
 def erase (env : Env) (x : Name) : Env :=
   { slotAt := fun y => if y = x then none else env.slotAt y }
 
+def eraseMany (env : Env) : List Name → Env
+  | [] => env
+  | erased :: rest => (env.erase erased).eraseMany rest
+
 @[simp] theorem update_slotAt_same (env : Env) (x : Name) (slot : EnvSlot) :
     (env.update x slot).slotAt x = some slot := by
   simp [update]
@@ -47,6 +51,19 @@ def erase (env : Env) (x : Name) : Env :=
     (env.update x slot).slotAt y = env.slotAt y := by
   intro hne
   simp [update, hne]
+
+@[simp] theorem erase_update_fresh (env : Env) (x : Name) (slot : EnvSlot) :
+    env.fresh x →
+    (env.update x slot).erase x = env := by
+  intro hfresh
+  cases env with
+  | mk slotAt =>
+      simp [erase, update, fresh] at hfresh ⊢
+      funext y
+      by_cases hy : y = x
+      · subst hy
+        simpa using hfresh.symm
+      · simp [hy]
 
 end Env
 
@@ -317,6 +334,42 @@ def LVal.base : LVal → Name
   | .var x => x
   | .deref lv => LVal.base lv
 
+/-- Syntactic occurrence of a variable name in an lvalue. -/
+def LVal.Mentions (x : Name) : LVal → Prop
+  | .var y => y = x
+  | .deref lv => LVal.Mentions x lv
+
+mutual
+  /-- Syntactic occurrence of a variable name in a term. -/
+  def Term.Mentions (x : Name) : Term → Prop
+    | .block _ terms => TermList.Mentions x terms
+    | .letMut y initialiser => y = x ∨ Term.Mentions x initialiser
+    | .assign lhs rhs => LVal.Mentions x lhs ∨ Term.Mentions x rhs
+    | .box operand => Term.Mentions x operand
+    | .borrow _ operand => LVal.Mentions x operand
+    | .move operand => LVal.Mentions x operand
+    | .copy operand => LVal.Mentions x operand
+    | .val _ => False
+    | .missing => False
+    | .eq lhs rhs => Term.Mentions x lhs ∨ Term.Mentions x rhs
+    | .ite condition trueBranch falseBranch =>
+        Term.Mentions x condition ∨ Term.Mentions x trueBranch ∨
+          Term.Mentions x falseBranch
+    | .whileLoop _ condition body =>
+        Term.Mentions x condition ∨ Term.Mentions x body
+    | .whileCond _ conditionInFlight condition body =>
+        Term.Mentions x conditionInFlight ∨ Term.Mentions x condition ∨
+          Term.Mentions x body
+    | .whileBody _ bodyInFlight condition body =>
+        Term.Mentions x bodyInFlight ∨ Term.Mentions x condition ∨
+          Term.Mentions x body
+
+  /-- Syntactic occurrence of a variable name in a term list. -/
+  def TermList.Mentions (x : Name) : List Term → Prop
+    | [] => False
+    | term :: rest => Term.Mentions x term ∨ TermList.Mentions x rest
+end
+
 /-- Variables occurring in a full type (the base names of all borrow targets). -/
 def Ty.vars : Ty → List Name
   | .unit => []
@@ -333,6 +386,35 @@ def PartialTy.vars : PartialTy → List Name
   | .ty t => Ty.vars t
   | .box inner => PartialTy.vars inner
   | .undef _ => []
+
+/-- Variables occurring anywhere in a partial type, including dead `undef` shadows.
+
+`PartialTy.vars` deliberately ignores `undef` for live-borrow invariants.  Ghost
+erasure also has to preserve shape checks, and those can inspect the type carried
+under `undef`, so freshness for anonymous equality slots uses this stronger
+view. -/
+def PartialTy.allVars : PartialTy → List Name
+  | .ty t => Ty.vars t
+  | .box inner => PartialTy.allVars inner
+  | .undef t => Ty.vars t
+
+/-- A name does not occur in any borrow target inside an environment type,
+including the type shadows carried below `undef`. -/
+def Env.TypeNameFresh (env : Env) (x : Name) : Prop :=
+  ∀ y slot, env.slotAt y = some slot → x ∉ PartialTy.allVars slot.ty
+
+namespace StoreTyping
+
+/-- A name does not occur in any live borrow target inside store-typed values. -/
+def TypeNameFresh (typing : StoreTyping) (x : Name) : Prop :=
+  ∀ location ty, typing.tyOf location = some ty → x ∉ Ty.vars ty
+
+@[simp] theorem empty_typeNameFresh (x : Name) :
+    TypeNameFresh StoreTyping.empty x := by
+  intro location ty hlookup
+  simp [StoreTyping.empty] at hlookup
+
+end StoreTyping
 
 /-- A fixed rank function witnessing linearizability of an environment. -/
 def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
@@ -702,6 +784,13 @@ def EnvJoinSameShape (branch join : Env) : Prop :=
     join.slotAt x = some joinSlot →
     PartialTy.sameShape branchSlot.ty joinSlot.ty
 
+def LoopInvariantNameFresh (entry inv : Env) (condition body : Term) : Prop :=
+  ∀ erased checked,
+    Env.TypeNameFresh (entry.eraseMany erased) checked →
+    ¬ Term.Mentions checked condition →
+    ¬ Term.Mentions checked body →
+    Env.TypeNameFresh (inv.eraseMany erased) checked
+
 /-- A join is an upper bound of its left component. -/
 theorem EnvJoin.left_le {left right join : Env} :
     EnvJoin left right join →
@@ -975,29 +1064,26 @@ mutual
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
     /-- T-Eqal, Section 6.1.2, with the paper's ghost-slot check.
 
-    The paper types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous
-    fresh `γ` and erases `γ` afterwards, so that borrows inside `T₁` keep
-    prohibiting conflicting uses while the right operand is typed.  The
-    third premise is exactly that check.  The ghost slot has no runtime
-    counterpart, so its derivation cannot be threaded through preservation
-    (safe abstraction `S ∼ Γ` demands two-way domain agreement), and
-    eliminating it afterwards would need the fresh-slot thinning
-    metatheorem, which the paper does not provide.  Following the
-    rule-carried-obligation convention (cf. `T-While`), the rule
-    therefore *also* carries the eliminated form (fourth premise) — in the
-    paper's system it is implied by the ghost form, and it is what the
-    metatheory threads.  The ghost premise is a pure filter restoring the
-    paper's strictness: a right operand that conflicts with borrows in the
-    left operand's result type is rejected. -/
+    The right operand is typed only in `Γ₂[γ ↦ ⟨T₁⟩^l]`, where `γ` is a fresh
+    anonymous slot representing the left operand value that remains live while
+    the right operand is evaluated.  The result environment erases `γ` again.
+
+    The explicit non-occurrence premise records that the anonymous slot is not
+    source-addressable syntax.  It is what lets the metatheory thin the ghost
+    slot back out after it has done its borrow-conflict filtering job. -/
     | eq {env₁ env₂ env₃ envGhost : Env} {ghost : Name}
         {typing : StoreTyping} {lifetime : Lifetime}
-        {lhs rhs : Term} {lhsTy rhsTy ghostRhsTy : Ty} :
+        {lhs rhs : Term} {lhsTy rhsTy : Ty} :
         TermTyping env₁ typing lifetime lhs lhsTy env₂ →
         env₂.fresh ghost →
+        Env.TypeNameFresh env₂ ghost →
+        ghost ∉ Ty.vars lhsTy →
+        StoreTyping.TypeNameFresh typing ghost →
         TermTyping
           (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
-          typing lifetime rhs ghostRhsTy envGhost →
-        TermTyping env₂ typing lifetime rhs rhsTy env₃ →
+          typing lifetime rhs rhsTy envGhost →
+        ¬ Term.Mentions ghost rhs →
+        env₃ = envGhost.erase ghost →
         CopyTy lhsTy →
         CopyTy rhsTy →
         ShapeCompatible env₃ (.ty lhsTy) (.ty rhsTy) →
@@ -1125,6 +1211,7 @@ mutual
         Coherent envInv →
         Linearizable envInv →
         BorrowSafeEnv envInv →
+        LoopInvariantNameFresh env₁ envInv condition body →
         TermTyping envInv typing lifetime condition .bool env₂ →
         TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
         WellFormedTy env₃ bodyTy lifetime →
@@ -1147,6 +1234,26 @@ mutual
         TermListTyping env₂ typing lifetime rest finalTy env₃ →
         TermListTyping env₁ typing lifetime (term :: rest) finalTy env₃
 end
+
+theorem BorrowSafeEnv.erase {env : Env} {ghost : Name} :
+    BorrowSafeEnv env →
+    BorrowSafeEnv (env.erase ghost) := by
+  intro hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    hx hy htargetMutable htargetOther hconflict
+  rcases hx with ⟨xSlot, hxSlot, hxContains⟩
+  rcases hy with ⟨ySlot, hySlot, hyContains⟩
+  have hxOrig : env ⊢ x ↝ (&mut targetsMutable) := by
+    by_cases hxGhost : x = ghost
+    · subst hxGhost
+      simp [Env.erase] at hxSlot
+    · exact ⟨xSlot, by simpa [Env.erase, hxGhost] using hxSlot, hxContains⟩
+  have hyOrig : env ⊢ y ↝ (Ty.borrow mutable targetsOther) := by
+    by_cases hyGhost : y = ghost
+    · subst hyGhost
+      simp [Env.erase] at hySlot
+    · exact ⟨ySlot, by simpa [Env.erase, hyGhost] using hySlot, hyContains⟩
+  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    hxOrig hyOrig htargetMutable htargetOther hconflict
 
 end Paper
 end LwRust

@@ -114,6 +114,178 @@ theorem whileJoinEnv_slotAt_none (targets : List LVal) {name : Name}
     (whileJoinEnv targets).slotAt name = none := by
   simp [whileJoinEnv, Env.update, Env.empty, hq, hy, hx]
 
+theorem whileJoin_typeNameFresh_gamma {targets : List LVal} :
+    WhileJoinGoodTargets targets →
+    Env.TypeNameFresh (whileJoinEnv targets) "γ" := by
+  intro htargets root slot hslot
+  by_cases hq : root = "q"
+  · subst hq
+    have hslotEq : slot = whileJoinQSlot targets :=
+      Option.some.inj (hslot.symm.trans (whileJoinEnv_slotAt_q targets))
+    subst slot
+    intro hv
+    simp only [whileJoinQSlot, PartialTy.allVars, Ty.vars, List.mem_map] at hv
+    rcases hv with ⟨target, htarget, hbase⟩
+    rcases htargets target htarget with rfl | rfl <;>
+      simp [LVal.base] at hbase
+  · by_cases hy : root = "y"
+    · subst hy
+      have hslotEq : slot = whileJoinIntSlot :=
+        Option.some.inj (hslot.symm.trans (whileJoinEnv_slotAt_y targets))
+      subst slot
+      simp [whileJoinIntSlot, PartialTy.allVars, Ty.vars]
+    · by_cases hx : root = "x"
+      · subst hx
+        have hslotEq : slot = whileJoinIntSlot :=
+          Option.some.inj (hslot.symm.trans (whileJoinEnv_slotAt_x targets))
+        subst slot
+        simp [whileJoinIntSlot, PartialTy.allVars, Ty.vars]
+      · have hnone : (whileJoinEnv targets).slotAt root = none :=
+          whileJoinEnv_slotAt_none targets hq hy hx
+        rw [hnone] at hslot
+        cases hslot
+
+theorem Env.eraseMany_slotAt_none_of_slotAt_none {env : Env}
+    {erased : List Name} {name : Name} :
+    env.slotAt name = none →
+    (env.eraseMany erased).slotAt name = none := by
+  intro hnone
+  induction erased generalizing env with
+  | nil =>
+      simpa [Env.eraseMany] using hnone
+  | cons head rest ih =>
+      have hnone' : (env.erase head).slotAt name = none := by
+        by_cases hname : name = head
+        · subst hname
+          simp [Env.erase]
+        · simpa [Env.erase, hname] using hnone
+      simpa [Env.eraseMany] using ih (env := env.erase head) hnone'
+
+theorem Env.eraseMany_slotAt_none_of_mem {env : Env}
+    {erased : List Name} {name : Name} :
+    name ∈ erased →
+    (env.eraseMany erased).slotAt name = none := by
+  intro hmem
+  induction erased generalizing env with
+  | nil =>
+      cases hmem
+  | cons head rest ih =>
+      simp only [List.mem_cons] at hmem
+      rcases hmem with hhead | hrest
+      · subst hhead
+        have hnone : (env.erase name).slotAt name = none := by
+          simp [Env.erase]
+        simpa [Env.eraseMany] using
+          Env.eraseMany_slotAt_none_of_slotAt_none
+            (env := env.erase name) (erased := rest) hnone
+      · simpa [Env.eraseMany] using ih (env := env.erase head) hrest
+
+theorem Env.not_mem_of_eraseMany_slotAt_some {env : Env}
+    {erased : List Name} {name : Name} {slot : EnvSlot} :
+    (env.eraseMany erased).slotAt name = some slot →
+    name ∉ erased := by
+  intro hslot hmem
+  have hnone : (env.eraseMany erased).slotAt name = none :=
+    Env.eraseMany_slotAt_none_of_mem (env := env) hmem
+  rw [hslot] at hnone
+  cases hnone
+
+theorem Env.eraseMany_slotAt_eq_of_not_mem {env : Env}
+    {erased : List Name} {name : Name} :
+    name ∉ erased →
+    (env.eraseMany erased).slotAt name = env.slotAt name := by
+  intro hnot
+  induction erased generalizing env with
+  | nil =>
+      simp [Env.eraseMany]
+  | cons head rest ih =>
+      simp only [List.mem_cons, not_or] at hnot
+      rcases hnot with ⟨hhead, hrest⟩
+      have hlookup := ih (env := env.erase head) hrest
+      simpa [Env.eraseMany, Env.erase, hhead] using hlookup
+
+theorem Env.slotAt_of_eraseMany_slotAt {env : Env}
+    {erased : List Name} {name : Name} {slot : EnvSlot} :
+    (env.eraseMany erased).slotAt name = some slot →
+    env.slotAt name = some slot := by
+  intro hslot
+  have hnot : name ∉ erased :=
+    Env.not_mem_of_eraseMany_slotAt_some (env := env) hslot
+  have hlookup :=
+    Env.eraseMany_slotAt_eq_of_not_mem (env := env) (erased := erased)
+      (name := name) hnot
+  rw [hlookup] at hslot
+  exact hslot
+
+theorem whileJoin_loopInvariantNameFresh :
+    LoopInvariantNameFresh whileJoinEntryEnv whileJoinInvEnv
+      whileJoinCondition whileJoinBody := by
+  intro erased checked hentryFresh _hnotCondition hnotBody root slot hslot
+  by_cases hq : root = "q"
+  · subst hq
+    have hqNotErased : "q" ∉ erased :=
+      Env.not_mem_of_eraseMany_slotAt_some
+        (env := whileJoinInvEnv) (erased := erased) hslot
+    have hslotEq : slot = whileJoinQSlot [.var "x", .var "y"] := by
+      have hbase :
+          whileJoinInvEnv.slotAt "q" = some slot :=
+        Env.slotAt_of_eraseMany_slotAt
+          (env := whileJoinInvEnv) (erased := erased) hslot
+      exact Option.some.inj
+        (hbase.symm.trans (whileJoinEnv_slotAt_q [.var "x", .var "y"]))
+    have hentryQ :
+        (whileJoinEntryEnv.eraseMany erased).slotAt "q" =
+          some (whileJoinQSlot [.var "x"]) := by
+      have hlookup :=
+        Env.eraseMany_slotAt_eq_of_not_mem (env := whileJoinEntryEnv)
+          (erased := erased) (name := "q") hqNotErased
+      rw [hlookup]
+      exact whileJoinEnv_slotAt_q [.var "x"]
+    have hcheckedX : checked ≠ "x" := by
+      intro hchecked
+      have hfreshQ := hentryFresh "q" (whileJoinQSlot [.var "x"]) hentryQ
+      apply hfreshQ
+      subst hchecked
+      simp [whileJoinQSlot, PartialTy.allVars, Ty.vars, LVal.base]
+    have hcheckedY : checked ≠ "y" := by
+      intro hchecked
+      apply hnotBody
+      subst hchecked
+      simp [whileJoinBody, Term.Mentions, LVal.Mentions]
+    subst slot
+    simp [whileJoinQSlot, PartialTy.allVars, Ty.vars, LVal.base,
+      hcheckedX, hcheckedY]
+  · by_cases hy : root = "y"
+    · subst hy
+      have hbase :
+          whileJoinInvEnv.slotAt "y" = some slot :=
+        Env.slotAt_of_eraseMany_slotAt
+          (env := whileJoinInvEnv) (erased := erased) hslot
+      have hslotEq : slot = whileJoinIntSlot :=
+        Option.some.inj
+          (hbase.symm.trans (whileJoinEnv_slotAt_y [.var "x", .var "y"]))
+      subst slot
+      simp [whileJoinIntSlot, PartialTy.allVars, Ty.vars]
+    · by_cases hx : root = "x"
+      · subst hx
+        have hbase :
+            whileJoinInvEnv.slotAt "x" = some slot :=
+          Env.slotAt_of_eraseMany_slotAt
+            (env := whileJoinInvEnv) (erased := erased) hslot
+        have hslotEq : slot = whileJoinIntSlot :=
+          Option.some.inj
+            (hbase.symm.trans (whileJoinEnv_slotAt_x [.var "x", .var "y"]))
+        subst slot
+        simp [whileJoinIntSlot, PartialTy.allVars, Ty.vars]
+      · have hbase :
+            whileJoinInvEnv.slotAt root = some slot :=
+          Env.slotAt_of_eraseMany_slotAt
+            (env := whileJoinInvEnv) (erased := erased) hslot
+        have hnone : whileJoinInvEnv.slotAt root = none :=
+          whileJoinEnv_slotAt_none [.var "x", .var "y"] hq hy hx
+        rw [hnone] at hbase
+        cases hbase
+
 /-- Updating `q`'s slot moves between the example environments. -/
 theorem whileJoinEnv_update_q (targets targets' : List LVal) :
     (whileJoinEnv targets).update "q" (whileJoinQSlot targets') =
@@ -809,6 +981,7 @@ from the invariant environment (the loop's main premises) and once from the
 entry environment (the rule-carried monotonicity premises). -/
 
 theorem whileJoinCondition_typing (targets : List LVal)
+    (htypeFresh : Env.TypeNameFresh (whileJoinEnv targets) "γ")
     (hderef : LValTyping (whileJoinEnv targets) (.deref (.var "q"))
       (.ty .int) Lifetime.root) :
     TermTyping (whileJoinEnv targets) StoreTyping.empty Lifetime.root
@@ -818,8 +991,15 @@ theorem whileJoinCondition_typing (targets : List LVal)
     (TermTyping.copy hderef CopyTy.int
       (whileJoin_not_readProhibited targets _))
     (by simp [Env.fresh, whileJoinEnv, Env.update, Env.empty])
+    htypeFresh
+    (by simp [Ty.vars])
+    (by simp [StoreTyping.TypeNameFresh, StoreTyping.empty])
     (TermTyping.const ValueTyping.int)
-    (TermTyping.const ValueTyping.int)
+    (by simp [Term.Mentions])
+    (by
+      exact (Env.erase_update_fresh (whileJoinEnv targets) "γ"
+        { ty := .ty Ty.int, lifetime := Lifetime.root } (by
+          simp [Env.fresh, whileJoinEnv, Env.update, Env.empty])).symm)
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
@@ -869,11 +1049,16 @@ theorem whileRetargetLoop_typing :
     ⟨fun name => if name = "q" then 1 else 0,
       whileJoin_linearizedBy [.var "x", .var "y"] whileJoinInv_goodTargets⟩
     (whileJoin_borrowSafe [.var "x", .var "y"])
-    (whileJoinCondition_typing [.var "x", .var "y"] whileJoinInv_deref_q_typing)
+    whileJoin_loopInvariantNameFresh
+    (whileJoinCondition_typing [.var "x", .var "y"]
+      (whileJoin_typeNameFresh_gamma whileJoinInv_goodTargets)
+      whileJoinInv_deref_q_typing)
     (whileJoinBody_typing [.var "x", .var "y"] whileJoinInv_goodTargets)
     WellFormedTy.unit
     whileJoinBack_dropLifetime
-    (whileJoinCondition_typing [.var "x"] whileJoinEntry_deref_q_typing)
+    (whileJoinCondition_typing [.var "x"]
+      (whileJoin_typeNameFresh_gamma whileJoinEntry_goodTargets)
+      whileJoinEntry_deref_q_typing)
     (whileJoinBody_typing [.var "x"] whileJoinEntry_goodTargets)
 
 end Paper

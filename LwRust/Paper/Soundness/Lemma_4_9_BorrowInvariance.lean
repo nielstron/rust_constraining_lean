@@ -1055,10 +1055,11 @@ consult the store typing: any store typing types them identically.
 theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     {typing typing' : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
+    (∀ ghost, StoreTyping.TypeNameFresh typing' ghost) →
     SourceTerm term →
     TermTyping env₁ typing lifetime term ty env₂ →
     TermTyping env₁ typing' lifetime term ty env₂ := by
-  intro hsource htyping
+  intro hfreshTyping hsource htyping
   exact TermTyping.rec
     (motive_1 := fun env _t l term ty env₂ _ =>
       SourceTerm term → TermTyping env typing' l term ty env₂)
@@ -1092,11 +1093,12 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         hnotWrite ih hsource =>
       TermTyping.assign (ih (SourceTerm.assign_inner hsource)) hLhsPost
         hshape hwf hwrite hranked hcoh hcontained hnotWrite)
-    (fun _hLhs hfresh _hghostRhs _hRhs hcopyL hcopyR hshape ihL ihGhost ihR
-        hsource =>
+    (fun _hLhs hfresh htypeFresh htyFresh _hstoreFresh _hghostRhs hnotMention henvEq
+        hcopyL hcopyR hshape ihL ihGhost hsource =>
       TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
+        htypeFresh htyFresh (hfreshTyping _)
         (ihGhost (SourceTerm.eq_rhs hsource))
-        (ihR (SourceTerm.eq_rhs hsource)) hcopyL hcopyR hshape)
+        hnotMention henvEq hcopyL hcopyR hshape)
     (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
         hcontained hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
@@ -1115,10 +1117,11 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv
+    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse hnameFresh _hcondInv _hbodyInv
         hwellTy hdrop _hcondEntry _hbodyEntry
         ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
       TermTyping.whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
+        hnameFresh
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
         hwellTy hdrop
@@ -2697,6 +2700,200 @@ theorem block_preserves_wellFormed {env₁ env₂ env₃ : Env}
   intro hchild hwellBody _hterms hwellTy hdrop
   exact Env.dropLifetime_preserves_wellFormed_child hchild hwellBody hwellTy hdrop
 
+theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
+    (fuel : Nat) {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
+    {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
+    term.size ≤ fuel →
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    WellFormedEnv env₁ lifetime →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  induction fuel generalizing env₁ env₂ typing lifetime term ty with
+  | zero =>
+      intro hsize _hrefs _hwellFormed _htyping
+      cases term <;> simp [Term.size] at hsize
+  | succ fuel ihFuel =>
+      intro hsize hrefs hwellFormed htyping
+      refine TermTyping.rec
+        (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
+          term.size ≤ fuel.succ →
+          currentTyping = typing →
+          WellFormedEnv env lifetime →
+          WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+        (motive_2 := fun env currentTyping lifetime terms ty env₂ _ =>
+          Term.size (.block lifetime terms) ≤ fuel.succ →
+          currentTyping = typing →
+          WellFormedEnv env lifetime →
+          WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+        (fun {_env _typing _lifetime _value _ty} hvalueTyping _hsize
+            htypingEq hwellFormed =>
+          by
+            subst htypingEq
+            exact ⟨hwellFormed,
+              valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping⟩)
+        (fun {_env _typing _lifetime _ty} hwellTy _hloanFree _hsize
+            _htypingEq hwellFormed =>
+          ⟨hwellFormed, hwellTy⟩)
+        (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
+            _hsize _htypingEq hwellFormed =>
+          ⟨hwellFormed, copyTy_result_wellFormed hwellFormed hLv hcopy⟩)
+        (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty}
+            hLv hnotWrite hmove _hsize _htypingEq hwellFormed =>
+          move_preserves_wellFormed hwellFormed hLv hnotWrite hmove)
+        (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hmutable
+            _hwrite _hsize _htypingEq hwellFormed =>
+          ⟨hwellFormed,
+            WellFormedTy.borrow
+              (BorrowTargetsWellFormed.singleton hLv
+                (LValTyping.lifetime_outlives_one hwellFormed hLv)
+                (LValTyping.base_outlives_one hwellFormed hLv))⟩)
+        (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hread
+            _hsize _htypingEq hwellFormed =>
+          ⟨hwellFormed,
+            WellFormedTy.borrow
+              (BorrowTargetsWellFormed.singleton hLv
+                (LValTyping.lifetime_outlives_one hwellFormed hLv)
+                (LValTyping.base_outlives_one hwellFormed hLv))⟩)
+        (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih hsize
+            htypingEq hwellFormed =>
+          let result := ih
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed
+          ⟨result.1, WellFormedTy.box result.2⟩)
+        (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
+            hblockChild hterms hwellTy hdrop ih hsize htypingEq hwellFormed =>
+          let bodyResult :=
+            ih hsize htypingEq
+              (WellFormedEnv.weaken hwellFormed
+                (LifetimeChild.outlives hblockChild))
+          block_preserves_wellFormed
+            hblockChild bodyResult.1 hterms hwellTy hdrop)
+        (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
+            _hfresh _hterm hfreshOut hcohObligations henv₃ ih hsize htypingEq
+            hwellFormed =>
+          by
+            let result := ih
+              (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+              htypingEq hwellFormed
+            refine ⟨?_, WellFormedTy.unit⟩
+            rw [henv₃]
+            exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
+              result.1 result.2 hfreshOut hcohObligations)
+        (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs
+              _oldTy _rhs _rhsTy}
+            hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+            hnotWrite ih hsize htypingEq hwellFormed =>
+          by
+            let result := ih
+              (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+              htypingEq hwellFormed
+            rcases hranked with
+              ⟨φ, hlinBy, hbelow⟩
+            have hlin3By :=
+              EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
+                hwrite hlinBy hbelow
+            have hcoh3 := EnvWrite.preserves_coherent_of_obligations
+              result.1.2.2.1 hwriteCoh
+            exact ⟨⟨hcontained,
+                EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
+                hcoh3,
+                Linearizable.of_linearizedBy hlin3By⟩,
+                WellFormedTy.unit⟩)
+        (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+              _lhsTy _rhsTy}
+            _hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs hnotMention
+            henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize htypingEq
+            hwellFormed =>
+          by
+            subst htypingEq
+            let leftResult := ihL
+              (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+              rfl hwellFormed
+            have hRhsErased : TermTyping _env₂ _typing _lifetime _rhs _rhsTy
+                (_envGhost.erase _ghost) :=
+              TermTyping.erase_ghost
+                (env := _env₂)
+                (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
+                hfresh htypeFresh (by simpa [PartialTy.vars] using htyFresh)
+                hstoreFresh hnotMention hghostRhs
+            have rightResult :=
+              ihFuel
+                (env₁ := _env₂)
+                (env₂ := _envGhost.erase _ghost)
+                (typing := _typing)
+                (lifetime := _lifetime)
+                (term := _rhs)
+                (ty := _rhsTy)
+                (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+                hrefs leftResult.1 hRhsErased
+            exact ⟨by simpa [henvEq] using rightResult.1, WellFormedTy.bool⟩)
+        (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+              _trueBranch _falseBranch _trueTy _falseTy _joinTy}
+            _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
+            hwellJoin hcontained hcoherent hlinear _hborrowSafe _hresultSafe
+            ihCondition ihTrue ihFalse hsize htypingEq hwellFormed =>
+          let conditionResult := ihCondition
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed
+          let trueResult := ihTrue
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq conditionResult.1
+          let falseResult := ihFalse
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq conditionResult.1
+          ⟨⟨hcontained, by
+              exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
+                (EnvJoin.lifetimesPreserved_left _henvJoin),
+            hcoherent, hlinear⟩, hwellJoin⟩)
+        (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+              _trueBranch _falseBranch _trueTy _falseTy}
+            _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
+            hsize htypingEq hwellFormed =>
+          let conditionResult := ihCondition
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed
+          ihTrue
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq conditionResult.1)
+        (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
+              _bodyTy}
+            _hchild _hcond _hbody _hdiverges ihCond _ihBody hsize htypingEq
+            hwellFormed =>
+          let conditionResult := ihCond
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed
+          ⟨conditionResult.1, WellFormedTy.unit⟩)
+        (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+              _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+            _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hnameFresh _hcondInv
+            _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+            ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry hsize htypingEq
+            hwellFormed =>
+          let invWellFormed : WellFormedEnv _envInv _lifetime :=
+            ⟨hcbwf,
+              EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
+                (EnvJoin.lifetimesPreserved_left hjoin),
+              hcoh, hlin⟩
+          let conditionResult := ihCondInv
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq invWellFormed
+          ⟨conditionResult.1, WellFormedTy.unit⟩)
+        (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih hsize
+            htypingEq hwellFormed =>
+          ih
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed)
+        (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
+            _hterm _hrest ihHead ihRest hsize htypingEq hwellFormed =>
+          let headResult := ihHead
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed
+          ihRest
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq headResult.1)
+        htyping hsize rfl hwellFormed
+
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
@@ -2709,132 +2906,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
   intro hrefs _hvalidState _hvalidStoreTyping hwellFormed _hsafe htyping
-  exact TermTyping.rec
-    (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
-      currentTyping = typing →
-      WellFormedEnv env lifetime →
-      WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
-    (motive_2 := fun env currentTyping lifetime terms ty env₂ _ =>
-      currentTyping = typing →
-      WellFormedEnv env lifetime →
-      WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
-    (fun {_env _typing _lifetime _value _ty} hvalueTyping htypingEq
-        hwellFormed =>
-      by
-        subst htypingEq
-        exact ⟨hwellFormed,
-          valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping⟩)
-    (fun {_env _typing _lifetime _ty} hwellTy _hloanFree _htypingEq hwellFormed =>
-      ⟨hwellFormed, hwellTy⟩)
-    (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
-        _htypingEq hwellFormed =>
-      ⟨hwellFormed, copyTy_result_wellFormed hwellFormed hLv hcopy⟩)
-    (fun {_env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty} hLv hnotWrite hmove
-        _htypingEq hwellFormed =>
-      move_preserves_wellFormed hwellFormed hLv hnotWrite hmove)
-    (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hmutable _hwrite
-        _htypingEq hwellFormed =>
-      ⟨hwellFormed,
-        WellFormedTy.borrow
-          (BorrowTargetsWellFormed.singleton hLv
-            (LValTyping.lifetime_outlives_one hwellFormed hLv)
-            (LValTyping.base_outlives_one hwellFormed hLv))⟩)
-    (fun {_env _typing _lifetime _valueLifetime lv _ty} hLv _hread
-        _htypingEq hwellFormed =>
-      ⟨hwellFormed,
-        WellFormedTy.borrow
-          (BorrowTargetsWellFormed.singleton hLv
-            (LValTyping.lifetime_outlives_one hwellFormed hLv)
-            (LValTyping.base_outlives_one hwellFormed hLv))⟩)
-    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
-        hwellFormed =>
-      let result := ih htypingEq hwellFormed
-      ⟨result.1, WellFormedTy.box result.2⟩)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty}
-        hblockChild hterms hwellTy hdrop ih htypingEq hwellFormed =>
-      let bodyResult :=
-        ih htypingEq
-          (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hblockChild))
-      block_preserves_wellFormed
-        hblockChild bodyResult.1 hterms hwellTy hdrop)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _x _term _ty}
-        _hfresh _hterm hfreshOut hcohObligations henv₃ ih htypingEq hwellFormed =>
-      by
-        let result := ih htypingEq hwellFormed
-        refine ⟨?_, WellFormedTy.unit⟩
-        rw [henv₃]
-        exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
-          result.1 result.2 hfreshOut hcohObligations)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
-        hnotWrite ih
-        htypingEq hwellFormed =>
-      by
-        let result := ih htypingEq hwellFormed
-        rcases hranked with
-          ⟨φ, hlinBy, hbelow⟩
-        have hlin3By :=
-          EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
-            hwrite hlinBy hbelow
-        have hcoh3 := EnvWrite.preserves_coherent_of_obligations
-          result.1.2.2.1 hwriteCoh
-        exact ⟨⟨hcontained,
-            EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
-            hcoh3,
-            Linearizable.of_linearizedBy hlin3By⟩,
-            WellFormedTy.unit⟩)
-    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-          _lhsTy _rhsTy _ghostRhsTy}
-        _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR _hshape
-        ihL _ihGhost ihR htypingEq hwellFormed =>
-      let leftResult := ihL htypingEq hwellFormed
-      let rightResult := ihR htypingEq leftResult.1
-      ⟨rightResult.1, WellFormedTy.bool⟩)
-    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
-          _falseBranch _trueTy _falseTy _joinTy}
-        _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
-        hcontained hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
-        htypingEq hwellFormed =>
-      let conditionResult := ihCondition htypingEq hwellFormed
-      let trueResult := ihTrue htypingEq conditionResult.1
-      let falseResult := ihFalse htypingEq conditionResult.1
-      ⟨⟨hcontained, by
-          exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
-            (EnvJoin.lifetimesPreserved_left _henvJoin),
-        hcoherent, hlinear⟩, hwellJoin⟩)
-    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-          _falseBranch _trueTy _falseTy}
-        _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
-        htypingEq hwellFormed =>
-      let conditionResult := ihCondition htypingEq hwellFormed
-      ihTrue htypingEq conditionResult.1)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-          _bodyTy}
-        _hchild _hcond _hbody _hdiverges ihCond _ihBody
-        htypingEq hwellFormed =>
-      let conditionResult := ihCond htypingEq hwellFormed
-      ⟨conditionResult.1, WellFormedTy.unit⟩)
-    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hcondInv _hbodyInv
-        _hwellTy _hdrop _hcondEntry _hbodyEntry
-        ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
-        htypingEq hwellFormed =>
-      let invWellFormed : WellFormedEnv _envInv _lifetime :=
-        ⟨hcbwf,
-          EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
-            (EnvJoin.lifetimesPreserved_left hjoin),
-          hcoh, hlin⟩
-      let conditionResult := ihCondInv htypingEq invWellFormed
-      ⟨conditionResult.1, WellFormedTy.unit⟩)
-    (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
-        hwellFormed =>
-      ih htypingEq hwellFormed)
-    (fun {_env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy}
-        _hterm _hrest ihHead ihRest htypingEq hwellFormed =>
-      let headResult := ihHead htypingEq hwellFormed
-      ihRest htypingEq headResult.1)
-    htyping rfl hwellFormed
+  exact typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
+    term.size (Nat.le_refl _) hrefs hwellFormed htyping
 
 theorem borrowInvariance_emptyStoreTyping {store : ProgramStore}
     {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term}
@@ -2914,7 +2987,8 @@ theorem typingPreservesWellFormed_of_sourceTerm
   exact typingPreservesWellFormed_of_ruleCarriedObligations
     (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
     hvalidState (sourceTerm_validStoreTyping_empty_any hsource) hwellFormed
-    hsafe (TermTyping.retype_of_sourceTerm hsource htyping)
+    hsafe (TermTyping.retype_of_sourceTerm
+      (fun ghost => StoreTyping.empty_typeNameFresh ghost) hsource htyping)
 
 /-- Lemma 4.9, Borrow Invariance, for source terms (no store-typing premise). -/
 theorem borrowInvariance_of_sourceTerm

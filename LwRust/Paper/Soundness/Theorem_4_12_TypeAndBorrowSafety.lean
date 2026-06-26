@@ -160,9 +160,11 @@ preservation (Lemma 4.11), the well-formedness induction (Lemma 4.9), and the
 borrow-safety induction (Corollary 4.14), and re-establishes the operational
 store facts from step-stable finite support.
 -/
-theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
+theorem reachable_progress_bounded (fuel : Nat)
+    {store store' : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
     {ty : Ty} :
+    term.size ≤ fuel →
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
@@ -173,10 +175,17 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term store' term' →
     ProgressResult store' lifetime term' := by
-  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+  induction fuel generalizing store store' env₁ env₂ typing lifetime term term' ty with
+  | zero =>
+      intro hsize _hsource _hvalidRuntime _hvalidStoreTyping _hwellFormed
+        _hborrowSafe _hsafe _hfinite _htyping _hmulti
+      cases term <;> simp [Term.size] at hsize
+  | succ fuel ihFuel =>
+  intro hsize hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
     hfinite htyping hmulti
   refine TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
+      term.size ≤ fuel.succ →
       currentTyping = typing →
       SourceTerm term →
       ∀ (store store' : ProgramStore) (term' : Term),
@@ -189,6 +198,7 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
         MultiStep store lifetime term store' term' →
         ProgressResult store' lifetime term')
     (motive_2 := fun env currentTyping blockLifetime terms ty env₂ _ =>
+      Term.size (.block blockLifetime terms) ≤ fuel.succ →
       currentTyping = typing →
       SourceTerm (.block blockLifetime terms) →
       ∀ (outerLifetime : Lifetime) (store store' : ProgramStore)
@@ -206,19 +216,19 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
     ?whileLoopDiverging ?whileLoop ?singleton ?cons
-    htyping rfl hsource store store' term' hvalidRuntime hvalidStoreTyping
+    htyping hsize rfl hsource store store' term' hvalidRuntime hvalidStoreTyping
     hwellFormed hborrowSafe hsafe hfinite hmulti
   -- T-Const: values are terminal; runs from them are empty.
   case const =>
-    intro _env _typing _lifetime _value _ty _hvalueTyping _htypingEq _hsource
-      store store' term' _hvalid _hvst _hwf _hbs _hsafe _hfs hmulti
+    intro _env _typing _lifetime _value _ty _hvalueTyping _hsize _htypingEq
+      _hsource store store' term' _hvalid _hvst _hwf _hbs _hsafe _hfs hmulti
     rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
     subst hstore
     subst hterm
     exact Or.inl (value_terminal _)
   case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _htypingEq _hsource
-      store store' term' _hvalid _hvst _hwf _hbs _hsafe _hfs hmulti
+    intro _env _typing _lifetime _ty _hwellTy _hloanFree _hsize _htypingEq
+      _hsource store store' term' _hvalid _hvst _hwf _hbs _hsafe _hfs hmulti
     rcases multistep_missing_inv hmulti with ⟨hstore, hterm⟩
     subst hstore
     subst hterm
@@ -226,8 +236,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- T-Copy: a single redex; afterwards the term is a value.
   case copy =>
     intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
-      htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs hsafe _hfs
-      hmulti
+      _hsize htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs
+      hsafe _hfs hmulti
     cases htypingEq
     cases hmulti with
     | refl =>
@@ -243,8 +253,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- T-Move.
   case move =>
     intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty hLv hnotWrite
-      hmove htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs hsafe
-      _hfs hmulti
+      hmove _hsize htypingEq _hsource store store' term' _hvalid _hvst hwf
+      _hbs hsafe _hfs hmulti
     cases htypingEq
     cases hmulti with
     | refl =>
@@ -260,8 +270,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- T-MutBorrow.
   case mutBorrow =>
     intro _env _typing _lifetime _valueLifetime _lv _ty hLv hmutable hnotWrite
-      htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs hsafe _hfs
-      hmulti
+      _hsize htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs
+      hsafe _hfs hmulti
     cases htypingEq
     cases hmulti with
     | refl =>
@@ -276,8 +286,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
             exact Or.inl (value_terminal _)
   -- T-ImmBorrow.
   case immBorrow =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead htypingEq
-      _hsource store store' term' _hvalid _hvst hwf _hbs hsafe _hfs hmulti
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead _hsize
+      htypingEq _hsource store store' term' _hvalid _hvst hwf _hbs hsafe _hfs
+      hmulti
     cases htypingEq
     cases hmulti with
     | refl =>
@@ -292,14 +303,15 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
             exact Or.inl (value_terminal _)
   -- T-Box: either still inside the operand, or the box redex ended the run.
   case box =>
-    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih htypingEq hsource
-      store store' term' hvalid hvst hwf hbs hsafe hfs hmulti
+    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hsize htypingEq
+      hsource store store' term' hvalid hvst hwf hbs hsafe hfs hmulti
     cases htypingEq
     rcases multistep_box_prefix_inv hmulti with
       ⟨inner', hfinal, hms⟩ | ⟨midStore, value, _hms, hredex⟩
     · subst hfinal
       have hprogress :=
-        ih rfl (SourceTerm.box_inner hsource) store store' inner'
+        ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl (SourceTerm.box_inner hsource) store store' inner'
           (validRuntimeState_box_inner hvalid)
           (validStoreTyping_box_inner hvst) hwf hbs hsafe hfs hms
       rcases hprogress with hterminal | ⟨storeNext, termNext, hstep⟩
@@ -314,23 +326,25 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- T-Block: delegate to the body induction at the block lifetime.
   case block =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
-      hblockChild _hterms _hwellTy _hdrop ih htypingEq hsource store store'
-      term' hvalid hvst hwf hbs hsafe hfs hmulti
-    exact ih htypingEq hsource _lifetime store store' term' hblockChild hvalid
+      hblockChild _hterms _hwellTy _hdrop ih hsize htypingEq hsource store
+      store' term' hvalid hvst hwf hbs hsafe hfs hmulti
+    cases htypingEq
+    exact ih hsize rfl hsource _lifetime store store' term' hblockChild hvalid
       hvst (WellFormedEnv.weaken hwf (LifetimeChild.outlives hblockChild)) hbs
       hsafe hfs hmulti
   -- T-Declare: either still inside the initialiser, or the declare redex
   -- ended the run.
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hfresh _hterm
-      _hfreshOut _hcoh _henv ih htypingEq hsource store store' term' hvalid
-      hvst hwf hbs hsafe hfs hmulti
+      _hfreshOut _hcoh _henv ih hsize htypingEq hsource store store' term'
+      hvalid hvst hwf hbs hsafe hfs hmulti
     cases htypingEq
     rcases multistep_declare_prefix_inv hmulti with
       ⟨inner', hfinal, hms⟩ | ⟨midStore, value, _hms, hredex⟩
     · subst hfinal
       have hprogress :=
-        ih rfl (SourceTerm.declare_inner hsource) store store' inner'
+        ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl (SourceTerm.declare_inner hsource) store store' inner'
           (validRuntimeState_declare_inner hvalid)
           (validStoreTyping_declare_inner hvst) hwf hbs hsafe hfs hms
       rcases hprogress with hterminal | ⟨storeNext, termNext, hstep⟩
@@ -347,15 +361,16 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
       _rhsTy hRhs hLhsPost _hshape _hwellTy _hwrite _hranked _hcoh
-      _hcontained _hnotWrite ih htypingEq hsource store store' term' hvalid
-      hvst hwf hbs hsafe hfs hmulti
+      _hcontained _hnotWrite ih hsize htypingEq hsource store store' term'
+      hvalid hvst hwf hbs hsafe hfs hmulti
     cases htypingEq
     have hsourceRhs : SourceTerm _rhs := SourceTerm.assign_inner hsource
     rcases multistep_assign_prefix_inv hmulti with
       ⟨rhs', hfinal, hms⟩ | ⟨midStore, value, _hms, hredex⟩
     · subst hfinal
       have hprogress :=
-        ih rfl hsourceRhs store store' rhs'
+        ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceRhs store store' rhs'
           (validRuntimeState_assign_inner hvalid)
           (validStoreTyping_assign_inner hvst) hwf hbs hsafe hfs hms
       rcases hprogress with hterminal | ⟨storeNext, termNext, hstep⟩
@@ -388,10 +403,18 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- T-Eq.
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy _ghostRhsTy _hLhs _hfresh _hghostRhs _hRhs _hcopyL _hcopyR
-      _hshape ihL _ihGhost ihR htypingEq hsource store store' term' hvalid
-      hvst hwf hbs hsafe hfs hmulti
+      _lhsTy _rhsTy _hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs
+      hnotMention _henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize
+      htypingEq hsource store store' term' hvalid hvst hwf hbs hsafe hfs
+      hmulti
     cases htypingEq
+    have _hRhsErased : TermTyping _env₂ typing _lifetime _rhs _rhsTy
+        (_envGhost.erase _ghost) :=
+      TermTyping.erase_ghost
+        (env := _env₂)
+        (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
+        hfresh htypeFresh (by simpa [PartialTy.vars] using htyFresh)
+        hstoreFresh hnotMention hghostRhs
     have hsourceLeft : SourceTerm _lhs := SourceTerm.eq_lhs hsource
     have hsourceRight : SourceTerm _rhs := SourceTerm.eq_rhs hsource
     have hvstLeft : ValidStoreTyping store _lhs typing :=
@@ -403,7 +426,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       ⟨midStore, leftValue, hmsLeft, hcase⟩
     · subst hfinal
       have hprogressLeft :=
-        ihL rfl hsourceLeft store store' lhs'
+        ihL (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceLeft store store' lhs'
           (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
           hvstLeft hwf hbs hsafe hfs hmsLeft
       rcases hprogressLeft with hterminalLeft | hstepLeft
@@ -415,19 +439,22 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
             hvstLeft hwf hbs hsafe _hLhs hmsLeft
         have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
           (typingPreservesBorrowSafeResult_global hsourceLeft hbs _hLhs).1
+        have hwellLeft : WellFormedEnv _env₂ _lifetime :=
+          (typingPreservesWellFormed_of_sourceTerm hsourceLeft
+            (ValidRuntimeState.validState
+              (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
+            hwf hsafe _hLhs).1
         have hvalidRight : ValidRuntimeState store' _rhs :=
           validRuntimeState_of_sourceTerm hsourceRight hterminalLeftState.1
         have hvstRight : ValidStoreTyping store' _rhs typing :=
           validStoreTyping_sourceTerm_of_validStoreTyping hsourceRight
             hvstRightSource
-        have hprogressRight :=
-          ihR rfl hsourceRight store' store' _rhs hvalidRight hvstRight
-            (typingPreservesWellFormed_of_sourceTerm hsourceLeft
-              (ValidRuntimeState.validState
-                (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
-              hwf hsafe _hLhs).1
-            hborrowSafeLeft hterminalLeftState.2.1 (hfs.multiStep hmsLeft)
-            MultiStep.refl
+        have hprogressRight : ProgressResult store' _lifetime _rhs := by
+          exact progress_runtime hvalidRight hvstRight hwellLeft
+            hterminalLeftState.2.1
+            (OperationalStoreProgress.of_finiteSupport
+              (ProgramStore.FiniteSupport.multiStep hmsLeft hfs))
+            _hRhsErased
         rcases hprogressRight with hterminalRight | hstepRight
         · rcases (terminal_iff_value _rhs).mp hterminalRight with
             ⟨rightValue, hrightValue⟩
@@ -445,17 +472,28 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       have hvstRight : ValidStoreTyping midStore _rhs typing :=
         validStoreTyping_sourceTerm_of_validStoreTyping hsourceRight
           hvstRightSource
+      have hwellLeft : WellFormedEnv _env₂ _lifetime :=
+        (typingPreservesWellFormed_of_sourceTerm hsourceLeft
+          (ValidRuntimeState.validState
+            (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
+          hwf hsafe _hLhs).1
       rcases hcase with ⟨rhs', hfinal, hmsRight⟩ |
         ⟨rightStore, rightValue, hmsRight, hredex⟩
       · subst hfinal
-        have hprogressRight :=
-          ihR rfl hsourceRight midStore store' rhs' hvalidRight hvstRight
-            (typingPreservesWellFormed_of_sourceTerm hsourceLeft
-              (ValidRuntimeState.validState
-                (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
-              hwf hsafe _hLhs).1
-            hborrowSafeLeft hterminalLeftState.2.1
-            (hfs.multiStep hmsLeft) hmsRight
+        have hprogressRight : ProgressResult store' _lifetime rhs' := by
+          exact ihFuel
+            (env₁ := _env₂)
+            (env₂ := _envGhost.erase _ghost)
+            (typing := typing)
+            (lifetime := _lifetime)
+            (term := _rhs)
+            (term' := rhs')
+            (ty := _rhsTy)
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            hsourceRight hvalidRight hvstRight hwellLeft hborrowSafeLeft
+            hterminalLeftState.2.1
+            (ProgramStore.FiniteSupport.multiStep hmsLeft hfs)
+            _hRhsErased hmsRight
         rcases hprogressRight with hterminalRight | hstepRight
         · rcases (terminal_iff_value rhs').mp hterminalRight with
             ⟨rightValue, hrightValue⟩
@@ -473,8 +511,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin _hcontained
       _hcoherent _hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
-      ihFalse htypingEq hsource store store' term' hvalid hvst hwf hbs hsafe
-      hfs hmulti
+      ihFalse hsize htypingEq hsource store store' term' hvalid hvst hwf hbs
+      hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.ite_condition hsource
@@ -494,7 +532,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       ⟨midStore, hmsCondition, hmsFalse⟩
     · subst hfinal
       have hprogressCondition :=
-        ihCondition rfl hsourceCondition store store' condition'
+        ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceCondition store store' condition'
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
           hvstCondition hwf hbs hsafe hfs hmsCondition
       rcases hprogressCondition with hterminalCondition | hstepCondition
@@ -524,7 +563,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       have hvstTrue : ValidStoreTyping midStore _trueBranch typing :=
         validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
           hvstTrueSource
-      exact ihTrue rfl hsourceTrue midStore store' term' hvalidTrue hvstTrue
+      exact ihTrue (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceTrue midStore store' term' hvalidTrue hvstTrue
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
@@ -543,7 +583,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       have hvstFalse : ValidStoreTyping midStore _falseBranch typing :=
         validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
           hvstFalseSource
-      exact ihFalse rfl hsourceFalse midStore store' term' hvalidFalse hvstFalse
+      exact ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceFalse midStore store' term' hvalidFalse hvstFalse
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
@@ -555,8 +596,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   case iteDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
       _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
-      ihCondition ihTrue ihFalse htypingEq hsource store store' term' hvalid
-      hvst hwf hbs hsafe hfs hmulti
+      ihCondition ihTrue ihFalse hsize htypingEq hsource store store' term'
+      hvalid hvst hwf hbs hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.ite_condition hsource
@@ -576,7 +617,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       ⟨midStore, hmsCondition, hmsFalse⟩
     · subst hfinal
       have hprogressCondition :=
-        ihCondition rfl hsourceCondition store store' condition'
+        ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceCondition store store' condition'
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
           hvstCondition hwf hbs hsafe hfs hmsCondition
       rcases hprogressCondition with hterminalCondition | hstepCondition
@@ -606,7 +648,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       have hvstTrue : ValidStoreTyping midStore _trueBranch typing :=
         validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
           hvstTrueSource
-      exact ihTrue rfl hsourceTrue midStore store' term' hvalidTrue hvstTrue
+      exact ihTrue (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceTrue midStore store' term' hvalidTrue hvstTrue
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
@@ -625,7 +668,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       have hvstFalse : ValidStoreTyping midStore _falseBranch typing :=
         validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
           hvstFalseSource
-      exact ihFalse rfl hsourceFalse midStore store' term' hvalidFalse hvstFalse
+      exact ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceFalse midStore store' term' hvalidFalse hvstFalse
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
@@ -636,8 +680,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- states still progress because the body is fully typed.
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
-      _bodyTy hchild _hcondition _hbody hdiverges ihCondition ihBody htypingEq
-      hsource store store' term' hvalid hvst hwf hbs hsafe hfs hmulti
+      _bodyTy hchild _hcondition _hbody hdiverges ihCondition ihBody hsize
+      htypingEq hsource store store' term' hvalid hvst hwf hbs hsafe hfs
+      hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.while_condition hsource
@@ -676,8 +721,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
               have hvst' : ValidStoreTyping s₀ _condition typing :=
                 validStoreTyping_sourceTerm_of_validStoreTyping
                   hsourceCondition hvstCondition
-              rcases ihCondition rfl hsourceCondition s₀ s₁ _ hvalid' hvst'
-                  hwf hbs hsafe' hfs' hms with hterminal | hstepCond
+              rcases ihCondition
+                  (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+                  rfl hsourceCondition s₀ s₁ _ hvalid' hvst' hwf hbs hsafe'
+                  hfs' hms with hterminal | hstepCond
               · rcases (terminal_iff_value _).mp hterminal with ⟨v, hv⟩
                 subst hv
                 have hterminalState :=
@@ -727,9 +774,11 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
                 ⟨midStore, value, hheadRun, hcont⟩
               · subst hcurrent
                 have hheadProgress :=
-                  ihBody rfl hsourceBody s₁ s₂ head' hvalidBody hvstBody'
-                    hwfBody hborrowSafeCondition hterminalCondState.2.1 hfs₁
-                    hheadRun
+                  ihBody
+                    (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+                    rfl hsourceBody s₁ s₂ head' hvalidBody hvstBody'
+                    hwfBody hborrowSafeCondition hterminalCondState.2.1
+                    hfs₁ hheadRun
                 rcases progress_block_of_head_progress
                     (lifetime := _lifetime) hstoreOps hheadProgress with
                   hterminal | ⟨s₃, t₃, hstepBlock⟩
@@ -757,10 +806,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      hjoin hss1 hss2 hcbwf hcoh hlin hbse _hcondInv _hbodyInv _hwellTyBody
+      hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh _hcondInv _hbodyInv _hwellTyBody
       hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
-      _ihBodyEntry htypingEq hsource store store' term' hvalid hvst hwf hbs
-      hsafe hfs hmulti
+      _ihBodyEntry hsize htypingEq hsource store store' term' hvalid hvst hwf
+      hbs hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=
       SourceTerm.while_condition hsource
@@ -846,8 +895,10 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
               have hvst' : ValidStoreTyping s₀ _condition typing :=
                 validStoreTyping_sourceTerm_of_validStoreTyping
                   hsourceCondition hvstCondition
-              rcases ihCondInv rfl hsourceCondition s₀ s₁ _ hvalid' hvst'
-                  hwfInv hbse hsafe' hfs' hms with hterminal | hstepCond
+              rcases ihCondInv
+                  (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+                  rfl hsourceCondition s₀ s₁ _ hvalid' hvst' hwfInv hbse
+                  hsafe' hfs' hms with hterminal | hstepCond
               · rcases (terminal_iff_value _).mp hterminal with ⟨v, hv⟩
                 subst hv
                 have hterminalState :=
@@ -897,7 +948,9 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
                 ⟨midStore, value, hheadRun, hcont⟩
               · subst hcurrent
                 have hheadProgress :=
-                  ihBodyInv rfl hsourceBody s₁ s₂ head' hvalidBody hvstBody'
+                  ihBodyInv
+                    (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+                    rfl hsourceBody s₁ s₂ head' hvalidBody hvstBody'
                     hwfBody hbseCondition hterminalCondState.2.1 hfs₁
                     hheadRun
                 rcases progress_block_of_head_progress
@@ -970,15 +1023,16 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid) hfs
   -- T-Seq singleton: in-flight head, or the block-exit drop ended the run.
   case singleton =>
-    intro _env₁ _env₂ _typing _blockLifetime _term _ty hterm ih htypingEq
-      hsource outerLifetime store store' term' _hchild hvalid hvst hwf hbs
-      hsafe hfs hmulti
+    intro _env₁ _env₂ _typing _blockLifetime _term _ty hterm ih hsize htypingEq
+      hsource outerLifetime store store' term' _hchild hvalid hvst hwf hbs hsafe
+      hfs hmulti
     cases htypingEq
     rcases multistep_block_prefix_inv hmulti with
       ⟨head', hfinal, hms⟩ | ⟨midStore, value, _hms, hcont⟩
     · subst hfinal
       have hprogress :=
-        ih rfl (SourceTerm.block_head hsource) store store' head'
+        ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl (SourceTerm.block_head hsource) store store' head'
           (validRuntimeState_block_singleton_inner hvalid)
           (validStoreTyping_block_singleton_inner hvst) hwf hbs hsafe hfs
           hms
@@ -993,8 +1047,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
   -- dropped, and the block continued from the tail.
   case cons =>
     intro _env₁ _env₂ _env₃ _typing _blockLifetime _term _rest _termTy
-      _finalTy hterm hrest ihHead ihRest htypingEq hsource outerLifetime store
-      store' term' hchild hvalid hvst hwf hbs hsafe hfs hmulti
+      _finalTy hterm hrest ihHead ihRest hsize htypingEq hsource outerLifetime
+      store store' term' hchild hvalid hvst hwf hbs hsafe hfs hmulti
     cases htypingEq
     cases _rest with
     | nil => cases hrest
@@ -1006,7 +1060,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
       ⟨head', hfinal, hms⟩ | ⟨midStore, value, hmsHead, hcont⟩
     · subst hfinal
       have hprogress :=
-        ihHead rfl hsourceHead store store' head'
+        ihHead (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceHead store store' head'
           (validRuntimeState_block_head hvalid)
           (validStoreTyping_block_head hvst) hwf hbs hsafe hfs hms
       exact progress_block_of_head_progress
@@ -1049,11 +1104,34 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
               (.block _blockLifetime (next :: restTail)) typing :=
           validStoreTyping_sourceTerm_of_validStoreTyping hsourceTail
             (validStoreTyping_block_tail_of_cons hvst)
-        exact ihRest rfl hsourceTail outerLifetime dropStore store' term'
+        exact ihRest
+          (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceTail outerLifetime dropStore store' term'
           hchild hvalidTailAfter htailStoreTyping hwellInner
           hborrowSafeInner hsafeTailAfter
-          ((hfs.multiStep hmsHead).drops hdrops) hmsTail
+          ((hfs.multiStep hmsHead).drops hdrops)
+          hmsTail
       · cases heq
+
+/-- Public reachable-progress theorem, with the size fuel hidden. -/
+theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
+    {ty : Ty} :
+    SourceTerm term →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    store.FiniteSupport →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    MultiStep store lifetime term store' term' →
+    ProgressResult store' lifetime term' := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+    hfinite htyping hmulti
+  exact reachable_progress_bounded term.size (Nat.le_refl _) hsource
+    hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
+    htyping hmulti
 
 /--
 The step-stable soundness invariant: the state is a suffix of an execution

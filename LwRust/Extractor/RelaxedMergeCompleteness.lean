@@ -106,13 +106,17 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
   /-- T-Eq. -/
   | eq {env1 env2 env3 envGhost : Env} {ghost : Name}
       {typing : StoreTyping} {lifetime : Lifetime}
-      {lhs rhs : Term} {lhsTy rhsTy ghostRhsTy : Ty} :
+      {lhs rhs : Term} {lhsTy rhsTy : Ty} :
       RelaxedTermTyping env1 typing lifetime lhs lhsTy env2 →
       env2.fresh ghost →
+      Env.TypeNameFresh env2 ghost →
+      ghost ∉ Ty.vars lhsTy →
+      StoreTyping.TypeNameFresh typing ghost →
       RelaxedTermTyping
         (env2.update ghost { ty := .ty lhsTy, lifetime := lifetime })
-        typing lifetime rhs ghostRhsTy envGhost →
-      RelaxedTermTyping env2 typing lifetime rhs rhsTy env3 →
+        typing lifetime rhs rhsTy envGhost →
+      ¬ LwRust.Paper.Term.Mentions ghost rhs →
+      env3 = envGhost.erase ghost →
       CopyTy lhsTy →
       CopyTy rhsTy →
       ShapeCompatible env3 (.ty lhsTy) (.ty rhsTy) →
@@ -397,10 +401,9 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
       simp only [SyntaxCtor.ctermEq_ctor] at htyped
       change RelaxedTermTyping env typing currentLifetime (.eq _ _) ty env2 at htyped
       cases htyped with
-      | eq hlhs' _ _ hrhs' =>
-          obtain ⟨env', hstmts⟩ := extractTermStmts_relaxedTyped hrhs hrhs'
+      | eq hlhs' =>
           simp only [extractTermStmts]
-          exact ⟨env', .cons hlhs' hstmts⟩
+          exact ⟨_, .cons hlhs' .nil⟩
   case ctermIte_iteCondition hcondition =>
       simp only [extractTermStmts]
       cases htyped with

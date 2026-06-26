@@ -27,8 +27,12 @@ theorem scalarCopyComparison_typing :
   exact TermTyping.eq (ghost := "γ")
     (TermTyping.const ValueTyping.int)
     (by simp [Env.fresh, Env.empty])
+    (by intro y slot hslot; simp [Env.empty] at hslot)
+    (by simp [Ty.vars])
+    (by simp [StoreTyping.TypeNameFresh, StoreTyping.empty])
     (TermTyping.const ValueTyping.int)
-    (TermTyping.const ValueTyping.int)
+    (by simp [Term.Mentions])
+    (by simp [Env.fresh, Env.empty])
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
@@ -249,8 +253,44 @@ theorem pointerIfCondition_typing :
       pointerIf_not_readProhibited_deref_p)
     (by simp [Env.fresh, pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
       pointerIfPXSlot, Env.update, Env.empty])
+    (by
+      intro y slot hslot
+      by_cases hp : y = "p"
+      · subst hp
+        have hslotTy : slot.ty = (.ty (.borrow true [.var "x"])) := by
+          simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy]
+        simp [PartialTy.allVars, Ty.vars, LVal.base]
+      · by_cases hy : y = "y"
+        · subst hy
+          have hslotTy : slot.ty = .ty .int := by
+            simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          rw [hslotTy]
+          simp [PartialTy.allVars, Ty.vars]
+        · by_cases hx : y = "x"
+          · subst hx
+            have hslotTy : slot.ty = .ty .int := by
+              simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+                Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+            rw [hslotTy]
+            simp [PartialTy.allVars, Ty.vars]
+          · have hnone : pointerIfEnv.slotAt y = none := by
+              simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+                Env.update, Env.empty, hp, hy, hx]
+            rw [hnone] at hslot
+            cases hslot)
+    (by simp [Ty.vars])
+    (by simp [StoreTyping.TypeNameFresh, StoreTyping.empty])
     (TermTyping.const ValueTyping.int)
-    (TermTyping.const ValueTyping.int)
+    (by simp [Term.Mentions])
+    (by
+      exact (Env.erase_update_fresh pointerIfEnv "γ"
+        { ty := .ty Ty.int, lifetime := Lifetime.root } (by
+          simp [Env.fresh, pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
+            pointerIfPXSlot, Env.update, Env.empty])).symm)
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
