@@ -840,26 +840,20 @@ theorem sourceInitial_declare_value_typeAndBorrowSafety
       MultiStep.trans (Step.declare (lifetime := lifetime) rfl) MultiStep.refl⟩
 
 /--
-**Lemma 4.9.** Source-initial borrow invariance through the explicit
-ranked/fresh-coherence route.
+**Lemma 4.9.** Source-initial borrow invariance through the legacy
+ranked/fresh-coherence wrapper.
 
-This is the source-program version of
-`borrowInvariance_of_rankedAssign_and_declFreshCoherence`.
+The wrapper no longer requires the old global assignment/declaration
+obligations; the typing derivation carries the required local facts.
 -/
 theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
     :
-    AssignmentRhsEdgesRanked →
-    AssignmentWriteCoherenceObligations →
-    DeclarationFreshUpdateCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hranked hwriteCoherent hdeclFresh hsource htyping
+  intro hsource htyping
   exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
-    hranked
-    hwriteCoherent
-    hdeclFresh
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
@@ -887,27 +881,20 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     htyping
 
 /--
-**Corollary 4.14.** Source-initial Borrow Safety through the explicit,
-proof-carrying borrow-invariance route.
+**Corollary 4.14.** Source-initial Borrow Safety through the legacy
+proof-carrying borrow-invariance wrapper.
 
 This is the source-program counterpart of
 `borrowSafety_of_rankedAssign_and_declFreshCoherence`: the empty initial store,
-environment, and store typing discharge the standard source-state premises, while
-the rule-carried side conditions are supplied by the typing derivation.
+environment, and store typing discharge the standard source-state premises.
 -/
 theorem sourceInitial_borrowSafety_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
-    AssignmentRhsEdgesRanked →
-    AssignmentWriteCoherenceObligations →
-    DeclarationFreshUpdateCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
-  intro hrankedAssign hwriteCoherent hdeclFresh hsource htyping
+  intro hsource htyping
   exact borrowSafety_of_rankedAssign_and_declFreshCoherence
-    hrankedAssign
-    hwriteCoherent
-    hdeclFresh
     hsource
     (by
       intro env lifetime

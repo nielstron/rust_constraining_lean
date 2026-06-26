@@ -34,9 +34,9 @@ open Core
 /-! ## Section 4.5.1: Borrow Safety -/
 
 theorem partialTyContains_borrow_iff_eq {mutable : Bool} {targets : List LVal}
-    {needle : Ty} :
-    PartialTyContains (.ty (.borrow mutable targets)) needle ↔
-      Ty.borrow mutable targets = needle := by
+    {pointee needle : Ty} :
+    PartialTyContains (.ty (.borrow mutable targets pointee)) needle ↔
+      Ty.borrow mutable targets pointee = needle := by
   constructor
   · intro hcontains
     cases hcontains with
@@ -48,50 +48,52 @@ theorem partialTyContains_borrow_iff_eq {mutable : Bool} {targets : List LVal}
 theorem partialTyBorrowFree_ty {ty : Ty} :
     TyBorrowFree ty →
     PartialTyBorrowFree (.ty ty) := by
-  intro hfree mutable targets hcontains
-  exact hfree mutable targets hcontains
+  intro hfree mutable targets pointee hcontains
+  exact hfree mutable targets pointee hcontains
 
 @[simp] theorem partialTyBorrowFree_undef (ty : Ty) :
     PartialTyBorrowFree (.undef ty) := by
-  intro mutable targets hcontains
+  intro mutable targets pointee hcontains
   cases hcontains
 
 @[simp] theorem partialTyBorrowFree_box {ty : PartialTy} :
     PartialTyBorrowFree ty →
     PartialTyBorrowFree (.box ty) := by
-  intro hfree mutable targets hcontains
+  intro hfree mutable targets pointee hcontains
   cases hcontains with
   | box hinner =>
-      exact hfree mutable targets hinner
+      exact hfree mutable targets pointee hinner
 
 @[simp] theorem tyBorrowFree_unit :
     TyBorrowFree .unit := by
-  intro mutable targets hcontains
+  intro mutable targets pointee hcontains
   cases hcontains
 
 @[simp] theorem tyBorrowFree_int :
     TyBorrowFree .int := by
-  intro mutable targets hcontains
+  intro mutable targets pointee hcontains
   cases hcontains
 
 @[simp] theorem tyBorrowFree_bool :
     TyBorrowFree .bool := by
-  intro mutable targets hcontains
+  intro mutable targets pointee hcontains
   cases hcontains
 
 @[simp] theorem tyBorrowFree_box {ty : Ty} :
     TyBorrowFree ty →
     TyBorrowFree (.box ty) := by
-  intro hfree mutable targets hcontains
+  intro hfree mutable targets pointee hcontains
   cases hcontains with
   | tyBox hinner =>
-      exact hfree mutable targets hinner
+      exact hfree mutable targets pointee hinner
 
 @[simp] theorem borrowSafeEnv_empty :
     BorrowSafeEnv Env.empty := by
-  intro x y mutable targetsMutable targetsOther targetMutable targetOther hcontains _ _ _ _
+  intro x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther hcontains _ _ _ _
   rcases hcontains with ⟨slot, hslot, _hcontainsTy⟩
-  simp [Env.empty] at hslot
+  change none = some slot at hslot
+  cases hslot
 
 theorem EnvContains.update_fresh_ne {env : Env} {x y : Name} {slot : EnvSlot}
     {ty : Ty} :
@@ -103,11 +105,12 @@ theorem EnvContains.update_fresh_ne {env : Env} {x y : Name} {slot : EnvSlot}
   exact ⟨containedSlot, by simpa [Env.update, hy] using hslot, hcontainsTy⟩
 
 theorem EnvContains.update_box_borrow_to_inner {env : Env} {gamma x : Name}
-    {ty : Ty} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal} :
+    {ty : Ty} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
+    {pointee : Ty} :
     (env.update gamma { ty := .ty (.box ty), lifetime := lifetime }) ⊢ x ↝
-      (Ty.borrow mutable targets) →
+      (Ty.borrow mutable targets pointee) →
     (env.update gamma { ty := .ty ty, lifetime := lifetime }) ⊢ x ↝
-      (Ty.borrow mutable targets) := by
+      (Ty.borrow mutable targets pointee) := by
   intro hcontains
   rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
   by_cases hx : x = gamma
@@ -132,59 +135,44 @@ theorem pathConflicts_symm {left right : LVal} :
   exact h.symm
 
 theorem partialTyContains_borrow_injective {partialTy : PartialTy}
-    {mutable₁ mutable₂ : Bool} {targets₁ targets₂ : List LVal} :
-    PartialTyContains partialTy (.borrow mutable₁ targets₁) →
-    PartialTyContains partialTy (.borrow mutable₂ targets₂) →
-    mutable₁ = mutable₂ ∧ targets₁ = targets₂ := by
-  revert mutable₁ mutable₂ targets₁ targets₂
-  refine PartialTy.rec
-    (motive_1 := fun ty =>
-      ∀ {mutable₁ mutable₂ : Bool} {targets₁ targets₂ : List LVal},
-        PartialTyContains (.ty ty) (.borrow mutable₁ targets₁) →
-        PartialTyContains (.ty ty) (.borrow mutable₂ targets₂) →
-        mutable₁ = mutable₂ ∧ targets₁ = targets₂)
-    (motive_2 := fun partialTy =>
-      ∀ {mutable₁ mutable₂ : Bool} {targets₁ targets₂ : List LVal},
-        PartialTyContains partialTy (.borrow mutable₁ targets₁) →
-        PartialTyContains partialTy (.borrow mutable₂ targets₂) →
-        mutable₁ = mutable₂ ∧ targets₁ = targets₂)
-    ?unit ?int ?borrow ?boxTy ?bool ?ty ?boxPartial ?undef partialTy
-  · intro mutable₁ mutable₂ targets₁ targets₂ hleft
-    cases hleft
-  · intro mutable₁ mutable₂ targets₁ targets₂ hleft
-    cases hleft
-  · intro mutable targets mutable₁ mutable₂ targets₁ targets₂ hleft hright
-    cases hleft with
+    {mutable₁ mutable₂ : Bool} {targets₁ targets₂ : List LVal}
+    {pointee₁ pointee₂ : Ty} :
+    PartialTyContains partialTy (.borrow mutable₁ targets₁ pointee₁) →
+    PartialTyContains partialTy (.borrow mutable₂ targets₂ pointee₂) →
+    mutable₁ = mutable₂ ∧ targets₁ = targets₂ ∧ pointee₁ = pointee₂ := by
+  have hgeneral :
+      ∀ {partialTy needle₁},
+        PartialTyContains partialTy needle₁ →
+        ∀ {mutable₁ mutable₂ : Bool} {targets₁ targets₂ : List LVal}
+          {pointee₁ pointee₂ : Ty},
+          needle₁ = .borrow mutable₁ targets₁ pointee₁ →
+          PartialTyContains partialTy (.borrow mutable₂ targets₂ pointee₂) →
+          mutable₁ = mutable₂ ∧ targets₁ = targets₂ ∧ pointee₁ = pointee₂ := by
+    intro partialTy needle₁ hleft
+    induction hleft with
     | here =>
+        intro mutable₁ mutable₂ targets₁ targets₂ pointee₁ pointee₂ hneedle hright
+        subst hneedle
         cases hright with
-        | here =>
-            exact ⟨rfl, rfl⟩
-  · intro inner ih mutable₁ mutable₂ targets₁ targets₂ hleft hright
-    cases hleft with
-    | tyBox hleftInner =>
+        | here => exact ⟨rfl, rfl, rfl⟩
+    | tyBox _hinner ih =>
+        intro mutable₁ mutable₂ targets₁ targets₂ pointee₁ pointee₂ hneedle hright
         cases hright with
-        | tyBox hrightInner =>
-            exact ih hleftInner hrightInner
-  · intro mutable₁ mutable₂ targets₁ targets₂ hleft
-    cases hleft
-  · intro ty ih mutable₁ mutable₂ targets₁ targets₂ hleft hright
-    exact ih hleft hright
-  · intro inner ih mutable₁ mutable₂ targets₁ targets₂ hleft hright
-    cases hleft with
-    | box hleftInner =>
+        | tyBox hrightInner => exact ih hneedle hrightInner
+    | box _hinner ih =>
+        intro mutable₁ mutable₂ targets₁ targets₂ pointee₁ pointee₂ hneedle hright
         cases hright with
-        | box hrightInner =>
-            exact ih hleftInner hrightInner
-  · intro shape _ih mutable₁ mutable₂ targets₁ targets₂ hleft
-    cases hleft
+        | box hrightInner => exact ih hneedle hrightInner
+  intro hleft hright
+  exact hgeneral hleft rfl hright
 
 theorem partialTyContains_mut_imm_false {partialTy : PartialTy}
-    {mutableTargets immTargets : List LVal} :
-    PartialTyContains partialTy (.borrow true mutableTargets) →
-    PartialTyContains partialTy (.borrow false immTargets) →
+    {mutableTargets immTargets : List LVal} {mutablePointee immPointee : Ty} :
+    PartialTyContains partialTy (.borrow true mutableTargets mutablePointee) →
+    PartialTyContains partialTy (.borrow false immTargets immPointee) →
     False := by
   intro hmut himm
-  rcases partialTyContains_borrow_injective hmut himm with ⟨hbool, _htargets⟩
+  rcases partialTyContains_borrow_injective hmut himm with ⟨hbool, _htargets, _hpointee⟩
   cases hbool
 
 theorem borrowSafeEnv_update_partialBorrowFree {env : Env} {x : Name}
@@ -192,11 +180,12 @@ theorem borrowSafeEnv_update_partialBorrowFree {env : Env} {x : Name}
     BorrowSafeEnv env →
     PartialTyBorrowFree slot.ty →
     BorrowSafeEnv (env.update x slot) := by
-  intro hsafe hborrowFree y z mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  intro hsafe hborrowFree y z mutable targetsMutable targetsOther pointeeMutable
+    pointeeOther targetMutable targetOther hcontainsMutable hcontainsOther
+    htargetMutable htargetOther hconflict
   by_cases hy : y = x
   · have hcontainsMutableAtX :
-        (env.update x slot) ⊢ x ↝ Ty.borrow true targetsMutable := by
+        (env.update x slot) ⊢ x ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa [hy] using hcontainsMutable
     exact False.elim
       (by
@@ -206,10 +195,10 @@ theorem borrowSafeEnv_update_partialBorrowFree {env : Env} {x : Name}
             simpa [Env.update] using hslot
           exact h.symm
         subst hslotEq
-        exact hborrowFree true targetsMutable hcontainsTy)
+        exact hborrowFree true targetsMutable pointeeMutable hcontainsTy)
   · by_cases hz : z = x
     · have hcontainsOtherAtX :
-          (env.update x slot) ⊢ x ↝ Ty.borrow mutable targetsOther := by
+          (env.update x slot) ⊢ x ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa [hz] using hcontainsOther
       exact False.elim
         (by
@@ -219,8 +208,9 @@ theorem borrowSafeEnv_update_partialBorrowFree {env : Env} {x : Name}
               simpa [Env.update] using hslot
             exact h.symm
           subst hslotEq
-          exact hborrowFree mutable targetsOther hcontainsTy)
-    · exact hsafe y z mutable targetsMutable targetsOther targetMutable targetOther
+          exact hborrowFree mutable targetsOther pointeeOther hcontainsTy)
+    · exact hsafe y z mutable targetsMutable targetsOther pointeeMutable pointeeOther
+        targetMutable targetOther
         (EnvContains.update_fresh_ne hy hcontainsMutable)
         (EnvContains.update_fresh_ne hz hcontainsOther)
         htargetMutable htargetOther hconflict
@@ -245,11 +235,12 @@ theorem borrowSafeEnv_update_partialLoanFree {env : Env} {x : Name}
     BorrowSafeEnv env →
     PartialTyLoanFree slot.ty →
     BorrowSafeEnv (env.update x slot) := by
-  intro hsafe hloanFree y z mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  intro hsafe hloanFree y z mutable targetsMutable targetsOther pointeeMutable
+    pointeeOther targetMutable targetOther hcontainsMutable hcontainsOther
+    htargetMutable htargetOther hconflict
   by_cases hy : y = x
   · have hcontainsMutableAtX :
-        (env.update x slot) ⊢ x ↝ Ty.borrow true targetsMutable := by
+        (env.update x slot) ⊢ x ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa [hy] using hcontainsMutable
     exact False.elim
       (by
@@ -260,12 +251,12 @@ theorem borrowSafeEnv_update_partialLoanFree {env : Env} {x : Name}
           exact h.symm
         subst hslotEq
         have hempty : targetsMutable = [] :=
-          hloanFree true targetsMutable hcontainsTy
+          PartialTyLoanFree.empty_targets hloanFree hcontainsTy
         subst hempty
         simp at htargetMutable)
   · by_cases hz : z = x
     · have hcontainsOtherAtX :
-          (env.update x slot) ⊢ x ↝ Ty.borrow mutable targetsOther := by
+          (env.update x slot) ⊢ x ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa [hz] using hcontainsOther
       exact False.elim
         (by
@@ -276,10 +267,11 @@ theorem borrowSafeEnv_update_partialLoanFree {env : Env} {x : Name}
             exact h.symm
           subst hslotEq
           have hempty : targetsOther = [] :=
-            hloanFree mutable targetsOther hcontainsTy
+            PartialTyLoanFree.empty_targets hloanFree hcontainsTy
           subst hempty
           simp at htargetOther)
-    · exact hsafe y z mutable targetsMutable targetsOther targetMutable targetOther
+    · exact hsafe y z mutable targetsMutable targetsOther pointeeMutable pointeeOther
+        targetMutable targetOther
         (EnvContains.update_fresh_ne hy hcontainsMutable)
         (EnvContains.update_fresh_ne hz hcontainsOther)
         htargetMutable htargetOther hconflict
@@ -298,14 +290,18 @@ theorem tyBorrowSafeAgainstEnv_loanFree {env : Env} {ty : Ty} :
     TyBorrowSafeAgainstEnv env ty := by
   intro hfree
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
-      _hother htargetMutable _htargetOther _hconflict
-    have hempty : targetsMutable = [] := hfree true targetsMutable hcontains
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontains _hother htargetMutable _htargetOther
+      _hconflict
+    have hempty : targetsMutable = [] :=
+      TyLoanFree.empty_targets hfree hcontains
     subst hempty
     simp at htargetMutable
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther
-      _hcontainsMutable hcontains _htargetMutable htargetOther _hconflict
-    have hempty : targetsOther = [] := hfree mutable targetsOther hcontains
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther _hcontainsMutable hcontains _htargetMutable
+      htargetOther _hconflict
+    have hempty : targetsOther = [] :=
+      TyLoanFree.empty_targets hfree hcontains
     subst hempty
     simp at htargetOther
 
@@ -314,12 +310,14 @@ theorem tyBorrowSafeAgainstEnv_borrowFree {env : Env} {ty : Ty} :
     TyBorrowSafeAgainstEnv env ty := by
   intro hfree
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
-      _hother _htargetMutable _htargetOther _hconflict
-    exact hfree true targetsMutable hcontains
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther _hcontainsMutable
-      hcontains _htargetMutable _htargetOther _hconflict
-    exact hfree mutable targetsOther hcontains
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontains _hother _htargetMutable _htargetOther
+      _hconflict
+    exact hfree true targetsMutable pointeeMutable hcontains
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther _hcontainsMutable hcontains _htargetMutable
+      _htargetOther _hconflict
+    exact hfree mutable targetsOther pointeeOther hcontains
 
 theorem TyBorrowSafeAgainstEnv.dropLifetime {env : Env} {ty : Ty}
     {lifetime : Lifetime} :
@@ -327,14 +325,18 @@ theorem TyBorrowSafeAgainstEnv.dropLifetime {env : Env} {ty : Ty}
     TyBorrowSafeAgainstEnv (env.dropLifetime lifetime) ty := by
   intro hsafeTy
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
-      hother htargetMutable htargetOther hconflict
-    exact hsafeTy.1 targetsMutable mutable targetsOther x targetMutable targetOther
-      hcontains (EnvContains.dropLifetime_of_contains hother)
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontains hother htargetMutable htargetOther
+      hconflict
+    exact hsafeTy.1 targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      x targetMutable targetOther hcontains
+      (EnvContains.dropLifetime_of_contains hother)
       htargetMutable htargetOther hconflict
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther hcontainsMutable
-      hcontains htargetMutable htargetOther hconflict
-    exact hsafeTy.2 x targetsMutable mutable targetsOther targetMutable targetOther
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther hcontainsMutable hcontains htargetMutable
+      htargetOther hconflict
+    exact hsafeTy.2 x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther
       (EnvContains.dropLifetime_of_contains hcontainsMutable) hcontains
       htargetMutable htargetOther hconflict
 
@@ -343,13 +345,14 @@ theorem borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv {env : Env} {x : Name}
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env ty →
     BorrowSafeEnv (env.update x { ty := .ty ty, lifetime := lifetime }) := by
-  intro hsafe hsafeTy a b mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+  intro hsafe hsafeTy a b mutable targetsMutable targetsOther pointeeMutable
+    pointeeOther targetMutable targetOther hcontainsMutable hcontainsOther
+    htargetMutable htargetOther hconflict
   by_cases ha : a = x
   · subst a
     have hcontainsMutableAtX :
         (env.update x { ty := .ty ty, lifetime := lifetime }) ⊢
-          x ↝ Ty.borrow true targetsMutable := by
+          x ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa using hcontainsMutable
     rcases hcontainsMutableAtX with ⟨containedSlot, hslot, hcontainsTy⟩
     have hslotEq :
@@ -362,15 +365,15 @@ theorem borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv {env : Env} {x : Name}
     by_cases hb : b = x
     · exact hb.symm
     · exact False.elim
-        (hsafeTy.1 targetsMutable mutable targetsOther b targetMutable targetOther
-          hcontainsTy
+        (hsafeTy.1 targetsMutable mutable targetsOther pointeeMutable pointeeOther
+          b targetMutable targetOther hcontainsTy
           (EnvContains.update_fresh_ne hb hcontainsOther)
           htargetMutable htargetOther hconflict)
   · by_cases hb : b = x
     · subst b
       have hcontainsOtherAtX :
           (env.update x { ty := .ty ty, lifetime := lifetime }) ⊢
-            x ↝ Ty.borrow mutable targetsOther := by
+            x ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa using hcontainsOther
       rcases hcontainsOtherAtX with ⟨containedSlot, hslot, hcontainsTy⟩
       have hslotEq :
@@ -381,10 +384,12 @@ theorem borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv {env : Env} {x : Name}
         exact h.symm
       subst hslotEq
       exact False.elim
-        (hsafeTy.2 a targetsMutable mutable targetsOther targetMutable targetOther
+        (hsafeTy.2 a targetsMutable mutable targetsOther pointeeMutable pointeeOther
+          targetMutable targetOther
           (EnvContains.update_fresh_ne ha hcontainsMutable)
           hcontainsTy htargetMutable htargetOther hconflict)
-    · exact hsafe a b mutable targetsMutable targetsOther targetMutable targetOther
+    · exact hsafe a b mutable targetsMutable targetsOther pointeeMutable pointeeOther
+        targetMutable targetOther
         (EnvContains.update_fresh_ne ha hcontainsMutable)
         (EnvContains.update_fresh_ne hb hcontainsOther)
         htargetMutable htargetOther hconflict
@@ -392,9 +397,11 @@ theorem borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv {env : Env} {x : Name}
 theorem borrowSafeEnv_dropLifetime {env : Env} {lifetime : Lifetime} :
     BorrowSafeEnv env →
     BorrowSafeEnv (env.dropLifetime lifetime) := by
-  intro hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
-    hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
-  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+  intro hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
+    htargetOther hconflict
+  exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther
     (EnvContains.dropLifetime_of_contains hcontainsMutable)
     (EnvContains.dropLifetime_of_contains hcontainsOther)
     htargetMutable htargetOther hconflict
@@ -411,15 +418,15 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
     BorrowSafeEnv env →
     (∀ {lv partialTy lifetime},
       LValTyping env lv partialTy lifetime →
-      ∀ {borrowTargets},
-        PartialTyContains partialTy (.borrow false borrowTargets) →
+      ∀ {borrowTargets borrowPointee},
+        PartialTyContains partialTy (.borrow false borrowTargets borrowPointee) →
         ∀ target,
           target ∈ borrowTargets →
           ¬ ReadProhibited env target) ∧
     (∀ {targets partialTy lifetime},
       LValTargetsTyping env targets partialTy lifetime →
-      ∀ {borrowTargets},
-        PartialTyContains partialTy (.borrow false borrowTargets) →
+      ∀ {borrowTargets borrowPointee},
+        PartialTyContains partialTy (.borrow false borrowTargets borrowPointee) →
         ∀ target,
           target ∈ borrowTargets →
           ¬ ReadProhibited env target) := by
@@ -428,22 +435,22 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
   · intro lv partialTy lifetime htyping
     exact LValTyping.rec
       (motive_1 := fun lv partialTy lifetime _ =>
-        ∀ {borrowTargets},
-          PartialTyContains partialTy (.borrow false borrowTargets) →
+        ∀ {borrowTargets borrowPointee},
+          PartialTyContains partialTy (.borrow false borrowTargets borrowPointee) →
           ∀ target,
             target ∈ borrowTargets →
             ¬ ReadProhibited env target)
       (motive_2 := fun targets partialTy lifetime _ =>
-        ∀ {borrowTargets},
-          PartialTyContains partialTy (.borrow false borrowTargets) →
+        ∀ {borrowTargets borrowPointee},
+          PartialTyContains partialTy (.borrow false borrowTargets borrowPointee) →
           ∀ target,
             target ∈ borrowTargets →
             ¬ ReadProhibited env target)
       (by
-        intro x slot hslot borrowTargets hcontains target htarget hread
+        intro x slot hslot borrowTargets borrowPointee hcontains target htarget hread
         rcases hread with
-          ⟨borrower, mutableTargets, mutableTarget, hmutableContains,
-            hmutableTarget, hconflict⟩
+          ⟨borrower, mutableTargets, mutablePointee, mutableTarget,
+            hmutableContains, hmutableTarget, hconflict⟩
         by_cases hsame : borrower = x
         · subst hsame
           rcases hmutableContains with ⟨mutableSlot, hmutableSlot, hmutableTy⟩
@@ -454,7 +461,7 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
         · have hsafeContradiction :
               borrower = x := by
             exact hsafe borrower x false mutableTargets borrowTargets
-              mutableTarget target
+              mutablePointee borrowPointee mutableTarget target
               hmutableContains
               ⟨slot, hslot, hcontains⟩
               hmutableTarget
@@ -462,22 +469,31 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
               hconflict
           exact hsame hsafeContradiction)
       (by
-        intro _lv _inner _lifetime _htyping ih borrowTargets hcontains target
-          htarget hread
+        intro _lv _inner _lifetime _htyping ih borrowTargets borrowPointee
+          hcontains target htarget hread
         exact ih (PartialTyContains.box hcontains) target htarget hread)
       (by
-        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-          _hborrow _htargets _ihBorrow ihTargets borrowTargets hcontains target
-          htarget hread
+        intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+          _hborrow _htargets _ihBorrow ihTargets borrowTargets _borrowPointee
+          hcontains target htarget hread
         exact ihTargets hcontains target htarget hread)
       (by
-        intro target ty lifetime _htarget ihTarget borrowTargets hcontains selected
-          hselected hread
+        intro _ty _hvars borrowTargets _borrowPointee hcontains target htarget _hread
+        have hempty : borrowTargets = [] :=
+          PartialTyLoanFree.empty_targets
+            (partialTy := .ty _ty)
+            (by simpa [PartialTyLoanFree, PartialTy.allVars] using _hvars)
+            hcontains
+        subst hempty
+        cases htarget)
+      (by
+        intro target ty lifetime _htarget ihTarget borrowTargets _borrowPointee
+          hcontains selected hselected hread
         exact ihTarget hcontains selected hselected hread)
       (by
         intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
-          _hhead _hrest hunion _hintersection ihHead ihRest borrowTargets hcontains
-          selected hselected hread
+          _hhead _hrest hunion _hintersection ihHead ihRest borrowTargets
+          _borrowPointee hcontains selected hselected hread
         rcases PartialTyUnion.contained_borrow_member hunion hcontains hselected with
           hselectedHead | hselectedRest
         · rcases hselectedHead with ⟨headTargets, hheadContains, hselectedHead⟩
@@ -488,22 +504,22 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
   · intro targets partialTy lifetime htyping
     exact LValTargetsTyping.rec
       (motive_1 := fun lv partialTy lifetime _ =>
-        ∀ {borrowTargets},
-          PartialTyContains partialTy (.borrow false borrowTargets) →
+        ∀ {borrowTargets borrowPointee},
+          PartialTyContains partialTy (.borrow false borrowTargets borrowPointee) →
           ∀ target,
             target ∈ borrowTargets →
             ¬ ReadProhibited env target)
       (motive_2 := fun targets partialTy lifetime _ =>
-        ∀ {borrowTargets},
-          PartialTyContains partialTy (.borrow false borrowTargets) →
+        ∀ {borrowTargets borrowPointee},
+          PartialTyContains partialTy (.borrow false borrowTargets borrowPointee) →
           ∀ target,
             target ∈ borrowTargets →
             ¬ ReadProhibited env target)
       (by
-        intro x slot hslot borrowTargets hcontains target htarget hread
+        intro x slot hslot borrowTargets borrowPointee hcontains target htarget hread
         rcases hread with
-          ⟨borrower, mutableTargets, mutableTarget, hmutableContains,
-            hmutableTarget, hconflict⟩
+          ⟨borrower, mutableTargets, mutablePointee, mutableTarget,
+            hmutableContains, hmutableTarget, hconflict⟩
         by_cases hsame : borrower = x
         · subst hsame
           rcases hmutableContains with ⟨mutableSlot, hmutableSlot, hmutableTy⟩
@@ -514,7 +530,7 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
         · have hsafeContradiction :
               borrower = x := by
             exact hsafe borrower x false mutableTargets borrowTargets
-              mutableTarget target
+              mutablePointee borrowPointee mutableTarget target
               hmutableContains
               ⟨slot, hslot, hcontains⟩
               hmutableTarget
@@ -522,22 +538,31 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
               hconflict
           exact hsame hsafeContradiction)
       (by
-        intro _lv _inner _lifetime _htyping ih borrowTargets hcontains target
-          htarget hread
+        intro _lv _inner _lifetime _htyping ih borrowTargets borrowPointee
+          hcontains target htarget hread
         exact ih (PartialTyContains.box hcontains) target htarget hread)
       (by
-        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-          _hborrow _htargets _ihBorrow ihTargets borrowTargets hcontains target
-          htarget hread
+        intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+          _hborrow _htargets _ihBorrow ihTargets borrowTargets _borrowPointee
+          hcontains target htarget hread
         exact ihTargets hcontains target htarget hread)
       (by
-        intro target ty lifetime _htarget ihTarget borrowTargets hcontains selected
-          hselected hread
+        intro _ty _hvars borrowTargets _borrowPointee hcontains target htarget _hread
+        have hempty : borrowTargets = [] :=
+          PartialTyLoanFree.empty_targets
+            (partialTy := .ty _ty)
+            (by simpa [PartialTyLoanFree, PartialTy.allVars] using _hvars)
+            hcontains
+        subst hempty
+        cases htarget)
+      (by
+        intro target ty lifetime _htarget ihTarget borrowTargets _borrowPointee
+          hcontains selected hselected hread
         exact ihTarget hcontains selected hselected hread)
       (by
         intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
-          _hhead _hrest hunion _hintersection ihHead ihRest borrowTargets hcontains
-          selected hselected hread
+          _hhead _hrest hunion _hintersection ihHead ihRest borrowTargets
+          _borrowPointee hcontains selected hselected hread
         rcases PartialTyUnion.contained_borrow_member hunion hcontains hselected with
           hselectedHead | hselectedRest
         · rcases hselectedHead with ⟨headTargets, hheadContains, hselectedHead⟩
@@ -547,30 +572,32 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
       htyping
 
 theorem borrowSafeEnv_update_fresh_mutBorrow {env : Env} {gamma : Name}
-    {lv : LVal} {lifetime : Lifetime} :
+    {lv : LVal} {pointee : Ty} {lifetime : Lifetime} :
     BorrowSafeEnv env →
     env.fresh gamma →
     ¬ WriteProhibited env lv →
     BorrowSafeEnv
-      (env.update gamma { ty := .ty (.borrow true [lv]), lifetime := lifetime }) := by
-  intro hsafe _hfresh hnotWrite x y mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+      (env.update gamma { ty := .ty (.borrow true [lv] pointee), lifetime := lifetime }) := by
+  intro hsafe _hfresh hnotWrite x y mutable targetsMutable targetsOther
+    pointeeMutable pointeeOther targetMutable targetOther hcontainsMutable
+    hcontainsOther htargetMutable htargetOther hconflict
   by_cases hx : x = gamma
   · have hcontainsMutableAtGamma :
-        (env.update gamma { ty := .ty (.borrow true [lv]), lifetime := lifetime }) ⊢
-          gamma ↝ Ty.borrow true targetsMutable := by
+        (env.update gamma { ty := .ty (.borrow true [lv] pointee), lifetime := lifetime }) ⊢
+          gamma ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa [hx] using hcontainsMutable
     rcases hcontainsMutableAtGamma with ⟨slot, hslot, hcontainsTy⟩
     have hslotEq :
-        slot = { ty := PartialTy.ty (Ty.borrow true [lv]), lifetime := lifetime } := by
+        slot = { ty := PartialTy.ty (Ty.borrow true [lv] pointee), lifetime := lifetime } := by
       have h :
-          { ty := PartialTy.ty (Ty.borrow true [lv]), lifetime := lifetime } = slot := by
+          { ty := PartialTy.ty (Ty.borrow true [lv] pointee), lifetime := lifetime } = slot := by
         simpa [Env.update] using hslot
       exact h.symm
     subst hslotEq
-    have hborrowEq : Ty.borrow true [lv] = Ty.borrow true targetsMutable :=
+    have hborrowEq : Ty.borrow true [lv] pointee =
+        Ty.borrow true targetsMutable pointeeMutable :=
       partialTyContains_borrow_iff_eq.mp hcontainsTy
-    injection hborrowEq with _hmut htargetsMutable
+    injection hborrowEq with _hmut htargetsMutable _hpointee
     subst htargetsMutable
     have htargetMutableEq : targetMutable = lv := by
       simpa using htargetMutable
@@ -578,170 +605,178 @@ theorem borrowSafeEnv_update_fresh_mutBorrow {env : Env} {gamma : Name}
       simpa [htargetMutableEq] using hconflict
     by_cases hy : y = gamma
     · exact hx.trans hy.symm
-    · have hcontainsOtherOld : env ⊢ y ↝ Ty.borrow mutable targetsOther :=
+    · have hcontainsOtherOld : env ⊢ y ↝ Ty.borrow mutable targetsOther pointeeOther :=
         EnvContains.update_fresh_ne hy hcontainsOther
       have hwrite : WriteProhibited env lv := by
         cases mutable with
         | false =>
-            exact Or.inr ⟨y, targetsOther, targetOther, hcontainsOtherOld,
+            exact Or.inr ⟨y, targetsOther, pointeeOther, targetOther, hcontainsOtherOld,
               htargetOther, pathConflicts_symm hconflictLv⟩
         | true =>
-            exact Or.inl ⟨y, targetsOther, targetOther, hcontainsOtherOld,
+            exact Or.inl ⟨y, targetsOther, pointeeOther, targetOther, hcontainsOtherOld,
               htargetOther, pathConflicts_symm hconflictLv⟩
       exact False.elim (hnotWrite hwrite)
   · by_cases hy : y = gamma
     · have hcontainsOtherAtGamma :
-          (env.update gamma { ty := .ty (.borrow true [lv]), lifetime := lifetime }) ⊢
-            gamma ↝ Ty.borrow mutable targetsOther := by
+          (env.update gamma { ty := .ty (.borrow true [lv] pointee), lifetime := lifetime }) ⊢
+            gamma ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa [hy] using hcontainsOther
       rcases hcontainsOtherAtGamma with ⟨slot, hslot, hcontainsTy⟩
       have hslotEq :
-          slot = { ty := PartialTy.ty (Ty.borrow true [lv]), lifetime := lifetime } := by
+          slot = { ty := PartialTy.ty (Ty.borrow true [lv] pointee), lifetime := lifetime } := by
         have h :
-            { ty := PartialTy.ty (Ty.borrow true [lv]), lifetime := lifetime } = slot := by
+            { ty := PartialTy.ty (Ty.borrow true [lv] pointee), lifetime := lifetime } = slot := by
           simpa [Env.update] using hslot
         exact h.symm
       subst hslotEq
-      have hborrowEq : Ty.borrow true [lv] = Ty.borrow mutable targetsOther :=
+      have hborrowEq : Ty.borrow true [lv] pointee =
+          Ty.borrow mutable targetsOther pointeeOther :=
         partialTyContains_borrow_iff_eq.mp hcontainsTy
-      injection hborrowEq with _hmutable htargetsOther
+      injection hborrowEq with _hmutable htargetsOther _hpointee
       subst htargetsOther
       have htargetOtherEq : targetOther = lv := by
         simpa using htargetOther
       have hconflictLv : targetMutable ⋈ lv := by
         simpa [htargetOtherEq] using hconflict
-      have hcontainsMutableOld : env ⊢ x ↝ Ty.borrow true targetsMutable :=
+      have hcontainsMutableOld : env ⊢ x ↝ Ty.borrow true targetsMutable pointeeMutable :=
         EnvContains.update_fresh_ne hx hcontainsMutable
       have hwrite : WriteProhibited env lv :=
-        Or.inl ⟨x, targetsMutable, targetMutable, hcontainsMutableOld,
+        Or.inl ⟨x, targetsMutable, pointeeMutable, targetMutable, hcontainsMutableOld,
           htargetMutable, hconflictLv⟩
       exact False.elim (hnotWrite hwrite)
-    · exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    · exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+        targetMutable targetOther
         (EnvContains.update_fresh_ne hx hcontainsMutable)
         (EnvContains.update_fresh_ne hy hcontainsOther)
         htargetMutable htargetOther hconflict
 
 theorem borrowSafeEnv_update_fresh_immBorrow {env : Env} {gamma : Name}
-    {lv : LVal} {lifetime : Lifetime} :
+    {lv : LVal} {pointee : Ty} {lifetime : Lifetime} :
     BorrowSafeEnv env →
     env.fresh gamma →
     ¬ ReadProhibited env lv →
     BorrowSafeEnv
-      (env.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) := by
-  intro hsafe hfresh hnotRead x y mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+      (env.update gamma { ty := .ty (.borrow false [lv] pointee), lifetime := lifetime }) := by
+  intro hsafe hfresh hnotRead x y mutable targetsMutable targetsOther
+    pointeeMutable pointeeOther targetMutable targetOther hcontainsMutable
+    hcontainsOther htargetMutable htargetOther hconflict
   by_cases hx : x = gamma
   · have hcontainsMutableAtGamma :
-        (env.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) ⊢
-          gamma ↝ Ty.borrow true targetsMutable := by
+        (env.update gamma { ty := .ty (.borrow false [lv] pointee), lifetime := lifetime }) ⊢
+          gamma ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa [hx] using hcontainsMutable
     rcases hcontainsMutableAtGamma with ⟨slot, hslot, hcontainsTy⟩
     have hslotEq :
-        slot = { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } := by
+        slot = { ty := PartialTy.ty (Ty.borrow false [lv] pointee), lifetime := lifetime } := by
       have h :
-          { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } = slot := by
+          { ty := PartialTy.ty (Ty.borrow false [lv] pointee), lifetime := lifetime } = slot := by
         simpa [Env.update] using hslot
       exact h.symm
     subst hslotEq
     have hborrowEq :
-        Ty.borrow false [lv] = Ty.borrow true targetsMutable :=
+        Ty.borrow false [lv] pointee = Ty.borrow true targetsMutable pointeeMutable :=
       partialTyContains_borrow_iff_eq.mp hcontainsTy
     cases hborrowEq
   · by_cases hy : y = gamma
     · have hcontainsOtherAtGamma :
-          (env.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) ⊢
-            gamma ↝ Ty.borrow mutable targetsOther := by
+          (env.update gamma { ty := .ty (.borrow false [lv] pointee), lifetime := lifetime }) ⊢
+            gamma ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa [hy] using hcontainsOther
       rcases hcontainsOtherAtGamma with ⟨slot, hslot, hcontainsTy⟩
       have hslotEq :
-          slot = { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } := by
+          slot = { ty := PartialTy.ty (Ty.borrow false [lv] pointee), lifetime := lifetime } := by
         have h :
-            { ty := PartialTy.ty (Ty.borrow false [lv]), lifetime := lifetime } = slot := by
+            { ty := PartialTy.ty (Ty.borrow false [lv] pointee), lifetime := lifetime } = slot := by
           simpa [Env.update] using hslot
         exact h.symm
       subst hslotEq
       have hborrowEq :
-          Ty.borrow false [lv] = Ty.borrow mutable targetsOther :=
+          Ty.borrow false [lv] pointee = Ty.borrow mutable targetsOther pointeeOther :=
         partialTyContains_borrow_iff_eq.mp hcontainsTy
-      injection hborrowEq with _hmutable htargets
+      injection hborrowEq with _hmutable htargets _hpointee
       have htargetOtherEq : targetOther = lv := by
         cases htargets
         simpa using htargetOther
       subst htargetOtherEq
-      exact False.elim (hnotRead ⟨x, targetsMutable, targetMutable,
+      exact False.elim (hnotRead ⟨x, targetsMutable, pointeeMutable, targetMutable,
         EnvContains.update_fresh_ne hx hcontainsMutable,
         htargetMutable,
         hconflict⟩)
-    · exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    · exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+        targetMutable targetOther
         (EnvContains.update_fresh_ne hx hcontainsMutable)
         (EnvContains.update_fresh_ne hy hcontainsOther)
         htargetMutable htargetOther hconflict
 
 theorem borrowSafeEnv_update_fresh_immBorrowMany {env : Env} {gamma : Name}
-    {targets : List LVal} {lifetime : Lifetime} :
+    {targets : List LVal} {pointee : Ty} {lifetime : Lifetime} :
     BorrowSafeEnv env →
     env.fresh gamma →
     (∀ target, target ∈ targets → ¬ ReadProhibited env target) →
     BorrowSafeEnv
-      (env.update gamma { ty := .ty (.borrow false targets), lifetime := lifetime }) := by
-  intro hsafe hfresh hnotRead x y mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+      (env.update gamma { ty := .ty (.borrow false targets pointee), lifetime := lifetime }) := by
+  intro hsafe hfresh hnotRead x y mutable targetsMutable targetsOther
+    pointeeMutable pointeeOther targetMutable targetOther hcontainsMutable
+    hcontainsOther htargetMutable htargetOther hconflict
   by_cases hx : x = gamma
   · have hcontainsMutableAtGamma :
-        (env.update gamma { ty := .ty (.borrow false targets), lifetime := lifetime }) ⊢
-          gamma ↝ Ty.borrow true targetsMutable := by
+        (env.update gamma { ty := .ty (.borrow false targets pointee), lifetime := lifetime }) ⊢
+          gamma ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa [hx] using hcontainsMutable
     rcases hcontainsMutableAtGamma with ⟨slot, hslot, hcontainsTy⟩
     have hslotEq :
-        slot = { ty := PartialTy.ty (Ty.borrow false targets), lifetime := lifetime } := by
+        slot = { ty := PartialTy.ty (Ty.borrow false targets pointee), lifetime := lifetime } := by
       have h :
-          { ty := PartialTy.ty (Ty.borrow false targets), lifetime := lifetime } = slot := by
+          { ty := PartialTy.ty (Ty.borrow false targets pointee), lifetime := lifetime } = slot := by
         simpa [Env.update] using hslot
       exact h.symm
     subst hslotEq
     have hborrowEq :
-        Ty.borrow false targets = Ty.borrow true targetsMutable :=
+        Ty.borrow false targets pointee = Ty.borrow true targetsMutable pointeeMutable :=
       partialTyContains_borrow_iff_eq.mp hcontainsTy
     cases hborrowEq
   · by_cases hy : y = gamma
     · have hcontainsOtherAtGamma :
-          (env.update gamma { ty := .ty (.borrow false targets), lifetime := lifetime }) ⊢
-            gamma ↝ Ty.borrow mutable targetsOther := by
+          (env.update gamma { ty := .ty (.borrow false targets pointee), lifetime := lifetime }) ⊢
+            gamma ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa [hy] using hcontainsOther
       rcases hcontainsOtherAtGamma with ⟨slot, hslot, hcontainsTy⟩
       have hslotEq :
-          slot = { ty := PartialTy.ty (Ty.borrow false targets), lifetime := lifetime } := by
+          slot = { ty := PartialTy.ty (Ty.borrow false targets pointee), lifetime := lifetime } := by
         have h :
-            { ty := PartialTy.ty (Ty.borrow false targets), lifetime := lifetime } = slot := by
+            { ty := PartialTy.ty (Ty.borrow false targets pointee), lifetime := lifetime } = slot := by
           simpa [Env.update] using hslot
         exact h.symm
       subst hslotEq
       have hborrowEq :
-          Ty.borrow false targets = Ty.borrow mutable targetsOther :=
+          Ty.borrow false targets pointee = Ty.borrow mutable targetsOther pointeeOther :=
         partialTyContains_borrow_iff_eq.mp hcontainsTy
-      injection hborrowEq with _hmutable htargets
+      injection hborrowEq with _hmutable htargets _hpointee
       subst htargets
       exact False.elim
         (hnotRead targetOther htargetOther
-          ⟨x, targetsMutable, targetMutable,
+          ⟨x, targetsMutable, pointeeMutable, targetMutable,
             EnvContains.update_fresh_ne hx hcontainsMutable,
             htargetMutable,
             hconflict⟩)
-    · exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    · exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+        targetMutable targetOther
         (EnvContains.update_fresh_ne hx hcontainsMutable)
         (EnvContains.update_fresh_ne hy hcontainsOther)
         htargetMutable htargetOther hconflict
 
-theorem tyBorrowSafeAgainstEnv_mutBorrow {env : Env} {lv : LVal} :
+theorem tyBorrowSafeAgainstEnv_mutBorrow {env : Env} {lv : LVal} {pointee : Ty} :
     ¬ WriteProhibited env lv →
-    TyBorrowSafeAgainstEnv env (.borrow true [lv]) := by
+    TyBorrowSafeAgainstEnv env (.borrow true [lv] pointee) := by
   intro hnotWrite
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
-      hother htargetMutable htargetOther hconflict
-    have hborrowEq : Ty.borrow true [lv] = Ty.borrow true targetsMutable :=
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontains hother htargetMutable htargetOther
+      hconflict
+    have hborrowEq : Ty.borrow true [lv] pointee =
+        Ty.borrow true targetsMutable pointeeMutable :=
       partialTyContains_borrow_iff_eq.mp hcontains
-    injection hborrowEq with _hmut htargetsMutable
+    injection hborrowEq with _hmut htargetsMutable _hpointee
     subst htargetsMutable
     have htargetMutableEq : targetMutable = lv := by
       simpa using htargetMutable
@@ -750,51 +785,57 @@ theorem tyBorrowSafeAgainstEnv_mutBorrow {env : Env} {lv : LVal} :
     have hwrite : WriteProhibited env lv := by
       cases mutable with
       | false =>
-          exact Or.inr ⟨x, targetsOther, targetOther, hother,
+          exact Or.inr ⟨x, targetsOther, pointeeOther, targetOther, hother,
             htargetOther, pathConflicts_symm hconflictLv⟩
       | true =>
-          exact Or.inl ⟨x, targetsOther, targetOther, hother,
+          exact Or.inl ⟨x, targetsOther, pointeeOther, targetOther, hother,
             htargetOther, pathConflicts_symm hconflictLv⟩
     exact hnotWrite hwrite
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther
-      hcontainsMutable hcontains htargetMutable htargetOther hconflict
-    have hborrowEq : Ty.borrow true [lv] = Ty.borrow mutable targetsOther :=
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther hcontainsMutable hcontains htargetMutable
+      htargetOther hconflict
+    have hborrowEq : Ty.borrow true [lv] pointee =
+        Ty.borrow mutable targetsOther pointeeOther :=
       partialTyContains_borrow_iff_eq.mp hcontains
-    injection hborrowEq with _hmutable htargetsOther
+    injection hborrowEq with _hmutable htargetsOther _hpointee
     subst htargetsOther
     have htargetOtherEq : targetOther = lv := by
       simpa using htargetOther
     have hconflictLv : targetMutable ⋈ lv := by
       simpa [htargetOtherEq] using hconflict
     exact hnotWrite
-      (Or.inl ⟨x, targetsMutable, targetMutable, hcontainsMutable,
+      (Or.inl ⟨x, targetsMutable, pointeeMutable, targetMutable, hcontainsMutable,
         htargetMutable, hconflictLv⟩)
 
-theorem tyBorrowSafeAgainstEnv_immBorrowMany {env : Env} {targets : List LVal} :
+theorem tyBorrowSafeAgainstEnv_immBorrowMany {env : Env} {targets : List LVal}
+    {pointee : Ty} :
     (∀ target, target ∈ targets → ¬ ReadProhibited env target) →
-    TyBorrowSafeAgainstEnv env (.borrow false targets) := by
+    TyBorrowSafeAgainstEnv env (.borrow false targets pointee) := by
   intro hnotRead
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
-      _hother _htargetMutable _htargetOther _hconflict
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontains _hother _htargetMutable _htargetOther
+      _hconflict
     have hborrowEq :
-        Ty.borrow false targets = Ty.borrow true targetsMutable :=
+        Ty.borrow false targets pointee = Ty.borrow true targetsMutable pointeeMutable :=
       partialTyContains_borrow_iff_eq.mp hcontains
     cases hborrowEq
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther
-      hcontainsMutable hcontains htargetMutable htargetOther hconflict
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther hcontainsMutable hcontains htargetMutable
+      htargetOther hconflict
     have hborrowEq :
-        Ty.borrow false targets = Ty.borrow mutable targetsOther :=
+        Ty.borrow false targets pointee =
+          Ty.borrow mutable targetsOther pointeeOther :=
       partialTyContains_borrow_iff_eq.mp hcontains
-    injection hborrowEq with _hmutable htargets
+    injection hborrowEq with _hmutable htargets _hpointee
     subst htargets
     exact hnotRead targetOther htargetOther
-      ⟨x, targetsMutable, targetMutable, hcontainsMutable,
+      ⟨x, targetsMutable, pointeeMutable, targetMutable, hcontainsMutable,
         htargetMutable, hconflict⟩
 
-theorem tyBorrowSafeAgainstEnv_immBorrow {env : Env} {lv : LVal} :
+theorem tyBorrowSafeAgainstEnv_immBorrow {env : Env} {lv : LVal} {pointee : Ty} :
     ¬ ReadProhibited env lv →
-    TyBorrowSafeAgainstEnv env (.borrow false [lv]) := by
+    TyBorrowSafeAgainstEnv env (.borrow false [lv] pointee) := by
   intro hnotRead
   exact tyBorrowSafeAgainstEnv_immBorrowMany
     (by
@@ -805,9 +846,9 @@ theorem tyBorrowSafeAgainstEnv_immBorrow {env : Env} {lv : LVal} :
       exact hnotRead)
 
 theorem PartialTyContains.tyBox_borrow_inv {inner : Ty} {mutable : Bool}
-    {targets : List LVal} :
-    PartialTyContains (.ty (.box inner)) (.borrow mutable targets) →
-    PartialTyContains (.ty inner) (.borrow mutable targets) := by
+    {targets : List LVal} {pointee : Ty} :
+    PartialTyContains (.ty (.box inner)) (.borrow mutable targets pointee) →
+    PartialTyContains (.ty inner) (.borrow mutable targets pointee) := by
   intro hcontains
   cases hcontains with
   | tyBox hinner => exact hinner
@@ -817,25 +858,29 @@ theorem TyBorrowSafeAgainstEnv.box {env : Env} {ty : Ty} :
     TyBorrowSafeAgainstEnv env (.box ty) := by
   intro hsafeTy
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontains
-      hother htargetMutable htargetOther hconflict
-    exact hsafeTy.1 targetsMutable mutable targetsOther x targetMutable targetOther
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontains hother htargetMutable htargetOther
+      hconflict
+    exact hsafeTy.1 targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      x targetMutable targetOther
       (PartialTyContains.tyBox_borrow_inv hcontains) hother
       htargetMutable htargetOther hconflict
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther hcontainsMutable
-      hcontains htargetMutable htargetOther hconflict
-    exact hsafeTy.2 x targetsMutable mutable targetsOther targetMutable targetOther
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther hcontainsMutable hcontains htargetMutable
+      htargetOther hconflict
+    exact hsafeTy.2 x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther
       hcontainsMutable (PartialTyContains.tyBox_borrow_inv hcontains)
       htargetMutable htargetOther hconflict
 
 theorem borrowSafety_immBorrow_result_extension {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
-    {gamma : Name} :
+    {pointee : Ty} {gamma : Name} :
     BorrowSafeEnv env →
-    TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv]) env₂ →
+    TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv] pointee) env₂ →
     env₂.fresh gamma →
     BorrowSafeEnv
-      (env₂.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) := by
+      (env₂.update gamma { ty := .ty (.borrow false [lv] pointee), lifetime := lifetime }) := by
   intro hsafe htyping hfresh
   cases htyping with
   | immBorrow _hLv hnotRead =>
@@ -843,12 +888,12 @@ theorem borrowSafety_immBorrow_result_extension {env env₂ : Env}
 
 theorem borrowSafety_mutBorrow_result_extension {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
-    {gamma : Name} :
+    {pointee : Ty} {gamma : Name} :
     BorrowSafeEnv env →
-    TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv]) env₂ →
+    TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv] pointee) env₂ →
     env₂.fresh gamma →
     BorrowSafeEnv
-      (env₂.update gamma { ty := .ty (.borrow true [lv]), lifetime := lifetime }) := by
+      (env₂.update gamma { ty := .ty (.borrow true [lv] pointee), lifetime := lifetime }) := by
   intro hsafe htyping hfresh
   cases htyping with
   | mutBorrow _hLv _hmutable hnotWrite =>
@@ -872,9 +917,11 @@ theorem borrowSafeEnv_update_box_of_update_inner {env : Env} {gamma : Name}
     {ty : Ty} {lifetime : Lifetime} :
     BorrowSafeEnv (env.update gamma { ty := .ty ty, lifetime := lifetime }) →
     BorrowSafeEnv (env.update gamma { ty := .ty (.box ty), lifetime := lifetime }) := by
-  intro hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
-    hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
-  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+  intro hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
+    htargetOther hconflict
+  exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther
     (EnvContains.update_box_borrow_to_inner hcontainsMutable)
     (EnvContains.update_box_borrow_to_inner hcontainsOther)
     htargetMutable htargetOther hconflict
@@ -1038,6 +1085,9 @@ theorem LValTyping.strike_suffix_at_type {env : Env} :
         rcases ihBorrow hbase hstrikeAtBorrow with ⟨borrowStruck, hborrowStruck⟩
         simp [Strike] at hborrowStruck)
       (by
+        intro _ty _hvars
+        trivial)
+      (by
         intro target ty lifetime _htarget _ihTarget
         trivial)
       (by
@@ -1105,6 +1155,9 @@ theorem LValTyping.contains_base_of_strike_suffix {env : Env} :
           ⟨borrowStruck, hborrowStruck⟩
         simp [Strike] at hborrowStruck)
       (by
+        intro _ty _hvars
+        trivial)
+      (by
         intro target ty lifetime _htarget _ihTarget
         trivial)
       (by
@@ -1133,9 +1186,9 @@ theorem LValTyping.contains_base_of_strike {env : Env} {lv : LVal}
 /-- The base slot struck by an `EnvMove` cannot still contain a live borrow in
 the moved environment. -/
 theorem EnvContains.move_base_same_false {env env' : Env} {lv : LVal}
-    {mutable : Bool} {targets : List LVal} :
+    {mutable : Bool} {targets : List LVal} {pointee : Ty} :
     EnvMove env lv env' →
-    ¬ env' ⊢ LVal.base lv ↝ Ty.borrow mutable targets := by
+    ¬ env' ⊢ LVal.base lv ↝ Ty.borrow mutable targets pointee := by
   intro hmove hcontains
   rcases hmove with ⟨slot, struck, _hslot, hstrike, henv'⟩
   rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
@@ -1158,9 +1211,11 @@ theorem borrowSafeEnv_move {env env' : Env} {lv : LVal} :
     BorrowSafeEnv env →
     EnvMove env lv env' →
     BorrowSafeEnv env' := by
-  intro hsafe hmove x y mutable targetsMutable targetsOther targetMutable
-    targetOther hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
-  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+  intro hsafe hmove x y mutable targetsMutable targetsOther pointeeMutable
+    pointeeOther targetMutable targetOther hcontainsMutable hcontainsOther
+    htargetMutable htargetOther hconflict
+  exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther
     (EnvContains.of_move hmove hcontainsMutable)
     (EnvContains.of_move hmove hcontainsOther)
     htargetMutable htargetOther hconflict
@@ -1191,19 +1246,19 @@ theorem borrowSafeEnv_move_result_extension_of_base_contains {env env₂ : Env}
     {lv : LVal} {ty : Ty} {gamma : Name} {lifetime : Lifetime} :
     BorrowSafeEnv env →
     EnvMove env lv env₂ →
-    (∀ mutable targets,
-      PartialTyContains (.ty ty) (.borrow mutable targets) →
-      env ⊢ LVal.base lv ↝ Ty.borrow mutable targets) →
+    (∀ mutable targets pointee,
+      PartialTyContains (.ty ty) (.borrow mutable targets pointee) →
+      env ⊢ LVal.base lv ↝ Ty.borrow mutable targets pointee) →
     env₂.fresh gamma →
     BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hsafe hmove hbaseContains _hfresh a b mutable targetsMutable targetsOther
-    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
-    htargetOther hconflict
+    pointeeMutable pointeeOther targetMutable targetOther hcontainsMutable
+    hcontainsOther htargetMutable htargetOther hconflict
   by_cases ha : a = gamma
   · subst a
     have hcontainsMutableAtGamma :
         (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) ⊢
-          gamma ↝ Ty.borrow true targetsMutable := by
+          gamma ↝ Ty.borrow true targetsMutable pointeeMutable := by
       simpa using hcontainsMutable
     rcases hcontainsMutableAtGamma with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
     have hslotEq :
@@ -1216,19 +1271,19 @@ theorem borrowSafeEnv_move_result_extension_of_base_contains {env env₂ : Env}
     by_cases hb : b = gamma
     · exact hb.symm
     · have hcontainsOtherMove :
-          env₂ ⊢ b ↝ Ty.borrow mutable targetsOther :=
+          env₂ ⊢ b ↝ Ty.borrow mutable targetsOther pointeeOther :=
         EnvContains.update_fresh_ne hb hcontainsOther
       by_cases hbBase : b = LVal.base lv
       · subst hbBase
         exact False.elim (EnvContains.move_base_same_false hmove hcontainsOtherMove)
       · have hcontainsOtherOld :
-            env ⊢ b ↝ Ty.borrow mutable targetsOther :=
+            env ⊢ b ↝ Ty.borrow mutable targetsOther pointeeOther :=
           EnvContains.of_move hmove hcontainsOtherMove
         have hbaseEq :
             LVal.base lv = b :=
-          hsafe (LVal.base lv) b mutable targetsMutable targetsOther targetMutable
-            targetOther
-            (hbaseContains true targetsMutable hcontainsTy)
+          hsafe (LVal.base lv) b mutable targetsMutable targetsOther
+            pointeeMutable pointeeOther targetMutable targetOther
+            (hbaseContains true targetsMutable pointeeMutable hcontainsTy)
             hcontainsOtherOld
             htargetMutable htargetOther hconflict
         exact False.elim (hbBase hbaseEq.symm)
@@ -1236,7 +1291,7 @@ theorem borrowSafeEnv_move_result_extension_of_base_contains {env env₂ : Env}
     · subst b
       have hcontainsOtherAtGamma :
           (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) ⊢
-            gamma ↝ Ty.borrow mutable targetsOther := by
+            gamma ↝ Ty.borrow mutable targetsOther pointeeOther := by
         simpa using hcontainsOther
       rcases hcontainsOtherAtGamma with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
       have hslotEq :
@@ -1247,23 +1302,23 @@ theorem borrowSafeEnv_move_result_extension_of_base_contains {env env₂ : Env}
         exact h.symm
       subst hslotEq
       have hcontainsMutableMove :
-          env₂ ⊢ a ↝ Ty.borrow true targetsMutable :=
+          env₂ ⊢ a ↝ Ty.borrow true targetsMutable pointeeMutable :=
         EnvContains.update_fresh_ne ha hcontainsMutable
       by_cases haBase : a = LVal.base lv
       · subst haBase
         exact False.elim (EnvContains.move_base_same_false hmove hcontainsMutableMove)
       · have hcontainsMutableOld :
-            env ⊢ a ↝ Ty.borrow true targetsMutable :=
+            env ⊢ a ↝ Ty.borrow true targetsMutable pointeeMutable :=
           EnvContains.of_move hmove hcontainsMutableMove
         have hbaseEq :
             a = LVal.base lv :=
-          hsafe a (LVal.base lv) mutable targetsMutable targetsOther targetMutable
-            targetOther hcontainsMutableOld
-            (hbaseContains mutable targetsOther hcontainsTy)
+          hsafe a (LVal.base lv) mutable targetsMutable targetsOther
+            pointeeMutable pointeeOther targetMutable targetOther hcontainsMutableOld
+            (hbaseContains mutable targetsOther pointeeOther hcontainsTy)
             htargetMutable htargetOther hconflict
         exact False.elim (haBase hbaseEq)
     · exact borrowSafeEnv_move hsafe hmove a b mutable targetsMutable targetsOther
-        targetMutable targetOther
+        pointeeMutable pointeeOther targetMutable targetOther
         (EnvContains.update_fresh_ne ha hcontainsMutable)
         (EnvContains.update_fresh_ne hb hcontainsOther)
         htargetMutable htargetOther hconflict
@@ -1272,50 +1327,53 @@ theorem tyBorrowSafeAgainstEnv_move_of_base_contains {env env₂ : Env}
     {lv : LVal} {ty : Ty} :
     BorrowSafeEnv env →
     EnvMove env lv env₂ →
-    (∀ mutable targets,
-      PartialTyContains (.ty ty) (.borrow mutable targets) →
-      env ⊢ LVal.base lv ↝ Ty.borrow mutable targets) →
+    (∀ mutable targets pointee,
+      PartialTyContains (.ty ty) (.borrow mutable targets pointee) →
+      env ⊢ LVal.base lv ↝ Ty.borrow mutable targets pointee) →
     TyBorrowSafeAgainstEnv env₂ ty := by
   intro hsafe hmove hbaseContains
   constructor
-  · intro targetsMutable mutable targetsOther x targetMutable targetOther hcontainsTy
-      hcontainsOther htargetMutable htargetOther hconflict
+  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+      targetMutable targetOther hcontainsTy hcontainsOther htargetMutable
+      htargetOther hconflict
     by_cases hxBase : x = LVal.base lv
     · subst hxBase
       exact False.elim (EnvContains.move_base_same_false hmove hcontainsOther)
     · have hcontainsOtherOld :
-          env ⊢ x ↝ Ty.borrow mutable targetsOther :=
+          env ⊢ x ↝ Ty.borrow mutable targetsOther pointeeOther :=
         EnvContains.of_move hmove hcontainsOther
       have hbaseEq :
           LVal.base lv = x :=
-        hsafe (LVal.base lv) x mutable targetsMutable targetsOther targetMutable
-          targetOther
-          (hbaseContains true targetsMutable hcontainsTy)
+        hsafe (LVal.base lv) x mutable targetsMutable targetsOther
+          pointeeMutable pointeeOther targetMutable targetOther
+          (hbaseContains true targetsMutable pointeeMutable hcontainsTy)
           hcontainsOtherOld
           htargetMutable htargetOther hconflict
       exact False.elim (hxBase hbaseEq.symm)
-  · intro x targetsMutable mutable targetsOther targetMutable targetOther
-      hcontainsMutable hcontainsTy htargetMutable htargetOther hconflict
+  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+      targetMutable targetOther hcontainsMutable hcontainsTy htargetMutable
+      htargetOther hconflict
     by_cases hxBase : x = LVal.base lv
     · subst hxBase
       exact False.elim (EnvContains.move_base_same_false hmove hcontainsMutable)
     · have hcontainsMutableOld :
-          env ⊢ x ↝ Ty.borrow true targetsMutable :=
+          env ⊢ x ↝ Ty.borrow true targetsMutable pointeeMutable :=
         EnvContains.of_move hmove hcontainsMutable
       have hbaseEq :
           x = LVal.base lv :=
-        hsafe x (LVal.base lv) mutable targetsMutable targetsOther targetMutable
-          targetOther hcontainsMutableOld
-          (hbaseContains mutable targetsOther hcontainsTy)
+        hsafe x (LVal.base lv) mutable targetsMutable targetsOther
+          pointeeMutable pointeeOther targetMutable targetOther hcontainsMutableOld
+          (hbaseContains mutable targetsOther pointeeOther hcontainsTy)
           htargetMutable htargetOther hconflict
       exact False.elim (hxBase hbaseEq)
 
 theorem EnvContains.move_var_same_false {env env' : Env} {x : Name}
-    {slot : EnvSlot} {ty : Ty} {mutable : Bool} {targets : List LVal} :
+    {slot : EnvSlot} {ty : Ty} {mutable : Bool} {targets : List LVal}
+    {pointee : Ty} :
     env.slotAt x = some slot →
     slot.ty = .ty ty →
     EnvMove env (.var x) env' →
-    ¬ env' ⊢ x ↝ Ty.borrow mutable targets := by
+    ¬ env' ⊢ x ↝ Ty.borrow mutable targets pointee := by
   intro _hslot _hslotTy hmove hcontains
   exact EnvContains.move_base_same_false hmove hcontains
 
@@ -1327,8 +1385,8 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
     env₂.fresh gamma →
     BorrowSafeEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) := by
   intro hsafe htyping hfresh a b mutable targetsMutable targetsOther
-    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
-    htargetOther hconflict
+    pointeeMutable pointeeOther targetMutable targetOther hcontainsMutable
+    hcontainsOther htargetMutable htargetOther hconflict
   cases htyping with
   | move hLv hnotWrite hmove =>
       rcases LValTyping.var_inv hLv with
@@ -1336,7 +1394,7 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
       by_cases ha : a = gamma
       · subst a
         have hcontainsMovedMutable :
-            env ⊢ x ↝ Ty.borrow true targetsMutable := by
+            env ⊢ x ↝ Ty.borrow true targetsMutable pointeeMutable := by
           rcases hcontainsMutable with
             ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
           have hslotEq :
@@ -1353,7 +1411,7 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
         · subst b
           exact rfl
         · have hcontainsOtherMove :
-              env₂ ⊢ b ↝ Ty.borrow mutable targetsOther :=
+              env₂ ⊢ b ↝ Ty.borrow mutable targetsOther pointeeOther :=
             EnvContains.update_fresh_ne hb hcontainsOther
           by_cases hbx : b = x
           · subst b
@@ -1361,18 +1419,18 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
               (EnvContains.move_var_same_false hslotSource hsourceTy hmove
                 hcontainsOtherMove)
           · have hcontainsOtherOld :
-                env ⊢ b ↝ Ty.borrow mutable targetsOther :=
+                env ⊢ b ↝ Ty.borrow mutable targetsOther pointeeOther :=
               EnvContains.of_move hmove hcontainsOtherMove
             have hsafeEq :
                 x = b :=
-              hsafe x b mutable targetsMutable targetsOther targetMutable
-                targetOther hcontainsMovedMutable hcontainsOtherOld
+              hsafe x b mutable targetsMutable targetsOther pointeeMutable pointeeOther
+                targetMutable targetOther hcontainsMovedMutable hcontainsOtherOld
                 htargetMutable htargetOther hconflict
             exact False.elim (hbx hsafeEq.symm)
       · by_cases hb : b = gamma
         · subst b
           have hcontainsMovedOther :
-              env ⊢ x ↝ Ty.borrow mutable targetsOther := by
+              env ⊢ x ↝ Ty.borrow mutable targetsOther pointeeOther := by
             rcases hcontainsOther with
               ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
             have hslotEq :
@@ -1386,7 +1444,7 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
               rw [hsourceTy]
               exact hcontainsTy⟩
           have hcontainsMutableMove :
-              env₂ ⊢ a ↝ Ty.borrow true targetsMutable :=
+              env₂ ⊢ a ↝ Ty.borrow true targetsMutable pointeeMutable :=
             EnvContains.update_fresh_ne ha hcontainsMutable
           by_cases hax : a = x
           · subst a
@@ -1394,100 +1452,42 @@ theorem borrowSafety_move_var_result_extension {env env₂ : Env}
               (EnvContains.move_var_same_false hslotSource hsourceTy hmove
                 hcontainsMutableMove)
           · have hcontainsMutableOld :
-                env ⊢ a ↝ Ty.borrow true targetsMutable :=
+                env ⊢ a ↝ Ty.borrow true targetsMutable pointeeMutable :=
               EnvContains.of_move hmove hcontainsMutableMove
             have hcontainsOtherOld :
-                env ⊢ x ↝ Ty.borrow mutable targetsOther :=
+                env ⊢ x ↝ Ty.borrow mutable targetsOther pointeeOther :=
               hcontainsMovedOther
             have hsafeEq :
                 a = x :=
-              hsafe a x mutable targetsMutable targetsOther targetMutable
-                targetOther hcontainsMutableOld hcontainsOtherOld
+              hsafe a x mutable targetsMutable targetsOther pointeeMutable pointeeOther
+                targetMutable targetOther hcontainsMutableOld hcontainsOtherOld
                 htargetMutable htargetOther hconflict
             exact False.elim (hax hsafeEq)
         · exact borrowSafeEnv_move hsafe hmove a b mutable targetsMutable
-            targetsOther targetMutable targetOther
+            targetsOther pointeeMutable pointeeOther targetMutable targetOther
             (EnvContains.update_fresh_ne ha hcontainsMutable)
             (EnvContains.update_fresh_ne hb hcontainsOther)
             htargetMutable htargetOther hconflict
 
-/-- Structured assignment-level replacement for `AssignmentWritePreservesCoherent`.
-
-This avoids asking directly for `Coherent env₃`.  Instead it asks for the two
-lvalue-transport facts that are sufficient to prove coherence of the result:
-old-root borrow typings transport back to `env₂`, while borrow typings rooted at
-the written base provide their joint target-list typings in `env₃`.
--/
-def AssignmentWriteCoherenceObligations : Prop :=
-  ∀ {env₁ env₂ env₃ : Env}
-    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
-    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty}
-    {φ : Name → Nat},
-    WellFormedEnv env₁ lifetime →
-    WellFormedEnv env₂ lifetime →
-    LinearizedBy φ env₂ →
-    EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy →
-    LValTyping env₂ lhs oldTy targetLifetime →
-    targetLifetime ≤ lifetime →
-    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-    ShapeCompatible env₂ oldTy (.ty rhsTy) →
-    WellFormedTy env₂ rhsTy targetLifetime →
-    EnvWrite 0 env₂ lhs rhsTy env₃ →
-    ¬ WriteProhibited env₃ lhs →
-    Coherent env₃
-
-def AssignmentRhsEdgesRanked : Prop :=
-  ∀ {env₁ env₂ env₃ : Env}
-    {typing : StoreTyping} {lifetime targetLifetime : Lifetime}
-    {lhs : LVal} {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty},
-    WellFormedEnv env₁ lifetime →
-    WellFormedEnv env₂ lifetime →
-    LValTyping env₂ lhs oldTy targetLifetime →
-    targetLifetime ≤ lifetime →
-    TermTyping env₁ typing lifetime rhs rhsTy env₂ →
-    ShapeCompatible env₂ oldTy (.ty rhsTy) →
-    WellFormedTy env₂ rhsTy targetLifetime →
-    EnvWrite 0 env₂ lhs rhsTy env₃ →
-    ¬ WriteProhibited env₃ lhs →
-    ∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy
-
-/-- Declaration-level fresh-slot coherence side condition for Lemma 4.9.
-
-The legacy declaration case used `Coherent.update_fresh_ty`, which is false from
-`WellFormedTy` alone.  This side condition states the missing local fact for each
-`T-Declare`: adding the freshly declared full type must satisfy the explicit
-fresh-update coherence obligations.
--/
-def DeclarationFreshUpdateCoherent : Prop :=
-  ∀ {env₁ env₂ env₃ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime}
-    {x : Name} {term : Term} {ty : Ty},
-    WellFormedEnv env₁ lifetime →
-    WellFormedEnv env₂ lifetime →
-    WellFormedTy env₂ ty lifetime →
-    env₁.fresh x →
-    TermTyping env₁ typing lifetime term ty env₂ →
-    env₂.fresh x →
-    env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
-    FreshUpdateCoherenceObligations env₂ x ty lifetime
-
 theorem typingPreservesBorrowSafeResult_mutBorrow_case {env env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal} {gamma : Name} :
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal} {pointee : Ty}
+    {gamma : Name} :
     BorrowSafeEnv env →
-    TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv]) env₂ →
+    TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv] pointee) env₂ →
     env₂.fresh gamma →
     BorrowSafeEnv
-      (env₂.update gamma { ty := .ty (.borrow true [lv]), lifetime := lifetime }) := by
+      (env₂.update gamma { ty := .ty (.borrow true [lv] pointee), lifetime := lifetime }) := by
   intro hborrowSafe htyping hfresh
   exact borrowSafety_mutBorrow_result_extension hborrowSafe htyping hfresh
 
 theorem typingPreservesBorrowSafeResult_immBorrow_case {env env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal} {gamma : Name} :
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal} {pointee : Ty}
+    {gamma : Name} :
     BorrowSafeEnv env →
-    TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv]) env₂ →
+    TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv] pointee) env₂ →
     env₂.fresh gamma →
     BorrowSafeEnv
-      (env₂.update gamma { ty := .ty (.borrow false [lv]), lifetime := lifetime }) := by
+      (env₂.update gamma { ty := .ty (.borrow false [lv] pointee), lifetime := lifetime }) := by
   intro hborrowSafe htyping hfresh
   exact borrowSafety_immBorrow_result_extension hborrowSafe htyping hfresh
 
@@ -1575,7 +1575,7 @@ theorem borrowSafetyPreservation_move
         hborrowSafe
         ⟨slot, struck, hslot, hstrike, rfl⟩
         (by
-          intro mutable targets hcontains
+          intro mutable targets pointee hcontains
           exact LValTyping.contains_base_of_strike hLv hslot hstrike hcontains)
         hfresh
 
@@ -1611,65 +1611,72 @@ theorem borrowSafetyPreservation_envWrite
     ¬ WriteProhibited env₃ lhs →
     BorrowSafeEnv env₃ := by
   intro hborrowSafe hsafeTy _hLhsPost _hRhs _hshape _hwellTy hwrite hranked _hcoh
-    _hnotWrite x y mutable targetsMutable targetsOther targetMutable targetOther
-    hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
+    _hnotWrite x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
+    htargetOther hconflict
   rcases hranked with ⟨_φ, _hlinBy, hbelow⟩
   rcases hcontainsMutable with ⟨mutableSlot, hmutableSlot, hmutableContains⟩
   rcases hcontainsOther with ⟨otherSlot, hotherSlot, hotherContains⟩
   have hmutableOrigin :=
-    EnvWrite.borrowTargetOrigin_all hwrite x mutableSlot true targetsMutable
+    EnvWrite.borrowTargetOrigin_all hwrite x mutableSlot true targetsMutable pointeeMutable
       hmutableSlot hmutableContains targetMutable htargetMutable
   have hotherOrigin :=
-    EnvWrite.borrowTargetOrigin_all hwrite y otherSlot mutable targetsOther
+    EnvWrite.borrowTargetOrigin_all hwrite y otherSlot mutable targetsOther pointeeOther
       hotherSlot hotherContains targetOther htargetOther
   rcases hmutableOrigin with hmutableOld | hmutableRhs
   · rcases hmutableOld with
-      ⟨oldMutableSlot, oldMutableTargets, holdMutableSlot,
+      ⟨oldMutableSlot, oldMutableTargets, oldMutablePointee, holdMutableSlot,
         holdMutableContains, holdMutableTarget⟩
     rcases hotherOrigin with hotherOld | hotherRhs
     · rcases hotherOld with
-        ⟨oldOtherSlot, oldOtherTargets, holdOtherSlot,
+        ⟨oldOtherSlot, oldOtherTargets, oldOtherPointee, holdOtherSlot,
           holdOtherContains, holdOtherTarget⟩
       exact hborrowSafe x y mutable oldMutableTargets oldOtherTargets
-        targetMutable targetOther
+        oldMutablePointee oldOtherPointee targetMutable targetOther
         ⟨oldMutableSlot, holdMutableSlot, holdMutableContains⟩
         ⟨oldOtherSlot, holdOtherSlot, holdOtherContains⟩
         holdMutableTarget holdOtherTarget hconflict
-    · rcases hotherRhs with ⟨rhsOtherTargets, hrhsOtherContains, hrhsOtherTarget⟩
+    · rcases hotherRhs with
+        ⟨rhsOtherTargets, rhsOtherPointee, hrhsOtherContains, hrhsOtherTarget⟩
       exact False.elim
-        (hsafeTy.2 x oldMutableTargets mutable rhsOtherTargets targetMutable
-          targetOther
+        (hsafeTy.2 x oldMutableTargets mutable rhsOtherTargets oldMutablePointee
+          rhsOtherPointee targetMutable targetOther
           ⟨oldMutableSlot, holdMutableSlot, holdMutableContains⟩
           hrhsOtherContains holdMutableTarget hrhsOtherTarget hconflict)
   · rcases hmutableRhs with
-      ⟨rhsMutableTargets, hrhsMutableContains, hrhsMutableTarget⟩
+      ⟨rhsMutableTargets, rhsMutablePointee, hrhsMutableContains, hrhsMutableTarget⟩
     rcases hotherOrigin with hotherOld | hotherRhs
     · rcases hotherOld with
-        ⟨oldOtherSlot, oldOtherTargets, holdOtherSlot,
+        ⟨oldOtherSlot, oldOtherTargets, oldOtherPointee, holdOtherSlot,
           holdOtherContains, holdOtherTarget⟩
       exact False.elim
-        (hsafeTy.1 rhsMutableTargets mutable oldOtherTargets y targetMutable
-          targetOther hrhsMutableContains
+        (hsafeTy.1 rhsMutableTargets mutable oldOtherTargets rhsMutablePointee
+          oldOtherPointee y targetMutable targetOther hrhsMutableContains
           ⟨oldOtherSlot, holdOtherSlot, holdOtherContains⟩
           hrhsMutableTarget holdOtherTarget hconflict)
-    · rcases hotherRhs with ⟨rhsOtherTargets, hrhsOtherContains, hrhsOtherTarget⟩
-      exact hbelow.2 x y mutable targetsMutable targetsOther targetMutable
-        targetOther
+    · rcases hotherRhs with
+        ⟨rhsOtherTargets, rhsOtherPointee, hrhsOtherContains, hrhsOtherTarget⟩
+      exact hbelow.2 x y mutable targetsMutable targetsOther pointeeMutable
+        pointeeOther targetMutable targetOther
         ⟨mutableSlot, hmutableSlot, hmutableContains⟩
         ⟨otherSlot, hotherSlot, hotherContains⟩
         htargetMutable htargetOther hconflict
-        ⟨true, rhsMutableTargets, hrhsMutableContains, hrhsMutableTarget⟩
-        ⟨mutable, rhsOtherTargets, hrhsOtherContains, hrhsOtherTarget⟩
+        ⟨true, rhsMutableTargets, rhsMutablePointee, hrhsMutableContains,
+          hrhsMutableTarget⟩
+        ⟨mutable, rhsOtherTargets, rhsOtherPointee, hrhsOtherContains,
+          hrhsOtherTarget⟩
 
 /-- Concrete borrow-safety package assembled from proved local preservation lemmas. -/
 theorem borrowSafetyPreservationObligations_proved :
     BorrowSafetyPreservationObligations where
   envWrite := borrowSafetyPreservation_envWrite
 
+/-- Compatibility wrapper for the old explicit-obligation route.
+
+The explicit global assignment/declaration predicates are no longer required:
+the needed facts are carried by the `TermTyping` derivation itself and consumed
+by `borrowInvariance_of_ruleCarriedObligations`. -/
 theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
-    (_hrankedAssign : AssignmentRhsEdgesRanked)
-    (_hwriteCoherent : AssignmentWriteCoherenceObligations)
-    (_hdeclFresh : DeclarationFreshUpdateCoherent)
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
@@ -1784,7 +1791,7 @@ theorem typingPreservesBorrowSafeResult_global {env₁ env₂ : Env}
         hborrowSafe
         ⟨slot, struck, hslot, hstrike, rfl⟩
         (by
-          intro mutable targets hcontains
+          intro mutable targets pointee hcontains
           exact LValTyping.contains_base_of_strike hLv hslot hstrike hcontains)
     refine ⟨hcore, hsafeTy, ?_⟩
     intro gamma hfresh
@@ -1920,9 +1927,6 @@ theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
-    AssignmentRhsEdgesRanked →
-    AssignmentWriteCoherenceObligations →
-    DeclarationFreshUpdateCoherent →
     SourceTerm term →
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidState store term →
@@ -1932,13 +1936,11 @@ theorem borrowSafety_of_rankedAssign_and_declFreshCoherence
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ := by
-  intro hrankedAssign hwriteCoherent
-    hdeclFresh hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
+  intro hsource hrefs hvalidState hvalidStoreTyping hwellFormed hborrowSafe hsafe
     htyping
   exact ⟨
     borrowInvariance_of_rankedAssign_and_declFreshCoherence
-      hrankedAssign hwriteCoherent hdeclFresh hrefs hvalidState
-      hvalidStoreTyping hwellFormed hsafe htyping,
+      hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping,
     (typingPreservesBorrowSafeResult_global hsource hborrowSafe htyping).1⟩
 
 /--
