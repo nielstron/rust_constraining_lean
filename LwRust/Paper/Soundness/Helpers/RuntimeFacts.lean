@@ -919,6 +919,105 @@ theorem PartialTyBorrowsWellFormedInSlot.of_partialTyUnion {env : Env}
   intro hunion hleft hright mutable targets hcontains
   exact BorrowTargetsWellFormedInSlot.of_partialTyUnion hunion hleft hright hcontains
 
+/--
+Join closure for contained borrows, factored through the actual target-transport
+obligations.
+
+`EnvJoin.contained_borrow_member` shows that every target in a joined borrow
+comes from one of the branch borrows.  This lemma packages the remaining work:
+transporting that branch target's per-slot well-formedness into the joined
+environment and joined slot lifetime.
+-/
+theorem EnvJoin.preserves_containedBorrowsWellFormed_of_target_transport
+    {left right join : Env} :
+    EnvJoin left right join →
+    ContainedBorrowsWellFormed left →
+    ContainedBorrowsWellFormed right →
+    (∀ x joinSlot leftSlot mutable targets,
+      join.slotAt x = some joinSlot →
+      left.slotAt x = some leftSlot →
+      PartialTyContains leftSlot.ty (.borrow mutable targets) →
+      BorrowTargetsWellFormedInSlot left leftSlot.lifetime targets →
+      BorrowTargetsWellFormedInSlot join joinSlot.lifetime targets) →
+    (∀ x joinSlot rightSlot mutable targets,
+      join.slotAt x = some joinSlot →
+      right.slotAt x = some rightSlot →
+      PartialTyContains rightSlot.ty (.borrow mutable targets) →
+      BorrowTargetsWellFormedInSlot right rightSlot.lifetime targets →
+      BorrowTargetsWellFormedInSlot join joinSlot.lifetime targets) →
+    ContainedBorrowsWellFormed join := by
+  intro hjoin hleft hright hleftTransport hrightTransport
+    x joinSlot mutable targets hjoinSlot hcontains
+  rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+  have hcontainedSlotEq : containedSlot = joinSlot :=
+    Option.some.inj (hcontainedSlot.symm.trans hjoinSlot)
+  have hcontainsJoin : PartialTyContains joinSlot.ty (.borrow mutable targets) := by
+    simpa [hcontainedSlotEq] using hcontainsTy
+  intro target htarget
+  rcases EnvJoin.contained_borrow_member hjoin hjoinSlot hcontainsJoin htarget with
+    hfromLeft | hfromRight
+  · rcases hfromLeft with
+      ⟨leftSlot, leftTargets, hleftSlot, hcontainsLeft, htargetLeft⟩
+    exact hleftTransport x joinSlot leftSlot mutable leftTargets
+      hjoinSlot hleftSlot hcontainsLeft
+      (hleft x leftSlot mutable leftTargets hleftSlot
+        ⟨leftSlot, hleftSlot, hcontainsLeft⟩)
+      target htargetLeft
+  · rcases hfromRight with
+      ⟨rightSlot, rightTargets, hrightSlot, hcontainsRight, htargetRight⟩
+    exact hrightTransport x joinSlot rightSlot mutable rightTargets
+      hjoinSlot hrightSlot hcontainsRight
+      (hright x rightSlot mutable rightTargets hrightSlot
+        ⟨rightSlot, hrightSlot, hcontainsRight⟩)
+      target htargetRight
+
+/--
+Write closure for contained borrows, factored through old-slot and RHS target
+transport.
+
+`EnvWrite.borrowTargetOrigin_all` proves that every target in a result borrow
+originates either in the same source slot or in the RHS type.  This theorem
+turns those origins into contained-borrow well-formedness once callers supply
+the two transport facts appropriate for the particular write rule.
+-/
+theorem EnvWrite.preserves_containedBorrowsWellFormed_of_target_transport
+    {rank : Nat} {env result : Env} {lv : LVal} {rhsTy : Ty} :
+    EnvWrite rank env lv rhsTy result →
+    ContainedBorrowsWellFormed env →
+    (∀ x resultSlot sourceSlot mutable targets,
+      result.slotAt x = some resultSlot →
+      env.slotAt x = some sourceSlot →
+      PartialTyContains sourceSlot.ty (.borrow mutable targets) →
+      BorrowTargetsWellFormedInSlot env sourceSlot.lifetime targets →
+      BorrowTargetsWellFormedInSlot result resultSlot.lifetime targets) →
+    (∀ x resultSlot mutable targets,
+      result.slotAt x = some resultSlot →
+      PartialTyContains (.ty rhsTy) (.borrow mutable targets) →
+      BorrowTargetsWellFormedInSlot result resultSlot.lifetime targets) →
+    ContainedBorrowsWellFormed result := by
+  intro hwrite hcontained holdTransport hrhsTransport
+    x resultSlot mutable targets hresultSlot hcontains
+  rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+  have hcontainedSlotEq : containedSlot = resultSlot :=
+    Option.some.inj (hcontainedSlot.symm.trans hresultSlot)
+  have hcontainsResult :
+      PartialTyContains resultSlot.ty (.borrow mutable targets) := by
+    simpa [hcontainedSlotEq] using hcontainsTy
+  intro target htarget
+  rcases EnvWrite.borrowTargetOrigin_all hwrite x resultSlot mutable targets
+      hresultSlot hcontainsResult target htarget with
+    hfromOld | hfromRhs
+  · rcases hfromOld with
+      ⟨sourceSlot, sourceTargets, hsourceSlot, hcontainsSource, htargetSource⟩
+    exact holdTransport x resultSlot sourceSlot mutable sourceTargets
+      hresultSlot hsourceSlot hcontainsSource
+      (hcontained x sourceSlot mutable sourceTargets hsourceSlot
+        ⟨sourceSlot, hsourceSlot, hcontainsSource⟩)
+      target htargetSource
+  · rcases hfromRhs with ⟨rhsTargets, hcontainsRhs, htargetRhs⟩
+    exact hrhsTransport x resultSlot mutable rhsTargets
+      hresultSlot hcontainsRhs target htargetRhs
+
 theorem safeStrengthening {store : ProgramStore} {env : Env}
     {lifetime : Lifetime} {left right : Ty} {value : Value} :
     WellFormedEnv env lifetime →
