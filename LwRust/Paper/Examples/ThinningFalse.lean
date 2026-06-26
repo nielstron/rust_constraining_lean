@@ -1,4 +1,4 @@
-import LwRust.Paper.Typing
+import LwRust.Paper.Soundness.Helpers.BorrowWellFormed
 
 /-!
 The old environment-thinning counterexample no longer applies after borrow
@@ -17,6 +17,7 @@ open Core
 
 private def thinY : Name := "y"
 private def thinP : Name := "p"
+private def thinZ : Name := "z"
 
 private def thinYSlot : EnvSlot :=
   { ty := .ty Ty.int, lifetime := Lifetime.root }
@@ -97,6 +98,90 @@ theorem thinStrongEnv_types_copy_deref :
         subst hslot
         cases hcontains
       · simp [thinStrongEnv, Env.update, Env.empty, hp, hy] at hslot
+
+/-!
+The pointee annotation fixes the original example, but unrestricted thinning is
+still false.  Strengthening can shrink a borrow target list to `[]`; the strong
+side can type the dereference from the annotated pointee, while a weaker
+environment may add a target whose base variable is not in the environment.
+-/
+
+private def thinMissingWeakPSlot : EnvSlot :=
+  { ty := .ty (Ty.borrow true [LVal.var thinZ] Ty.int),
+    lifetime := Lifetime.root }
+
+private def thinMissingStrongPSlot : EnvSlot :=
+  { ty := .ty (Ty.borrow true [] Ty.int), lifetime := Lifetime.root }
+
+def thinMissingWeakEnv : Env :=
+  Env.empty.update thinP thinMissingWeakPSlot
+
+def thinMissingStrongEnv : Env :=
+  Env.empty.update thinP thinMissingStrongPSlot
+
+theorem thinMissingStrongEnv_strengthens :
+    EnvStrengthens thinMissingStrongEnv thinMissingWeakEnv := by
+  intro x
+  by_cases hp : x = thinP
+  · subst hp
+    simp [thinMissingStrongEnv, thinMissingWeakEnv, Env.update]
+    exact ⟨rfl, PartialTyStrengthens.borrow (List.nil_subset _)⟩
+  · simp [thinMissingStrongEnv, thinMissingWeakEnv, Env.update, Env.empty, hp]
+
+theorem thinMissingStrongEnv_types_copy_deref :
+    TermTyping thinMissingStrongEnv StoreTyping.empty Lifetime.root
+      (.copy (.deref (.var thinP))) .int thinMissingStrongEnv := by
+  refine TermTyping.copy (valueLifetime := Lifetime.root) ?_ CopyTy.int ?_
+  · exact LValTyping.borrow
+      (LValTyping.var
+        (slot := thinMissingStrongPSlot)
+        (by simp [thinMissingStrongEnv, Env.update]))
+      (LValTargetsTyping.empty (by simp [Ty.allVars]))
+  · rintro ⟨x, targets, pointee, target, ⟨slot, hslot, hcontains⟩, hmem, _hconf⟩
+    by_cases hp : x = thinP
+    · subst hp
+      simp [thinMissingStrongEnv, Env.update] at hslot
+      subst hslot
+      cases hcontains
+      cases hmem
+    · simp [thinMissingStrongEnv, Env.update, Env.empty, hp] at hslot
+
+private theorem thinMissingWeakEnv_no_var_z :
+    ∀ {pty lifetime},
+      ¬ LValTyping thinMissingWeakEnv (.var thinZ) pty lifetime := by
+  intro pty lifetime htyping
+  cases htyping with
+  | var hslot =>
+      simp [thinMissingWeakEnv, Env.update, Env.empty, thinP, thinZ] at hslot
+
+private theorem thinMissingWeakEnv_no_targets_z :
+    ¬ LValTargetsTyping thinMissingWeakEnv [LVal.var thinZ] (.ty Ty.int)
+      Lifetime.root := by
+  intro htargets
+  cases htargets with
+  | singleton htarget =>
+      exact thinMissingWeakEnv_no_var_z htarget
+  | cons hhead _hrest _hunion _hintersection =>
+      exact thinMissingWeakEnv_no_var_z hhead
+
+theorem thinMissingWeakEnv_not_types_deref :
+    ¬ LValTyping thinMissingWeakEnv (.deref (.var thinP)) (.ty Ty.int)
+      Lifetime.root := by
+  intro htyping
+  cases htyping with
+  | box hbox =>
+      rcases LValTyping.var_inv hbox with ⟨slot, hslot, hty, _hlife⟩
+      have hslotEq : slot = thinMissingWeakPSlot := by
+        simpa [thinMissingWeakEnv, Env.update] using hslot.symm
+      subst hslotEq
+      simp [thinMissingWeakPSlot] at hty
+  | borrow hborrow htargets =>
+      rcases LValTyping.var_inv hborrow with ⟨slot, hslot, hty, _hlife⟩
+      have hslotEq : slot = thinMissingWeakPSlot := by
+        simpa [thinMissingWeakEnv, Env.update] using hslot.symm
+      subst hslotEq
+      cases hty
+      exact thinMissingWeakEnv_no_targets_z htargets
 
 end Paper
 end LwRust

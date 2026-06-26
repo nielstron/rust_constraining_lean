@@ -18,7 +18,7 @@ def invalidBorrowIntSlot : EnvSlot :=
   { ty := .ty .int, lifetime := InvalidBorrowExample.l }
 
 def invalidBorrowYSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [InvalidBorrowExample.x]),
+  { ty := .ty (Ty.borrow true [InvalidBorrowExample.x] .int),
     lifetime := InvalidBorrowExample.l }
 
 /--
@@ -98,6 +98,7 @@ theorem invalidBorrowExample_rejected :
                           | declare _freshY hinitY _freshYOut _cohY hyEnv =>
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
+                                  rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
                                   | assign _hRhs _hLhsPost _hshape _hwell
                                       hwrite _hranked _hcoh _hcontained hnotWrite =>
@@ -113,15 +114,15 @@ theorem invalidBorrowExample_rejected :
                                           exact hnotWrite (by
                                             left
                                             refine ⟨"y", [InvalidBorrowExample.x],
-                                              InvalidBorrowExample.x, ?_, by simp,
-                                              by simp [PathConflicts]⟩
-                                            refine ⟨invalidBorrowYSlot, ?_,
-                                              PartialTyContains.here⟩
-                                            rw [Env.update_slotAt_ne]
-                                            · simp [Env.update, invalidBorrowYSlot,
-                                                InvalidBorrowExample.x,
-                                                InvalidBorrowExample.l]
-                                            · simp [InvalidBorrowExample.x, LVal.base])
+                                              borrowedTy, InvalidBorrowExample.x, ?_,
+                                              by simp, by simp [PathConflicts]⟩
+                                            refine ⟨
+                                              { ty := .ty (Ty.borrow true
+                                                  [InvalidBorrowExample.x] borrowedTy),
+                                                lifetime := InvalidBorrowExample.l },
+                                              ?_, PartialTyContains.here⟩
+                                            simp [Env.update, InvalidBorrowExample.x,
+                                              InvalidBorrowExample.l, LVal.base])
               | cons _hhead htail => cases htail
 
 /-- Paper Section 6.1.3's joined environment after
@@ -130,11 +131,11 @@ def rootIntSlot : EnvSlot :=
   { ty := .ty .int, lifetime := Lifetime.root }
 
 def paperConditionalPSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [.var "x", .var "a"]),
+  { ty := .ty (Ty.borrow true [.var "x", .var "a"] .int),
     lifetime := Lifetime.root }
 
 def paperConditionalQSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [.var "y", .var "a"]),
+  { ty := .ty (Ty.borrow true [.var "y", .var "a"] .int),
     lifetime := Lifetime.root }
 
 def paperConditionalJoinEnv : Env :=
@@ -157,18 +158,18 @@ theorem paperConditionalJoinEnv_not_borrowSafe :
     ¬ BorrowSafeEnv paperConditionalJoinEnv := by
   intro hsafe
   have hp : paperConditionalJoinEnv ⊢ "p" ↝
-      (.borrow true [.var "x", .var "a"]) := by
+      (.borrow true [.var "x", .var "a"] .int) := by
     refine ⟨paperConditionalPSlot, ?_, PartialTyContains.here⟩
     simp [paperConditionalJoinEnv, paperConditionalPSlot, paperConditionalQSlot,
       rootIntSlot, Env.update]
   have hq : paperConditionalJoinEnv ⊢ "q" ↝
-      (.borrow true [.var "y", .var "a"]) := by
+      (.borrow true [.var "y", .var "a"] .int) := by
     refine ⟨paperConditionalQSlot, ?_, PartialTyContains.here⟩
     simp [paperConditionalJoinEnv, paperConditionalPSlot, paperConditionalQSlot,
       rootIntSlot, Env.update]
   have hpq : "p" = "q" :=
     hsafe "p" "q" true [.var "x", .var "a"] [.var "y", .var "a"]
-      (.var "a") (.var "a") hp hq (by simp) (by simp)
+      .int .int (.var "a") (.var "a") hp hq (by simp) (by simp)
       (by simp [PathConflicts, LVal.base])
   contradiction
 
@@ -189,7 +190,7 @@ that situation: here the result slot `x @ [0]` holds a borrow of `w @ [0,0]`
 rejects the dangling write, confirming the replacement is sound, not merely
 derivable. -/
 def fanoutRejectSlotX : EnvSlot :=
-  { ty := .ty (.borrow true [.var "w"]), lifetime := ([0] : Lifetime) }
+  { ty := .ty (.borrow true [.var "w"] .int), lifetime := ([0] : Lifetime) }
 
 def fanoutRejectSlotW : EnvSlot :=
   { ty := .ty .int, lifetime := ([0, 0] : Lifetime) }
@@ -200,14 +201,14 @@ def fanoutRejectEnv : Env :=
       else if n = "w" then some fanoutRejectSlotW else none }
 
 example :
-    ¬ EnvWriteRhsTargetsWellFormed fanoutRejectEnv (.borrow true [.var "w"]) := by
+    ¬ EnvWriteRhsTargetsWellFormed fanoutRejectEnv (.borrow true [.var "w"] .int) := by
   intro h
   obtain ⟨tTy, tLf, htyp, hle, _⟩ :=
-    h "x" fanoutRejectSlotX true [.var "w"] (.var "w")
+    h "x" fanoutRejectSlotX true [.var "w"] .int (.var "w")
       (by simp [fanoutRejectEnv])
       (PartialTyContains.here)
       (by simp)
-      ⟨true, [.var "w"], PartialTyContains.here, by simp⟩
+      ⟨true, [.var "w"], .int, PartialTyContains.here, by simp⟩
   rcases LValTyping.var_inv htyp with ⟨slot, hslot, _hty, hlf⟩
   simp only [fanoutRejectEnv, if_neg (by decide : ("w" : Name) ≠ "x"), if_pos rfl] at hslot
   injection hslot with hslotEq

@@ -1628,11 +1628,10 @@ mutual
       variable's initialisation state (see that definition for why the
       paper's more liberal join is unsound against Definition 4.4 as
       printed);
-    * `ContainedBorrowsWellFormed`, `Coherent`, `Linearizable` — the
-      well-formed-environment invariants for the join.  Joins merge borrow
-      target lists, so these do not follow from the branch invariants by a
-      local argument; they are carried, as the corresponding `T-Assign`
-      obligations are;
+    * `Coherent`, `Linearizable` — the result invariants needed to type
+      dereferences through joined borrow target lists.  The per-target
+      `ContainedBorrowsWellFormed` invariant is derived in the preservation
+      proof from the branch invariants plus these result obligations;
     * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
       variables into one target list, in which case the joined environment
       is genuinely not borrow safe even though each branch is (the paper
@@ -1710,7 +1709,7 @@ mutual
 
     Obligations follow the `T-If` convention: joins merge borrow target
     lists, so shape agreement and the well-formedness/borrow-safety kit for
-    the join are rule-carried.  Runtime entry/back-edge states transport
+    the invariant are rule-carried.  Runtime entry/back-edge states transport
     into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
     the `T-If` preservation argument.
 
@@ -1718,14 +1717,12 @@ mutual
     *entry-side* environments.  In real Rust this is implied: per-code
     borrow checking is monotone under removing loans, so anything that
     checks at the widened loop-head state also checks at the entry state.
-    In this calculus that implication is genuinely unprovable — borrow
-    types carry their pointee information in the target lists, so
-    shrinking a target list can make a dereference typeless rather than
-    merely less constrained (`Examples/ThinningFalse.lean`) — so the
-    monotonicity fact is carried as rule premises instead.  The
-    conservative extractor's transport relies on them: a truncated loop
-    re-rooted at the loop's position reuses the entry-side derivations
-    verbatim. -/
+    In this calculus that implication is genuinely unprovable without a
+    well-formedness condition on the widened environment: strengthening can
+    shrink a borrow target list to `[]`, while weakening may add a target whose
+    base variable is absent or untypable (`Examples/ThinningFalse.lean`).  The
+    conservative extractor's transport relies on these entry-side derivations
+    to keep loop-frontier extraction precise. -/
     | whileLoop {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
         {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
         {condition body : Term} {bodyTy bodyEntryTy : Ty} :

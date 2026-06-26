@@ -413,7 +413,9 @@ theorem reachable_progress_bounded (fuel : Nat)
       TermTyping.erase_ghost
         (env := _env₂)
         (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
-        hfresh htypeFresh (by simpa [PartialTy.vars] using htyFresh)
+        hfresh htypeFresh (by
+          intro hmem
+          exact htyFresh (Ty.vars_subset_allVars (ty := _lhsTy) hmem))
         hstoreFresh hnotMention hghostRhs
     have hsourceLeft : SourceTerm _lhs := SourceTerm.eq_lhs hsource
     have hsourceRight : SourceTerm _rhs := SourceTerm.eq_rhs hsource

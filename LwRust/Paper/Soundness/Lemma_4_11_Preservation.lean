@@ -195,12 +195,13 @@ inductive Reaches (store : ProgramStore) : PartialValue → PartialTy → Locati
       store.slotAt location = some slot →
       Reaches store slot.value (.ty ty) ℓ →
       Reaches store (.value (.ref { location := location, owner := true })) (.ty (.box ty)) ℓ
-  | borrow {location ℓ : Location} {mutable : Bool} {targets : List LVal} {target : LVal} :
+  | borrow {location ℓ : Location} {mutable : Bool} {targets : List LVal}
+      {pointee : Ty} {target : LVal} :
       target ∈ targets →
       store.loc target = some location →
       LocReads store target ℓ →
       Reaches store (.value (.ref { location := location, owner := false }))
-        (.ty (.borrow mutable targets)) ℓ
+        (.ty (.borrow mutable targets pointee)) ℓ
 
 /-- Frame lemma for `ValidPartialValue`: updating a location the value's
 validity derivation never inspects preserves the abstraction. -/
@@ -470,7 +471,7 @@ theorem lval_loc_var_rank_le_base {store : ProgramStore} {env : Env}
       (∀ target, target ∈ targets →
         store.loc target = some (VariableProjection x) →
         φ x ≤ φ (LVal.base target)))
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
   · intro y slot _hslot hloc
     simp [ProgramStore.loc, VariableProjection] at hloc
     cases hloc
@@ -493,16 +494,16 @@ theorem lval_loc_var_rank_le_base {store : ProgramStore} {env : Env}
           exact ⟨sourceLocation, sourceSlotLifetime, by
             simpa [owningRef] using hsourceSlot⟩
         exact False.elim ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
-  · intro source mutable targets borrowLifetime targetLifetime targetTy
+  · intro source mutable targets pointee borrowLifetime targetLifetime
       hsource htargets _ihSource ihTargets hloc
     have hsourceAbs :
-        LValLocationAbstraction store source (.ty (.borrow mutable targets)) :=
+        LValLocationAbstraction store source (.ty (.borrow mutable targets pointee)) :=
       lvalTyping_defined_location hwellFormed hsafe hsource
     rcases hsourceAbs with
       ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
     rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
     cases hsourceValid with
-    | @borrow selectedLocation _mutable _targets selected hmem hselectedLoc =>
+    | @borrow selectedLocation _mutable _targets _pointee selected hmem hselectedLoc =>
         have hderefLoc : store.loc source.deref = some selectedLocation := by
           simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
         have hselectedLocationEq : selectedLocation = VariableProjection x := by
@@ -512,14 +513,17 @@ theorem lval_loc_var_rank_le_base {store : ProgramStore} {env : Env}
         have hxLeSelected : φ x ≤ φ (LVal.base selected) :=
           ihTargets selected hmem hselectedLoc
         have hselectedMemVars :
-            LVal.base selected ∈ PartialTy.vars (.ty (.borrow mutable targets)) := by
+            LVal.base selected ∈ PartialTy.vars
+              (.ty (.borrow mutable targets pointee)) := by
           exact mem_partialTy_vars_iff.mpr
-            ⟨mutable, targets, selected, PartialTyContains.here, hmem, rfl⟩
+            ⟨mutable, targets, pointee, selected, PartialTyContains.here, hmem, rfl⟩
         have hselectedLtSource :
             φ (LVal.base selected) < φ (LVal.base source) :=
           (lvalTyping_vars_rank_lt hφ).1 hsource
             (LVal.base selected) hselectedMemVars
         exact le_trans hxLeSelected (Nat.le_of_lt hselectedLtSource)
+  · intro ty _hvars target hmem _hloc
+    cases hmem
   · intro target targetTy targetLifetime _htarget ihTarget selected hmem hloc
     rw [List.mem_singleton] at hmem
     subst hmem
@@ -552,7 +556,7 @@ theorem locReads_var_rank_le_base {store : ProgramStore} {env : Env}
       RuntimeFrame.LocReads store lv (VariableProjection x) →
       φ x ≤ φ (LVal.base lv))
     (motive_2 := fun _targets _pt _lifetime _ => True)
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
   · intro _y _slot _hslot hreads
     cases hreads
   · intro source inner sourceLifetime hsource ih hreads
@@ -563,7 +567,7 @@ theorem locReads_var_rank_le_base {store : ProgramStore} {env : Env}
             hsource hsourceLoc
     | there hsourceReads =>
         simpa [LVal.base] using ih hsourceReads
-  · intro source mutable targets borrowLifetime targetLifetime targetTy
+  · intro source mutable targets pointee borrowLifetime targetLifetime
       hsource _htargets ihSource _ihTargets hreads
     cases hreads with
     | here hsourceLoc =>
@@ -572,6 +576,8 @@ theorem locReads_var_rank_le_base {store : ProgramStore} {env : Env}
             hsource hsourceLoc
     | there hsourceReads =>
         simpa [LVal.base] using ihSource hsourceReads
+  · intros
+    trivial
   · intros
     trivial
   · intros
@@ -597,20 +603,20 @@ theorem RuntimeFrame.borrowDependency_var_rank_le_var
     ∃ v, v ∈ PartialTy.vars partialTy ∧ φ x ≤ φ v := by
   intro hφ hwellFormed hsafe hheap hborrows hdependency hdependencyEq
   induction hdependency generalizing env current slotLifetime with
-  | @borrow location readLocation mutable targets target hmem hloc hreads =>
+  | @borrow location readLocation mutable targets pointee target hmem hloc hreads =>
       subst hdependencyEq
       have htargetWell := hborrows PartialTyContains.here target hmem
       rcases htargetWell with
         ⟨targetTy, targetLifetime, htargetTyping, _houtlives, _hbase⟩
       refine ⟨LVal.base target, ?_, ?_⟩
       · exact mem_partialTy_vars_iff.mpr
-          ⟨mutable, targets, target, PartialTyContains.here, hmem, rfl⟩
+          ⟨mutable, targets, pointee, target, PartialTyContains.here, hmem, rfl⟩
       · exact locReads_var_rank_le_base hφ hwellFormed hsafe hheap
           htargetTyping hreads
   | @boxInner location slot inner dependency hslot hinner ih =>
       have hinnerBorrows :
           PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
-        intro mutable targets hcontains
+        intro mutable targets pointee hcontains
         exact hborrows (PartialTyContains.box hcontains)
       rcases ih hφ hwellFormed hsafe hinnerBorrows hdependencyEq with
         ⟨v, hv, hle⟩
@@ -618,7 +624,7 @@ theorem RuntimeFrame.borrowDependency_var_rank_le_var
   | @boxFullInner location slot ty dependency hslot hinner ih =>
       have hinnerBorrows :
           PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty ty) := by
-        intro mutable targets hcontains
+        intro mutable targets pointee hcontains
         exact hborrows (PartialTyContains.tyBox hcontains)
       rcases ih hφ hwellFormed hsafe hinnerBorrows hdependencyEq with
         ⟨v, hv, hle⟩
@@ -649,7 +655,7 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_selected_dependency_f
   | unit | int | bool | undef =>
       intro _howners _hdeps
       constructor
-  | @borrow location mutable targets target hmem hloc =>
+  | @borrow location mutable targets pointee target hmem hloc =>
       intro _howners hdeps
       refine ValidPartialValue.borrow hmem ?_
       exact RuntimeFrame.loc_update_of_not_locReads hloc (by
@@ -657,7 +663,7 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_selected_dependency_f
         exact hdeps mid
           (RuntimeFrame.SelectedBorrowDependency.borrow
             (store := store) (location := location) (mutable := mutable)
-            (targets := targets) (target := target) (hmem := hmem)
+            (targets := targets) (pointee := pointee) (target := target) (hmem := hmem)
             (hloc := hloc) hreads))
   | @box location slot inner hslot _hinner ih =>
       intro howners hdeps
@@ -709,7 +715,7 @@ mutual
   -/
   inductive RuntimePathSelected (store : ProgramStore) (env : Env) :
       PartialTy → List Unit → Name → EnvSlot → Ty → Prop where
-    | borrowHere {mutable : Bool} {targets : List LVal}
+    | borrowHere {mutable : Bool} {targets : List LVal} {pointee : Ty}
         {selectedTarget : LVal} {selectedTargetTy : Ty}
         {selectedTargetLifetime : Lifetime} {selectedName : Name}
         {selectedSlot : EnvSlot} {selectedSlotTy : Ty} :
@@ -719,7 +725,7 @@ mutual
         store.loc selectedTarget = some (VariableProjection selectedName) →
         env.slotAt selectedName = some selectedSlot →
         selectedSlot.ty = .ty selectedSlotTy →
-        RuntimePathSelected store env (.ty (.borrow mutable targets)) [()]
+        RuntimePathSelected store env (.ty (.borrow mutable targets pointee)) [()]
           selectedName selectedSlot selectedSlotTy
     | box {inner : PartialTy} {path : List Unit} {selectedName : Name}
         {selectedSlot : EnvSlot} {selectedSlotTy : Ty} :
@@ -727,11 +733,12 @@ mutual
           selectedSlotTy →
         RuntimePathSelected store env (.box inner) (() :: path) selectedName
           selectedSlot selectedSlotTy
-    | borrowStep {mutable : Bool} {targets : List LVal} {path : List Unit}
-        {selectedName : Name} {selectedSlot : EnvSlot} {selectedSlotTy : Ty} :
+    | borrowStep {mutable : Bool} {targets : List LVal} {pointee : Ty}
+        {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+        {selectedSlotTy : Ty} :
         RuntimeTargetsPathSelected store env targets path selectedName
           selectedSlot selectedSlotTy →
-        RuntimePathSelected store env (.ty (.borrow mutable targets))
+        RuntimePathSelected store env (.ty (.borrow mutable targets pointee))
           (() :: path) selectedName selectedSlot selectedSlotTy
 
   inductive RuntimeTargetsPathSelected (store : ProgramStore) (env : Env) :
@@ -759,7 +766,7 @@ mutual
         ∀ {lv : LVal} {lifetime : Lifetime},
           LValTyping env lv pt lifetime →
           φ selectedName < φ (LVal.base lv)
-    | .ty (.borrow mutable targets), [()], selectedName, selectedSlot,
+    | .ty (.borrow mutable targets pointee), [()], selectedName, selectedSlot,
       selectedSlotTy,
       RuntimePathSelected.borrowHere hmem htargetTyping htargetLoc _hslot _hty,
       lv, lifetime, htyping => by
@@ -768,9 +775,10 @@ mutual
           lval_loc_var_rank_le_base hφ hwellFormed hsafe hheap
             htargetTyping htargetLoc
         have htargetMem :
-            LVal.base _ ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+            LVal.base _ ∈ PartialTy.vars
+              (.ty (.borrow mutable targets pointee)) :=
           mem_partialTy_vars_iff.mpr
-            ⟨mutable, targets, _, PartialTyContains.here, hmem, rfl⟩
+            ⟨mutable, targets, pointee, _, PartialTyContains.here, hmem, rfl⟩
         have htargetLtLv :
             φ (LVal.base _) < φ (LVal.base lv) :=
           (lvalTyping_vars_rank_lt hφ).1 htyping _ htargetMem
@@ -782,7 +790,7 @@ mutual
         simpa [LVal.base] using
           RuntimePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
             hheap hinner hderef
-    | .ty (.borrow mutable targets), () :: path, selectedName, selectedSlot,
+    | .ty (.borrow mutable targets pointee), () :: path, selectedName, selectedSlot,
       selectedSlotTy, RuntimePathSelected.borrowStep htargets, lv, lifetime,
       htyping => by
         exact RuntimeTargetsPathSelected.rank_lt_of_lvalTyping hφ hwellFormed
@@ -792,14 +800,15 @@ mutual
       {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
       (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
       (hsafe : store ∼ₛ env) (hheap : StoreOwnerTargetsHeap store) :
-      ∀ {mutable : Bool} {targets : List LVal} {path : List Unit}
+      ∀ {mutable : Bool} {targets : List LVal} {pointee : Ty}
+        {path : List Unit}
         {selectedName : Name} {selectedSlot : EnvSlot} {selectedSlotTy : Ty},
         RuntimeTargetsPathSelected store env targets path selectedName
           selectedSlot selectedSlotTy →
         ∀ {lv : LVal} {lifetime : Lifetime},
-          LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
+          LValTyping env lv (.ty (.borrow mutable targets pointee)) lifetime →
           φ selectedName < φ (LVal.base lv)
-    | mutable, targets, path, selectedName, selectedSlot, selectedSlotTy,
+    | mutable, targets, pointee, path, selectedName, selectedSlot, selectedSlotTy,
       RuntimeTargetsPathSelected.target hmem htargetTyping hpath, lv, lifetime,
       htyping => by
         have hselectedLtTarget :
@@ -807,9 +816,10 @@ mutual
           RuntimePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
             hheap hpath htargetTyping
         have htargetMem :
-            LVal.base _ ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+            LVal.base _ ∈ PartialTy.vars
+              (.ty (.borrow mutable targets pointee)) :=
           mem_partialTy_vars_iff.mpr
-            ⟨mutable, targets, _, PartialTyContains.here, hmem, rfl⟩
+            ⟨mutable, targets, pointee, _, PartialTyContains.here, hmem, rfl⟩
         have htargetLtLv :
             φ (LVal.base _) < φ (LVal.base lv) :=
           (lvalTyping_vars_rank_lt hφ).1 htyping _ htargetMem
@@ -839,7 +849,7 @@ theorem RuntimePathSelected.of_partialTyUnion {store : ProgramStore} {env : Env}
       _selectedSlotTy _ => True)
     ?borrowHere ?box ?borrowStep ?target hselected left right hunion
   case borrowHere =>
-    intro mutable targets selectedTarget selectedTargetTy selectedTargetLifetime
+    intro mutable targets pointee selectedTarget selectedTargetTy selectedTargetLifetime
       selectedName selectedSlot selectedSlotTy hmem htyping hloc hslot hty
       left right hunion
     rcases PartialTyStrengthens.to_borrow_right
@@ -870,7 +880,7 @@ theorem RuntimePathSelected.of_partialTyUnion {store : ProgramStore} {env : Env}
             · exact Or.inl (RuntimePathSelected.box hleft)
             · exact Or.inr (RuntimePathSelected.box hright)
   case borrowStep =>
-    intro mutable targets path selectedName selectedSlot selectedSlotTy
+    intro mutable targets pointee path selectedName selectedSlot selectedSlotTy
       htargets _ih left right hunion
     cases htargets with
     | target hmem htargetTyping hpath =>
@@ -910,8 +920,15 @@ theorem RuntimeTargetsPathSelected.of_lvalTargetsTyping {store : ProgramStore}
           selectedSlotTy →
         RuntimeTargetsPathSelected store env targets path selectedName
           selectedSlot selectedSlotTy)
-    ?var ?box ?borrow ?singleton ?cons htargets hselected
+    ?var ?box ?borrow ?empty ?singleton ?cons htargets hselected
   case var | box | borrow => intros; trivial
+  case empty =>
+      intros
+      rename_i hselected
+      cases hselected <;> simp_all [PartialTy.allVars, Ty.allVars, List.mem_map]
+      rename_i htargets
+      cases htargets with
+      | target hmem _ _ => cases hmem
   case singleton =>
       intro target ty lifetime htarget _ih path selectedName selectedSlot
         selectedSlotTy hselected
@@ -947,7 +964,7 @@ theorem RuntimePathSelected.prepend_of_lvalTyping {store : ProgramStore}
         RuntimePathSelected store env slot.ty (LVal.path lv ++ path)
           selectedName selectedSlot selectedSlotTy)
     (motive_2 := fun _targets _pt _lifetime _ => True)
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
   case var =>
     intro x slot hslot slot' hslot' path hselected
     simp only [LVal.base] at hslot'
@@ -961,12 +978,15 @@ theorem RuntimePathSelected.prepend_of_lvalTyping {store : ProgramStore}
     rw [LVal.path, List.append_assoc]
     exact ih hslot (() :: path) (RuntimePathSelected.box hselected)
   case borrow =>
-    intro source mutable targets borrowLifetime targetLifetime targetTy
+    intro source mutable targets pointee borrowLifetime targetLifetime
       _hsource htargets ih _ihTargets slot hslot path hselected
     rw [LVal.path, List.append_assoc]
     exact ih hslot (() :: path)
       (RuntimePathSelected.borrowStep
         (RuntimeTargetsPathSelected.of_lvalTargetsTyping htargets hselected))
+  case empty =>
+    intros
+    trivial
   case singleton | cons =>
     intros
     trivial
@@ -1033,21 +1053,21 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
     ?borrowHere ?box ?borrowStep ?target hselected) hbelow hupdate
       hbranchHere hbranchStep
   case borrowHere =>
-      intro mutable targets selectedTarget selectedTargetTy selectedTargetLifetime
+      intro mutable targets pointee selectedTarget selectedTargetTy selectedTargetLifetime
         selectedName selectedSlot selectedSlotTy hmem htargetTyping htargetLoc
         _hselectedSlot _hselectedTy rank updatedTy writeEnv hbelow hupdate
         hbranchHere _hbranchStep
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
         cases htyEq
         cases hupdatedEq
         have htargetRank :
             φ (LVal.base selectedTarget) < rootRank :=
           hbelow (LVal.base selectedTarget)
             (mem_partialTy_vars_iff.mpr
-              ⟨true, _, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
+              ⟨true, _, pointee, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
         have hleaves :=
           WriteBorrowTargets.initialized_leaves_of_typed hwrites
         have hmap :
@@ -1074,16 +1094,16 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
           ⟨hmap, hstrength, hshape⟩
         exact ⟨hmap, PartialTyStrengthens.box hstrength,
           by simpa [PartialTy.sameShape] using hshape⟩
-      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+      · rcases hborrow with ⟨targets, oldPointee, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
   case borrowStep =>
-      intro mutable targets path selectedName selectedSlot selectedSlotTy
+      intro mutable targets pointee path selectedName selectedSlot selectedSlotTy
         htargetsSelected _ih rank updatedTy writeEnv hbelow hupdate
         _hbranchHere hbranchStep
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
         cases htyEq
         cases hupdatedEq
         cases htargetsSelected with
@@ -1093,7 +1113,8 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
                 φ (LVal.base branchTarget) < rootRank := by
               exact hbelow (LVal.base branchTarget)
                 (mem_partialTy_vars_iff.mpr
-                  ⟨true, _, branchTarget, PartialTyContains.here, htargetMem, rfl⟩)
+                  ⟨true, _, pointee, branchTarget, PartialTyContains.here,
+                    htargetMem, rfl⟩)
             have hleaves :=
               WriteBorrowTargets.initialized_leaves_of_typed hwrites
             have hmap :
@@ -1171,16 +1192,16 @@ where
               ⟨sourceLocation, sourceLifetime, by
                 simpa [owningRef] using hsourceSlot⟩
             exact False.elim ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
-      | @borrow source mutable targets borrowLifetime targetLifetime targetTy
+      | @borrow source mutable targets pointee borrowLifetime targetLifetime
           hsource htargets =>
         have hsourceAbs :
-            LValLocationAbstraction store source (.ty (.borrow mutable targets)) :=
+            LValLocationAbstraction store source (.ty (.borrow mutable targets lvTy)) :=
           lvalTyping_defined_location hwellFormed hsafe hsource
         rcases hsourceAbs with
           ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
         rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
         cases hsourceValid with
-        | @borrow selectedLocation _mutable _targets selectedTarget hselectedMem
+        | @borrow selectedLocation _mutable _targets _pointee selectedTarget hselectedMem
             htargetLocFromBorrow =>
             rcases lvalTargetsTyping_member_strengthens htargets _ hselectedMem with
               ⟨selectedTargetTy, selectedTargetLifetime, hselectedTyping,
@@ -1196,7 +1217,7 @@ where
                 store.loc selectedTarget = some (VariableProjection selectedName) := by
               simpa [hselectedLocationEq] using htargetLocFromBorrow
             have hpathSelected :
-                RuntimePathSelected store env (.ty (.borrow mutable targets)) [()]
+                RuntimePathSelected store env (.ty (.borrow mutable targets lvTy)) [()]
                   selectedName selectedSlot selectedSlotTy :=
               RuntimePathSelected.borrowHere hselectedMem hselectedTyping
                 hselectedLocVar hslot hslotTy
@@ -1316,7 +1337,7 @@ theorem lval_loc_var_slot_full_of_lvalTyping {store : ProgramStore} {env : Env}
         store.loc target = some (VariableProjection x) →
         env.slotAt x = some slot →
         ∃ slotTy, slot.ty = .ty slotTy)
-    ?var ?box ?borrow ?singleton ?cons htyping ty rfl
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping ty rfl
   · intro y envSlot henvSlot ty hty hloc hxSlot
     simp [ProgramStore.loc, VariableProjection] at hloc
     cases hloc
@@ -1343,17 +1364,17 @@ theorem lval_loc_var_slot_full_of_lvalTyping {store : ProgramStore} {env : Env}
           ⟨sourceLocation, sourceSlotLifetime, by
             simpa [owningRef] using hsourceSlot⟩
         exact False.elim ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
-  · intro source mutable targets borrowLifetime targetLifetime targetTy
+  · intro source mutable targets pointee borrowLifetime targetLifetime
       hsource htargets _ihSource ihTargets ty hty hloc hxSlot
     cases hty
     have hsourceAbs :
-        LValLocationAbstraction store source (.ty (.borrow mutable targets)) :=
+        LValLocationAbstraction store source (.ty (.borrow mutable targets pointee)) :=
       lvalTyping_defined_location hwellFormed hsafe hsource
     rcases hsourceAbs with
       ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
     rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
     cases hsourceValid with
-    | @borrow selectedLocation _mutable _targets selected hmem hselectedLoc =>
+    | @borrow selectedLocation _mutable _targets _pointee selected hmem hselectedLoc =>
         have hderefLoc : store.loc source.deref = some selectedLocation := by
           simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
         have hselectedLocationEq : selectedLocation = VariableProjection x := by
@@ -1363,6 +1384,8 @@ theorem lval_loc_var_slot_full_of_lvalTyping {store : ProgramStore} {env : Env}
             store.loc selected = some (VariableProjection x) := by
           simpa [hselectedLocationEq] using hselectedLoc
         exact ihTargets selected hmem hselectedLocVar hxSlot
+  · intro ty hvars selected hmem hloc hxSlot
+    cases hmem
   · intro target targetTy targetLifetime _htarget ihTarget selected hmem hloc hxSlot
     rw [List.mem_singleton] at hmem
     subst hmem
@@ -1386,22 +1409,22 @@ mutual
   -/
   inductive RuntimeSpinePathSelected (store : ProgramStore) (env : Env) :
       PartialTy → List Unit → Nat → Prop where
-    | borrowHere {mutable : Bool} {targets : List LVal}
+    | borrowHere {mutable : Bool} {targets : List LVal} {pointee : Ty}
         {selectedTarget : LVal} {selectedTargetTy : Ty}
         {selectedTargetLifetime : Lifetime} {address : Nat} :
         selectedTarget ∈ targets →
         LValTyping env selectedTarget (.ty selectedTargetTy)
           selectedTargetLifetime →
         store.loc selectedTarget = some (.heap address) →
-        RuntimeSpinePathSelected store env (.ty (.borrow mutable targets))
+        RuntimeSpinePathSelected store env (.ty (.borrow mutable targets pointee))
           [()] address
     | box {inner : PartialTy} {path : List Unit} {address : Nat} :
         RuntimeSpinePathSelected store env inner path address →
         RuntimeSpinePathSelected store env (.box inner) (() :: path) address
-    | borrowStep {mutable : Bool} {targets : List LVal} {path : List Unit}
-        {address : Nat} :
+    | borrowStep {mutable : Bool} {targets : List LVal} {pointee : Ty}
+        {path : List Unit} {address : Nat} :
         RuntimeSpineTargetsSelected store env targets path address →
-        RuntimeSpinePathSelected store env (.ty (.borrow mutable targets))
+        RuntimeSpinePathSelected store env (.ty (.borrow mutable targets pointee))
           (() :: path) address
 
   inductive RuntimeSpineTargetsSelected (store : ProgramStore) (env : Env) :
@@ -1431,7 +1454,7 @@ theorem RuntimeSpinePathSelected.of_partialTyUnion {store : ProgramStore}
     (motive_2 := fun _targets _path _address _ => True)
     ?borrowHere ?box ?borrowStep ?target hselected left right hunion
   case borrowHere =>
-    intro mutable targets selectedTarget selectedTargetTy
+    intro mutable targets pointee selectedTarget selectedTargetTy
       selectedTargetLifetime address hmem htyping hloc left right hunion
     rcases PartialTyStrengthens.to_borrow_right
         (PartialTyUnion.left_strengthens hunion) with
@@ -1462,7 +1485,7 @@ theorem RuntimeSpinePathSelected.of_partialTyUnion {store : ProgramStore}
             · exact Or.inl (RuntimeSpinePathSelected.box hleft)
             · exact Or.inr (RuntimeSpinePathSelected.box hright)
   case borrowStep =>
-    intro mutable targets path address htargets _ih left right hunion
+    intro mutable targets pointee path address htargets _ih left right hunion
     cases htargets with
     | target hmem htargetTyping hpath =>
         rcases PartialTyStrengthens.to_borrow_right
@@ -1495,8 +1518,15 @@ theorem RuntimeSpineTargetsSelected.of_lvalTargetsTyping {store : ProgramStore}
       ∀ {path : List Unit} {address : Nat},
         RuntimeSpinePathSelected store env pt path address →
         RuntimeSpineTargetsSelected store env targets path address)
-    ?var ?box ?borrow ?singleton ?cons htargets hselected
+    ?var ?box ?borrow ?empty ?singleton ?cons htargets hselected
   case var | box | borrow => intros; trivial
+  case empty =>
+      intros
+      rename_i hselected
+      cases hselected <;> simp_all [PartialTy.allVars, Ty.allVars, List.mem_map]
+      rename_i htargets
+      cases htargets with
+      | target hmem _ _ => cases hmem
   case singleton =>
       intro target ty lifetime htarget _ih path address hselected
       exact RuntimeSpineTargetsSelected.target (by simp) htarget hselected
@@ -1529,7 +1559,7 @@ theorem RuntimeSpinePathSelected.prepend_of_lvalTyping {store : ProgramStore}
         RuntimeSpinePathSelected store env slot.ty (LVal.path lv ++ path)
           address)
     (motive_2 := fun _targets _pt _lifetime _ => True)
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
   case var =>
     intro x slot hslot slot' hslot' path hselected
     simp only [LVal.base] at hslot'
@@ -1543,12 +1573,15 @@ theorem RuntimeSpinePathSelected.prepend_of_lvalTyping {store : ProgramStore}
     rw [LVal.path, List.append_assoc]
     exact ih hslot (() :: path) (RuntimeSpinePathSelected.box hselected)
   case borrow =>
-    intro source mutable targets borrowLifetime targetLifetime targetTy
+    intro source mutable targets pointee borrowLifetime targetLifetime
       _hsource htargets ih _ihTargets slot hslot path hselected
     rw [LVal.path, List.append_assoc]
     exact ih hslot (() :: path)
       (RuntimeSpinePathSelected.borrowStep
         (RuntimeSpineTargetsSelected.of_lvalTargetsTyping htargets hselected))
+  case empty =>
+    intros
+    trivial
   case singleton | cons =>
     intros
     trivial
@@ -1566,7 +1599,7 @@ mutual
         ∀ {lv : LVal} {lifetime : Lifetime},
           LValTyping env lv pt lifetime →
           φ xRoot < φ (LVal.base lv)
-    | .ty (.borrow mutable targets), [()], address,
+    | .ty (.borrow mutable targets pointee), [()], address,
       RuntimeSpinePathSelected.borrowHere hmem htargetTyping htargetLoc,
       hprot, lv, lifetime, htyping => by
         rcases RuntimeFrame.loc_intrinsicRootView hφ hwellFormed hsafe
@@ -1576,9 +1609,10 @@ mutual
           ProtectedByBase.root_unique hvalidStore hheap hprot' hprot
         subst hrootEq
         have htargetMem :
-            LVal.base _ ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+            LVal.base _ ∈ PartialTy.vars
+              (.ty (.borrow mutable targets pointee)) :=
           mem_partialTy_vars_iff.mpr
-            ⟨mutable, targets, _, PartialTyContains.here, hmem, rfl⟩
+            ⟨mutable, targets, pointee, _, PartialTyContains.here, hmem, rfl⟩
         have htargetLtLv :
             φ (LVal.base _) < φ (LVal.base lv) :=
           (lvalTyping_vars_rank_lt hφ).1 htyping _ htargetMem
@@ -1590,7 +1624,7 @@ mutual
         simpa [LVal.base] using
           RuntimeSpinePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
             hvalidStore hheap hinner hprot hderef
-    | .ty (.borrow mutable targets), () :: path, address,
+    | .ty (.borrow mutable targets pointee), () :: path, address,
       RuntimeSpinePathSelected.borrowStep htargets, hprot, lv, lifetime,
       htyping => by
         exact RuntimeSpineTargetsSelected.rank_lt_of_lvalTyping hφ hwellFormed
@@ -1605,20 +1639,21 @@ mutual
       ∀ {targets : List LVal} {path : List Unit} {address : Nat},
         RuntimeSpineTargetsSelected store env targets path address →
         ProtectedByBase store xRoot (.heap address) →
-        ∀ {mutable : Bool} {lv : LVal} {lifetime : Lifetime},
-          LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
+        ∀ {mutable : Bool} {pointee : Ty} {lv : LVal} {lifetime : Lifetime},
+          LValTyping env lv (.ty (.borrow mutable targets pointee)) lifetime →
           φ xRoot < φ (LVal.base lv)
     | targets, path, address,
       RuntimeSpineTargetsSelected.target hmem htargetTyping hpath, hprot,
-      mutable, lv, lifetime, htyping => by
+      mutable, pointee, lv, lifetime, htyping => by
         have hselectedLtTarget :
             φ xRoot < φ (LVal.base _) :=
           RuntimeSpinePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
             hvalidStore hheap hpath hprot htargetTyping
         have htargetMem :
-            LVal.base _ ∈ PartialTy.vars (.ty (.borrow mutable targets)) :=
+            LVal.base _ ∈ PartialTy.vars
+              (.ty (.borrow mutable targets pointee)) :=
           mem_partialTy_vars_iff.mpr
-            ⟨mutable, targets, _, PartialTyContains.here, hmem, rfl⟩
+            ⟨mutable, targets, pointee, _, PartialTyContains.here, hmem, rfl⟩
         have htargetLtLv :
             φ (LVal.base _) < φ (LVal.base lv) :=
           (lvalTyping_vars_rank_lt hφ).1 htyping _ htargetMem
@@ -1682,20 +1717,20 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
     ?borrowHere ?box ?borrowStep ?target hselected) hbelow hupdate
       hbranchHere hbranchStep
   case borrowHere =>
-      intro mutable targets selectedTarget selectedTargetTy
+      intro mutable targets pointee selectedTarget selectedTargetTy
         selectedTargetLifetime address hmem htargetTyping htargetLoc rank
         updatedTy writeEnv hbelow hupdate hbranchHere _hbranchStep
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
         cases htyEq
         cases hupdatedEq
         have htargetRank :
             φ (LVal.base selectedTarget) < rootRank :=
           hbelow (LVal.base selectedTarget)
             (mem_partialTy_vars_iff.mpr
-              ⟨true, _, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
+              ⟨true, _, pointee, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
         have hleaves :=
           WriteBorrowTargets.initialized_leaves_of_typed hwrites
         have hmap :
@@ -1722,15 +1757,15 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
           ⟨hmap, hstrength, hshape⟩
         exact ⟨hmap, PartialTyStrengthens.box hstrength,
           by simpa [PartialTy.sameShape] using hshape⟩
-      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+      · rcases hborrow with ⟨targets, oldPointee, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
   case borrowStep =>
-      intro mutable targets path address htargetsSelected _ih rank updatedTy
+      intro mutable targets pointee path address htargetsSelected _ih rank updatedTy
         writeEnv hbelow hupdate _hbranchHere hbranchStep
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
         cases htyEq
         cases hupdatedEq
         cases htargetsSelected with
@@ -1740,7 +1775,7 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
                 φ (LVal.base branchTarget) < rootRank := by
               exact hbelow (LVal.base branchTarget)
                 (mem_partialTy_vars_iff.mpr
-                  ⟨true, _, branchTarget, PartialTyContains.here, htargetMem,
+                  ⟨true, _, pointee, branchTarget, PartialTyContains.here, htargetMem,
                     rfl⟩)
             have hleaves :=
               WriteBorrowTargets.initialized_leaves_of_typed hwrites
@@ -1884,17 +1919,17 @@ where
                   simp [LVal.base, hbaseEq]
                 rw [hgoalEq]
                 exact hfinal
-      | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
+      | @borrow _ mutable targets pointee borrowLifetime targetLifetime
           hsource htargets =>
         have hsourceAbs :
             LValLocationAbstraction store source
-              (.ty (.borrow mutable targets)) :=
+              (.ty (.borrow mutable targets lvTy)) :=
           lvalTyping_defined_location hwellFormed hsafe hsource
         rcases hsourceAbs with
           ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
         rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
         cases hsourceValid with
-        | @borrow selectedLocation _mutable _targets selectedTarget
+        | @borrow selectedLocation _mutable _targets _pointee selectedTarget
             hselectedMem htargetLocFromBorrow =>
             rcases lvalTargetsTyping_member_strengthens htargets _
                 hselectedMem with
@@ -1912,7 +1947,7 @@ where
               simpa [hselectedLocationEq] using htargetLocFromBorrow
             have hpathSelected :
                 RuntimeSpinePathSelected store env
-                  (.ty (.borrow mutable targets)) [()] address :=
+                  (.ty (.borrow mutable targets lvTy)) [()] address :=
               RuntimeSpinePathSelected.borrowHere hselectedMem
                 hselectedTyping hselectedLocHeap
             exact goPath hφ hwellFormed hsafe hvalidStore hheap hrootSlot
@@ -2323,11 +2358,8 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
               have hlhsLocVar :
                   store.loc source.deref = some (VariableProjection x) := by
                 simpa [hxUpdated] using hlhsLoc
-              rcases LValTargetsTyping.output_full htargets with
-                ⟨lhsTy, hOldTyFull⟩
-              subst hOldTyFull
               have hLhsBorrow :
-                  LValTyping env source.deref (.ty lhsTy) targetLifetime :=
+                  LValTyping env source.deref (.ty _) targetLifetime :=
                 LValTyping.borrow hsourceBorrow htargets
               rcases lval_loc_var_slot_full_of_lvalTyping hwellFormed hsafe
                   (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
@@ -2451,11 +2483,8 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
               rcases hheap lhsLocation
                   (ProgramStore.OwnsTransitively.to_owns hownsTrans) with
                 ⟨address, haddrEq⟩
-              rcases LValTargetsTyping.output_full htargets with
-                ⟨lhsTy, hOldTyFull⟩
-              subst hOldTyFull
               have hLhsTyping :
-                  LValTyping env (.deref source) (.ty lhsTy) targetLifetime :=
+                  LValTyping env (.deref source) (.ty _) targetLifetime :=
                 LValTyping.borrow hsourceBorrow htargets
               have hlocHeap :
                   store.loc (.deref source) = some (.heap address) := by
@@ -2525,7 +2554,7 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                 intro location hdep heq
                 subst heq
                 rcases RuntimeFrame.borrowDependency_witness hdep with
-                  ⟨m, ts, t, hcontains, hmem, hreads⟩
+                  ⟨m, ts, pointee, t, hcontains, hmem, hreads⟩
                 rcases hborrowsRhs hcontains t hmem with
                   ⟨tTy, tLt, htTyping, _houtlives, _hbase⟩
                 rcases RuntimeFrame.locReads_resolved_prefix htTyping
@@ -2557,14 +2586,14 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     PartialTyContains
                       (PartialTy.strongLeafUpdate sourceSlot.ty spinePath
                         rhsTy)
-                      (.borrow m ts) :=
+                      (.borrow m ts pointee) :=
                   StoreOwnerSpine.strongLeafUpdate_contains hspine hcontains
                 rcases PartialTyContains.mono_strengthens_sameShape
                     hcontainsStrong hstrengthensXr hshapeXr with
                   ⟨ts', hcontains', hsubset⟩
                 have hstrict : φ (LVal.base t) < φ xRoot :=
-                  hbelowRhs.1 xRoot resultSlotXr m ts' t hresultXr hcontains'
-                    (hsubset hmem) ⟨m, ts, hcontains, hmem⟩
+                  hbelowRhs.1 xRoot resultSlotXr m ts' pointee t hresultXr hcontains'
+                    (hsubset hmem) ⟨m, ts, pointee, hcontains, hmem⟩
                 exact Nat.lt_irrefl _ (lt_of_le_of_lt hrankW hstrict)
               have hnewValid :
                   ValidPartialValue
@@ -2637,23 +2666,23 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     hlhsLoc hwrite (WriteGuarded.base hkill₀) with
                   ⟨r, hprotR, hGr⟩
                 rcases RuntimeFrame.borrowDependency_witness hdep with
-                  ⟨m, ts, t, hcontains, hmem, hreads⟩
+                  ⟨m, ts, pointee, t, hcontains, hmem, hreads⟩
                 have hborrowsX :
                     PartialTyBorrowsWellFormedInSlot env sourceSlot.lifetime
                       sourceSlot.ty := by
-                  intro mutable' targets' hcontains'
-                  exact hwellFormed.1 x sourceSlot mutable' targets'
+                  intro mutable' targets' pointee' hcontains'
+                  exact hwellFormed.1 x sourceSlot mutable' targets' pointee'
                     hsourceSlot ⟨sourceSlot, hsourceSlot, hcontains'⟩
                 rcases hborrowsX hcontains t hmem with
                   ⟨tTy, tLt, htTyping, _houtlives, _hbase⟩
                 have hcollapse :
-                    ∀ container mutable' ts' t',
-                      env ⊢ container ↝ (.borrow mutable' ts') → t' ∈ ts' →
+                    ∀ container mutable' ts' pointee' t',
+                      env ⊢ container ↝ (.borrow mutable' ts' pointee') → t' ∈ ts' →
                       WriteGuarded store env lhsLocation (LVal.base source)
                         (LVal.base t') →
                       WriteGuarded store env lhsLocation (LVal.base source)
                         container :=
-                  fun c m' ts' t' hn hm hG =>
+                  fun c m' ts' pointee' t' hn hm hG =>
                     (WriteGuarded.collapse_kill hborrowSafe hnotWPbase hn hm
                       hG).1
                 have hGt :
@@ -2839,14 +2868,14 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
     {lifetime borrowLifetime targetLifetime rhsWellLifetime : Lifetime}
     {source : LVal} {mutable : Bool} {targets : List LVal}
-    {targetTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
+    {pointee : Ty} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
-    LValTyping env source (.ty (.borrow mutable targets)) borrowLifetime →
-    LValTargetsTyping env targets targetTy targetLifetime →
-    ShapeCompatible env targetTy (.ty rhsTy) →
+    LValTyping env source (.ty (.borrow mutable targets pointee)) borrowLifetime →
+    LValTargetsTyping env targets (.ty pointee) targetLifetime →
+    ShapeCompatible env (.ty pointee) (.ty rhsTy) →
     WellFormedTy env rhsTy rhsWellLifetime →
     EnvWrite 0 env (.deref source) rhsTy env' →
     (∃ φ, LinearizedBy φ env ∧ EnvWriteRhsBorrowTargetsBelow φ env' rhsTy) →
@@ -2862,7 +2891,7 @@ theorem preservation_assign_deref_borrow_step_runtime_of_wellFormed
       hlhsLoc, hlhsSlot, hwriteStoreEq, hresult⟩
   cases hresult
   have hsourceAbs :
-      LValLocationAbstraction store source (.ty (.borrow mutable targets)) :=
+      LValLocationAbstraction store source (.ty (.borrow mutable targets pointee)) :=
     lvalTyping_defined_location hwellFormed hsafe hsourceBorrow
   have htargetsAbs :
       ∀ target ty lifetime,
@@ -3056,8 +3085,8 @@ theorem preservation_blockB_value_multistep_runtime_of_runtimeDrop
                     have hborrows :
                         PartialTyBorrowsWellFormedInSlot env envSlot.lifetime
                           envSlot.ty := by
-                      intro mutable targets hcontains
-                      exact hwellBody.1 x envSlot mutable targets henvSlot
+                      intro mutable targets pointee hcontains
+                      exact hwellBody.1 x envSlot mutable targets pointee henvSlot
                         ⟨envSlot, henvSlot, hcontains⟩
                     have havoidVar :
                         DropsAvoids store _ (VariableProjection x) :=
@@ -3185,8 +3214,8 @@ theorem safeAbstraction_seq_value_drop
       dropsAvoids_slotAt_preserved hdrops havoidVar hstoreSlot
     have hborrows :
         PartialTyBorrowsWellFormedInSlot env envSlot.lifetime envSlot.ty := by
-      intro mutable targets hcontains
-      exact hwellFormed.1 x envSlot mutable targets henvSlot
+      intro mutable targets pointee hcontains
+      exact hwellFormed.1 x envSlot mutable targets pointee henvSlot
         ⟨envSlot, henvSlot, hcontains⟩
     have hvalidOld' : ValidPartialValue store' oldValue envSlot.ty :=
       RuntimeFrame.validPartialValue_drops_of_avoids_reaches hdrops hvalidOld
@@ -3502,9 +3531,9 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       _hvalidStoreTyping _hwellFormed _hborrowSafe hsafe hmulti
     cases htypingEq
     have htermTyping :
-        TermTyping _env typing _lifetime (.borrow true _lv) (.borrow true [_lv]) _env :=
+        TermTyping _env typing _lifetime (.borrow true _lv) (.borrow true [_lv] _ty) _env :=
       TermTyping.mutBorrow hLv hmutable hnotWrite
-    have hterminal : TerminalStateSafe finalStore finalValue _env (.borrow true [_lv]) :=
+    have hterminal : TerminalStateSafe finalStore finalValue _env (.borrow true [_lv] _ty) :=
       preservation_borrow_multistep_runtime hsafe hvalidRuntime htermTyping hmulti
     exact And.intro _hwellFormed hterminal
   -- T-ImmBorrow
@@ -3514,9 +3543,9 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       _hwellFormed _hborrowSafe hsafe hmulti
     cases htypingEq
     have htermTyping :
-        TermTyping _env typing _lifetime (.borrow false _lv) (.borrow false [_lv]) _env :=
+        TermTyping _env typing _lifetime (.borrow false _lv) (.borrow false [_lv] _ty) _env :=
       TermTyping.immBorrow hLv hnotRead
-    have hterminal : TerminalStateSafe finalStore finalValue _env (.borrow false [_lv]) :=
+    have hterminal : TerminalStateSafe finalStore finalValue _env (.borrow false [_lv] _ty) :=
       preservation_borrow_multistep_runtime hsafe hvalidRuntime htermTyping hmulti
     exact And.intro _hwellFormed hterminal
   -- T-Box
@@ -3645,7 +3674,9 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       TermTyping.erase_ghost
         (env := _env₂)
         (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
-        hfresh htypeFresh (by simpa [PartialTy.vars] using htyFresh)
+        hfresh htypeFresh (by
+          intro hmem
+          exact htyFresh (Ty.vars_subset_allVars (ty := _lhsTy) hmem))
         hstoreFresh hnotMention hghostRhs
     rcases multistep_eq_to_value_inv hmulti with
       ⟨midStore, leftValue, rightStore, rightValue, hleftMulti, hrightMulti,
