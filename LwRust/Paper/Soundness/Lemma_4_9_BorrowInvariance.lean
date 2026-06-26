@@ -2697,6 +2697,199 @@ theorem block_preserves_wellFormed {env₁ env₂ env₃ : Env}
   intro hchild hwellBody _hterms hwellTy hdrop
   exact Env.dropLifetime_preserves_wellFormed_child hchild hwellBody hwellTy hdrop
 
+/-! ### CBWF-derivation keystone: single-lval typing determinism (up to `eqv`)
+and target-union monotonicity.
+
+These lemmas let us *derive* `ContainedBorrowsWellFormed` of a join/write result
+from the kept premises (`Coherent`, `Linearizable`, `EnvJoinSameShape`, …),
+replacing the rule-carried obligation in `T-Assign`/`T-If`. -/
+
+/-- `eqv` of full types is at least as strong as the strengthening preorder. -/
+theorem ty_eqv_imp_strengthens : ∀ {a b : Ty},
+    Ty.eqv a b → PartialTyStrengthens (.ty a) (.ty b)
+  | .unit, b, h => by
+      cases b <;> first | exact PartialTyStrengthens.reflex | simp [Ty.eqv] at h
+  | .int, b, h => by
+      cases b <;> first | exact PartialTyStrengthens.reflex | simp [Ty.eqv] at h
+  | .bool, b, h => by
+      cases b <;> first | exact PartialTyStrengthens.reflex | simp [Ty.eqv] at h
+  | .borrow m ta, b, h => by
+      cases b with
+      | borrow m' tb =>
+          obtain ⟨rfl, hsub, _⟩ := h
+          exact PartialTyStrengthens.borrow hsub
+      | unit => simp [Ty.eqv] at h
+      | int => simp [Ty.eqv] at h
+      | bool => simp [Ty.eqv] at h
+      | box _ => simp [Ty.eqv] at h
+  | .box a0, b, h => by
+      cases b with
+      | box b0 =>
+          exact PartialTyStrengthens.tyBox
+            (ty_eqv_imp_strengthens (a := a0) (b := b0) (by simpa [Ty.eqv] using h))
+      | unit => simp [Ty.eqv] at h
+      | int => simp [Ty.eqv] at h
+      | bool => simp [Ty.eqv] at h
+      | borrow _ _ => simp [Ty.eqv] at h
+
+/-- Antisymmetry of the strengthening preorder on full types, modulo `eqv`. -/
+theorem ty_eqv_of_le_le : ∀ {a b : Ty},
+    PartialTyStrengthens (.ty a) (.ty b) →
+    PartialTyStrengthens (.ty b) (.ty a) → Ty.eqv a b
+  | .unit, _, hab, _ => by cases hab; exact Ty.eqv_refl _
+  | .int, _, hab, _ => by cases hab; exact Ty.eqv_refl _
+  | .bool, _, hab, _ => by cases hab; exact Ty.eqv_refl _
+  | .borrow m ta, _, hab, hba => by
+      cases hab with
+      | reflex => exact Ty.eqv_refl _
+      | borrow hsub =>
+          cases hba with
+          | reflex => exact Ty.eqv_refl _
+          | borrow hsub' => exact ⟨rfl, hsub, hsub'⟩
+  | .box a0, _, hab, hba => by
+      cases hab with
+      | reflex => exact Ty.eqv_refl _
+      | tyBox hinner =>
+          cases hba with
+          | reflex => exact Ty.eqv_refl _
+          | tyBox hinner' => exact ty_eqv_of_le_le (a := a0) hinner hinner'
+
+/-- `eqv` composes into strengthening on the left. -/
+theorem ty_eqv_strengthens_trans {a τ b : Ty} :
+    Ty.eqv a τ → PartialTyStrengthens (.ty τ) (.ty b) →
+    PartialTyStrengthens (.ty a) (.ty b) :=
+  fun heqv hstr => partialTyStrengthens_trans (ty_eqv_imp_strengthens heqv) hstr
+
+/-- **Target-union monotonicity.**  If two borrow-target lists are jointly typed
+in the same environment, the smaller list's pointee union strengthens to the
+larger list's, provided each shared target is typed determinately (up to `eqv`).
+This is the "least" half of the union LUB, transported across `⊆`. -/
+theorem lvalTargetsTyping_union_mono {env : Env} {W' : List LVal} {b : Ty}
+    {lb : Lifetime}
+    (h2 : LValTargetsTyping env W' (.ty b) lb)
+    (hdet : ∀ t, t ∈ W' → ∀ {q1 m1 q2 m2 : _},
+      LValTyping env t q1 m1 → LValTyping env t q2 m2 → PartialTy.eqv q1 q2)
+    {W : List LVal} {pty : PartialTy} {la : Lifetime}
+    (h1 : LValTargetsTyping env W pty la) :
+    W ⊆ W' → ∀ a, pty = .ty a → PartialTyStrengthens (.ty a) (.ty b) := by
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _ _ _ _ => True)
+    (motive_2 := fun W pty _ _ =>
+      W ⊆ W' → ∀ a, pty = .ty a → PartialTyStrengthens (.ty a) (.ty b))
+    (by intro _ _ _; trivial)
+    (by intro _ _ _ _ _; trivial)
+    (by intro _ _ _ _ _ _ _ _ _ _; trivial)
+    (by
+      intro t ty lifetime htyping _ihTarget hsub a ha
+      cases ha
+      have htmem : t ∈ W' := hsub (by simp)
+      rcases lvalTargetsTyping_member_strengthens h2 t htmem with
+        ⟨τ, lτ, htτ, hstrτ⟩
+      have heq : PartialTy.eqv (.ty ty) (.ty τ) := hdet t htmem htyping htτ
+      exact ty_eqv_strengthens_trans (by simpa [PartialTy.eqv] using heq) hstrτ)
+    (by
+      intro t rest headTy headLife restLife lifetime restTy unionTy
+        hhead hrest hunion _hinter _ihhead ihrest hsub a ha
+      subst ha
+      have htmem : t ∈ W' := hsub (by simp)
+      rcases lvalTargetsTyping_member_strengthens h2 t htmem with
+        ⟨τ, lτ, htτ, hstrτ⟩
+      have heqHead : PartialTy.eqv (.ty headTy) (.ty τ) := hdet t htmem hhead htτ
+      have hheadLe : PartialTyStrengthens (.ty headTy) (.ty b) :=
+        ty_eqv_strengthens_trans (by simpa [PartialTy.eqv] using heqHead) hstrτ
+      obtain ⟨restU, hrestU⟩ := LValTargetsTyping.output_full hrest
+      have hrestLe : PartialTyStrengthens (.ty restU) (.ty b) :=
+        ihrest (fun t ht => hsub (List.mem_cons_of_mem _ ht)) restU hrestU
+      rw [hrestU] at hunion
+      exact hunion.2 (by
+        intro z hz
+        simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hz
+        rcases hz with rfl | rfl
+        · exact hheadLe
+        · exact hrestLe))
+    h1
+
+/-- **Single-lval typing determinism (up to `eqv`).**  In a linearizable
+environment two typings of the same lvalue assign `eqv`-equivalent pointee types.
+Proved by strong induction on the linearization rank of the lvalue's base (with a
+structural inner induction for the box/borrow chain). -/
+theorem lvalTyping_eqv_of_linearizedBy {env : Env} {φ : Name → Nat}
+    (hφ : LinearizedBy φ env) :
+    ∀ {lv : LVal} {p1 l1 p2 l2}, LValTyping env lv p1 l1 →
+      LValTyping env lv p2 l2 → PartialTy.eqv p1 p2 := by
+  have key : ∀ n, ∀ lv : LVal, φ (LVal.base lv) ≤ n →
+      ∀ {p1 l1 p2 l2}, LValTyping env lv p1 l1 → LValTyping env lv p2 l2 →
+        PartialTy.eqv p1 p2 := by
+    intro n
+    induction n using Nat.strong_induction_on with
+    | _ n IHn =>
+      intro lv
+      induction lv with
+      | var x =>
+          intro _hle p1 l1 p2 l2 h1 h2
+          rcases LValTyping.var_inv h1 with ⟨s1, hs1, ht1, _hl1⟩
+          rcases LValTyping.var_inv h2 with ⟨s2, hs2, ht2, _hl2⟩
+          have hseq : s1 = s2 := Option.some.inj (hs1.symm.trans hs2)
+          subst hseq
+          subst ht1; subst ht2
+          exact PartialTy.eqv_refl _
+      | deref w IHw =>
+          intro hle p1 l1 p2 l2 h1 h2
+          have hbase : LVal.base w = LVal.base (.deref w) := rfl
+          have hleW : φ (LVal.base w) ≤ n := hle
+          cases h1 with
+          | box hb1 =>
+              cases h2 with
+              | box hb2 =>
+                  have hweq : PartialTy.eqv (.box p1) (.box p2) :=
+                    IHw hleW hb1 hb2
+                  simpa [PartialTy.eqv] using hweq
+              | borrow hb2 _ht2 =>
+                  have hweq := IHw hleW hb1 hb2
+                  simp [PartialTy.eqv] at hweq
+          | borrow hb1 ht1 =>
+              cases h2 with
+              | box hb2 =>
+                  have hweq := IHw hleW hb1 hb2
+                  simp [PartialTy.eqv] at hweq
+              | borrow hb2 ht2 =>
+                  rename_i m1 W1 bl1 m2 W2 bl2
+                  have hweq := IHw hleW hb1 hb2
+                  obtain ⟨hm, hsub12, hsub21⟩ : m1 = m2 ∧ W1 ⊆ W2 ∧ W2 ⊆ W1 := by
+                    simpa [PartialTy.eqv, Ty.eqv] using hweq
+                  subst hm
+                  obtain ⟨a, ha⟩ := LValTargetsTyping.output_full ht1
+                  obtain ⟨c, hc⟩ := LValTargetsTyping.output_full ht2
+                  subst ha; subst hc
+                  -- determinism for each target (rank strictly below base w)
+                  have hr1 : ∀ t, t ∈ W1 → φ (LVal.base t) < n := fun t ht =>
+                    lt_of_lt_of_le
+                      ((lvalTyping_vars_rank_lt hφ).1 hb1 (LVal.base t)
+                        (mem_partialTy_vars_iff.mpr
+                          ⟨m1, W1, t, PartialTyContains.here, ht, rfl⟩)) hleW
+                  have hr2 : ∀ t, t ∈ W2 → φ (LVal.base t) < n := fun t ht =>
+                    lt_of_lt_of_le
+                      ((lvalTyping_vars_rank_lt hφ).1 hb2 (LVal.base t)
+                        (mem_partialTy_vars_iff.mpr
+                          ⟨m1, W2, t, PartialTyContains.here, ht, rfl⟩)) hleW
+                  have hdet1 : ∀ t, t ∈ W1 → ∀ {q1 m1' q2 m2'},
+                      LValTyping env t q1 m1' → LValTyping env t q2 m2' →
+                      PartialTy.eqv q1 q2 := by
+                    intro t ht q1 m1' q2 m2' hq1 hq2
+                    exact IHn (φ (LVal.base t)) (hr1 t ht) t (le_refl _) hq1 hq2
+                  have hdet2 : ∀ t, t ∈ W2 → ∀ {q1 m1' q2 m2'},
+                      LValTyping env t q1 m1' → LValTyping env t q2 m2' →
+                      PartialTy.eqv q1 q2 := by
+                    intro t ht q1 m1' q2 m2' hq1 hq2
+                    exact IHn (φ (LVal.base t)) (hr2 t ht) t (le_refl _) hq1 hq2
+                  have hac : PartialTyStrengthens (.ty a) (.ty c) :=
+                    lvalTargetsTyping_union_mono ht2 hdet2 ht1 hsub12 a rfl
+                  have hca : PartialTyStrengthens (.ty c) (.ty a) :=
+                    lvalTargetsTyping_union_mono ht1 hdet1 ht2 hsub21 c rfl
+                  exact ty_eqv_of_le_le hac hca
+  intro lv p1 l1 p2 l2 h1 h2
+  exact key (φ (LVal.base lv)) lv (le_refl _) h1 h2
+
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
