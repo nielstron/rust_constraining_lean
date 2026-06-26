@@ -2890,6 +2890,219 @@ theorem lvalTyping_eqv_of_linearizedBy {env : Env} {φ : Name → Nat}
   intro lv p1 l1 p2 l2 h1 h2
   exact key (φ (LVal.base lv)) lv (le_refl _) h1 h2
 
+/-- **Base-slot lifetime bound.**  Given that every borrow contained in a slot of
+`result` has its targets' bases outliving that slot (the base-outlives half of
+`ContainedBorrowsWellFormed`, `hdecomp`), the output lifetime of any lvalue typing
+is bounded by the lifetime of the lvalue's base slot, and every borrow contained
+in the output type has its targets' bases outliving that slot too. -/
+theorem lvalTyping_lifetime_le_baseSlot {result : Env}
+    (hdecomp : ∀ z zslot m W, result.slotAt z = some zslot →
+      PartialTyContains zslot.ty (.borrow m W) →
+      ∀ w, w ∈ W → ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
+        wbs.lifetime ≤ zslot.lifetime) :
+    ∀ {lv pty lf}, LValTyping result lv pty lf →
+      ∀ bs, result.slotAt (LVal.base lv) = some bs →
+        lf ≤ bs.lifetime ∧
+        (∀ m W, PartialTyContains pty (.borrow m W) → ∀ w, w ∈ W →
+          ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
+            wbs.lifetime ≤ bs.lifetime) := by
+  intro lv pty lf htyping
+  refine LValTyping.rec
+      (motive_1 := fun lv pty lf _ =>
+        ∀ bs, result.slotAt (LVal.base lv) = some bs →
+          lf ≤ bs.lifetime ∧
+          (∀ m W, PartialTyContains pty (.borrow m W) → ∀ w, w ∈ W →
+            ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
+              wbs.lifetime ≤ bs.lifetime))
+      (motive_2 := fun targets pty lf _ =>
+        ∀ bound,
+          (∀ t, t ∈ targets → ∃ tbs, result.slotAt (LVal.base t) = some tbs ∧
+            tbs.lifetime ≤ bound) →
+          lf ≤ bound ∧
+          (∀ m W, PartialTyContains pty (.borrow m W) → ∀ w, w ∈ W →
+            ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
+              wbs.lifetime ≤ bound))
+      ?var ?box ?borrow ?singleton ?cons htyping
+  case var =>
+    intro x slot hslot bs hbs
+    simp only [LVal.base] at hbs
+    rw [hslot] at hbs
+    have hbsEq : slot = bs := Option.some.inj hbs
+    subst hbsEq
+    refine ⟨LifetimeOutlives.refl _, ?_⟩
+    intro m W hcontains w hw
+    exact hdecomp x slot m W hslot hcontains w hw
+  case box =>
+    intro u inner lifetime _htyping ih bs hbs
+    have hih := ih bs (by simpa [LVal.base] using hbs)
+    refine ⟨hih.1, ?_⟩
+    intro m W hcontains w hw
+    exact hih.2 m W (PartialTyContains.box hcontains) w hw
+  case borrow =>
+    intro u mutable W0 borrowLf targetLf targetTy _hborrow _htargets ihBorrow ihTargets bs hbs
+    have hihB := ihBorrow bs (by simpa [LVal.base] using hbs)
+    have hbound : ∀ t, t ∈ W0 → ∃ tbs, result.slotAt (LVal.base t) = some tbs ∧
+        tbs.lifetime ≤ bs.lifetime :=
+      hihB.2 mutable W0 PartialTyContains.here
+    have hres := ihTargets bs.lifetime hbound
+    exact ⟨hres.1, hres.2⟩
+  case singleton =>
+    intro t ty lifetime _htyping ihTarget bound hbound
+    obtain ⟨tbs, htbs, htle⟩ := hbound t (by simp)
+    have hih := ihTarget tbs htbs
+    refine ⟨LifetimeOutlives.trans hih.1 htle, ?_⟩
+    intro m W hcontains w hw
+    obtain ⟨wbs, hwbs, hwle⟩ := hih.2 m W hcontains w hw
+    exact ⟨wbs, hwbs, LifetimeOutlives.trans hwle htle⟩
+  case cons =>
+    intro t rest headTy headLf restLf lifetime restTy unionTy _hhead _hrest hunion
+      hinter ihHead ihRest bound hbound
+    obtain ⟨tbs, htbs, htle⟩ := hbound t (by simp)
+    have hihHead := ihHead tbs htbs
+    have hboundRest : ∀ s, s ∈ rest → ∃ sbs, result.slotAt (LVal.base s) = some sbs ∧
+        sbs.lifetime ≤ bound := fun s hs => hbound s (List.mem_cons_of_mem _ hs)
+    have hihRest := ihRest bound hboundRest
+    refine ⟨LifetimeIntersection.le_of_le hinter
+      (LifetimeOutlives.trans hihHead.1 htle) hihRest.1, ?_⟩
+    intro m W hcontains w hw
+    rcases PartialTyUnion.contained_borrow_member hunion hcontains hw with
+      ⟨Wh, hch, hwh⟩ | ⟨Wr, hcr, hwr⟩
+    · obtain ⟨wbs, hwbs, hwle⟩ := hihHead.2 m Wh hch w hwh
+      exact ⟨wbs, hwbs, LifetimeOutlives.trans hwle htle⟩
+    · exact hihRest.2 m Wr hcr w hwr
+
+/-- `eqv` of full types implies `sameShape`. -/
+theorem ty_eqv_imp_sameShape {a b : Ty} (h : Ty.eqv a b) : Ty.sameShape a b :=
+  ty_sameShape_of_strengthens (ty_eqv_imp_strengthens h)
+
+/-- **LValue typing transport across a same-shape strengthening.**  If `result`
+is a same-shape strengthening of `source`, is coherent and linearizable, then any
+lvalue typing transports from `source` to `result`, with the result pointee type
+both `eqv`-strengthening and `sameShape` to the source one. -/
+theorem lvalTyping_transport_of_sameShapeStrengthening {source result : Env}
+    (hmap : EnvSameShapeStrengthening source result)
+    (hcoh : Coherent result) (hlin : Linearizable result) :
+    ∀ {lv pty lf}, LValTyping source lv pty lf →
+      ∃ pty' lf', LValTyping result lv pty' lf' ∧
+        PartialTyStrengthens pty pty' ∧ PartialTy.sameShape pty pty' := by
+  obtain ⟨φ, hφ⟩ := hlin
+  have hdet : ∀ t, ∀ {q1 m1 q2 m2}, LValTyping result t q1 m1 →
+      LValTyping result t q2 m2 → PartialTy.eqv q1 q2 := by
+    intro t q1 m1 q2 m2 hq1 hq2
+    exact lvalTyping_eqv_of_linearizedBy hφ hq1 hq2
+  intro lv pty lf htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv pty _ _ =>
+      ∃ pty' lf', LValTyping result lv pty' lf' ∧
+        PartialTyStrengthens pty pty' ∧ PartialTy.sameShape pty pty')
+    (motive_2 := fun targets pty _ _ =>
+      ∀ {W' tyJ lfJ}, targets ⊆ W' → LValTargetsTyping result W' (.ty tyJ) lfJ →
+        ∀ tyS, pty = .ty tyS →
+          PartialTyStrengthens (.ty tyS) (.ty tyJ) ∧
+            PartialTy.sameShape (.ty tyS) (.ty tyJ))
+    ?var ?box ?borrow ?singleton ?cons htyping
+  case var =>
+    intro x slot hslot
+    rcases hmap.2 x slot hslot with ⟨rslot, hrslot, _hlife⟩
+    rcases hmap.1 x rslot hrslot with ⟨slot', hslot', _hlife, hstr, hshape⟩
+    have : slot' = slot := Option.some.inj (hslot'.symm.trans hslot)
+    subst this
+    exact ⟨rslot.ty, rslot.lifetime, LValTyping.var hrslot, hstr, hshape⟩
+  case box =>
+    intro u inner lifetime _htyping ih
+    obtain ⟨pty', lf', htyp', hstr', hshape'⟩ := ih
+    cases pty' with
+    | box inner' =>
+        exact ⟨inner', lf', LValTyping.box htyp',
+          PartialTyStrengthens.box_inv hstr', by simpa [PartialTy.sameShape] using hshape'⟩
+    | ty _ => simp [PartialTy.sameShape] at hshape'
+    | undef _ => simp [PartialTy.sameShape] at hshape'
+  case borrow =>
+    intro u mutable W0 borrowLf targetLf targetTy _hborrow _htargets ihBorrow ihTargets
+    obtain ⟨ptyU, lfU, htypU, hstrU, hshapeU⟩ := ihBorrow
+    cases ptyU with
+    | ty tyU =>
+        cases tyU with
+        | borrow mU WU =>
+            have hmEq : mutable = mU := by
+              cases hstrU with
+              | reflex => rfl
+              | borrow _ => rfl
+            subst hmEq
+            obtain ⟨tyJ, lfJ, htJ⟩ := hcoh u mutable WU lfU htypU
+            obtain ⟨tyTsrc, hTsrc⟩ := LValTargetsTyping.output_full _htargets
+            subst hTsrc
+            have hsub : W0 ⊆ WU := PartialTyStrengthens.borrow_subset hstrU
+            have hcmp := ihTargets hsub htJ tyTsrc rfl
+            exact ⟨.ty tyJ, lfJ, LValTyping.borrow htypU htJ, hcmp.1, hcmp.2⟩
+        | unit => cases hstrU
+        | int => cases hstrU
+        | bool => cases hstrU
+        | box _ => cases hstrU
+    | box _ => simp [PartialTy.sameShape] at hshapeU
+    | undef _ => simp [PartialTy.sameShape] at hshapeU
+  case singleton =>
+    intro t ty lifetime _htyping ih W' tyJ lfJ hsub htJ tyS htyS
+    injection htyS with htyEq; subst htyEq
+    obtain ⟨pt', lf', htyp', hstr', hshape'⟩ := ih
+    obtain ⟨ty', hty'⟩ : ∃ ty', pt' = .ty ty' := by
+      cases pt' with
+      | ty ty' => exact ⟨ty', rfl⟩
+      | box _ => simp [PartialTy.sameShape] at hshape'
+      | undef _ => simp [PartialTy.sameShape] at hshape'
+    subst hty'
+    have htmem : t ∈ W' := hsub (by simp)
+    rcases lvalTargetsTyping_member_strengthens htJ t htmem with ⟨τ, lτ, htτ, hstrτ⟩
+    have heq : PartialTy.eqv (.ty ty') (.ty τ) := hdet t htyp' htτ
+    have hτJ : PartialTyStrengthens (.ty ty') (.ty tyJ) :=
+      ty_eqv_strengthens_trans (by simpa [PartialTy.eqv] using heq) hstrτ
+    refine ⟨partialTyStrengthens_trans hstr' hτJ, ?_⟩
+    exact PartialTy.sameShape_trans hshape'
+      (by simpa [PartialTy.sameShape] using ty_sameShape_of_strengthens hτJ)
+  case cons =>
+    intro t rest headTy headLf restLf lifetime restTy unionTy hhead hrest hunion
+      _hinter ihHead ihRest W' tyJ lfJ hsub htJ tyS htyS
+    obtain ⟨ph, lh, htypHead, hstrHead, hshapeHead⟩ := ihHead
+    obtain ⟨headTy', hh⟩ : ∃ ty, ph = .ty ty := by
+      cases ph with
+      | ty ty => exact ⟨ty, rfl⟩
+      | box _ => simp [PartialTy.sameShape] at hshapeHead
+      | undef _ => simp [PartialTy.sameShape] at hshapeHead
+    subst hh
+    obtain ⟨restTyFull, hrf⟩ := LValTargetsTyping.output_full hrest
+    subst hrf
+    -- head ≤ tyJ
+    have htmem : t ∈ W' := hsub (by simp)
+    rcases lvalTargetsTyping_member_strengthens htJ t htmem with ⟨τ, lτ, htτ, hstrτ⟩
+    have heqH : PartialTy.eqv (.ty headTy') (.ty τ) := hdet t htypHead htτ
+    have hHeadJ : PartialTyStrengthens (.ty headTy) (.ty tyJ) :=
+      partialTyStrengthens_trans hstrHead
+        (ty_eqv_strengthens_trans (by simpa [PartialTy.eqv] using heqH) hstrτ)
+    -- rest ≤ tyJ
+    have hsubRest : rest ⊆ W' := fun s hs => hsub (List.mem_cons_of_mem _ hs)
+    have hRestJ := ihRest hsubRest htJ restTyFull rfl
+    -- union ≤ tyJ
+    have hunionTyS : PartialTyUnion (.ty headTy) (.ty restTyFull) (.ty tyS) := by
+      rwa [htyS] at hunion
+    refine ⟨hunionTyS.2 (by
+      intro z hz
+      simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hz
+      rcases hz with rfl | rfl
+      · exact hHeadJ
+      · exact hRestJ.1), ?_⟩
+    -- sameShape (.ty tyS) (.ty tyJ)
+    have hS1 : Ty.sameShape tyS headTy :=
+      partialTyUnion_ty_left_sameShape hunionTyS
+    have hS2 : Ty.sameShape headTy tyJ := by
+      have h2a : Ty.sameShape headTy headTy' := by
+        simpa [PartialTy.sameShape] using hshapeHead
+      have h2b : Ty.sameShape headTy' τ := ty_eqv_imp_sameShape
+        (by simpa [PartialTy.eqv] using heqH)
+      have h2c : Ty.sameShape τ tyJ := ty_sameShape_of_strengthens hstrτ
+      exact Ty.sameShape_trans (Ty.sameShape_trans h2a h2b) h2c
+    show PartialTy.sameShape (.ty tyS) (.ty tyJ)
+    simpa [PartialTy.sameShape] using Ty.sameShape_trans hS1 hS2
+
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
