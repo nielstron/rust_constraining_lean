@@ -17,9 +17,10 @@ stated; the deviation then documents the corrected claim).
   no admissibility theorem bridges the gap.**  `T-Assign` carries extra
   obligations (the lhs re-typeable after the rhs, a linearization/rank witness
   `∃ φ, LinearizedBy φ ∧ EnvWriteRhsBorrowTargetsBelow`,
-  `EnvWriteCoherenceObligations`, and the minimal `EnvWriteRhsTargetsWellFormed`
-  for the result (the broad result `ContainedBorrowsWellFormed` is now derived;
-  see the coherence-obligations deviation below),
+  a plain `Coherent env₃`, and the minimal `EnvWriteRhsTargetsWellFormed`
+  for the result (the broad result `ContainedBorrowsWellFormed` is now derived,
+  and the former structured `EnvWriteCoherenceObligations` has been flattened to
+  `Coherent env₃`; see the coherence-obligations deviation below),
   plus per-branch typing witnesses and weak-update shape premises inside
   `EnvWrite` itself); `T-Declare` carries `FreshUpdateCoherenceObligations`
   and a second freshness check on the post-initialiser environment; `T-Block`
@@ -43,14 +44,18 @@ stated; the deviation then documents the corrected claim).
     second conjunct (fan-out mutable-conflict locality) goes beyond the
     follow-up but is vacuous for the core, where multi-target borrows cannot
     arise (paper Section 3.4).
-  - *Coherence obligations* (`EnvWriteCoherenceObligations`,
+  - *Coherence obligations* (`Coherent env₃` on `T-Assign`,
     `ContainedBorrowsWellFormed`, `FreshUpdateCoherenceObligations`) —
     **derivable for core programs**: coherence concerns joint target-list
     typing, and core target lists are singletons typed in the same
     environment; the incoherent-`&[]` pathology cannot be produced by core
     source programs from the empty environment.  For *arbitrary* well-formed
     starting environments these are likely genuinely necessary, since such
-    environments admit pathologies the core never creates.
+    environments admit pathologies the core never creates.  (`T-Assign`'s
+    coherence obligation was previously a bespoke structured
+    `EnvWriteCoherenceObligations` carrying old-/written-root transport fields;
+    since its sole purpose was to derive `Coherent env₃`, it has been flattened
+    to that strictly-more-local premise and the structure removed.)
 
     *Update (now mechanised for `T-If`):* `ContainedBorrowsWellFormed` of the
     `T-If` join is no longer a carried premise — it is **derived** by
@@ -202,7 +207,9 @@ These deviations from the paper should be kept.
 - **Assignment is strengthened.**  `T-Assign` rechecks that the lhs is typeable
   after typing the rhs, requires shape compatibility and rhs well-formedness at
   the target lifetime, and carries explicit rank/coherence obligations:
-  `EnvWriteRhsBorrowTargetsBelow`, `EnvWriteCoherenceObligations`, and the
+  `EnvWriteRhsBorrowTargetsBelow`, a plain `Coherent env₃` (formerly the
+  structured `EnvWriteCoherenceObligations`, now flattened since its only use was
+  to derive `Coherent env₃`), and the
   minimal `EnvWriteRhsTargetsWellFormed` for the result (the RHS-origin borrow
   edges must outlive the slot they are injected into — strictly weaker than the
   broad result `ContainedBorrowsWellFormed`, which is *derived* from it via
