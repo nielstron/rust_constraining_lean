@@ -24,18 +24,19 @@ theorem scalarCopyComparison_typing :
     TermTyping Env.empty StoreTyping.empty Lifetime.root
       scalarCopyComparison .bool Env.empty := by
   unfold scalarCopyComparison
-  exact TermTyping.eq (ghost := "γ")
+  refine TermTyping.eq_finite
     (TermTyping.const ValueTyping.int)
-    (by simp [Env.fresh, Env.empty])
-    (by intro y slot hslot; simp [Env.empty] at hslot)
-    (by simp [Ty.vars])
-    (by simp [StoreTyping.TypeNameFresh, StoreTyping.empty])
-    (TermTyping.const ValueTyping.int)
-    (by simp [Term.Mentions])
-    (by simp [Env.fresh, Env.empty])
+    Env.finiteSupport_empty
+    StoreTyping.finiteSupport_empty
+    ?_
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
+  intro ghost hfresh _htypeFresh _htyFresh _hstoreFresh _hnotMention
+  exact ⟨_,
+    TermTyping.const ValueTyping.int,
+    (Env.erase_update_fresh Env.empty ghost
+      { ty := .ty Ty.int, lifetime := Lifetime.root } hfresh).symm⟩
 
 theorem scalarCopyComparison_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root scalarCopyComparison := by
@@ -246,52 +247,20 @@ theorem pointerIf_not_readProhibited_deref_p :
 theorem pointerIfCondition_typing :
     TermTyping pointerIfEnv StoreTyping.empty Lifetime.root
       (.eq (.copy (.deref (.var "p"))) (.val (.int 1))) .bool pointerIfEnv := by
-  exact TermTyping.eq (ghost := "γ")
+  refine TermTyping.eq_finite
     (TermTyping.copy pointerIf_deref_p_typing CopyTy.int
       pointerIf_not_readProhibited_deref_p)
-    (by simp [Env.fresh, pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
-      pointerIfPXSlot, Env.update, Env.empty])
-    (by
-      intro y slot hslot
-      by_cases hp : y = "p"
-      · subst hp
-        have hslotTy : slot.ty = (.ty (.borrow true [.var "x"])) := by
-          simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-        rw [hslotTy]
-        simp [PartialTy.allVars, Ty.vars, LVal.base]
-      · by_cases hy : y = "y"
-        · subst hy
-          have hslotTy : slot.ty = .ty .int := by
-            simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
-              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-          rw [hslotTy]
-          simp [PartialTy.allVars, Ty.vars]
-        · by_cases hx : y = "x"
-          · subst hx
-            have hslotTy : slot.ty = .ty .int := by
-              simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-                Env.update] using
-                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-            rw [hslotTy]
-            simp [PartialTy.allVars, Ty.vars]
-          · have hnone : pointerIfEnv.slotAt y = none := by
-              simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-                Env.update, Env.empty, hp, hy, hx]
-            rw [hnone] at hslot
-            cases hslot)
-    (by simp [Ty.vars])
-    (by simp [StoreTyping.TypeNameFresh, StoreTyping.empty])
-    (TermTyping.const ValueTyping.int)
-    (by simp [Term.Mentions])
-    (by
-      exact (Env.erase_update_fresh pointerIfEnv "γ"
-        { ty := .ty Ty.int, lifetime := Lifetime.root } (by
-          simp [Env.fresh, pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
-            pointerIfPXSlot, Env.update, Env.empty])).symm)
+    (((Env.finiteSupport_empty.update).update).update)
+    StoreTyping.finiteSupport_empty
+    ?_
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
+  intro ghost hfresh _htypeFresh _htyFresh _hstoreFresh _hnotMention
+  exact ⟨_,
+    TermTyping.const ValueTyping.int,
+    (Env.erase_update_fresh pointerIfEnv ghost
+      { ty := .ty Ty.int, lifetime := Lifetime.root } hfresh).symm⟩
 
 theorem pointerIf_not_writeProhibited_y :
     ¬ WriteProhibited pointerIfEnv (.var "y") := by

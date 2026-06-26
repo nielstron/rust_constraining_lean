@@ -1688,6 +1688,45 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
       ihRest (ihTerm hfinite))
     htyping
 
+/--
+Derived equality typing rule that chooses the anonymous equality slot from
+finite support instead of requiring callers to name it and prove freshness.
+
+The RHS is still checked in the ghost-extended environment.  The continuation
+must work for the fresh ghost chosen by `exists_fresh_eq_ghost`.
+-/
+theorem TermTyping.eq_finite {env₁ env₂ env₃ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {lhs rhs : Term} {lhsTy rhsTy : Ty} :
+    TermTyping env₁ typing lifetime lhs lhsTy env₂ →
+    Env.FiniteSupport env₁ →
+    StoreTyping.FiniteSupport typing →
+    (∀ ghost,
+      env₂.fresh ghost →
+      Env.TypeNameFresh env₂ ghost →
+      ghost ∉ Ty.vars lhsTy →
+      StoreTyping.TypeNameFresh typing ghost →
+      ¬ Term.Mentions ghost rhs →
+      ∃ envGhost,
+        TermTyping
+          (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
+          typing lifetime rhs rhsTy envGhost ∧
+        env₃ = envGhost.erase ghost) →
+    CopyTy lhsTy →
+    CopyTy rhsTy →
+    ShapeCompatible env₃ (.ty lhsTy) (.ty rhsTy) →
+    TermTyping env₁ typing lifetime (.eq lhs rhs) .bool env₃ := by
+  intro hLhs hfiniteEnv hfiniteTyping hRhs hcopyL hcopyR hshape
+  have hfiniteEnv₂ : Env.FiniteSupport env₂ :=
+    hLhs.finiteSupport hfiniteEnv
+  rcases exists_fresh_eq_ghost (env := env₂) (typing := typing)
+      (lhsTy := lhsTy) (rhs := rhs) hfiniteEnv₂ hfiniteTyping with
+    ⟨ghost, hfresh, htypeFresh, htyFresh, hstoreFresh, hnotMention⟩
+  rcases hRhs ghost hfresh htypeFresh htyFresh hstoreFresh hnotMention with
+    ⟨envGhost, hRhsGhost, henvEq⟩
+  exact TermTyping.eq hLhs hfresh htypeFresh htyFresh hstoreFresh
+    hRhsGhost hnotMention henvEq hcopyL hcopyR hshape
+
 theorem BorrowSafeEnv.erase {env : Env} {ghost : Name} :
     BorrowSafeEnv env →
     BorrowSafeEnv (env.erase ghost) := by

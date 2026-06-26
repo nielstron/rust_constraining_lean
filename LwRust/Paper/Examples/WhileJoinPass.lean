@@ -981,28 +981,25 @@ from the invariant environment (the loop's main premises) and once from the
 entry environment (the rule-carried monotonicity premises). -/
 
 theorem whileJoinCondition_typing (targets : List LVal)
-    (htypeFresh : Env.TypeNameFresh (whileJoinEnv targets) "γ")
     (hderef : LValTyping (whileJoinEnv targets) (.deref (.var "q"))
       (.ty .int) Lifetime.root) :
     TermTyping (whileJoinEnv targets) StoreTyping.empty Lifetime.root
       whileJoinCondition .bool (whileJoinEnv targets) := by
   unfold whileJoinCondition
-  exact TermTyping.eq (ghost := "γ")
+  refine TermTyping.eq_finite
     (TermTyping.copy hderef CopyTy.int
       (whileJoin_not_readProhibited targets _))
-    (by simp [Env.fresh, whileJoinEnv, Env.update, Env.empty])
-    htypeFresh
-    (by simp [Ty.vars])
-    (by simp [StoreTyping.TypeNameFresh, StoreTyping.empty])
-    (TermTyping.const ValueTyping.int)
-    (by simp [Term.Mentions])
-    (by
-      exact (Env.erase_update_fresh (whileJoinEnv targets) "γ"
-        { ty := .ty Ty.int, lifetime := Lifetime.root } (by
-          simp [Env.fresh, whileJoinEnv, Env.update, Env.empty])).symm)
+    (((Env.finiteSupport_empty.update).update).update)
+    StoreTyping.finiteSupport_empty
+    ?_
     CopyTy.int
     CopyTy.int
     ShapeCompatible.int
+  intro ghost hfresh _htypeFresh _htyFresh _hstoreFresh _hnotMention
+  exact ⟨_,
+    TermTyping.const ValueTyping.int,
+    (Env.erase_update_fresh (whileJoinEnv targets) ghost
+      { ty := .ty Ty.int, lifetime := Lifetime.root } hfresh).symm⟩
 
 theorem whileJoinInv_deref_q_typing :
     LValTyping whileJoinInvEnv (.deref (.var "q")) (.ty .int) Lifetime.root :=
@@ -1051,13 +1048,11 @@ theorem whileRetargetLoop_typing :
     (whileJoin_borrowSafe [.var "x", .var "y"])
     whileJoin_loopInvariantNameFresh
     (whileJoinCondition_typing [.var "x", .var "y"]
-      (whileJoin_typeNameFresh_gamma whileJoinInv_goodTargets)
       whileJoinInv_deref_q_typing)
     (whileJoinBody_typing [.var "x", .var "y"] whileJoinInv_goodTargets)
     WellFormedTy.unit
     whileJoinBack_dropLifetime
     (whileJoinCondition_typing [.var "x"]
-      (whileJoin_typeNameFresh_gamma whileJoinEntry_goodTargets)
       whileJoinEntry_deref_q_typing)
     (whileJoinBody_typing [.var "x"] whileJoinEntry_goodTargets)
 
