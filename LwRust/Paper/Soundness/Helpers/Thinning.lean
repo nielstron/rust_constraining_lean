@@ -207,6 +207,25 @@ theorem LValTyping.mono {envS : Env} {lv : LVal} {pS : PartialTy}
       · rw [Set.mem_singleton_iff] at hz; subst hz; exact hrestLe
     exact hunion.2 hub
 
+/-! ## `CopyTy` is preserved downward under `⊑`
+
+A `⊑`-stronger type of a copy type is still a copy type: `unit`/`int`/`bool`
+can only strengthen from themselves, and an immutable borrow `&T` strengthens
+only from an immutable borrow `&T'` (with a subset target list), which is still
+`immBorrow`-`CopyTy`. -/
+
+/-- If `tyS ⊑ ty` and `ty` is a copy type, then so is `tyS`. -/
+theorem CopyTy.of_strengthens {tyS ty : Ty} :
+    PartialTyStrengthens (.ty tyS) (.ty ty) → CopyTy ty → CopyTy tyS := by
+  intro hstr hcopy
+  cases hcopy with
+  | unit => rw [PartialTyStrengthens.to_unit_inv hstr]; exact CopyTy.unit
+  | int => rw [PartialTyStrengthens.to_int_inv hstr]; exact CopyTy.int
+  | bool => rw [PartialTyStrengthens.to_bool_inv hstr]; exact CopyTy.bool
+  | immBorrow =>
+      rcases PartialTyStrengthens.to_borrow_inv hstr with ⟨srcTargets, hEq, _⟩
+      rw [hEq]; exact CopyTy.immBorrow
+
 /-! ## Coherence-preserving lval thinning
 
 For a weak-env typing of an lval, coherence of the strong env produces a
