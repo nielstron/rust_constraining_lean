@@ -849,7 +849,8 @@ theorem whileJoinBody_typing (targets : List LVal)
     ⟨fun name => if name = "q" then 1 else 0,
       whileJoin_linearizedBy targets hts, whileJoin_retarget_below⟩
     (whileJoin_writeCoherence targets)
-    (whileJoin_contained [.var "y"] whileJoinBack_goodTargets)
+    (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
+      (whileJoin_contained [.var "y"] whileJoinBack_goodTargets))
     (whileJoin_not_writeProhibited_q [.var "y"] whileJoinBack_goodTargets)
 
 /-! ### The loop typing -/

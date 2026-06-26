@@ -646,6 +646,16 @@ def ContainedBorrowsWellFormed (env : Env) : Prop :=
     env ⊢ x ↝ (Ty.borrow mutable targets) →
     BorrowTargetsWellFormedInSlot env slot.lifetime targets
 
+/-- The minimal RHS-target obligation is (much) weaker than the broad result
+CBWF: any environment that is fully `ContainedBorrowsWellFormed` satisfies it for
+every `rhsTy`.  Used to discharge the obligation in examples that already prove
+the stronger fact. -/
+theorem EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
+    {result : Env} {rhsTy : Ty} :
+    ContainedBorrowsWellFormed result → EnvWriteRhsTargetsWellFormed result rhsTy := by
+  intro hcbwf x slot mutable targets target hslot hcontains htarget _hrhs
+  exact (hcbwf x slot mutable targets hslot ⟨slot, hslot, hcontains⟩) target htarget
+
 /-- Definition 4.8(ii). Every environment slot lives at least as long as `lifetime`. -/
 def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=
   ∀ x slot,
@@ -1003,7 +1013,7 @@ mutual
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
         EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
-        ContainedBorrowsWellFormed env₃ →
+        EnvWriteRhsTargetsWellFormed env₃ rhsTy →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
     /-- T-Eqal, Section 6.1.2, with the paper's ghost-slot check.

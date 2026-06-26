@@ -3628,7 +3628,9 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
             hwrite hlinBy hbelow
         have hcoh3 := EnvWrite.preserves_coherent_of_obligations
           result.1.2.2.1 hwriteCoh
-        exact ⟨⟨hcontained,
+        have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
+          (Linearizable.of_linearizedBy hlin3By) hcontained hwrite hnotWrite
+        exact ⟨⟨hcbwf3,
             EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
             hcoh3,
             Linearizable.of_linearizedBy hlin3By⟩,
