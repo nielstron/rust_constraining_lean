@@ -15,17 +15,17 @@ open Core
 /-! ### Exact type equivalence (`eqvX`)
 
 `eqvX` is stricter than `Ty.eqv`: box contents must be syntactically equal.
-After recursive full-box strengthening, ordinary `Ty.eqv` is strong enough for
-strengthening transport.  Exact target-list determinism is intentionally not
-stated here: target-list joins may reorder borrow-target lists under boxes, so
-`eqvX` would be too strong for those joins. -/
+Exact target-list determinism is intentionally not stated here: target-list
+joins may reorder borrow-target lists under boxes, so `eqvX` would be too
+strong for those joins. -/
 
 /-- Exact type equivalence: like `Ty.eqv` but `box` contents must be *equal*. -/
 def Ty.eqvX : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
   | .bool, .bool => True
-  | .borrow m₁ t₁, .borrow m₂ t₂ => m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
+  | .borrow m₁ t₁ p₁, .borrow m₂ t₂ p₂ =>
+      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁ ∧ p₁ = p₂
   | .box t₁, .box t₂ => t₁ = t₂
   | _, _ => False
 
@@ -36,8 +36,13 @@ def PartialTy.eqvX : PartialTy → PartialTy → Prop
   | .undef t₁, .undef t₂ => Ty.eqvX t₁ t₂
   | _, _ => False
 
-@[refl] theorem Ty.eqvX_refl (a : Ty) : Ty.eqvX a a := by
-  cases a <;> simp [Ty.eqvX]
+@[refl] theorem Ty.eqvX_refl : (a : Ty) → Ty.eqvX a a
+  | .unit => trivial
+  | .int => trivial
+  | .bool => trivial
+  | .borrow _ _ _ =>
+      ⟨rfl, (fun _ h => h), (fun _ h => h), rfl⟩
+  | .box _ => rfl
 
 @[refl] theorem PartialTy.eqvX_refl : (a : PartialTy) → PartialTy.eqvX a a
   | .ty t => Ty.eqvX_refl t

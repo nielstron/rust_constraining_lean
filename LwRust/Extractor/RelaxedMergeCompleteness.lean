@@ -59,14 +59,14 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       Mutable env lv →
       ¬ WriteProhibited env lv →
       RelaxedTermTyping env typing lifetime
-        (Term.borrow Bool.true lv) (Ty.borrow Bool.true [lv]) env
+        (Term.borrow Bool.true lv) (Ty.borrow Bool.true [lv] ty) env
   /-- T-ImmBorrow. -/
   | immBorrow {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
       {lv : LVal} {ty : Ty} :
       LValTyping env lv (.ty ty) valueLifetime →
       ¬ ReadProhibited env lv →
       RelaxedTermTyping env typing lifetime
-        (Term.borrow Bool.false lv) (Ty.borrow Bool.false [lv]) env
+        (Term.borrow Bool.false lv) (Ty.borrow Bool.false [lv] ty) env
   /-- T-Box. -/
   | box {env1 env2 : Env} {typing : StoreTyping} {lifetime : Lifetime}
       {term : Term} {ty : Ty} :

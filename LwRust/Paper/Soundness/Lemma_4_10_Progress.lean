@@ -978,11 +978,16 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       cases hLhs with
       | const _hvalueL =>
           have hRhs :=
-            TermTyping.erase_ghost
-              (env := _env₁)
-              (ghostSlot := { ty := .ty lhsTy, lifetime := lifetime })
-              hfresh htypeFresh (by simpa [PartialTy.vars] using htyFresh)
-              hstoreFresh hnotMention hghostRhs
+                    TermTyping.erase_ghost
+                      (env := _env₁)
+                      (ghostSlot := { ty := .ty lhsTy, lifetime := lifetime })
+                      hfresh htypeFresh
+                      (by
+                        intro hv
+                        exact htyFresh
+                          (Ty.vars_subset_allVars (ty := lhsTy)
+                            (by simpa [PartialTy.vars] using hv)))
+                      hstoreFresh hnotMention hghostRhs
           rcases ihFuel (by simp [Term.size] at hsize ⊢; omega)
               hvst.eq_rhs hwf hsafe hstore hRhs with
             hterminalR | hstepR

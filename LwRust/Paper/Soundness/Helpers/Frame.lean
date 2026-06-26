@@ -171,12 +171,13 @@ inductive Reaches (store : ProgramStore) : PartialValue → PartialTy → Locati
       store.slotAt location = some slot →
       Reaches store slot.value (.ty ty) ℓ →
       Reaches store (.value (.ref { location := location, owner := true })) (.ty (.box ty)) ℓ
-  | borrow {location ℓ : Location} {mutable : Bool} {targets : List LVal} {target : LVal} :
+  | borrow {location ℓ : Location} {mutable : Bool} {targets : List LVal}
+      {pointee : Ty} {target : LVal} :
       target ∈ targets →
       store.loc target = some location →
       LocReads store target ℓ →
       Reaches store (.value (.ref { location := location, owner := false }))
-        (.ty (.borrow mutable targets)) ℓ
+        (.ty (.borrow mutable targets pointee)) ℓ
 
 /--
 Ownership reachability through a value.  Unlike `Reaches`, this relation does not
@@ -205,12 +206,12 @@ inductive OwnerReaches (store : ProgramStore) : PartialValue → PartialTy → L
 inductive BorrowDependency (store : ProgramStore) :
     PartialValue → PartialTy → Location → Prop where
   | borrow {location readLocation : Location} {mutable : Bool}
-      {targets : List LVal} {target : LVal} :
+      {targets : List LVal} {pointee : Ty} {target : LVal} :
       target ∈ targets →
       store.loc target = some location →
       LocReads store target readLocation →
       BorrowDependency store (.value (.ref { location := location, owner := false }))
-        (.ty (.borrow mutable targets)) readLocation
+        (.ty (.borrow mutable targets pointee)) readLocation
   | boxInner {location : Location} {slot : StoreSlot} {inner : PartialTy}
       {dependency : Location} :
       store.slotAt location = some slot →
@@ -277,10 +278,10 @@ inductive SelectedBorrowDependency (store : ProgramStore) :
     {value : PartialValue} → {ty : PartialTy} →
       ValidPartialValue store value ty → Location → Prop where
   | borrow {location : Location} {mutable : Bool} {targets : List LVal}
-      {target : LVal} {hmem : target ∈ targets}
+      {pointee : Ty} {target : LVal} {hmem : target ∈ targets}
       {hloc : store.loc target = some location} {dependency : Location} :
       LocReads store target dependency →
-      SelectedBorrowDependency store (ValidPartialValue.borrow hmem hloc)
+      SelectedBorrowDependency store (ValidPartialValue.borrow (pointee := pointee) hmem hloc)
         dependency
   | boxInner {location : Location} {slot : StoreSlot} {inner : PartialTy}
       {hslot : store.slotAt location = some slot}
@@ -304,7 +305,7 @@ theorem SelectedBorrowDependency.borrowDependency {store : ProgramStore}
     BorrowDependency store value ty dependency := by
   intro hdependency
   induction hdependency with
-  | @borrow _ location mutable targets target hmem hloc dependency hreads =>
+  | @borrow _ location mutable targets pointee target hmem hloc dependency hreads =>
       exact BorrowDependency.borrow hmem hloc hreads
   | @boxInner location slot inner hslot hinner dependency _hdependency ih =>
       exact BorrowDependency.boxInner hslot ih
@@ -536,7 +537,7 @@ theorem reaches_owner_source_of_validPartialValue {env : Env}
           subst reachedSlot
           have hinnerBorrows :
               PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
-            intro mutable targets hcontains
+            intro mutable targets pointee hcontains
             exact hborrows (PartialTyContains.box hcontains)
           rcases ih hinnerBorrows hinnerReach with howned | hsource
           · exact Or.inr ⟨ownerLocation, OwnerReaches.boxHere hslot,
@@ -564,7 +565,7 @@ theorem reaches_owner_source_of_validPartialValue {env : Env}
           subst reachedSlot
           have hinnerBorrows :
               PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
-            intro mutable targets hcontains
+            intro mutable targets pointee hcontains
             exact hborrows (PartialTyContains.tyBox hcontains)
           rcases ih hinnerBorrows hinnerReach with howned | hsource
           · exact Or.inr ⟨ownerLocation, OwnerReaches.boxFullHere hslot,
@@ -659,9 +660,9 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
       cases hreach
   | undef =>
       cases hreach
-  | @borrow borrowedLocation mutable targets target hmem hloc =>
+  | @borrow borrowedLocation mutable targets pointee target hmem hloc =>
       cases hreach with
-      | @borrow _borrowedLocation readLocation _mutable _targets target' hmem' _hloc' hreads =>
+      | @borrow _borrowedLocation readLocation _mutable _targets _pointee target' hmem' _hloc' hreads =>
           exact hborrowAvoids _
             (BorrowDependency.borrow hmem' _hloc' hreads)
   | @box ownerLocation slot inner hslot _hinnerValid ih =>
@@ -690,7 +691,7 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
           subst reachSlot
           have hinnerBorrows :
               PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
-            intro mutable targets hcontains
+            intro mutable targets pointee hcontains
             exact hborrows (PartialTyContains.box hcontains)
           exact ih
             (env := env) (slotLifetime := slotLifetime)
@@ -736,7 +737,7 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
           subst reachSlot
           have hinnerBorrows :
               PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
-            intro mutable targets hcontains
+            intro mutable targets pointee hcontains
             exact hborrows (PartialTyContains.tyBox hcontains)
           exact ih
             (env := env) (slotLifetime := slotLifetime)
@@ -792,9 +793,9 @@ theorem dropsAvoids_of_reaches_validPartialValue
       cases hreach
   | undef =>
       cases hreach
-  | @borrow borrowedLocation mutable targets target hmem hloc =>
+  | @borrow borrowedLocation mutable targets pointee target hmem hloc =>
       cases hreach with
-      | @borrow _borrowedLocation readLocation _mutable _targets target' hmem' _hloc' hreads =>
+      | @borrow _borrowedLocation readLocation _mutable _targets _pointee target' hmem' _hloc' hreads =>
           exact hborrowAvoids _
             (BorrowDependency.borrow hmem' _hloc' hreads)
   | @box ownerLocation slot inner hslot hinnerValid _ih =>
@@ -825,7 +826,7 @@ theorem dropsAvoids_of_reaches_validPartialValue
           subst reachSlot
           have hinnerBorrows :
               PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
-            intro mutable targets hcontains
+            intro mutable targets pointee hcontains
             exact hborrows (PartialTyContains.box hcontains)
           exact dropsAvoids_of_reaches_stored_validPartialValue hdrops hvalidStore
             (env := env) (slotLifetime := slotLifetime)
@@ -874,7 +875,7 @@ theorem dropsAvoids_of_reaches_validPartialValue
           subst reachSlot
           have hinnerBorrows :
               PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty innerTy) := by
-            intro mutable targets hcontains
+            intro mutable targets pointee hcontains
             exact hborrows (PartialTyContains.tyBox hcontains)
           exact dropsAvoids_of_reaches_stored_validPartialValue hdrops hvalidStore
             (env := env) (slotLifetime := slotLifetime)
