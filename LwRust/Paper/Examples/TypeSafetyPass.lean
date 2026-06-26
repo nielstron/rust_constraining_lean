@@ -799,18 +799,16 @@ theorem pointerIfRetarget_p_root_facts : ∀ {lv},
             rcases ihp.2 hinner with ⟨rfl, rfl, rfl, rfl⟩
             exact False.elim (pointerIfRetarget_no_y_targets_borrow htargets)
 
-theorem pointerIfRetarget_coherent :
-    EnvWriteCoherenceObligations pointerIfEnv pointerIfRetargetEnv "p" := by
-  constructor
-  · intro lv mutable targets borrowLifetime hbase htyping
-    rcases pointerIfRetarget_old_root_int hbase htyping with
-      ⟨_, hpartialTy, _⟩
-    cases hpartialTy
-  · intro lv mutable targets borrowLifetime hbase htyping
-    rcases (pointerIfRetarget_p_root_facts hbase).2 htyping with
+theorem pointerIfRetarget_coherent : Coherent pointerIfRetargetEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  by_cases hbase : LVal.base lv = "p"
+  · rcases (pointerIfRetarget_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
     exact ⟨.int, Lifetime.root,
       LValTargetsTyping.singleton pointerIfRetarget_y_typing⟩
+  · rcases pointerIfRetarget_old_root_int hbase htyping with
+      ⟨_, hpartialTy, _⟩
+    cases hpartialTy
 
 theorem pointerRetargetBranch_typing :
     TermTyping pointerIfEnv StoreTyping.empty Lifetime.root
@@ -1037,16 +1035,9 @@ theorem pointerIfWriteEnv_eq : pointerIfWriteEnv = pointerIfEnv := by
     simp [pointerIfWriteEnv, pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
       pointerIfPXSlot, Env.update, Env.empty, hp, hx, hy]
 
-theorem pointerIf_write_coherent :
-    EnvWriteCoherenceObligations pointerIfEnv pointerIfWriteEnv "p" := by
+theorem pointerIf_write_coherent : Coherent pointerIfWriteEnv := by
   rw [pointerIfWriteEnv_eq]
-  constructor
-  · intro lv mutable targets borrowLifetime hbase htyping
-    exact ⟨⟨borrowLifetime, htyping⟩,
-      fun targetTy targetLifetime htargets =>
-        ⟨targetTy, targetLifetime, htargets⟩⟩
-  · intro lv mutable targets borrowLifetime hbase htyping
-    exact pointerIf_coherent lv mutable targets borrowLifetime htyping
+  exact pointerIf_coherent
 
 theorem pointerIf_not_writeProhibited_deref_p :
     ¬ WriteProhibited pointerIfWriteEnv (.deref (.var "p")) := by

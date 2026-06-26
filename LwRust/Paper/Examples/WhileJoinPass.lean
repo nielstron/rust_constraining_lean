@@ -768,19 +768,17 @@ theorem whileJoin_retarget_below :
       _htargetOther _hconflict _hrhsMutable _hrhsOther
     exact absurd hcontainsMutable (whileJoin_no_mut [.var "y"])
 
-theorem whileJoin_writeCoherence (targets : List LVal) :
-    EnvWriteCoherenceObligations (whileJoinEnv targets) whileJoinBackEnv
-      "q" := by
-  constructor
-  · intro lv mutable bts borrowLifetime hbase htyping
-    rcases whileJoin_old_root_int [.var "y"] hbase htyping with
-      ⟨_, hpartialTy, _⟩
-    cases hpartialTy
-  · intro lv mutable bts borrowLifetime hbase htyping
-    rcases (whileJoin_q_root_facts [.var "y"] whileJoinBack_goodTargets
+theorem whileJoin_writeCoherence (_targets : List LVal) :
+    Coherent whileJoinBackEnv := by
+  intro lv mutable bts borrowLifetime htyping
+  by_cases hbase : LVal.base lv = "q"
+  · rcases (whileJoin_q_root_facts [.var "y"] whileJoinBack_goodTargets
         hbase).2 htyping with ⟨rfl, rfl, rfl, rfl⟩
     exact ⟨.int, Lifetime.root,
       LValTargetsTyping.singleton (whileJoin_y_typing [.var "y"])⟩
+  · rcases whileJoin_old_root_int [.var "y"] hbase htyping with
+      ⟨_, hpartialTy, _⟩
+    cases hpartialTy
 
 /-! ### Loop-rule side conditions -/
 

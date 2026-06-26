@@ -2259,8 +2259,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         hwriteErased
         ⟨φ, LinearizedBy.erase_ghost hlinear,
           EnvWriteRhsBorrowTargetsBelow.erase_ghost hrhsBelow⟩
-        (EnvWriteCoherenceObligations.erase_ghost hcoh hfreshRhs
-          hfreshWrite hbaseNe)
+        (Coherent.erase_ghost hcoh hfreshWrite)
         (EnvWriteRhsTargetsWellFormed.erase_ghost hcontained hfreshWrite)
         (by
           intro hwriteProhibited

@@ -1504,7 +1504,7 @@ mutual
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-        EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+        Coherent env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃

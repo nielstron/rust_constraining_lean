@@ -1434,7 +1434,7 @@ def AssignmentWriteCoherenceObligations : Prop :=
     WellFormedTy env₂ rhsTy targetLifetime →
     EnvWrite 0 env₂ lhs rhsTy env₃ →
     ¬ WriteProhibited env₃ lhs →
-    EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs)
+    Coherent env₃
 
 def AssignmentRhsEdgesRanked : Prop :=
   ∀ {env₁ env₂ env₃ : Env}
@@ -1544,7 +1544,7 @@ structure BorrowSafetyPreservationObligations : Prop where
       WellFormedTy env₂ rhsTy targetLifetime →
       EnvWrite 0 env₂ lhs rhsTy env₃ →
       (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-      EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+      Coherent env₃ →
       ¬ WriteProhibited env₃ lhs →
       BorrowSafeEnv env₃
 
@@ -1607,7 +1607,7 @@ theorem borrowSafetyPreservation_envWrite
     WellFormedTy env₂ rhsTy targetLifetime →
     EnvWrite 0 env₂ lhs rhsTy env₃ →
     (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-    EnvWriteCoherenceObligations env₂ env₃ (LVal.base lhs) →
+    Coherent env₃ →
     ¬ WriteProhibited env₃ lhs →
     BorrowSafeEnv env₃ := by
   intro hborrowSafe hsafeTy _hLhsPost _hRhs _hshape _hwellTy hwrite hranked _hcoh

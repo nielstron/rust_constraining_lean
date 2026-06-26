@@ -3643,8 +3643,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             have hlin3By :=
               EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
                 hwrite hlinBy hbelow
-            have hcoh3 := EnvWrite.preserves_coherent_of_obligations
-              result.1.2.2.1 hwriteCoh
+            have hcoh3 := hwriteCoh
             have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
               (Linearizable.of_linearizedBy hlin3By) hcontained hwrite hnotWrite
             exact ⟨⟨hcbwf3,
@@ -3826,8 +3825,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         have hlin3By :=
           EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
             hwrite hlinBy hbelow
-        have hcoh3 := EnvWrite.preserves_coherent_of_obligations
-          result.1.2.2.1 hwriteCoh
+        have hcoh3 := hwriteCoh
         have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
           (Linearizable.of_linearizedBy hlin3By) hcontained hwrite hnotWrite
         exact ⟨⟨hcbwf3,
