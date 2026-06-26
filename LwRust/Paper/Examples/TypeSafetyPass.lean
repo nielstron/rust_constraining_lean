@@ -65,7 +65,6 @@ theorem ifThenElseInt_typing :
     (PartialTyJoin.self (.ty .int))
     ?join ?leftShape ?rightShape
     WellFormedTy.int
-    containedBorrowsWellFormed_empty
     coherent_empty
     linearizable_empty
     borrowSafeEnv_empty
@@ -108,7 +107,6 @@ theorem ifEqThenElseInt_typing :
     (PartialTyJoin.self (.ty .int))
     ?join ?leftShape ?rightShape
     WellFormedTy.int
-    containedBorrowsWellFormed_empty
     coherent_empty
     linearizable_empty
     borrowSafeEnv_empty
@@ -1692,7 +1690,6 @@ theorem ifPointerAssignment_typing :
     ifPointerAssignment_join_obligations.2.1
     ifPointerAssignment_join_obligations.2.2.1
     WellFormedTy.unit
-    ifPointerAssignment_join_obligations.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.2
