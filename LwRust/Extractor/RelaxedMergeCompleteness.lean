@@ -157,10 +157,12 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       body.Diverges →
       RelaxedTermTyping env1 typing lifetime
         (.whileLoop bodyLifetime condition body) .unit env2
-  /-- T-While, without post-join borrow-safety checks. -/
-  | whileLoop {env1 envBack envInv env2 envEntry2 env3 envEntry3 : Env}
+  /-- T-While, without post-join borrow-safety checks.  Condition and body are
+  typed once from the widened invariant `envInv`; the entry-side pass is
+  recovered by coherence-preserving thinning (see `TermTyping.whileLoop`). -/
+  | whileLoop {env1 envBack envInv env2 env3 : Env}
       {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
-      {condition body : Term} {bodyTy bodyEntryTy : Ty} :
+      {condition body : Term} {bodyTy : Ty} :
       LifetimeChild lifetime bodyLifetime →
       EnvJoin env1 envBack envInv →
       EnvJoinSameShape env1 envInv →
@@ -172,8 +174,6 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       RelaxedTermTyping env2 typing bodyLifetime body bodyTy env3 →
       WellFormedTy env3 bodyTy lifetime →
       env3.dropLifetime bodyLifetime = envBack →
-      RelaxedTermTyping env1 typing lifetime condition .bool envEntry2 →
-      RelaxedTermTyping envEntry2 typing bodyLifetime body bodyEntryTy envEntry3 →
       RelaxedTermTyping env1 typing lifetime
         (.whileLoop bodyLifetime condition body) .unit env2
 

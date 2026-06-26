@@ -1031,11 +1031,11 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
   case whileLoop =>
-    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-      lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
+    intro _env₁ _envBack _envInv _env₂ _env₃ _typing
+      lifetime _bodyLifetime _condition _body _bodyTy
       _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-      _ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
+      _ihCondInv _ihBodyInv
       _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
   case singleton =>

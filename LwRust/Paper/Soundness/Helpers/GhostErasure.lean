@@ -2382,11 +2382,11 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨TermTyping.whileLoopDiverging hchild hconditionErased
         hbodyErased hdiverges, hfreshCond, by simp [Ty.allVars]⟩)
     (by
-      intro env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ typing
-        lifetime bodyLifetime condition body bodyTy bodyEntryTy hchild
+      intro env₁ envBack envInv env₂ env₃ typing
+        lifetime bodyLifetime condition body bodyTy hchild
         hjoin hsameEntry hsameBack hcontained hcoherent hlinear hborrowSafe
-        hnameFresh hcondition hbody hbodyWell hdrop hentryCondition hentryBody
-        ihCondition ihBody ihEntryCondition ihEntryBody hfresh hstore hnot
+        hnameFresh hcondition hbody hbodyWell hdrop
+        ihCondition ihBody hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
         exact hnot (by simp [Term.Mentions, hmention])
@@ -2406,10 +2406,6 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
             (by simpa [Env.eraseMany] using hentryFresh)
             hcheckedCondition hcheckedBody
         simpa [Env.eraseMany] using h
-      rcases ihEntryCondition hfresh hstore hnotCondition with
-        ⟨hentryConditionErased, hfreshEntryCond, _hboolFresh⟩
-      rcases ihEntryBody hfreshEntryCond hstore hnotBody with
-        ⟨hentryBodyErased, _hfreshEntryBody, _hbodyEntryFresh⟩
       rcases ihCondition hfreshInv hstore hnotCondition with
         ⟨hconditionErased, hfreshCond, _hboolFresh2⟩
       rcases ihBody hfreshCond hstore hnotBody with
@@ -2430,8 +2426,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         hnameFreshErased
         hconditionErased hbodyErased
         (WellFormedTy.erase_ghost hbodyWell hfreshBody hbodyFresh)
-        hdropErased hentryConditionErased hentryBodyErased,
-                hfreshCond, by simp [Ty.allVars]⟩)
+        hdropErased,
+        hfreshCond, by simp [Ty.allVars]⟩)
     (by
       intro env₁ env₂ typing lifetime singletonTerm ty hterm ih
         hfresh hstore hnot

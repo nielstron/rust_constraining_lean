@@ -1050,9 +1050,6 @@ theorem whileRetargetLoop_typing :
     (whileJoinBody_typing [.var "x", .var "y"] whileJoinInv_goodTargets)
     WellFormedTy.unit
     whileJoinBack_dropLifetime
-    (whileJoinCondition_typing [.var "x"]
-      whileJoinEntry_deref_q_typing)
-    (whileJoinBody_typing [.var "x"] whileJoinEntry_goodTargets)
 
 end Paper
 end LwRust

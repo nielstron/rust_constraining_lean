@@ -806,11 +806,11 @@ theorem reachable_progress_bounded (fuel : Nat)
   -- T-While: reachable loop states progress; the package carries
   -- `∼ₛ envInv`, with entry/back-edge transports via the same-shape maps.
   case whileLoop =>
-    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-      _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
+    intro _env₁ _envBack _envInv _env₂ _env₃ _typing
+      _lifetime _bodyLifetime _condition _body _bodyTy hchild
       hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh _hcondInv _hbodyInv _hwellTyBody
-      hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
-      _ihBodyEntry hsize htypingEq hsource store store' term' hvalid hvst hwf
+      hdropEq ihCondInv ihBodyInv
+      hsize htypingEq hsource store store' term' hvalid hvst hwf
       hbs hsafe hfs hmulti
     cases htypingEq
     have hsourceCondition : SourceTerm _condition :=

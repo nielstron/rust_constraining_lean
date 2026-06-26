@@ -1713,19 +1713,21 @@ mutual
     into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
     the `T-If` preservation argument.
 
-    The final two premises re-type the condition and body from the
-    *entry-side* environments.  In real Rust this is implied: per-code
-    borrow checking is monotone under removing loans, so anything that
-    checks at the widened loop-head state also checks at the entry state.
-    In this calculus that implication is genuinely unprovable without a
-    well-formedness condition on the widened environment: strengthening can
-    shrink a borrow target list to `[]`, while weakening may add a target whose
-    base variable is absent or untypable (`Examples/ThinningFalse.lean`).  The
-    conservative extractor's transport relies on these entry-side derivations
-    to keep loop-frontier extraction precise. -/
-    | whileLoop {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
+    The condition and body are typed once, from the widened invariant
+    `envInv`; there is no separate entry-side re-typing pass.  Earlier the
+    rule additionally re-typed the condition and body from the *entry*
+    environment `env₁`, as a rule-carried stand-in for the (false in general)
+    thinning metatheorem — borrow types carry their pointee information in the
+    target lists, so shrinking a target list can make a dereference typeless
+    rather than merely less constrained (`Examples/ThinningFalse.lean`).  That
+    pass is redundant: soundness only ever uses the `envInv`-rooted invariant
+    derivations, and the conservative extractor recovers the entry-side
+    derivations it needs (to re-root a truncated loop at `env₁`) by
+    *coherence-preserving* thinning — the `ThinningFalse` counterexample only
+    bites when a target list shrinks to empty, which `Coherent` rules out. -/
+    | whileLoop {env₁ envBack envInv env₂ env₃ : Env}
         {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
-        {condition body : Term} {bodyTy bodyEntryTy : Ty} :
+        {condition body : Term} {bodyTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
         EnvJoin env₁ envBack envInv →
         EnvJoinSameShape env₁ envInv →
@@ -1739,8 +1741,6 @@ mutual
         TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
         WellFormedTy env₃ bodyTy lifetime →
         env₃.dropLifetime bodyLifetime = envBack →
-        TermTyping env₁ typing lifetime condition .bool envEntry₂ →
-        TermTyping envEntry₂ typing bodyLifetime body bodyEntryTy envEntry₃ →
         TermTyping env₁ typing lifetime
           (.whileLoop bodyLifetime condition body) .unit env₂
 
@@ -1801,8 +1801,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
       ihCondition hfinite)
     (fun _hchild hjoin _hsameEntry _hsameBack _hcontained _hcoherent
         _hlinear _hborrowSafe _hnameFresh _hcondition _hbody _hwellTy
-        _hback _hentryCondition _hentryBody ihCondition _ihBody
-        _ihEntryCondition _ihEntryBody hfinite =>
+        _hback ihCondition _ihBody hfinite =>
       ihCondition (EnvJoin.finiteSupport_left hjoin hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>

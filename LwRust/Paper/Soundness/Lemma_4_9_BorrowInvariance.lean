@@ -1127,15 +1127,13 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
     (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse hnameFresh _hcondInv _hbodyInv
-        hwellTy hdrop _hcondEntry _hbodyEntry
-        ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
+        hwellTy hdrop
+        ihCondInv ihBodyInv hsource =>
       TermTyping.whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
         hnameFresh
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
-        hwellTy hdrop
-        (ihCondEntry (SourceTerm.while_condition hsource))
-        (ihBodyEntry (SourceTerm.while_body hsource)))
+        hwellTy hdrop)
     (fun _hterm ih hsource =>
       TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
     (fun _hterm _hrest ihHead ihRest hsource =>
@@ -3707,11 +3705,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq hwellFormed
           ⟨conditionResult.1, WellFormedTy.unit⟩)
-        (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-              _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+        (fun {_env₁ _envBack _envInv _env₂ _env₃ _typing
+              _lifetime _bodyLifetime _condition _body _bodyTy}
             _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hnameFresh _hcondInv
-            _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-            ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry hsize htypingEq
+            _hbodyInv _hwellTy _hdrop
+            ihCondInv _ihBodyInv hsize htypingEq
             hwellFormed =>
           let invWellFormed : WellFormedEnv _envInv _lifetime :=
             ⟨hcbwf,
@@ -3872,11 +3870,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         htypingEq hwellFormed =>
       let conditionResult := ihCond htypingEq hwellFormed
       ⟨conditionResult.1, WellFormedTy.unit⟩)
-    (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-          _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
+    (fun {_env₁ _envBack _envInv _env₂ _env₃ _typing
+          _lifetime _bodyLifetime _condition _body _bodyTy}
         _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hnameFresh _hcondInv _hbodyInv
-        _hwellTy _hdrop _hcondEntry _hbodyEntry
-        ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+        _hwellTy _hdrop
+        ihCondInv _ihBodyInv
         htypingEq hwellFormed =>
       let invWellFormed : WellFormedEnv _envInv _lifetime :=
         ⟨hcbwf,
