@@ -35,6 +35,38 @@ inductive LocReads (store : ProgramStore) : LVal → Location → Prop where
       LocReads store lv location →
       LocReads store (.deref lv) location
 
+/-- A resolved lvalue cannot have read a store slot that is fresh. -/
+theorem LocReads.ne_fresh_of_loc {store : ProgramStore}
+    {updated : Location} {lv : LVal} {location : Location} :
+      store.fresh updated →
+      store.loc lv = some location →
+      LocReads store lv updated →
+      False := by
+  intro hfresh hloc hread
+  induction lv generalizing updated location with
+  | var x =>
+      cases hread
+  | deref lv ih =>
+      cases hsource : store.loc lv with
+      | none =>
+          simp [ProgramStore.loc, hsource] at hloc
+      | some source =>
+          cases hread with
+          | here hsourceRead =>
+              have hsourceEq : source = updated := by
+                rw [hsource] at hsourceRead
+                exact (Option.some.inj hsourceRead)
+              have hfreshSource : store.fresh source := by
+                simpa [hsourceEq] using hfresh
+              cases hslot : store.slotAt source with
+              | none =>
+                  simp [ProgramStore.loc, hsource, hslot] at hloc
+              | some slot =>
+                  rw [hfreshSource] at hslot
+                  contradiction
+          | there hreadSource =>
+              exact ih hfresh hsource hreadSource
+
 /-- If an update misses every location read while resolving `lv`, resolution is unchanged. -/
 theorem loc_update_of_not_locReads {store : ProgramStore}
     {updated : Location} {slot : StoreSlot} :
@@ -323,6 +355,25 @@ inductive OwnerReaches (store : ProgramStore) : PartialValue → PartialTy → L
       store.slotAt location = some slot →
       OwnerReaches store slot.value (.ty ty) ℓ →
       OwnerReaches store (.value (.ref { location := location, owner := true })) (.ty (.box ty)) ℓ
+
+/-- Owner reachability cannot end at a fresh store slot. -/
+theorem OwnerReaches.ne_fresh {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} {location : Location} :
+    store.fresh location →
+    OwnerReaches store value ty location →
+    False := by
+  intro hfresh hreach
+  induction hreach with
+  | boxHere hslot =>
+      rw [hfresh] at hslot
+      contradiction
+  | boxInner _hslot _hinner ih =>
+      exact ih hfresh
+  | boxFullHere hslot =>
+      rw [hfresh] at hslot
+      contradiction
+  | boxFullInner _hslot _hinner ih =>
+      exact ih hfresh
 
 /-- Borrow-target lval-resolution dependencies inside a value. -/
 inductive BorrowDependency (store : ProgramStore) :
@@ -644,6 +695,479 @@ theorem ValidPartialValueEvidence.strengthen_sameShape_exists
             ValidPartialValueEvidence.StrengthensSameShape.boxFull hrel⟩
       | intoUndef _ => simp [PartialTy.sameShape] at hshape
 
+/--
+Relaxed proof-carrying runtime evidence for abstract slots.
+
+This is the storage-abstraction variant needed at control-flow joins after a
+branch initializes storage that the joined environment marks as `undef`.  The
+ordinary evidence relation validates `undef T` only against the concrete
+`PartialValue.undef`; the relaxed relation additionally permits any value that is
+valid at a stronger partial type to be hidden behind an `undef` upper bound.
+
+The `undef` evidence is intentionally lossy: once a slot is abstracted as
+`undef`, later frame proofs no longer need to preserve the concrete value's
+owner reachability or borrow-resolution dependencies.
+-/
+inductive RelaxedValidPartialValueEvidence (store : ProgramStore) :
+    PartialValue → PartialTy → Type where
+  | unit :
+      RelaxedValidPartialValueEvidence store (.value .unit) (.ty .unit)
+  | int {value : Int} :
+      RelaxedValidPartialValueEvidence store (.value (.int value)) (.ty .int)
+  | bool {value : Bool} :
+      RelaxedValidPartialValueEvidence store (.value (.bool value)) (.ty .bool)
+  | undef {value : PartialValue} {ty : Ty} :
+      RelaxedValidPartialValueEvidence store value (.undef ty)
+  | borrow {location : Location} {mutable : Bool}
+      {targets : List LVal} {pointee : Ty} (target : LVal) :
+      target ∈ targets →
+      store.loc target = some location →
+      RelaxedValidPartialValueEvidence store
+        (.value (.ref { location := location, owner := false }))
+        (.ty (.borrow mutable targets pointee))
+  | box {location : Location} {slot : StoreSlot} {inner : PartialTy} :
+      store.slotAt location = some slot →
+      RelaxedValidPartialValueEvidence store slot.value inner →
+      RelaxedValidPartialValueEvidence store
+        (.value (.ref { location := location, owner := true }))
+        (.box inner)
+  | boxFull {location : Location} {slot : StoreSlot} {ty : Ty} :
+      store.slotAt location = some slot →
+      RelaxedValidPartialValueEvidence store slot.value (.ty ty) →
+      RelaxedValidPartialValueEvidence store
+        (.value (.ref { location := location, owner := true }))
+        (.ty (.box ty))
+  | intoUndef {value : PartialValue} {source : PartialTy} {target : Ty} :
+      PartialTyStrengthens source (.undef target) →
+      RelaxedValidPartialValueEvidence store value source →
+      RelaxedValidPartialValueEvidence store value (.undef target)
+
+inductive RelaxedValidPartialValueEvidence.Strengthens
+    {store : ProgramStore} :
+    {value : PartialValue} → {oldTy : PartialTy} →
+      RelaxedValidPartialValueEvidence store value oldTy →
+      {newTy : PartialTy} →
+      RelaxedValidPartialValueEvidence store value newTy → Prop where
+  | unit :
+      Strengthens RelaxedValidPartialValueEvidence.unit
+        RelaxedValidPartialValueEvidence.unit
+  | int {value : Int} :
+      Strengthens
+        (RelaxedValidPartialValueEvidence.int (value := value))
+        RelaxedValidPartialValueEvidence.int
+  | bool {value : Bool} :
+      Strengthens
+        (RelaxedValidPartialValueEvidence.bool (value := value))
+        RelaxedValidPartialValueEvidence.bool
+  | undef {value : PartialValue} {ty : Ty} :
+      Strengthens
+        (RelaxedValidPartialValueEvidence.undef (value := value) (ty := ty))
+        RelaxedValidPartialValueEvidence.undef
+  | borrow {location : Location} {mutable : Bool}
+      {leftTargets rightTargets : List LVal} {pointee : Ty}
+      {target : LVal} {hmem : target ∈ leftTargets}
+      {hloc : store.loc target = some location}
+      (hsubset : leftTargets.Subset rightTargets) :
+      Strengthens
+        (RelaxedValidPartialValueEvidence.borrow (pointee := pointee)
+          target hmem hloc)
+        (RelaxedValidPartialValueEvidence.borrow (pointee := pointee)
+          target (hsubset hmem) hloc)
+  | box {location : Location} {slot : StoreSlot}
+      {oldInner newInner : PartialTy}
+      {oldEvidence : RelaxedValidPartialValueEvidence store slot.value oldInner}
+      {newEvidence : RelaxedValidPartialValueEvidence store slot.value newInner}
+      {hslot : store.slotAt location = some slot} :
+      Strengthens oldEvidence newEvidence →
+      Strengthens
+        (RelaxedValidPartialValueEvidence.box hslot oldEvidence)
+        (RelaxedValidPartialValueEvidence.box hslot newEvidence)
+  | boxFull {location : Location} {slot : StoreSlot}
+      {oldInner newInner : Ty}
+      {oldEvidence : RelaxedValidPartialValueEvidence store slot.value (.ty oldInner)}
+      {newEvidence : RelaxedValidPartialValueEvidence store slot.value (.ty newInner)}
+      {hslot : store.slotAt location = some slot} :
+      Strengthens oldEvidence newEvidence →
+      Strengthens
+        (RelaxedValidPartialValueEvidence.boxFull hslot oldEvidence)
+        (RelaxedValidPartialValueEvidence.boxFull hslot newEvidence)
+  | hide {value : PartialValue} {source : PartialTy} {target : Ty}
+      {evidence : RelaxedValidPartialValueEvidence store value source}
+      (hstrength : PartialTyStrengthens source (.undef target)) :
+    Strengthens evidence
+        (RelaxedValidPartialValueEvidence.undef (value := value) (ty := target))
+  | discardUndef {value : PartialValue} {sourceTarget target : Ty}
+      {evidence : RelaxedValidPartialValueEvidence store value (.undef sourceTarget)}
+      (hstrength : PartialTyStrengthens (.undef sourceTarget) (.undef target)) :
+      Strengthens evidence
+        (RelaxedValidPartialValueEvidence.undef (value := value) (ty := target))
+  | hiddenRefl {value : PartialValue} {source : PartialTy} {target : Ty}
+      {evidence : RelaxedValidPartialValueEvidence store value source}
+      {hstrength : PartialTyStrengthens source (.undef target)} :
+      Strengthens
+        (RelaxedValidPartialValueEvidence.intoUndef hstrength evidence)
+        (RelaxedValidPartialValueEvidence.intoUndef hstrength evidence)
+  | hiddenWiden {value : PartialValue} {source : PartialTy}
+      {leftTarget rightTarget : Ty}
+      {evidence : RelaxedValidPartialValueEvidence store value source}
+      (hsource : PartialTyStrengthens source (.undef leftTarget))
+      (hwiden : PartialTyStrengthens (.undef leftTarget) (.undef rightTarget)) :
+      Strengthens
+        (RelaxedValidPartialValueEvidence.intoUndef hsource evidence)
+        (RelaxedValidPartialValueEvidence.intoUndef
+          (partialTyStrengthens_trans hsource hwiden) evidence)
+
+theorem RelaxedValidPartialValueEvidence.Strengthens.refl
+    {store : ProgramStore} {value : PartialValue} {ty : PartialTy}
+    (evidence : RelaxedValidPartialValueEvidence store value ty) :
+    RelaxedValidPartialValueEvidence.Strengthens evidence evidence := by
+  induction evidence with
+  | unit => exact RelaxedValidPartialValueEvidence.Strengthens.unit
+  | int => exact RelaxedValidPartialValueEvidence.Strengthens.int
+  | bool => exact RelaxedValidPartialValueEvidence.Strengthens.bool
+  | undef => exact RelaxedValidPartialValueEvidence.Strengthens.undef
+  | @borrow location mutable targets pointee target hmem hloc =>
+      exact RelaxedValidPartialValueEvidence.Strengthens.borrow
+        (mutable := mutable) (pointee := pointee) (target := target)
+        (hmem := hmem) (hloc := hloc) (List.Subset.refl _)
+  | box hslot _hinner ih =>
+      exact RelaxedValidPartialValueEvidence.Strengthens.box ih
+  | boxFull hslot _hinner ih =>
+      exact RelaxedValidPartialValueEvidence.Strengthens.boxFull ih
+  | intoUndef hstrength _hinner _ih =>
+      exact RelaxedValidPartialValueEvidence.Strengthens.hiddenRefl
+        (hstrength := hstrength)
+
+def RelaxedValidPartialValueEvidence.of_strict {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValueEvidence store value ty →
+    RelaxedValidPartialValueEvidence store value ty
+  | ValidPartialValueEvidence.unit =>
+      RelaxedValidPartialValueEvidence.unit
+  | ValidPartialValueEvidence.int =>
+      RelaxedValidPartialValueEvidence.int
+  | ValidPartialValueEvidence.bool =>
+      RelaxedValidPartialValueEvidence.bool
+  | ValidPartialValueEvidence.undef =>
+      RelaxedValidPartialValueEvidence.undef
+  | ValidPartialValueEvidence.borrow target hmem hloc =>
+      RelaxedValidPartialValueEvidence.borrow target hmem hloc
+  | ValidPartialValueEvidence.box hslot hinner =>
+      RelaxedValidPartialValueEvidence.box hslot
+        (RelaxedValidPartialValueEvidence.of_strict hinner)
+  | ValidPartialValueEvidence.boxFull hslot hinner =>
+      RelaxedValidPartialValueEvidence.boxFull hslot
+        (RelaxedValidPartialValueEvidence.of_strict hinner)
+
+/--
+Partial types whose runtime evidence cannot be hidden behind a top-level
+`undef`.
+
+This is the read-facing fragment of partial types: full values are concrete,
+and boxed partial values are concrete exactly when their contents are concrete.
+The `undef` case is deliberately excluded, since relaxed evidence may hide an
+initialized value there.
+-/
+def PartialTy.Concrete : PartialTy → Prop
+  | .ty _ => True
+  | .box inner => PartialTy.Concrete inner
+  | .undef _ => False
+
+def RelaxedValidPartialValueEvidence.to_strict_full {store : ProgramStore}
+    {value : PartialValue} {ty : Ty} :
+    RelaxedValidPartialValueEvidence store value (.ty ty) →
+    ValidPartialValueEvidence store value (.ty ty)
+  | RelaxedValidPartialValueEvidence.unit =>
+      ValidPartialValueEvidence.unit
+  | RelaxedValidPartialValueEvidence.int =>
+      ValidPartialValueEvidence.int
+  | RelaxedValidPartialValueEvidence.bool =>
+      ValidPartialValueEvidence.bool
+  | RelaxedValidPartialValueEvidence.borrow target hmem hloc =>
+      ValidPartialValueEvidence.borrow target hmem hloc
+  | RelaxedValidPartialValueEvidence.boxFull hslot hinner =>
+      ValidPartialValueEvidence.boxFull hslot
+        (RelaxedValidPartialValueEvidence.to_strict_full hinner)
+
+def RelaxedValidPartialValueEvidence.to_strict_concrete {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    PartialTy.Concrete ty →
+    RelaxedValidPartialValueEvidence store value ty →
+    ValidPartialValueEvidence store value ty
+  | _hconcrete, RelaxedValidPartialValueEvidence.unit =>
+      ValidPartialValueEvidence.unit
+  | _hconcrete, RelaxedValidPartialValueEvidence.int =>
+      ValidPartialValueEvidence.int
+  | _hconcrete, RelaxedValidPartialValueEvidence.bool =>
+      ValidPartialValueEvidence.bool
+  | hconcrete, RelaxedValidPartialValueEvidence.undef =>
+      False.elim hconcrete
+  | _hconcrete, RelaxedValidPartialValueEvidence.borrow target hmem hloc =>
+      ValidPartialValueEvidence.borrow target hmem hloc
+  | hconcrete, RelaxedValidPartialValueEvidence.box hslot hinner =>
+      ValidPartialValueEvidence.box hslot
+        (RelaxedValidPartialValueEvidence.to_strict_concrete
+          hconcrete hinner)
+  | _hconcrete, RelaxedValidPartialValueEvidence.boxFull hslot hinner =>
+      ValidPartialValueEvidence.boxFull hslot
+        (RelaxedValidPartialValueEvidence.to_strict_full hinner)
+  | hconcrete, RelaxedValidPartialValueEvidence.intoUndef _hstrength _hinner =>
+      False.elim hconcrete
+
+structure RelaxedValidPartialValueEvidence.BoxView
+    (store : ProgramStore) (value : PartialValue) (inner : PartialTy) where
+  location : Location
+  slot : StoreSlot
+  value_eq :
+    value = .value (.ref { location := location, owner := true })
+  slotAt : store.slotAt location = some slot
+  innerEvidence : RelaxedValidPartialValueEvidence store slot.value inner
+
+structure RelaxedValidPartialValueEvidence.BorrowView
+    (store : ProgramStore) (value : PartialValue) (mutable : Bool)
+    (targets : List LVal) (pointee : Ty) where
+  location : Location
+  target : LVal
+  value_eq :
+    value = .value (.ref { location := location, owner := false })
+  target_mem : target ∈ targets
+  target_loc : store.loc target = some location
+
+def RelaxedValidPartialValueEvidence.box_inv {store : ProgramStore}
+    {value : PartialValue} {inner : PartialTy} :
+    RelaxedValidPartialValueEvidence store value (.box inner) →
+    RelaxedValidPartialValueEvidence.BoxView store value inner
+  | RelaxedValidPartialValueEvidence.box (location := location)
+      (slot := slot) hslot hinner =>
+      ⟨location, slot, rfl, hslot, hinner⟩
+
+def RelaxedValidPartialValueEvidence.borrow_inv {store : ProgramStore}
+    {value : PartialValue} {mutable : Bool}
+    {targets : List LVal} {pointee : Ty} :
+    RelaxedValidPartialValueEvidence store value
+      (.ty (.borrow mutable targets pointee)) →
+    RelaxedValidPartialValueEvidence.BorrowView store value mutable targets pointee
+  | RelaxedValidPartialValueEvidence.borrow (location := location)
+      target hmem hloc =>
+      ⟨location, target, rfl, hmem, hloc⟩
+
+theorem RelaxedValidPartialValueEvidence.strengthen_exists
+    {store : ProgramStore} {value : PartialValue}
+    {oldTy newTy : PartialTy} :
+    (evidence : RelaxedValidPartialValueEvidence store value oldTy) →
+    PartialTyStrengthens oldTy newTy →
+    ∃ newEvidence : RelaxedValidPartialValueEvidence store value newTy,
+      RelaxedValidPartialValueEvidence.Strengthens evidence newEvidence := by
+  intro evidence hstrength
+  induction evidence generalizing newTy with
+  | unit =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.unit,
+            RelaxedValidPartialValueEvidence.Strengthens.unit⟩
+      | intoUndef hinner =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.hide
+              (PartialTyStrengthens.intoUndef hinner)⟩
+  | int =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.int,
+            RelaxedValidPartialValueEvidence.Strengthens.int⟩
+      | intoUndef hinner =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.hide
+              (PartialTyStrengthens.intoUndef hinner)⟩
+  | bool =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.bool,
+            RelaxedValidPartialValueEvidence.Strengthens.bool⟩
+      | intoUndef hinner =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.hide
+              (PartialTyStrengthens.intoUndef hinner)⟩
+  | undef =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.undef⟩
+      | undefLeft hinner =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.discardUndef
+              (PartialTyStrengthens.undefLeft hinner)⟩
+  | @borrow location mutable targets pointee target hmem hloc =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.borrow target hmem hloc,
+            RelaxedValidPartialValueEvidence.Strengthens.borrow
+              (mutable := mutable) (leftTargets := targets)
+              (rightTargets := targets) (pointee := pointee)
+              (target := target) (hmem := hmem) (hloc := hloc)
+              (List.Subset.refl _)⟩
+      | borrow hsubset =>
+          exact ⟨RelaxedValidPartialValueEvidence.borrow target (hsubset hmem) hloc,
+            RelaxedValidPartialValueEvidence.Strengthens.borrow
+              (mutable := mutable) (leftTargets := targets)
+              (pointee := pointee)
+              (target := target) (hmem := hmem) (hloc := hloc) hsubset⟩
+      | intoUndef hinner =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.hide
+              (PartialTyStrengthens.intoUndef hinner)⟩
+  | box hslot _hinner ih =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.box hslot _hinner,
+            RelaxedValidPartialValueEvidence.Strengthens.box
+              (RelaxedValidPartialValueEvidence.Strengthens.refl _hinner)⟩
+      | box hinnerStrength =>
+          rcases ih hinnerStrength with ⟨innerEvidence, hrel⟩
+          exact ⟨RelaxedValidPartialValueEvidence.box hslot innerEvidence,
+            RelaxedValidPartialValueEvidence.Strengthens.box hrel⟩
+      | boxIntoUndef hinnerStrength =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.hide
+              (PartialTyStrengthens.boxIntoUndef hinnerStrength)⟩
+  | boxFull hslot _hinner ih =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.boxFull hslot _hinner,
+            RelaxedValidPartialValueEvidence.Strengthens.boxFull
+              (RelaxedValidPartialValueEvidence.Strengthens.refl _hinner)⟩
+      | tyBox hinnerStrength =>
+          rcases ih hinnerStrength with ⟨innerEvidence, hrel⟩
+          exact ⟨RelaxedValidPartialValueEvidence.boxFull hslot innerEvidence,
+            RelaxedValidPartialValueEvidence.Strengthens.boxFull hrel⟩
+      | intoUndef hinnerStrength =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.hide
+              (PartialTyStrengthens.intoUndef hinnerStrength)⟩
+  | intoUndef hsource _hinner ih =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.discardUndef
+              PartialTyStrengthens.reflex⟩
+      | undefLeft hinnerStrength =>
+          exact ⟨RelaxedValidPartialValueEvidence.undef,
+            RelaxedValidPartialValueEvidence.Strengthens.discardUndef
+              (PartialTyStrengthens.undefLeft hinnerStrength)⟩
+
+/--
+Relaxed safe abstraction for store/environment pairs.
+
+This keeps the ordinary variable-domain and lifetime agreement of `S ∼ Γ`, but
+uses relaxed evidence for slot values.  Consequently a concrete initialized
+value may represent an abstract `undef` slot, as long as the initialized value is
+kept as hidden evidence behind the `undef` strengthening.
+-/
+def RelaxedSafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
+  (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+        ∃ envSlot, env.slotAt x = some envSlot) ∧
+  ∀ x envSlot,
+    env.slotAt x = some envSlot →
+    ∃ value,
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } ∧
+      ∃ _evidence : RelaxedValidPartialValueEvidence store value envSlot.ty, True
+
+theorem SafeAbstraction.relaxed {store : ProgramStore} {env : Env} :
+    store ∼ₛ env →
+    RelaxedSafeAbstraction store env := by
+  intro hsafe
+  constructor
+  · exact hsafe.1
+  · intro x envSlot henvSlot
+    rcases hsafe.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, hvalid⟩
+    rcases ValidPartialValueEvidence.exists_of_valid hvalid with
+      ⟨evidence, _⟩
+    exact ⟨value, hstoreSlot,
+      RelaxedValidPartialValueEvidence.of_strict evidence, trivial⟩
+
+theorem RelaxedSafeAbstraction.strengthen {store : ProgramStore}
+    {source result : Env} :
+    RelaxedSafeAbstraction store source →
+    EnvStrengthens source result →
+    RelaxedSafeAbstraction store result := by
+  intro hsafe hstrength
+  constructor
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases (hsafe.1 x).mp hstoreDomain with ⟨sourceSlot, hsourceSlot⟩
+      rcases EnvStrengthens.slot_forward hstrength hsourceSlot with
+        ⟨resultSlot, hresultSlot, _hlifetime, _hslotStrength⟩
+      exact ⟨resultSlot, hresultSlot⟩
+    · intro hresultDomain
+      rcases hresultDomain with ⟨resultSlot, hresultSlot⟩
+      have hx := hstrength x
+      cases hsourceSlot : source.slotAt x with
+      | none =>
+          rw [hsourceSlot, hresultSlot] at hx
+          cases hx
+      | some sourceSlot =>
+          exact (hsafe.1 x).mpr ⟨sourceSlot, hsourceSlot⟩
+  · intro x resultSlot hresultSlot
+    have hx := hstrength x
+    cases hsourceSlot : source.slotAt x with
+    | none =>
+        rw [hsourceSlot, hresultSlot] at hx
+        cases hx
+    | some sourceSlot =>
+        rw [hsourceSlot, hresultSlot] at hx
+        rcases hsafe.2 x sourceSlot hsourceSlot with
+          ⟨value, hstoreSlot, sourceEvidence, _⟩
+        rcases RelaxedValidPartialValueEvidence.strengthen_exists
+            sourceEvidence hx.2 with
+          ⟨resultEvidence, _hrel⟩
+        refine ⟨value, ?_, resultEvidence, trivial⟩
+        simpa [hx.1] using hstoreSlot
+
+theorem SafeAbstraction.relaxed_strengthen {store : ProgramStore}
+    {source result : Env} :
+    store ∼ₛ source →
+    EnvStrengthens source result →
+    RelaxedSafeAbstraction store result := by
+  intro hsafe hstrength
+  exact RelaxedSafeAbstraction.strengthen
+    (SafeAbstraction.relaxed hsafe) hstrength
+
+theorem RelaxedSafeAbstraction.strengthen_join_left {store : ProgramStore}
+    {left right join : Env} :
+    RelaxedSafeAbstraction store left →
+    EnvJoin left right join →
+    RelaxedSafeAbstraction store join := by
+  intro hsafe hjoin
+  exact RelaxedSafeAbstraction.strengthen hsafe (EnvJoin.left_le hjoin)
+
+theorem RelaxedSafeAbstraction.strengthen_join_right {store : ProgramStore}
+    {left right join : Env} :
+    RelaxedSafeAbstraction store right →
+    EnvJoin left right join →
+    RelaxedSafeAbstraction store join := by
+  intro hsafe hjoin
+  exact RelaxedSafeAbstraction.strengthen hsafe (EnvJoin.right_le hjoin)
+
+theorem SafeAbstraction.relaxed_strengthen_join_left {store : ProgramStore}
+    {left right join : Env} :
+    store ∼ₛ left →
+    EnvJoin left right join →
+    RelaxedSafeAbstraction store join := by
+  intro hsafe hjoin
+  exact RelaxedSafeAbstraction.strengthen_join_left
+    (SafeAbstraction.relaxed hsafe) hjoin
+
+theorem SafeAbstraction.relaxed_strengthen_join_right {store : ProgramStore}
+    {left right join : Env} :
+    store ∼ₛ right →
+    EnvJoin left right join →
+    RelaxedSafeAbstraction store join := by
+  intro hsafe hjoin
+  exact RelaxedSafeAbstraction.strengthen_join_right
+    (SafeAbstraction.relaxed hsafe) hjoin
+
 inductive EvidenceBorrowDependency (store : ProgramStore) :
     {value : PartialValue} → {ty : PartialTy} →
       ValidPartialValueEvidence store value ty → Location → Prop where
@@ -668,6 +1192,22 @@ inductive EvidenceBorrowDependency (store : ProgramStore) :
       EvidenceBorrowDependency store hinner dependency →
       EvidenceBorrowDependency store (ValidPartialValueEvidence.boxFull hslot hinner)
         dependency
+
+theorem EvidenceBorrowDependency.ne_fresh {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : ValidPartialValueEvidence store value ty}
+    {dependency : Location} :
+    store.fresh dependency →
+    EvidenceBorrowDependency store evidence dependency →
+    False := by
+  intro hfresh hdependency
+  induction hdependency with
+  | @borrow _ location mutable targets pointee target hmem hloc dependency hreads =>
+      exact LocReads.ne_fresh_of_loc hfresh hloc hreads
+  | boxInner _hdependency ih =>
+      exact ih hfresh
+  | boxFullInner _hdependency ih =>
+      exact ih hfresh
 
 theorem EvidenceBorrowDependency.selected {store : ProgramStore}
     {value : PartialValue} {ty : PartialTy}
@@ -716,6 +1256,543 @@ theorem EvidenceBorrowDependency.of_strengthensSameShape
       cases hdependency with
       | boxFullInner hinnerDependency =>
           exact EvidenceBorrowDependency.boxFullInner (ih hinnerDependency)
+
+inductive RelaxedEvidenceBorrowDependency (store : ProgramStore) :
+    {value : PartialValue} → {ty : PartialTy} →
+      RelaxedValidPartialValueEvidence store value ty → Location → Prop where
+  | borrow {location : Location} {mutable : Bool} {targets : List LVal}
+      {pointee : Ty} {target : LVal} {hmem : target ∈ targets}
+      {hloc : store.loc target = some location} {dependency : Location} :
+      LocReads store target dependency →
+      RelaxedEvidenceBorrowDependency store
+        (RelaxedValidPartialValueEvidence.borrow (pointee := pointee)
+          target hmem hloc)
+        dependency
+  | boxInner {location : Location} {slot : StoreSlot} {inner : PartialTy}
+      {hslot : store.slotAt location = some slot}
+      {hinner : RelaxedValidPartialValueEvidence store slot.value inner}
+      {dependency : Location} :
+      RelaxedEvidenceBorrowDependency store hinner dependency →
+      RelaxedEvidenceBorrowDependency store
+        (RelaxedValidPartialValueEvidence.box hslot hinner)
+        dependency
+  | boxFullInner {location : Location} {slot : StoreSlot} {ty : Ty}
+      {hslot : store.slotAt location = some slot}
+      {hinner : RelaxedValidPartialValueEvidence store slot.value (.ty ty)}
+      {dependency : Location} :
+      RelaxedEvidenceBorrowDependency store hinner dependency →
+      RelaxedEvidenceBorrowDependency store
+        (RelaxedValidPartialValueEvidence.boxFull hslot hinner)
+        dependency
+
+theorem RelaxedEvidenceBorrowDependency.ne_fresh {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : RelaxedValidPartialValueEvidence store value ty}
+    {dependency : Location} :
+    store.fresh dependency →
+    RelaxedEvidenceBorrowDependency store evidence dependency →
+    False := by
+  intro hfresh hdependency
+  induction hdependency with
+  | @borrow _ location mutable targets pointee target hmem hloc dependency hreads =>
+      exact LocReads.ne_fresh_of_loc hfresh hloc hreads
+  | boxInner _hdependency ih =>
+      exact ih hfresh
+  | boxFullInner _hdependency ih =>
+      exact ih hfresh
+
+inductive RelaxedEvidenceOwnerReach (store : ProgramStore) :
+    {value : PartialValue} → {ty : PartialTy} →
+      RelaxedValidPartialValueEvidence store value ty → Location → Prop where
+  | boxHere {location : Location} {slot : StoreSlot} {inner : PartialTy}
+      {hslot : store.slotAt location = some slot}
+      {hinner : RelaxedValidPartialValueEvidence store slot.value inner} :
+      RelaxedEvidenceOwnerReach store
+        (RelaxedValidPartialValueEvidence.box hslot hinner)
+        location
+  | boxInner {location : Location} {slot : StoreSlot} {inner : PartialTy}
+      {hslot : store.slotAt location = some slot}
+      {hinner : RelaxedValidPartialValueEvidence store slot.value inner}
+      {reached : Location} :
+      RelaxedEvidenceOwnerReach store hinner reached →
+      RelaxedEvidenceOwnerReach store
+        (RelaxedValidPartialValueEvidence.box hslot hinner)
+        reached
+  | boxFullHere {location : Location} {slot : StoreSlot} {ty : Ty}
+      {hslot : store.slotAt location = some slot}
+      {hinner : RelaxedValidPartialValueEvidence store slot.value (.ty ty)} :
+      RelaxedEvidenceOwnerReach store
+        (RelaxedValidPartialValueEvidence.boxFull hslot hinner)
+        location
+  | boxFullInner {location : Location} {slot : StoreSlot} {ty : Ty}
+      {hslot : store.slotAt location = some slot}
+      {hinner : RelaxedValidPartialValueEvidence store slot.value (.ty ty)}
+      {reached : Location} :
+      RelaxedEvidenceOwnerReach store hinner reached →
+      RelaxedEvidenceOwnerReach store
+        (RelaxedValidPartialValueEvidence.boxFull hslot hinner)
+        reached
+
+theorem RelaxedEvidenceOwnerReach.ne_fresh {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : RelaxedValidPartialValueEvidence store value ty}
+    {location : Location} :
+    store.fresh location →
+    RelaxedEvidenceOwnerReach store evidence location →
+    False := by
+  intro hfresh hreach
+  induction hreach with
+  | @boxHere location slot inner hslot =>
+      rw [hfresh] at hslot
+      contradiction
+  | @boxInner location slot inner hslot hinner reached _hreach ih =>
+      exact ih hfresh
+  | @boxFullHere location slot ty hslot hinner =>
+      rw [hfresh] at hslot
+      contradiction
+  | @boxFullInner location slot ty hslot hinner reached _hreach ih =>
+      exact ih hfresh
+
+theorem RelaxedEvidenceOwnerReach.reaches_concrete {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : RelaxedValidPartialValueEvidence store value ty}
+    {location : Location} :
+    PartialTy.Concrete ty →
+    RelaxedEvidenceOwnerReach store evidence location →
+    Reaches store value ty location := by
+  intro hconcrete hreach
+  induction hreach with
+  | @boxHere location slot inner hslot =>
+      exact Reaches.boxHere hslot
+  | @boxInner location slot inner hslot hinner reached hinnerReach ih =>
+      exact Reaches.boxInner hslot (ih hconcrete)
+  | @boxFullHere location slot ty hslot =>
+      exact Reaches.boxFullHere hslot
+  | @boxFullInner location slot ty hslot hinner reached hinnerReach ih =>
+      exact Reaches.boxFullInner hslot (ih trivial)
+
+theorem RelaxedEvidenceOwnerReach.reaches_full {store : ProgramStore}
+    {value : PartialValue} {ty : Ty}
+    {evidence : RelaxedValidPartialValueEvidence store value (.ty ty)}
+    {location : Location} :
+    RelaxedEvidenceOwnerReach store evidence location →
+    Reaches store value (.ty ty) location :=
+  RelaxedEvidenceOwnerReach.reaches_concrete trivial
+
+theorem RelaxedEvidenceOwnerReach.ownerReaches_concrete {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : RelaxedValidPartialValueEvidence store value ty}
+    {location : Location} :
+    PartialTy.Concrete ty →
+    RelaxedEvidenceOwnerReach store evidence location →
+    OwnerReaches store value ty location := by
+  intro hconcrete hreach
+  induction hreach with
+  | boxHere =>
+      rename_i location slot inner hslot _hinner
+      exact OwnerReaches.boxHere hslot
+  | boxInner _hinnerReach ih =>
+      rename_i location slot inner hslot _hinner reached
+      exact OwnerReaches.boxInner hslot (ih hconcrete)
+  | boxFullHere =>
+      rename_i location slot ty hslot _hinner
+      exact OwnerReaches.boxFullHere hslot
+  | boxFullInner _hinnerReach ih =>
+      rename_i location slot ty hslot _hinner reached
+      exact OwnerReaches.boxFullInner hslot (ih trivial)
+
+theorem RelaxedEvidenceOwnerReach.ownerReaches_full {store : ProgramStore}
+    {value : PartialValue} {ty : Ty}
+    {evidence : RelaxedValidPartialValueEvidence store value (.ty ty)}
+    {location : Location} :
+    RelaxedEvidenceOwnerReach store evidence location →
+    OwnerReaches store value (.ty ty) location := by
+  exact RelaxedEvidenceOwnerReach.ownerReaches_concrete trivial
+
+def RelaxedEvidenceBorrowDependency.borrowDependency_full {store : ProgramStore}
+    {value : PartialValue} {ty : Ty}
+    {evidence : RelaxedValidPartialValueEvidence store value (.ty ty)}
+    {location : Location} :
+    RelaxedEvidenceBorrowDependency store evidence location →
+    BorrowDependency store value (.ty ty) location :=
+  match evidence with
+  | RelaxedValidPartialValueEvidence.unit =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.int =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.bool =>
+      fun hdependency => by cases hdependency
+  | @RelaxedValidPartialValueEvidence.borrow _ location mutable targets pointee
+      target hmem hloc =>
+      fun hdependency => by
+        cases hdependency with
+        | borrow hreads =>
+            exact BorrowDependency.borrow (mutable := mutable)
+              (targets := targets) (pointee := pointee) (target := target)
+              hmem hloc hreads
+  | RelaxedValidPartialValueEvidence.boxFull hslot hinner =>
+      fun hdependency => by
+        cases hdependency with
+        | boxFullInner hinnerDependency =>
+            exact BorrowDependency.boxFullInner hslot
+              (RelaxedEvidenceBorrowDependency.borrowDependency_full
+                hinnerDependency)
+
+def RelaxedEvidenceBorrowDependency.borrowDependency {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : RelaxedValidPartialValueEvidence store value ty}
+    {location : Location} :
+    RelaxedEvidenceBorrowDependency store evidence location →
+    BorrowDependency store value ty location :=
+  match evidence with
+  | RelaxedValidPartialValueEvidence.unit =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.int =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.bool =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.undef =>
+      fun hdependency => by cases hdependency
+  | @RelaxedValidPartialValueEvidence.borrow _ location mutable targets pointee
+      target hmem hloc =>
+      fun hdependency => by
+        cases hdependency with
+        | borrow hreads =>
+            exact BorrowDependency.borrow (mutable := mutable)
+              (targets := targets) (pointee := pointee) (target := target)
+              hmem hloc hreads
+  | @RelaxedValidPartialValueEvidence.box _ location slot inner hslot hinner =>
+      fun hdependency => by
+        cases hdependency with
+        | boxInner hinnerDependency =>
+            exact BorrowDependency.boxInner hslot
+              (RelaxedEvidenceBorrowDependency.borrowDependency
+                hinnerDependency)
+  | @RelaxedValidPartialValueEvidence.boxFull _ location slot innerTy hslot hinner =>
+      fun hdependency => by
+        cases hdependency with
+        | boxFullInner hinnerDependency =>
+            exact BorrowDependency.boxFullInner hslot
+              (RelaxedEvidenceBorrowDependency.borrowDependency
+                hinnerDependency)
+  | @RelaxedValidPartialValueEvidence.intoUndef _ value source target hstrength hinner =>
+      fun hdependency => by cases hdependency
+
+theorem RelaxedEvidenceBorrowDependency.of_strengthens
+    {store : ProgramStore} {value : PartialValue}
+    {oldTy newTy : PartialTy}
+    {oldEvidence : RelaxedValidPartialValueEvidence store value oldTy}
+    {newEvidence : RelaxedValidPartialValueEvidence store value newTy}
+    {dependency : Location} :
+    RelaxedValidPartialValueEvidence.Strengthens oldEvidence newEvidence →
+    RelaxedEvidenceBorrowDependency store newEvidence dependency →
+    RelaxedEvidenceBorrowDependency store oldEvidence dependency := by
+  intro hrel hdependency
+  induction hrel with
+  | unit => cases hdependency
+  | int => cases hdependency
+  | bool => cases hdependency
+  | undef => cases hdependency
+  | borrow _hsubset =>
+      rename_i oldMutable newMutable location mutable leftTargets rightTargets pointee
+        target hmem hloc
+      cases hdependency with
+      | borrow hreads =>
+          exact RelaxedEvidenceBorrowDependency.borrow
+            (mutable := oldMutable) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc) hreads
+  | box hinnerRel ih =>
+      cases hdependency with
+      | boxInner hinnerDependency =>
+          exact RelaxedEvidenceBorrowDependency.boxInner
+            (ih hinnerDependency)
+  | boxFull hinnerRel ih =>
+      cases hdependency with
+      | boxFullInner hinnerDependency =>
+          exact RelaxedEvidenceBorrowDependency.boxFullInner
+            (ih hinnerDependency)
+  | hide _hstrength =>
+      cases hdependency
+  | discardUndef _hstrength =>
+      cases hdependency
+  | hiddenRefl =>
+      exact hdependency
+  | hiddenWiden hsource _hwiden =>
+      cases hdependency
+
+theorem EvidenceBorrowDependency.of_relaxed_of_strict
+    {store : ProgramStore} {value : PartialValue} {ty : PartialTy}
+    {evidence : ValidPartialValueEvidence store value ty}
+    {dependency : Location} :
+    RelaxedEvidenceBorrowDependency store
+      (RelaxedValidPartialValueEvidence.of_strict evidence) dependency →
+    EvidenceBorrowDependency store evidence dependency := by
+  induction evidence with
+  | unit =>
+      intro hdependency
+      cases hdependency
+  | int =>
+      intro hdependency
+      cases hdependency
+  | bool =>
+      intro hdependency
+      cases hdependency
+  | undef =>
+      intro hdependency
+      cases hdependency
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro hdependency
+      cases hdependency with
+      | borrow hreads =>
+          exact EvidenceBorrowDependency.borrow (mutable := mutable)
+            (pointee := pointee) (target := target) (hmem := hmem)
+            (hloc := hloc) hreads
+  | box hslot hinner ih =>
+      intro hdependency
+      cases hdependency with
+      | boxInner hinnerDependency =>
+          exact EvidenceBorrowDependency.boxInner (ih hinnerDependency)
+  | boxFull hslot hinner ih =>
+      intro hdependency
+      cases hdependency with
+      | boxFullInner hinnerDependency =>
+          exact EvidenceBorrowDependency.boxFullInner (ih hinnerDependency)
+
+def RelaxedEvidenceBorrowDependency.of_to_strict_full
+    {store : ProgramStore} {value : PartialValue} {ty : Ty}
+    {evidence : RelaxedValidPartialValueEvidence store value (.ty ty)}
+    {dependency : Location} :
+    EvidenceBorrowDependency store
+      (RelaxedValidPartialValueEvidence.to_strict_full evidence) dependency →
+    RelaxedEvidenceBorrowDependency store evidence dependency :=
+  match evidence with
+  | RelaxedValidPartialValueEvidence.unit =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.int =>
+      fun hdependency => by cases hdependency
+  | RelaxedValidPartialValueEvidence.bool =>
+      fun hdependency => by cases hdependency
+  | @RelaxedValidPartialValueEvidence.borrow _ location mutable targets pointee
+      target hmem hloc =>
+      fun hdependency => by
+        cases hdependency with
+        | borrow hreads =>
+            exact RelaxedEvidenceBorrowDependency.borrow
+              (mutable := mutable) (targets := targets) (pointee := pointee)
+              (target := target) (hmem := hmem) (hloc := hloc) hreads
+  | RelaxedValidPartialValueEvidence.boxFull hslot hinner =>
+      fun hdependency => by
+        cases hdependency with
+        | boxFullInner hinnerDependency =>
+            exact RelaxedEvidenceBorrowDependency.boxFullInner
+              (RelaxedEvidenceBorrowDependency.of_to_strict_full
+                hinnerDependency)
+
+theorem RelaxedEvidenceOwnerReach.of_strengthens
+    {store : ProgramStore} {value : PartialValue}
+    {oldTy newTy : PartialTy}
+    {oldEvidence : RelaxedValidPartialValueEvidence store value oldTy}
+    {newEvidence : RelaxedValidPartialValueEvidence store value newTy}
+    {reached : Location} :
+    RelaxedValidPartialValueEvidence.Strengthens oldEvidence newEvidence →
+    RelaxedEvidenceOwnerReach store newEvidence reached →
+    RelaxedEvidenceOwnerReach store oldEvidence reached := by
+  intro hrel hreach
+  induction hrel with
+  | unit => cases hreach
+  | int => cases hreach
+  | bool => cases hreach
+  | undef => cases hreach
+  | borrow _hsubset => cases hreach
+  | box hinnerRel ih =>
+      cases hreach with
+      | boxHere => exact RelaxedEvidenceOwnerReach.boxHere
+      | boxInner hinnerReach =>
+          exact RelaxedEvidenceOwnerReach.boxInner (ih hinnerReach)
+  | boxFull hinnerRel ih =>
+      cases hreach with
+      | boxFullHere => exact RelaxedEvidenceOwnerReach.boxFullHere
+      | boxFullInner hinnerReach =>
+          exact RelaxedEvidenceOwnerReach.boxFullInner (ih hinnerReach)
+  | hide _hstrength =>
+      cases hreach
+  | discardUndef _hstrength =>
+      cases hreach
+  | hiddenRefl =>
+      exact hreach
+  | hiddenWiden hsource _hwiden =>
+      cases hreach
+
+/--
+Evidence-indexed update frame for relaxed runtime evidence.
+
+This is the relaxed analogue of
+`validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame`: it
+transports the concrete evidence hidden behind `undef`, rather than
+reconstructing arbitrary validity evidence after the write.
+-/
+theorem relaxedValidPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+    {store : ProgramStore} {updated : Location} {newSlot : StoreSlot} :
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (evidence : RelaxedValidPartialValueEvidence store value ty),
+      (∀ location,
+        RelaxedEvidenceOwnerReach store evidence location →
+        location ≠ updated) →
+      (∀ location,
+        RelaxedEvidenceBorrowDependency store evidence location →
+        location ≠ updated) →
+      ∃ evidence' :
+        RelaxedValidPartialValueEvidence
+          (store.update updated newSlot) value ty,
+        ∀ location,
+          RelaxedEvidenceBorrowDependency
+            (store.update updated newSlot) evidence' location →
+          RelaxedEvidenceBorrowDependency store evidence location := by
+  intro value ty evidence
+  induction evidence with
+  | unit =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.unit,
+        by intro location hdep; cases hdep⟩
+  | int =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.int,
+        by intro location hdep; cases hdep⟩
+  | bool =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.bool,
+        by intro location hdep; cases hdep⟩
+  | undef =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.undef,
+        by intro location hdep; cases hdep⟩
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro _howners hdeps
+      have hloc' : (store.update updated newSlot).loc target = some location :=
+        loc_update_of_not_locReads hloc (by
+          intro dependency hreads
+          exact hdeps dependency
+            (RelaxedEvidenceBorrowDependency.borrow
+              (store := store) (location := location) (mutable := mutable)
+              (targets := targets) (pointee := pointee) (target := target)
+              (hmem := hmem) (hloc := hloc) hreads))
+      refine ⟨RelaxedValidPartialValueEvidence.borrow (pointee := pointee)
+        target hmem hloc', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | borrow hreads =>
+          exact RelaxedEvidenceBorrowDependency.borrow
+            (store := store) (location := location) (mutable := mutable)
+            (targets := targets) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc)
+            (locReads_update_to_store_of_not_locReads hloc
+              (by
+                intro mid hmid
+                exact hdeps mid
+                  (RelaxedEvidenceBorrowDependency.borrow
+                    (store := store) (location := location) (mutable := mutable)
+                    (targets := targets) (pointee := pointee) (target := target)
+                    (hmem := hmem) (hloc := hloc) hmid))
+              hreads)
+  | @box location slot inner hslot hinner ih =>
+      intro howners hdeps
+      have hlocationNe : location ≠ updated :=
+        howners location (RelaxedEvidenceOwnerReach.boxHere (hslot := hslot))
+      have hslot' :
+          (store.update updated newSlot).slotAt location = some slot := by
+        rw [ProgramStore.slotAt_update_ne hlocationNe]
+        exact hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached
+              (RelaxedEvidenceOwnerReach.boxInner
+                (hslot := hslot) hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (RelaxedEvidenceBorrowDependency.boxInner
+                (store := store) (location := location) (slot := slot)
+                (inner := inner) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨RelaxedValidPartialValueEvidence.box hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxInner hdependency' =>
+          exact RelaxedEvidenceBorrowDependency.boxInner
+            (store := store) (location := location) (slot := slot)
+            (inner := inner) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
+  | @boxFull location slot innerTy hslot hinner ih =>
+      intro howners hdeps
+      have hlocationNe : location ≠ updated :=
+        howners location (RelaxedEvidenceOwnerReach.boxFullHere (hslot := hslot))
+      have hslot' :
+          (store.update updated newSlot).slotAt location = some slot := by
+        rw [ProgramStore.slotAt_update_ne hlocationNe]
+        exact hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached
+              (RelaxedEvidenceOwnerReach.boxFullInner
+                (hslot := hslot) hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (RelaxedEvidenceBorrowDependency.boxFullInner
+                (store := store) (location := location) (slot := slot)
+                (ty := innerTy) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨RelaxedValidPartialValueEvidence.boxFull hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxFullInner hdependency' =>
+          exact RelaxedEvidenceBorrowDependency.boxFullInner
+            (store := store) (location := location) (slot := slot)
+            (ty := innerTy) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
+  | @intoUndef value source target hstrength hinner ih =>
+      intro _howners _hdeps
+      refine ⟨RelaxedValidPartialValueEvidence.undef, ?_⟩
+      intro dependency hdependency
+      cases hdependency
+
+theorem relaxedValidPartialValueEvidence_declare_of_fresh {store : ProgramStore}
+    {x : Name} {lifetime : Lifetime} {newValue : Value}
+    {value : PartialValue} {ty : PartialTy}
+    (evidence : RelaxedValidPartialValueEvidence store value ty) :
+    store.fresh (VariableProjection x) →
+    ∃ evidence' :
+      RelaxedValidPartialValueEvidence (store.declare x lifetime newValue)
+        value ty,
+      ∀ location,
+        RelaxedEvidenceBorrowDependency
+          (store.declare x lifetime newValue) evidence' location →
+        RelaxedEvidenceBorrowDependency store evidence location := by
+  intro hfresh
+  rcases
+      relaxedValidPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+        (updated := VariableProjection x)
+        (newSlot := { value := .value newValue, lifetime := lifetime })
+        evidence
+        (by
+          intro location hreach hlocation
+          subst hlocation
+          exact RelaxedEvidenceOwnerReach.ne_fresh hfresh hreach)
+        (by
+          intro location hdependency hlocation
+          subst hlocation
+          exact RelaxedEvidenceBorrowDependency.ne_fresh hfresh hdependency) with
+    ⟨evidence', hdependencyBack⟩
+  refine ⟨by
+      simpa [ProgramStore.declare, VariableProjection] using evidence',
+    ?_⟩
+  intro location hdependency
+  exact hdependencyBack location (by
+    simpa [ProgramStore.declare, VariableProjection] using hdependency)
 
 /-- Frame lemma for `ValidPartialValue`: updating an uninspected location preserves validity. -/
 theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
@@ -875,6 +1952,39 @@ theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
             (store := store) (location := location) (slot := slot)
             (ty := innerTy) (hslot := hslot) (hinner := hinner)
             (hinnerDeps dependency hdependency')
+
+theorem validPartialValueEvidence_declare_of_fresh {store : ProgramStore}
+    {x : Name} {lifetime : Lifetime} {newValue : Value}
+    {value : PartialValue} {ty : PartialTy}
+    (evidence : ValidPartialValueEvidence store value ty) :
+    store.fresh (VariableProjection x) →
+    ∃ evidence' :
+      ValidPartialValueEvidence (store.declare x lifetime newValue) value ty,
+      ∀ location,
+        EvidenceBorrowDependency
+          (store.declare x lifetime newValue) evidence' location →
+        EvidenceBorrowDependency store evidence location := by
+  intro hfresh
+  rcases
+      validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+        (updated := VariableProjection x)
+        (newSlot := { value := .value newValue, lifetime := lifetime })
+        evidence
+        (by
+          intro location hreach hlocation
+          subst hlocation
+          exact OwnerReaches.ne_fresh hfresh hreach)
+        (by
+          intro location hdependency hlocation
+          subst hlocation
+          exact EvidenceBorrowDependency.ne_fresh hfresh hdependency) with
+    ⟨evidence', hdependencyBack⟩
+  refine ⟨by
+      simpa [ProgramStore.declare, VariableProjection] using evidence',
+    ?_⟩
+  intro location hdependency
+  exact hdependencyBack location (by
+    simpa [ProgramStore.declare, VariableProjection] using hdependency)
 
 /-- Frame lemma for `ValidPartialValue`: erasing an uninspected location preserves validity. -/
 theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
@@ -1294,6 +2404,129 @@ theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
             (ty := innerTy) (hslot := hslot) (hinner := hinner)
             (hinnerDeps dependency hdependency')
 
+/--
+Evidence-indexed drop frame for relaxed runtime evidence.
+
+The hidden concrete witness below an abstract `undef` is transported through the
+drop and wrapped again, so protected dependency paths are not lost by
+reconstructing arbitrary post-drop validity evidence.
+-/
+theorem relaxedValidPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+    {store store' : ProgramStore} {values : List PartialValue} :
+    Drops store values store' →
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (evidence : RelaxedValidPartialValueEvidence store value ty),
+      (∀ location,
+        RelaxedEvidenceOwnerReach store evidence location →
+        DropsAvoids store values location) →
+      (∀ location,
+        RelaxedEvidenceBorrowDependency store evidence location →
+        DropsAvoids store values location) →
+      ∃ evidence' : RelaxedValidPartialValueEvidence store' value ty,
+        ∀ location,
+          RelaxedEvidenceBorrowDependency store' evidence' location →
+          RelaxedEvidenceBorrowDependency store evidence location := by
+  intro hdrops value ty evidence
+  induction evidence with
+  | unit =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.unit,
+        by intro location hdep; cases hdep⟩
+  | int =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.int,
+        by intro location hdep; cases hdep⟩
+  | bool =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.bool,
+        by intro location hdep; cases hdep⟩
+  | undef =>
+      intro _howners _hdeps
+      exact ⟨RelaxedValidPartialValueEvidence.undef,
+        by intro location hdep; cases hdep⟩
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro _howners hdeps
+      have hloc' : store'.loc target = some location :=
+        loc_drops_of_not_locReads hdrops hloc (by
+          intro dependency hreads
+          exact hdeps dependency
+            (RelaxedEvidenceBorrowDependency.borrow
+              (store := store) (location := location) (mutable := mutable)
+              (targets := targets) (pointee := pointee) (target := target)
+              (hmem := hmem) (hloc := hloc) hreads))
+      refine ⟨RelaxedValidPartialValueEvidence.borrow (pointee := pointee)
+        target hmem hloc', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | borrow hreads =>
+          exact RelaxedEvidenceBorrowDependency.borrow
+            (store := store) (location := location) (mutable := mutable)
+            (targets := targets) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc)
+            (locReads_drops_to_store hdrops hreads)
+  | @box location slot inner hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (RelaxedEvidenceOwnerReach.boxHere (hslot := hslot))
+      have hslot' : store'.slotAt location = some slot :=
+        dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached
+              (RelaxedEvidenceOwnerReach.boxInner
+                (hslot := hslot) hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (RelaxedEvidenceBorrowDependency.boxInner
+                (store := store) (location := location) (slot := slot)
+                (inner := inner) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨RelaxedValidPartialValueEvidence.box hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxInner hdependency' =>
+          exact RelaxedEvidenceBorrowDependency.boxInner
+            (store := store) (location := location) (slot := slot)
+            (inner := inner) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
+  | @boxFull location slot innerTy hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location
+          (RelaxedEvidenceOwnerReach.boxFullHere (hslot := hslot))
+      have hslot' : store'.slotAt location = some slot :=
+        dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached
+              (RelaxedEvidenceOwnerReach.boxFullInner
+                (hslot := hslot) hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (RelaxedEvidenceBorrowDependency.boxFullInner
+                (store := store) (location := location) (slot := slot)
+                (ty := innerTy) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨RelaxedValidPartialValueEvidence.boxFull hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxFullInner hdependency' =>
+          exact RelaxedEvidenceBorrowDependency.boxFullInner
+            (store := store) (location := location) (slot := slot)
+            (ty := innerTy) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
+  | @intoUndef value source target hstrength hinner ih =>
+      intro _howners _hdeps
+      refine ⟨RelaxedValidPartialValueEvidence.undef, ?_⟩
+      intro dependency hdependency
+      cases hdependency
+
 theorem reaches_owner_source_of_validPartialValue {env : Env}
     {store : ProgramStore} {slotLifetime : Lifetime}
     {value : PartialValue} {ty : PartialTy} {location : Location} :
@@ -1401,6 +2634,38 @@ theorem ownsTransitively_of_ownerReaches_stored {store : ProgramStore}
       exact ProgramStore.OwnsTransitively.direct
         ⟨storageLifetime, by simpa [owningRef] using hstored⟩
   | @boxFullInner ownerLocation slot ty reached hslot _hinner ih =>
+      have hownsRoot : ProgramStore.OwnsAt store ownerLocation storage :=
+        ⟨storageLifetime, by simpa [owningRef] using hstored⟩
+      exact ProgramStore.OwnsTransitively.trans hownsRoot
+        (ih hslot)
+
+/--
+Owner reachability selected by relaxed evidence is still a transitive ownership
+path rooted at the slot that stores the represented value.
+-/
+theorem ownsTransitively_of_relaxedEvidenceOwnerReach_stored
+    {store : ProgramStore} {storage location : Location}
+    {storageLifetime : Lifetime} {storedValue : PartialValue}
+    {partialTy : PartialTy}
+    {evidence : RelaxedValidPartialValueEvidence store storedValue partialTy} :
+    store.slotAt storage =
+      some { value := storedValue, lifetime := storageLifetime } →
+    RelaxedEvidenceOwnerReach store evidence location →
+    ProgramStore.OwnsTransitively store storage location := by
+  intro hstored hreach
+  induction hreach generalizing storage storageLifetime with
+  | @boxHere ownerLocation _slot _inner _hslot =>
+      exact ProgramStore.OwnsTransitively.direct
+        ⟨storageLifetime, by simpa [owningRef] using hstored⟩
+  | @boxInner ownerLocation slot inner hslot _hinner reached _hreach ih =>
+      have hownsRoot : ProgramStore.OwnsAt store ownerLocation storage :=
+        ⟨storageLifetime, by simpa [owningRef] using hstored⟩
+      exact ProgramStore.OwnsTransitively.trans hownsRoot
+        (ih hslot)
+  | @boxFullHere ownerLocation _slot _ty _hslot =>
+      exact ProgramStore.OwnsTransitively.direct
+        ⟨storageLifetime, by simpa [owningRef] using hstored⟩
+  | @boxFullInner ownerLocation slot ty hslot _hinner reached _hreach ih =>
       have hownsRoot : ProgramStore.OwnsAt store ownerLocation storage :=
         ⟨storageLifetime, by simpa [owningRef] using hstored⟩
       exact ProgramStore.OwnsTransitively.trans hownsRoot

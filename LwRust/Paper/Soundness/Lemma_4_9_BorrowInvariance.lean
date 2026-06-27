@@ -1188,23 +1188,21 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
       TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
         hfreshOut hcoh henv)
-    (fun _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
-        hnotWrite ih hsource =>
+    (fun _hRhs hLhsPost hshape hwf hwrite hranked htargets hnotWrite ih hsource =>
       TermTyping.assign (ih (SourceTerm.assign_inner hsource)) hLhsPost
-        hshape hwf hwrite hranked hcoh hcontained hnotWrite)
+        hshape hwf hwrite hranked htargets hnotWrite)
     (fun _hLhs hfresh htypeFresh htyFresh _hstoreFresh _hghostRhs hnotMention henvEq
         hcopyL hcopyR hshape ihL ihGhost hsource =>
       TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
         htypeFresh htyFresh (hfreshTyping _)
         (ihGhost (SourceTerm.eq_rhs hsource))
         hnotMention henvEq hcopyL hcopyR hshape)
-    (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
-        hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
+    (fun _hcondition _htrue _hfalse hjoin henvJoin hwellJoin
+        hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear hborrowSafe
-        hresultSafe)
+        hjoin henvJoin hwellJoin hlinear hborrowSafe hresultSafe)
     (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
         hsource =>
       TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
@@ -1216,11 +1214,10 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse hnameFresh _hcondInv _hbodyInv
-        hwellTy hdrop _hcondEntry _hbodyEntry ihCondInv ihBodyInv ihCondEntry
-        ihBodyEntry hsource =>
-      TermTyping.whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
-        hnameFresh
+    (fun hchild hjoin hlin hbse hnameFresh _hcondInv _hbodyInv hwellTy hdrop
+        _hcondEntry _hbodyEntry ihCondInv ihBodyInv ihCondEntry ihBodyEntry
+        hsource =>
+      TermTyping.whileLoop hchild hjoin hlin hbse hnameFresh
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
         hwellTy hdrop
@@ -3637,17 +3634,16 @@ theorem typingPreservesSlotsOutlive {env₁ env₂ : Env}
     (fun _hfresh _hterm _hfreshOut _hcohObligations henv₃ ih hslots => by
       subst henv₃
       exact EnvSlotsOutlive.update_current (partialTy := .ty _) (ih hslots))
-    (fun _hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _hwriteCoh
-        _hcontained _hnotWrite ih hslots =>
+    (fun _hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _htargets
+        _hnotWrite ih hslots =>
       EnvWrite.preserves_slotsOutlive (ih hslots) hwrite)
     (fun _hLhs _hfresh _htypeFresh _htyFresh _hstoreFresh _hghostRhs
         _hnotMention henvEq _hcopyL _hcopyR _hshape ihL ihGhost hslots => by
       subst henvEq
       exact EnvSlotsOutlive.erase
         (ihGhost (EnvSlotsOutlive.update_current (partialTy := .ty _) (ihL hslots))))
-    (fun _hcondition _htrue _hfalse _hjoin henvJoin _hsameLeft _hsameRight
-        _hwellJoin _hcoherent _hlinear _hborrowSafe _hresultSafe
-        ihCondition ihTrue _ihFalse hslots =>
+    (fun _hcondition _htrue _hfalse _hjoin henvJoin _hwellJoin _hlinear
+        _hborrowSafe _hresultSafe ihCondition ihTrue _ihFalse hslots =>
       EnvSlotsOutlive.of_lifetimesPreserved
         (ihTrue (ihCondition hslots))
         (EnvJoin.lifetimesPreserved_left henvJoin))
@@ -3656,8 +3652,8 @@ theorem typingPreservesSlotsOutlive {env₁ env₂ : Env}
       ihTrue (ihCondition hslots))
     (fun _hchild _hcond _hbody _hdiverges ihCond _ihBody hslots =>
       ihCond hslots)
-    (fun _hchild hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse _hnameFresh
-        _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+    (fun _hchild hjoin _hlin _hbse _hnameFresh _hcondInv _hbodyInv
+        _hwellTy _hdrop _hcondEntry _hbodyEntry
         ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry hslots =>
       ihCondInv
         (EnvSlotsOutlive.of_lifetimesPreserved hslots
@@ -3666,6 +3662,18 @@ theorem typingPreservesSlotsOutlive {env₁ env₂ : Env}
     (fun _hterm _hrest ihHead ihRest hslots =>
       ihRest (ihHead hslots))
     htyping hslots
+
+/-
+The full static `WellFormedEnv` preservation theorem below was the paper-facing
+version of Lemma 4.9.  After removing the rule-carried `Coherent`,
+`ContainedBorrowsWellFormed`, and join-same-shape premises from `TermTyping`, the
+statement is no longer derivable: joins can strengthen initialized branch slots
+to `undef`, so the joined environment need not satisfy the old static
+contained-borrow/coherence invariants.  The runtime proof must carry the weak
+evidence-based abstraction instead.
+
+The block is kept here while the downstream preservation proof is being migrated
+so the old proof shape remains available for comparison.
 
 theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
     (fuel : Nat) {env₁ env₂ : Env}
@@ -4121,6 +4129,43 @@ theorem borrowInvariance_of_sourceTerm
   intro hsource hvalidState hwellFormed hsafe htyping
   exact (typingPreservesWellFormed_of_sourceTerm hsource hvalidState
     hwellFormed hsafe htyping).1
+-/
+
+/--
+Residual static preservation after the typing-premise cleanup.
+
+Full `WellFormedEnv` is intentionally not claimed here: the removed premises
+were exactly the static facts needed for `ContainedBorrowsWellFormed`,
+`Coherent`, and same-shape join transport.  Slot lifetime preservation remains
+derivable directly from the typing derivation and is the static component still
+needed by the relaxed runtime invariant.
+-/
+theorem typingPreservesSlotsOutlive_of_ruleCarriedObligations
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    EnvSlotsOutlive env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    EnvSlotsOutlive env₂ lifetime := by
+  intro _hrefs _hvalidState _hvalidStoreTyping hslots _hsafe htyping
+  exact typingPreservesSlotsOutlive hslots htyping
+
+theorem typingPreservesSlotsOutlive_of_sourceTerm
+    {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    SourceTerm term →
+    ValidState store term →
+    EnvSlotsOutlive env₁ lifetime →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    EnvSlotsOutlive env₂ lifetime := by
+  intro _hsource _hvalidState hslots _hsafe htyping
+  exact typingPreservesSlotsOutlive hslots htyping
 
 theorem writeProhibited_of_lvalTyping_var_in_type {env : Env}
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
@@ -4570,6 +4615,64 @@ theorem ProtectedByBase.update_of_not_ancestor {store : ProgramStore}
       (ProgramStore.OwnsTransitively.update_of_not_ancestor
         hnotAncestor hpath)
 
+theorem ProtectedByBase.not_fresh_heap_of_storeOwnersAllocated
+    {store : ProgramStore} {address : Nat} {base : Name} :
+    StoreOwnersAllocated store →
+    store.fresh (.heap address) →
+    ¬ ProtectedByBase store base (.heap address) := by
+  intro hallocated hfresh hprotected
+  rcases hprotected with hroot | hpath
+  · cases hroot
+  · have howns : ProgramStore.Owns store (.heap address) :=
+      ProgramStore.OwnsTransitively.to_owns hpath
+    rcases hallocated (.heap address) howns with ⟨slot, hslot⟩
+    rw [ProgramStore.fresh, hslot] at hfresh
+    cases hfresh
+
+theorem ProgramStore.OwnsAt.declare_of_fresh {store : ProgramStore}
+    {x : Name} {lifetime : Lifetime} {value : Value}
+    {owned storage : Location} :
+    store.fresh (VariableProjection x) →
+    ProgramStore.OwnsAt store owned storage →
+    ProgramStore.OwnsAt (store.declare x lifetime value) owned storage := by
+  intro hfresh howns
+  rcases howns with ⟨slotLifetime, hslot⟩
+  have hstorageNe : storage ≠ VariableProjection x := by
+    intro h
+    subst h
+    rw [hfresh] at hslot
+    contradiction
+  have hstorageNeVar : storage ≠ .var x := by
+    simpa [VariableProjection] using hstorageNe
+  exact ⟨slotLifetime, by
+    simpa [ProgramStore.declare, ProgramStore.update, hstorageNeVar] using hslot⟩
+
+theorem ProgramStore.OwnsTransitively.declare_of_fresh {store : ProgramStore}
+    {x : Name} {lifetime : Lifetime} {value : Value}
+    {storage owned : Location} :
+    store.fresh (VariableProjection x) →
+    ProgramStore.OwnsTransitively store storage owned →
+    ProgramStore.OwnsTransitively (store.declare x lifetime value) storage owned := by
+  intro hfresh hpath
+  induction hpath with
+  | direct howns =>
+      exact ProgramStore.OwnsTransitively.direct
+        (ProgramStore.OwnsAt.declare_of_fresh hfresh howns)
+  | trans howns _htail ih =>
+      exact ProgramStore.OwnsTransitively.trans
+        (ProgramStore.OwnsAt.declare_of_fresh hfresh howns) ih
+
+theorem ProtectedByBase.declare_of_fresh {store : ProgramStore}
+    {x base : Name} {lifetime : Lifetime} {value : Value}
+    {location : Location} :
+    store.fresh (VariableProjection x) →
+    ProtectedByBase store base location →
+    ProtectedByBase (store.declare x lifetime value) base location := by
+  intro hfresh hprotected
+  rcases hprotected with hroot | hpath
+  · exact Or.inl hroot
+  · exact Or.inr (ProgramStore.OwnsTransitively.declare_of_fresh hfresh hpath)
+
 theorem dropsAvoids_of_protectedByBase_unprotected_values
     {store store' : ProgramStore} {values : List PartialValue}
     {x : Name} {location : Location} :
@@ -4655,6 +4758,85 @@ theorem dropsAvoids_of_protectedByBase_unprotected_values
                 hprotectedStore)
             (ProtectedByBase.erase_of_not_protected hprotected hrefUnprotected))
 
+/--
+Head-only variant of `dropsAvoids_of_protectedByBase_unprotected_values`.
+
+The explicit drop values do not have to be heap-owning references.  This is
+needed for lifetime drops, whose explicit heads may be variable roots.  Once an
+owned slot is opened, recursive slot contents are still governed by the store's
+heap-owner invariant.
+-/
+theorem dropsAvoids_of_protectedByBase_unprotected_heads
+    {store store' : ProgramStore} {values : List PartialValue}
+    {x : Name} {location : Location} :
+    Drops store values store' →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ values →
+      ∀ owned, owned ∈ partialValueOwningLocations value →
+        ¬ ProtectedByBase store x owned) →
+    ProtectedByBase store x location →
+    DropsAvoids store values location := by
+  intro hdrops
+  induction hdrops generalizing x location with
+  | nil =>
+      intro _hvalid _hheap _hunprotected _hprotected
+      exact DropsAvoids.nil
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hvalid hheap hunprotected hprotected
+      exact DropsAvoids.nonOwner hnonOwner
+        (ih hvalid hheap
+          (by
+            intro value hmem owned howned
+            exact hunprotected value (by simp [hmem]) owned howned)
+          hprotected)
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hvalid hheap hunprotected hprotected
+      exact DropsAvoids.ownerMissing howner hmissing
+        (ih hvalid hheap
+          (by
+            intro value hmem owned howned
+            exact hunprotected value (by simp [hmem]) owned howned)
+          hprotected)
+  | ownerPresent howner hpresent _hdrops ih =>
+      intro hvalid hheap hunprotected hprotected
+      rename_i storeBefore _storeAfter ref slot rest
+      have hrefUnprotected :
+          ¬ ProtectedByBase storeBefore x ref.location :=
+        hunprotected (.value (.ref ref)) (by simp) ref.location
+          (mem_partialValueOwningLocations_ref_true howner)
+      have hrefNeLocation : ref.location ≠ location := by
+        intro h
+        exact hrefUnprotected (by simpa [h] using hprotected)
+      have hslotHeap : PartialValueOwnerTargetsHeap slot.value :=
+        partialValueOwnerTargetsHeap_of_slot hheap hpresent
+      exact DropsAvoids.ownerPresent howner hpresent hrefNeLocation
+        (ih (validStore_erase hvalid) (storeOwnerTargetsHeap_erase hheap)
+          (by
+            intro value hmem owned howned hprotectedErased
+            have hprotectedStore :
+                ProtectedByBase storeBefore x owned :=
+              ProtectedByBase.erase_to_store hprotectedErased
+            simp at hmem
+            rcases hmem with hslotValue | hrest
+            · subst hslotValue
+              have hownsSlot :
+                  ProgramStore.OwnsAt storeBefore owned ref.location := by
+                have hslotValueEq :
+                    slot.value = .value (owningRef owned) :=
+                  eq_owningRef_of_mem_partialValueOwningLocations howned
+                exact ⟨slot.lifetime, by
+                  cases slot with
+                  | mk slotValue slotLifetime =>
+                      cases hslotValueEq
+                      simpa [owningRef] using hpresent⟩
+              exact hrefUnprotected
+                (ProtectedByBase.pred_of_ownsAt hvalid hheap
+                  hprotectedStore hownsSlot)
+            · exact hunprotected value (by simp [hrest]) owned howned
+                hprotectedStore)
+          (ProtectedByBase.erase_of_not_protected hprotected hrefUnprotected))
+
 theorem ProtectedByBase.drops_of_unprotected_values
     {store store' : ProgramStore} {values : List PartialValue}
     {x : Name} {location : Location} :
@@ -4709,6 +4891,79 @@ theorem ProtectedByBase.drops_of_unprotected_values
           · subst hslotValue
             exact hslotHeap
           · exact hvaluesHeap value (by simp [hrest]))
+        (by
+          intro value hmem owned howned hprotectedErased
+          have hprotectedStore :
+              ProtectedByBase storeBefore x owned :=
+            ProtectedByBase.erase_to_store hprotectedErased
+          simp at hmem
+          rcases hmem with hslotValue | hrest
+          · subst hslotValue
+            have hownsSlot :
+                ProgramStore.OwnsAt storeBefore owned ref.location := by
+              have hslotValueEq :
+                  slot.value = .value (owningRef owned) :=
+                eq_owningRef_of_mem_partialValueOwningLocations howned
+              exact ⟨slot.lifetime, by
+                cases slot with
+                | mk slotValue slotLifetime =>
+                    cases hslotValueEq
+                    simpa [owningRef] using hpresent⟩
+            exact hrefUnprotected
+              (ProtectedByBase.pred_of_ownsAt hvalid hheap
+                hprotectedStore hownsSlot)
+          · exact hunprotected value (by simp [hrest]) owned howned
+              hprotectedStore)
+        (ProtectedByBase.erase_of_not_protected hprotected hrefUnprotected)
+
+/--
+Protection paths survive a recursive drop when every explicit drop-list owner is
+outside the protected root.
+
+Unlike `ProtectedByBase.drops_of_unprotected_values`, this variant does not
+require the explicit drop values themselves to target heap locations.  That
+distinction matters for `DropsLifetime`, whose synthesized root drop values may
+point at variable slots.  Recursive slot contents are still controlled by the
+store-level owner-target invariant.
+-/
+theorem ProtectedByBase.drops_of_unprotected_heads
+    {store store' : ProgramStore} {values : List PartialValue}
+    {x : Name} {location : Location} :
+    Drops store values store' →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ values →
+      ∀ owned, owned ∈ partialValueOwningLocations value →
+        ¬ ProtectedByBase store x owned) →
+    ProtectedByBase store x location →
+    ProtectedByBase store' x location := by
+  intro hdrops
+  induction hdrops generalizing x location with
+  | nil =>
+      intro _hvalid _hheap _hunprotected hprotected
+      exact hprotected
+  | nonOwner hnonOwner _hdrops ih =>
+      intro hvalid hheap hunprotected hprotected
+      exact ih hvalid hheap
+        (by
+          intro value hmem owned howned
+          exact hunprotected value (by simp [hmem]) owned howned)
+        hprotected
+  | ownerMissing howner hmissing _hdrops ih =>
+      intro hvalid hheap hunprotected hprotected
+      exact ih hvalid hheap
+        (by
+          intro value hmem owned howned
+          exact hunprotected value (by simp [hmem]) owned howned)
+        hprotected
+  | ownerPresent howner hpresent _hdrops ih =>
+      intro hvalid hheap hunprotected hprotected
+      rename_i storeBefore _storeAfter ref slot rest
+      have hrefUnprotected :
+          ¬ ProtectedByBase storeBefore x ref.location :=
+        hunprotected (.value (.ref ref)) (by simp) ref.location
+          (mem_partialValueOwningLocations_ref_true howner)
+      exact ih (validStore_erase hvalid) (storeOwnerTargetsHeap_erase hheap)
         (by
           intro value hmem owned howned hprotectedErased
           have hprotectedStore :
@@ -7727,6 +7982,2153 @@ theorem RuntimeEnvAbstraction.safe {store : ProgramStore} {env : Env} :
       ⟨value, hstoreSlot, evidence, _hprotected⟩
     exact ⟨value, hstoreSlot, evidence.valid⟩
 
+/--
+Proof-carrying runtime abstraction with relaxed slot evidence.
+
+This is the transportable replacement for `RuntimeEnvAbstraction` at joins that
+hide initialized branch values behind abstract `undef` slots.  It keeps the
+domain/lifetime facts and, crucially, keeps the protected-dependency payload for
+the concrete evidence hidden below an `undef` upper bound.
+-/
+def RelaxedRuntimeEnvAbstraction (store : ProgramStore) (env : Env) : Prop :=
+  (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+        ∃ envSlot, env.slotAt x = some envSlot) ∧
+  ∀ x envSlot,
+    env.slotAt x = some envSlot →
+    ∃ value,
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } ∧
+      ∃ evidence :
+        RuntimeFrame.RelaxedValidPartialValueEvidence store value envSlot.ty,
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+          ∃ base, ProtectedByBase store base location
+
+/--
+A borrow dependency is protected by a base whose environment slot outlives the
+given lifetime.
+
+`RelaxedRuntimeEnvAbstraction` only records that selected runtime dependencies
+are protected by some base.  Lifetime-drop transport needs the stronger local
+fact that the protecting base itself survives the drop.  This predicate keeps
+that extra lifetime witness separate from the undef-relaxed storage evidence.
+-/
+def ProtectedByBaseOutliving
+    (store : ProgramStore) (env : Env) (lifetime : Lifetime)
+    (location : Location) : Prop :=
+  ∃ base baseSlot,
+    env.slotAt base = some baseSlot ∧
+      baseSlot.lifetime ≤ lifetime ∧
+      ProtectedByBase store base location
+
+/--
+Relaxed runtime abstraction with lifetime-qualified protected dependencies.
+
+This is the storage abstraction suggested by the undef/nonundef merge, but made
+precise: top-level `undef` evidence remains lossy, while every selected
+dependency in non-`undef` evidence is protected by a base slot that outlives the
+slot whose evidence contains the dependency.
+-/
+def RelaxedRuntimeEnvAbstractionWithSlotProtection
+    (store : ProgramStore) (env : Env) : Prop :=
+  (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+        ∃ envSlot, env.slotAt x = some envSlot) ∧
+  ∀ x envSlot,
+    env.slotAt x = some envSlot →
+    ∃ value,
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } ∧
+      ∃ evidence :
+        RuntimeFrame.RelaxedValidPartialValueEvidence store value envSlot.ty,
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+          ProtectedByBaseOutliving store env envSlot.lifetime location
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.relaxed
+    {store : ProgramStore} {env : Env} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    RelaxedRuntimeEnvAbstraction store env := by
+  intro habstraction
+  constructor
+  · exact habstraction.1
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, evidence, hprotected⟩
+    refine ⟨value, hstoreSlot, evidence, ?_⟩
+    intro location hdependency
+    rcases hprotected location hdependency with
+      ⟨base, _baseSlot, _hbaseSlot, _houtlives, hprotectedBase⟩
+    exact ⟨base, hprotectedBase⟩
+
+theorem lval_loc_or_reads_protectedByBaseOutliving_of_safe
+    {store : ProgramStore} {env : Env}
+    {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    ContainedBorrowsWellFormed env →
+    store ∼ₛ env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    LValBaseOutlives env lv current →
+    LValTyping env lv partialTy lifetime →
+    lifetime ≤ current →
+      (∀ {location},
+        store.loc lv = some location →
+          ProtectedByBaseOutliving store env current location) ∧
+      (∀ {location},
+        RuntimeFrame.LocReads store lv location →
+          ProtectedByBaseOutliving store env current location) := by
+  intro hcontained hsafe _hvalidStore _hheap hbase htyping houtlives
+  refine LValTyping.rec
+    (motive_1 := fun lv partialTy lifetime _ =>
+      LValBaseOutlives env lv current →
+      lifetime ≤ current →
+        (∀ {location},
+          store.loc lv = some location →
+            ProtectedByBaseOutliving store env current location) ∧
+        (∀ {location},
+          RuntimeFrame.LocReads store lv location →
+            ProtectedByBaseOutliving store env current location))
+    (motive_2 := fun targets partialTy lifetime _ =>
+      (∀ target, target ∈ targets → LValBaseOutlives env target current) →
+      lifetime ≤ current →
+      ∀ target, target ∈ targets →
+        (∀ {location},
+          store.loc target = some location →
+            ProtectedByBaseOutliving store env current location) ∧
+        (∀ {location},
+          RuntimeFrame.LocReads store target location →
+            ProtectedByBaseOutliving store env current location))
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping hbase houtlives
+  · intro x slot hslot hbase _hslotParent
+    constructor
+    · intro location hloc
+      have hlocation : location = VariableProjection x :=
+        (Option.some.inj hloc).symm
+      subst hlocation
+      rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+      have hbaseSlotX : env.slotAt x = some baseSlot := by
+        simpa [LVal.base] using hbaseSlot
+      exact ⟨x, baseSlot, hbaseSlotX, hbaseOutlives, Or.inl rfl⟩
+    · intro location hreads
+      cases hreads
+  · intro source inner sourceLifetime hsource ihSource hbaseSource
+      hsourceLifetimeParent
+    have hsourceProtected :=
+      ihSource hbaseSource hsourceLifetimeParent
+    constructor
+    · intro location hloc
+      have hsourceAbs :
+          LValLocationAbstraction store source (.box inner) :=
+        lvalTyping_defined_location_of_safe hsafe hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+      rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+      cases hsourceValid with
+      | @box ownerLocation ownerSlot _ hownedSlot _hinnerValid =>
+          have hderefLoc :
+              store.loc source.deref = some ownerLocation := by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+          have hlocationEq : location = ownerLocation := by
+            rw [hloc] at hderefLoc
+            exact Option.some.inj hderefLoc
+          subst location
+          rcases hsourceProtected.1 hsourceLoc with
+            ⟨base, baseSlot, hbaseSlot, hbaseOutlives, hprotectedSource⟩
+          have hownsSource :
+              ProgramStore.OwnsAt store ownerLocation sourceLocation :=
+            ⟨sourceSlotLifetime, by simpa [owningRef] using hsourceSlot⟩
+          exact ⟨base, baseSlot, hbaseSlot, hbaseOutlives,
+            ProtectedByBase.trans_owned hprotectedSource hownsSource⟩
+    · intro location hreads
+      cases hreads with
+      | here hsourceLoc =>
+          exact hsourceProtected.1 hsourceLoc
+      | there hsourceReads =>
+          exact hsourceProtected.2 hsourceReads
+  · intro source mutable targets pointee borrowLifetime targetLifetime
+      hsource htargets ihSource ihTargets hbaseSource htargetLifetimeParent
+    have hborrowLifetimeParent : borrowLifetime ≤ current :=
+      LValTyping.lifetime_outlives_of_base_outlives_one
+        hcontained hsource hbaseSource
+    have hsourceProtected := ihSource hbaseSource hborrowLifetimeParent
+    have hwellTargetsAtBorrow :
+        BorrowTargetsWellFormed env targets borrowLifetime :=
+      LValTyping.containedBorrowTargetsWellFormed_at_lifetime
+        hcontained hsource PartialTyContains.here
+    have hwellTargetsParent : BorrowTargetsWellFormed env targets current :=
+      BorrowTargetsWellFormed.weaken hwellTargetsAtBorrow hborrowLifetimeParent
+    have hbaseTargets :
+        ∀ target, target ∈ targets → LValBaseOutlives env target current := by
+      intro target htarget
+      rcases BorrowTargetsWellFormed.member hwellTargetsParent target htarget with
+        ⟨_targetTy, _selectedLifetime, _htargetTyping, _houtlives,
+          hbaseTarget⟩
+      exact hbaseTarget
+    have htargetsProtected := ihTargets hbaseTargets htargetLifetimeParent
+    constructor
+    · intro location hloc
+      have hsourceAbs :
+          LValLocationAbstraction store source
+            (.ty (.borrow mutable targets pointee)) :=
+        lvalTyping_defined_location_of_safe hsafe hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+      rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+      cases hsourceValid with
+      | @borrow selectedLocation _mutable _targets _pointee selected hmem
+          hselectedLoc =>
+          have hderefLoc :
+              store.loc source.deref = some selectedLocation := by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+          have hlocationEq : location = selectedLocation := by
+            rw [hloc] at hderefLoc
+            exact Option.some.inj hderefLoc
+          subst location
+          exact (htargetsProtected selected hmem).1 hselectedLoc
+    · intro location hreads
+      cases hreads with
+      | here hsourceLoc =>
+          exact hsourceProtected.1 hsourceLoc
+      | there hsourceReads =>
+          exact hsourceProtected.2 hsourceReads
+  · intro _ty _hvars _hbaseTargets _htargetLifetimeParent target hmem
+    cases hmem
+  · intro onlyTarget ty targetLifetime htarget ihTarget hbaseTargets
+      htargetLifetimeParent queried hmem
+    have hqueriedEq : queried = onlyTarget := by
+      simpa using hmem
+    subst queried
+    exact ihTarget (hbaseTargets onlyTarget (by simp)) htargetLifetimeParent
+  · intro headTarget rest headTy headLifetime restLifetime targetLifetime restTy
+      unionTy hhead hrest hunion hintersection ihHead ihRest hbaseTargets
+      htargetLifetimeParent queried hmem
+    simp at hmem
+    rcases hmem with hqueriedHead | hqueriedRest
+    · subst queried
+      exact ihHead (hbaseTargets headTarget (by simp))
+        (LifetimeOutlives.trans
+          (LifetimeIntersection.left_le hintersection) htargetLifetimeParent)
+    · exact ihRest
+        (by
+          intro target htarget
+          exact hbaseTargets target (by simp [htarget]))
+        (LifetimeOutlives.trans
+          (LifetimeIntersection.right_le hintersection) htargetLifetimeParent)
+        queried hqueriedRest
+
+theorem borrowDependency_protectedByBaseOutliving_of_safe
+    {store : ProgramStore} {env : Env} {slotLifetime : Lifetime}
+    {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
+    ContainedBorrowsWellFormed env →
+    store ∼ₛ env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+    RuntimeFrame.BorrowDependency store value partialTy dependency →
+    ProtectedByBaseOutliving store env slotLifetime dependency := by
+  intro hcontained hsafe hvalidStore hheap hborrows hdependency
+  induction hdependency generalizing env slotLifetime with
+  | @borrow location readLocation mutable targets pointee target hmem hloc hreads =>
+      rcases hborrows PartialTyContains.here target hmem with
+        ⟨targetTy, targetLifetime, htargetTyping, htargetOutlives,
+          hbaseTarget⟩
+      exact (lval_loc_or_reads_protectedByBaseOutliving_of_safe
+        hcontained hsafe hvalidStore hheap hbaseTarget htargetTyping
+        htargetOutlives).2 hreads
+  | @boxInner location slot inner dependency hslot hinner ih =>
+      have hinnerBorrows :
+          PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
+        intro mutable targets pointee hcontains
+        exact hborrows (PartialTyContains.box hcontains)
+      exact ih (env := env) (slotLifetime := slotLifetime)
+        hcontained hsafe hinnerBorrows
+  | @boxFullInner location slot ty dependency hslot hinner ih =>
+      have hinnerBorrows :
+          PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty ty) := by
+        intro mutable targets pointee hcontains
+        exact hborrows (PartialTyContains.tyBox hcontains)
+      exact ih (env := env) (slotLifetime := slotLifetime)
+        hcontained hsafe hinnerBorrows
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.of_wellFormed
+    {store : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env := by
+  intro hwellFormed hsafe hvalidStore hheap
+  constructor
+  · exact hsafe.1
+  · intro x envSlot henvSlot
+    rcases hsafe.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, hvalid⟩
+    rcases RuntimeFrame.ValidPartialValueEvidence.exists_of_valid hvalid with
+      ⟨strictEvidence, _⟩
+    refine ⟨value, hstoreSlot,
+      RuntimeFrame.RelaxedValidPartialValueEvidence.of_strict strictEvidence,
+      ?_⟩
+    intro location hdependency
+    have hstrictDependency :
+        RuntimeFrame.EvidenceBorrowDependency store strictEvidence location :=
+      RuntimeFrame.EvidenceBorrowDependency.of_relaxed_of_strict hdependency
+    have hborrows :
+        PartialTyBorrowsWellFormedInSlot env envSlot.lifetime envSlot.ty := by
+      intro mutable targets pointee hcontains
+      exact hwellFormed.1 x envSlot mutable targets pointee henvSlot
+        ⟨envSlot, henvSlot, hcontains⟩
+    exact borrowDependency_protectedByBaseOutliving_of_safe
+      hwellFormed.1 hsafe hvalidStore hheap hborrows
+      (RuntimeFrame.SelectedBorrowDependency.borrowDependency
+        (RuntimeFrame.EvidenceBorrowDependency.selected hstrictDependency))
+
+theorem RuntimeEnvAbstraction.relaxed {store : ProgramStore} {env : Env} :
+    RuntimeEnvAbstraction store env →
+    RelaxedRuntimeEnvAbstraction store env := by
+  intro habstraction
+  constructor
+  · exact habstraction.1
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, evidence, hprotected⟩
+    refine ⟨value, hstoreSlot,
+      RuntimeFrame.RelaxedValidPartialValueEvidence.of_strict evidence, ?_⟩
+    intro location hdependency
+    exact hprotected location
+      (RuntimeFrame.EvidenceBorrowDependency.of_relaxed_of_strict hdependency)
+
+theorem RelaxedRuntimeEnvAbstraction.relaxedSafe {store : ProgramStore}
+    {env : Env} :
+    RelaxedRuntimeEnvAbstraction store env →
+    RuntimeFrame.RelaxedSafeAbstraction store env := by
+  intro habstraction
+  constructor
+  · exact habstraction.1
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, evidence, _hprotected⟩
+    exact ⟨value, hstoreSlot, evidence, trivial⟩
+
+/--
+Relaxed variant of `dropsAvoids_var_of_base_outlives_lifetimeDrop`.
+
+For lifetime drops the root variable avoidance argument only needs domain and
+lifetime agreement between the runtime store and the environment.  It does not
+inspect the slot's concrete value evidence, so the relaxed abstraction is enough.
+-/
+theorem dropsAvoids_var_of_base_outlives_lifetimeDrop_of_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {x : Name} {slot : EnvSlot} :
+    RelaxedRuntimeEnvAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    LifetimeChild parent child →
+    env.slotAt x = some slot →
+    slot.lifetime ≤ parent →
+    DropsAvoids store dropSet (VariableProjection x) := by
+  intro habstraction hheap hdropSet hdrops hchild henvSlot hslotParent
+  rcases habstraction.2 x slot henvSlot with
+    ⟨oldValue, hstoreSlot, _evidence, _hprotected⟩
+  exact dropsAvoids_var_of_not_owning_var hdrops hheap (by
+    intro dropValue hmem hownsVar
+    rcases (hdropSet dropValue).mp hmem with
+      ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
+    have howned : (VariableProjection x : Location) = dropLocation :=
+      eq_location_of_mem_lifetime_drop_value hdropValue hownsVar
+    subst howned
+    have hdropSlotEq :
+        dropSlot = { value := oldValue, lifetime := slot.lifetime } := by
+      rw [hstoreSlot] at hdropSlot
+      injection hdropSlot with hdropSlotEq
+      exact hdropSlotEq.symm
+    subst hdropSlotEq
+    have hchildParent : child ≤ parent := by
+      rw [← hdropLifetime]
+      exact hslotParent
+    exact LifetimeChild.not_child_outlives_parent hchild hchildParent)
+
+theorem RelaxedRuntimeEnvAbstraction.fullSlotEvidence {store : ProgramStore}
+    {env : Env} {x : Name} {envSlot : EnvSlot} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.slotAt x = some envSlot →
+    envSlot.ty = .ty ty →
+    ∃ value,
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } ∧
+      ∃ evidence :
+        RuntimeFrame.ValidPartialValueEvidence store value (.ty ty),
+        ∀ location,
+          RuntimeFrame.EvidenceBorrowDependency store evidence location →
+          ∃ base, ProtectedByBase store base location := by
+  intro habstraction henvSlot hty
+  cases envSlot with
+  | mk slotTy slotLifetime =>
+      simp at hty
+      rcases habstraction.2 x { ty := slotTy, lifetime := slotLifetime }
+          henvSlot with
+        ⟨value, hstoreSlot, evidence, hprotected⟩
+      cases hty
+      refine ⟨value, hstoreSlot,
+        RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_full evidence, ?_⟩
+      intro location hdependency
+      exact hprotected location
+        (RuntimeFrame.RelaxedEvidenceBorrowDependency.of_to_strict_full hdependency)
+
+/--
+Relaxed lvalue-location abstraction.
+
+This is the access-level analogue of `RelaxedRuntimeEnvAbstraction`: typed
+lvalues still denote concrete locations, but their slot evidence may be relaxed
+when the abstract partial type contains `undef`.
+-/
+def RelaxedLValLocationAbstraction
+    (store : ProgramStore) (lv : LVal) (ty : PartialTy) : Prop :=
+  ∃ location slot,
+    store.loc lv = some location ∧
+    store.slotAt location = some slot ∧
+    ∃ _evidence :
+      RuntimeFrame.RelaxedValidPartialValueEvidence store slot.value ty,
+      True
+
+def ProtectedRelaxedLValLocationAbstraction
+    (store : ProgramStore) (lv : LVal) (ty : PartialTy) : Prop :=
+  ∃ location slot,
+    store.loc lv = some location ∧
+    store.slotAt location = some slot ∧
+    ∃ evidence :
+      RuntimeFrame.RelaxedValidPartialValueEvidence store slot.value ty,
+      ∀ dependency,
+        RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence dependency →
+        ∃ base, ProtectedByBase store base dependency
+
+def RelaxedLValDefinedLocationAbstraction
+    (store : ProgramStore) (lv : LVal) : PartialTy → Prop
+  | .undef _ => True
+  | ty => RelaxedLValLocationAbstraction store lv ty
+
+def ProtectedRelaxedLValDefinedLocationAbstraction
+    (store : ProgramStore) (lv : LVal) : PartialTy → Prop
+  | .undef _ => True
+  | ty => ProtectedRelaxedLValLocationAbstraction store lv ty
+
+theorem RuntimeFrame.RelaxedEvidenceBorrowDependency.box_of_inner
+    {store : ProgramStore} {value : PartialValue} {inner : PartialTy}
+    {evidence :
+      RuntimeFrame.RelaxedValidPartialValueEvidence store value (.box inner)}
+    {dependency : Location} :
+    RuntimeFrame.RelaxedEvidenceBorrowDependency store
+      (RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv
+        evidence).innerEvidence dependency →
+    RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence dependency := by
+  cases evidence with
+  | box _hslot _hinner =>
+      intro hdependency
+      exact RuntimeFrame.RelaxedEvidenceBorrowDependency.boxInner hdependency
+
+theorem ProtectedRelaxedLValLocationAbstraction.relaxed
+    {store : ProgramStore} {lv : LVal} {ty : PartialTy} :
+    ProtectedRelaxedLValLocationAbstraction store lv ty →
+    RelaxedLValLocationAbstraction store lv ty := by
+  intro hlocation
+  rcases hlocation with
+    ⟨location, slot, hloc, hslot, evidence, _hprotected⟩
+  exact ⟨location, slot, hloc, hslot, evidence, trivial⟩
+
+theorem RelaxedLValLocationAbstraction.strict_full {store : ProgramStore}
+    {lv : LVal} {ty : Ty} :
+    RelaxedLValLocationAbstraction store lv (.ty ty) →
+    LValLocationAbstraction store lv (.ty ty) := by
+  intro hlocation
+  rcases hlocation with
+    ⟨location, slot, hloc, hslot, evidence, _⟩
+  exact ⟨location, slot, hloc, hslot,
+    (RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_full
+      evidence).valid⟩
+
+theorem RelaxedLValLocationAbstraction.strict_concrete {store : ProgramStore}
+    {lv : LVal} {ty : PartialTy} :
+    RuntimeFrame.PartialTy.Concrete ty →
+    RelaxedLValLocationAbstraction store lv ty →
+    LValLocationAbstraction store lv ty := by
+  intro hconcrete hlocation
+  rcases hlocation with
+    ⟨location, slot, hloc, hslot, evidence, _⟩
+  exact ⟨location, slot, hloc, hslot,
+    (RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_concrete
+      hconcrete evidence).valid⟩
+
+theorem lvalTyping_relaxed_defined_location_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv ty lifetime →
+    RelaxedLValDefinedLocationAbstraction store lv ty := by
+  intro habstraction htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv ty _ _ =>
+      RelaxedLValDefinedLocationAbstraction store lv ty)
+    (motive_2 := fun targets unionTy _ _ =>
+      ∀ target,
+        target ∈ targets →
+        ∃ ty,
+          RelaxedLValLocationAbstraction store target (.ty ty) ∧
+          PartialTyStrengthens (.ty ty) unionTy)
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
+  · intro x slot hslot
+    rcases slot with ⟨slotTy, slotLifetime⟩
+    cases slotTy with
+    | ty fullTy =>
+        change RelaxedLValLocationAbstraction store (.var x) (.ty fullTy)
+        rcases habstraction.2 x { ty := .ty fullTy, lifetime := slotLifetime }
+            hslot with
+          ⟨value, hstoreSlot, evidence, _hprotected⟩
+        exact ⟨VariableProjection x,
+          { value := value, lifetime := slotLifetime },
+          by simp [ProgramStore.loc, VariableProjection],
+          by simpa [VariableProjection] using hstoreSlot,
+          evidence, trivial⟩
+    | box inner =>
+        change RelaxedLValLocationAbstraction store (.var x) (.box inner)
+        rcases habstraction.2 x { ty := .box inner, lifetime := slotLifetime }
+            hslot with
+          ⟨value, hstoreSlot, evidence, _hprotected⟩
+        exact ⟨VariableProjection x,
+          { value := value, lifetime := slotLifetime },
+          by simp [ProgramStore.loc, VariableProjection],
+          by simpa [VariableProjection] using hstoreSlot,
+          evidence, trivial⟩
+    | undef shape =>
+        simp [RelaxedLValDefinedLocationAbstraction]
+  · intro _lv inner _lifetime _htyping ih
+    cases inner with
+    | ty fullTy =>
+        change RelaxedLValLocationAbstraction store (.deref _lv) (.ty fullTy)
+        change RelaxedLValLocationAbstraction store _lv (.box (.ty fullTy)) at ih
+        rcases ih with ⟨source, sourceSlot, hsourceLoc, hsourceSlot,
+          sourceEvidence, _⟩
+        let hbox :=
+          RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+        exact ⟨hbox.location, hbox.slot, by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hbox.value_eq],
+          hbox.slotAt, hbox.innerEvidence, trivial⟩
+    | box inner =>
+        change RelaxedLValLocationAbstraction store (.deref _lv) (.box inner)
+        change RelaxedLValLocationAbstraction store _lv (.box (.box inner)) at ih
+        rcases ih with ⟨source, sourceSlot, hsourceLoc, hsourceSlot,
+          sourceEvidence, _⟩
+        let hbox :=
+          RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+        exact ⟨hbox.location, hbox.slot, by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hbox.value_eq],
+          hbox.slotAt, hbox.innerEvidence, trivial⟩
+    | undef shape =>
+        simp [RelaxedLValDefinedLocationAbstraction]
+  · intro lv mutable targets pointee _borrowLifetime _targetLifetime
+      _hborrow _htargets ihBorrow ihTargets
+    simp [RelaxedLValDefinedLocationAbstraction] at ihBorrow ⊢
+    change RelaxedLValLocationAbstraction store lv
+      (.ty (.borrow mutable targets pointee)) at ihBorrow
+    rcases ihBorrow with
+      ⟨source, sourceSlot, hsourceLoc, hsourceSlot, sourceEvidence, _⟩
+    rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+    let hborrow :=
+      RuntimeFrame.RelaxedValidPartialValueEvidence.borrow_inv sourceEvidence
+    rcases ihTargets hborrow.target hborrow.target_mem with
+          ⟨selectedTy, hselectedLocation, hstrength⟩
+    rcases hselectedLocation with
+      ⟨selectedLocation, selectedSlot, hselectedLoc,
+        hselectedSlot, selectedEvidence, _⟩
+    rcases RuntimeFrame.RelaxedValidPartialValueEvidence.strengthen_exists
+        selectedEvidence hstrength with
+      ⟨pointeeEvidence, _hrel⟩
+    exact ⟨selectedLocation, selectedSlot, by
+        have hselectedEq : selectedLocation = hborrow.location := by
+          have hborrowTargetLoc :
+              store.loc hborrow.target = some hborrow.location :=
+            hborrow.target_loc
+          rw [hselectedLoc] at hborrowTargetLoc
+          exact Option.some.inj hborrowTargetLoc
+        have hsourceValueEq :
+            sourceValue =
+              .value (.ref { location := hborrow.location, owner := false }) := by
+          simpa using hborrow.value_eq
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+        rw [hsourceValueEq]
+        simp [hselectedEq],
+      hselectedSlot,
+      pointeeEvidence, trivial⟩
+  · intro ty _hvars selected hmem
+    simp at hmem
+  · intro target ty _lifetime _htarget ihTarget selected hmem
+    simp at hmem
+    subst hmem
+    exact ⟨ty, ihTarget, PartialTyStrengthens.reflex⟩
+  · intro target rest headTy _headLifetime _restLifetime _lifetime _restTy unionTy
+      _hhead _hrest hunion _hintersection ihHead ihRest selected hmem
+    simp at hmem
+    rcases hmem with hselected | hselected
+    · subst hselected
+      exact ⟨headTy, ihHead, PartialTyUnion.left_strengthens hunion⟩
+    · rcases ihRest selected hselected with
+        ⟨selectedTy, hlocation, hstrength⟩
+      exact ⟨selectedTy, hlocation,
+        partialTyStrengthens_trans hstrength
+          (PartialTyUnion.right_strengthens hunion)⟩
+
+theorem lvalTyping_protected_relaxed_defined_location_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv ty lifetime →
+    ProtectedRelaxedLValDefinedLocationAbstraction store lv ty := by
+  intro habstraction htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv ty _ _ =>
+      ProtectedRelaxedLValDefinedLocationAbstraction store lv ty)
+    (motive_2 := fun targets unionTy _ _ =>
+      ∀ target,
+        target ∈ targets →
+        ∃ ty,
+          ProtectedRelaxedLValLocationAbstraction store target (.ty ty) ∧
+          PartialTyStrengthens (.ty ty) unionTy)
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
+  · intro x slot hslot
+    rcases slot with ⟨slotTy, slotLifetime⟩
+    cases slotTy with
+    | ty fullTy =>
+        change ProtectedRelaxedLValLocationAbstraction store (.var x)
+          (.ty fullTy)
+        rcases habstraction.2 x { ty := .ty fullTy, lifetime := slotLifetime }
+            hslot with
+          ⟨value, hstoreSlot, evidence, hprotected⟩
+        exact ⟨VariableProjection x,
+          { value := value, lifetime := slotLifetime },
+          by simp [ProgramStore.loc, VariableProjection],
+          by simpa [VariableProjection] using hstoreSlot,
+          evidence, hprotected⟩
+    | box inner =>
+        change ProtectedRelaxedLValLocationAbstraction store (.var x)
+          (.box inner)
+        rcases habstraction.2 x { ty := .box inner, lifetime := slotLifetime }
+            hslot with
+          ⟨value, hstoreSlot, evidence, hprotected⟩
+        exact ⟨VariableProjection x,
+          { value := value, lifetime := slotLifetime },
+          by simp [ProgramStore.loc, VariableProjection],
+          by simpa [VariableProjection] using hstoreSlot,
+          evidence, hprotected⟩
+    | undef shape =>
+        simp [ProtectedRelaxedLValDefinedLocationAbstraction]
+  · intro _lv inner _lifetime _htyping ih
+    cases inner with
+    | ty fullTy =>
+        change ProtectedRelaxedLValLocationAbstraction store (.deref _lv)
+          (.ty fullTy)
+        change ProtectedRelaxedLValLocationAbstraction store _lv
+          (.box (.ty fullTy)) at ih
+        rcases ih with ⟨source, sourceSlot, hsourceLoc, hsourceSlot,
+          sourceEvidence, hsourceProtected⟩
+        let hbox :=
+          RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+        exact ⟨hbox.location, hbox.slot, by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hbox.value_eq],
+          hbox.slotAt, hbox.innerEvidence, by
+            intro dependency hdependency
+            exact hsourceProtected dependency
+              (RuntimeFrame.RelaxedEvidenceBorrowDependency.box_of_inner
+                (evidence := sourceEvidence) hdependency)⟩
+    | box inner =>
+        change ProtectedRelaxedLValLocationAbstraction store (.deref _lv)
+          (.box inner)
+        change ProtectedRelaxedLValLocationAbstraction store _lv
+          (.box (.box inner)) at ih
+        rcases ih with ⟨source, sourceSlot, hsourceLoc, hsourceSlot,
+          sourceEvidence, hsourceProtected⟩
+        let hbox :=
+          RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+        exact ⟨hbox.location, hbox.slot, by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hbox.value_eq],
+          hbox.slotAt, hbox.innerEvidence, by
+            intro dependency hdependency
+            exact hsourceProtected dependency
+              (RuntimeFrame.RelaxedEvidenceBorrowDependency.box_of_inner
+                (evidence := sourceEvidence) hdependency)⟩
+    | undef shape =>
+        simp [ProtectedRelaxedLValDefinedLocationAbstraction]
+  · intro lv mutable targets pointee _borrowLifetime _targetLifetime
+      _hborrow _htargets ihBorrow ihTargets
+    simp [ProtectedRelaxedLValDefinedLocationAbstraction] at ihBorrow ⊢
+    change ProtectedRelaxedLValLocationAbstraction store lv
+      (.ty (.borrow mutable targets pointee)) at ihBorrow
+    rcases ihBorrow with
+      ⟨source, sourceSlot, hsourceLoc, hsourceSlot, sourceEvidence,
+        _sourceProtected⟩
+    rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+    let hborrow :=
+      RuntimeFrame.RelaxedValidPartialValueEvidence.borrow_inv sourceEvidence
+    rcases ihTargets hborrow.target hborrow.target_mem with
+      ⟨selectedTy, hselectedLocation, hstrength⟩
+    rcases hselectedLocation with
+      ⟨selectedLocation, selectedSlot, hselectedLoc,
+        hselectedSlot, selectedEvidence, hselectedProtected⟩
+    rcases RuntimeFrame.RelaxedValidPartialValueEvidence.strengthen_exists
+        selectedEvidence hstrength with
+      ⟨pointeeEvidence, hrel⟩
+    exact ⟨selectedLocation, selectedSlot, by
+        have hselectedEq : selectedLocation = hborrow.location := by
+          have hborrowTargetLoc :
+              store.loc hborrow.target = some hborrow.location :=
+            hborrow.target_loc
+          rw [hselectedLoc] at hborrowTargetLoc
+          exact Option.some.inj hborrowTargetLoc
+        have hsourceValueEq :
+            sourceValue =
+              .value (.ref { location := hborrow.location, owner := false }) := by
+          simpa using hborrow.value_eq
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+        rw [hsourceValueEq]
+        simp [hselectedEq],
+      hselectedSlot,
+      pointeeEvidence, by
+        intro dependency hdependency
+        exact hselectedProtected dependency
+          (RuntimeFrame.RelaxedEvidenceBorrowDependency.of_strengthens
+            hrel hdependency)⟩
+  · intro ty _hvars selected hmem
+    simp at hmem
+  · intro target ty _lifetime _htarget ihTarget selected hmem
+    simp at hmem
+    subst hmem
+    exact ⟨ty, ihTarget, PartialTyStrengthens.reflex⟩
+  · intro target rest headTy _headLifetime _restLifetime _lifetime _restTy unionTy
+      _hhead _hrest hunion _hintersection ihHead ihRest selected hmem
+    simp at hmem
+    rcases hmem with hselected | hselected
+    · subst hselected
+      exact ⟨headTy, ihHead, PartialTyUnion.left_strengthens hunion⟩
+    · rcases ihRest selected hselected with
+        ⟨selectedTy, hlocation, hstrength⟩
+      exact ⟨selectedTy, hlocation,
+        partialTyStrengthens_trans hstrength
+          (PartialTyUnion.right_strengthens hunion)⟩
+
+theorem lvalTyping_location_full_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty ty) lifetime →
+    LValLocationAbstraction store lv (.ty ty) := by
+  intro habstraction htyping
+  exact RelaxedLValLocationAbstraction.strict_full
+    (lvalTyping_relaxed_defined_location_of_relaxed
+      habstraction htyping)
+
+theorem lvalTyping_protected_location_full_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty ty) lifetime →
+    ProtectedRelaxedLValLocationAbstraction store lv (.ty ty) := by
+  intro habstraction htyping
+  exact lvalTyping_protected_relaxed_defined_location_of_relaxed
+    habstraction htyping
+
+theorem lvalTyping_loc_and_reads_protected_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv ty lifetime →
+    (∀ location,
+      store.loc lv = some location →
+      ∃ base, ProtectedByBase store base location) ∧
+    (∀ location,
+      RuntimeFrame.LocReads store lv location →
+      ∃ base, ProtectedByBase store base location) := by
+  intro habstraction htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv _ _ _ =>
+      (∀ location,
+        store.loc lv = some location →
+        ∃ base, ProtectedByBase store base location) ∧
+      (∀ location,
+        RuntimeFrame.LocReads store lv location →
+        ∃ base, ProtectedByBase store base location))
+    (motive_2 := fun targets _ _ _ =>
+      ∀ target, target ∈ targets →
+        (∀ location,
+          store.loc target = some location →
+          ∃ base, ProtectedByBase store base location) ∧
+        (∀ location,
+          RuntimeFrame.LocReads store target location →
+          ∃ base, ProtectedByBase store base location))
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
+  · intro x slot hslot
+    constructor
+    · intro location hloc
+      have hlocation : location = VariableProjection x := by
+        exact (Option.some.inj hloc).symm
+      subst hlocation
+      exact ⟨x, Or.inl rfl⟩
+    · intro location hreads
+      cases hreads
+  · intro source inner lifetime hsource ihSource
+    constructor
+    · intro location hloc
+      have hsourceAbs :
+          RelaxedLValLocationAbstraction store source (.box inner) :=
+        lvalTyping_relaxed_defined_location_of_relaxed
+          habstraction hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+          sourceEvidence, _⟩
+      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+      let hbox :=
+        RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+      have hsourceValueEq :
+          sourceValue =
+            .value (.ref { location := hbox.location, owner := true }) := by
+        simpa using hbox.value_eq
+      have hderefLoc : store.loc source.deref = some hbox.location := by
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hsourceValueEq]
+      have hlocationEq : location = hbox.location := by
+        rw [hloc] at hderefLoc
+        exact Option.some.inj hderefLoc
+      subst hlocationEq
+      rcases ihSource.1 sourceLocation hsourceLoc with
+        ⟨base, hsourceProtected⟩
+      exact ⟨base,
+        ProtectedByBase.trans_owned hsourceProtected
+          ⟨sourceLifetime, by simpa [owningRef, hsourceValueEq] using hsourceSlot⟩⟩
+    · intro location hreads
+      cases hreads with
+      | here hsourceLoc =>
+          exact ihSource.1 location hsourceLoc
+      | there hsourceReads =>
+          exact ihSource.2 location hsourceReads
+  · intro source mutable targets pointee borrowLifetime targetLifetime
+      hsource htargets ihSource ihTargets
+    constructor
+    · intro location hloc
+      have hsourceAbs :
+          RelaxedLValLocationAbstraction store source
+            (.ty (.borrow mutable targets pointee)) :=
+        lvalTyping_relaxed_defined_location_of_relaxed
+          habstraction hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+          sourceEvidence, _⟩
+      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+      let hborrow :=
+        RuntimeFrame.RelaxedValidPartialValueEvidence.borrow_inv sourceEvidence
+      rcases ihTargets hborrow.target hborrow.target_mem with htargetProtected
+      have hderefLoc : store.loc source.deref = some hborrow.location := by
+        have hsourceValueEq :
+            sourceValue =
+              .value (.ref { location := hborrow.location, owner := false }) := by
+          simpa using hborrow.value_eq
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hsourceValueEq]
+      have hlocationEq : location = hborrow.location := by
+        rw [hloc] at hderefLoc
+        exact Option.some.inj hderefLoc
+      subst hlocationEq
+      exact htargetProtected.1 hborrow.location hborrow.target_loc
+    · intro location hreads
+      cases hreads with
+      | here hsourceLoc =>
+          exact ihSource.1 location hsourceLoc
+      | there hsourceReads =>
+          exact ihSource.2 location hsourceReads
+  · intro _ty _hvars selected hmem
+    simp at hmem
+  · intro target ty lifetime htarget ihTarget selected hmem
+    simp at hmem
+    subst hmem
+    exact ihTarget
+  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+      hhead hrest hunion hintersection ihHead ihRest selected hmem
+    simp at hmem
+    rcases hmem with hselected | hselected
+    · subst hselected
+      exact ihHead
+    · exact ihRest selected hselected
+
+theorem lvalTyping_allocated_location_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv ty lifetime →
+    LValAllocatedLocation store lv := by
+  intro habstraction htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv _ _ _ => LValAllocatedLocation store lv)
+    (motive_2 := fun targets _ _ _ =>
+      ∀ target, target ∈ targets → LValAllocatedLocation store target)
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
+  · intro x slot hslot
+    rcases slot with ⟨slotTy, slotLifetime⟩
+    rcases habstraction.2 x { ty := slotTy, lifetime := slotLifetime } hslot with
+      ⟨value, hstoreSlot, _evidence, _hprotected⟩
+    exact ⟨VariableProjection x, { value := value, lifetime := slotLifetime },
+      by simp [ProgramStore.loc, VariableProjection],
+      by simpa [VariableProjection] using hstoreSlot⟩
+  · intro lv inner _lifetime hbox _ih
+    have hsourceAbs :
+        RelaxedLValLocationAbstraction store lv (.box inner) :=
+      lvalTyping_relaxed_defined_location_of_relaxed habstraction hbox
+    rcases hsourceAbs with
+      ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, sourceEvidence, _⟩
+    rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+    let hboxEvidence :=
+      RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+    have hsourceValueEq :
+        sourceValue =
+          .value (.ref { location := hboxEvidence.location, owner := true }) := by
+      simpa using hboxEvidence.value_eq
+    exact ⟨hboxEvidence.location, hboxEvidence.slot, by
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hsourceValueEq],
+      hboxEvidence.slotAt⟩
+  · intro lv mutable targets pointee _borrowLifetime _targetLifetime
+      hborrow _htargets _ihBorrow ihTargets
+    rcases lvalTyping_location_full_of_relaxed habstraction hborrow with
+      ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hvalidBorrow⟩
+    rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+    cases hvalidBorrow with
+    | borrow hmem htargetLocFromBorrow =>
+        rcases ihTargets _ hmem with
+          ⟨targetLocation, targetSlot, htargetLoc, htargetSlot⟩
+        exact ⟨targetLocation, targetSlot, by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+            simpa [htargetLoc] using htargetLocFromBorrow.symm,
+          htargetSlot⟩
+  · intro _ty _hvars selected hmem
+    simp at hmem
+  · intro _target _ty _lifetime _htarget ihTarget selected hmem
+    simp at hmem
+    subst hmem
+    exact ihTarget
+  · intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
+      _unionTy _hhead _hrest _hunion _hintersection ihHead ihRest selected hmem
+    simp at hmem
+    rcases hmem with hselected | hselected
+    · subst hselected
+      exact ihHead
+    · exact ihRest selected hselected
+
+/-- `R-Copy` progress from relaxed storage abstraction. -/
+theorem progress_copy_lval_of_relaxed {store : ProgramStore} {env : Env}
+    {stepLifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty ty) valueLifetime →
+    ∃ value,
+      Step store stepLifetime (.copy lv) store (.val value) := by
+  intro habstraction htyping
+  rcases readPreservation_of_location
+      (lvalTyping_location_full_of_relaxed habstraction htyping) with
+    ⟨value, runtimeSlot, hread, hslotValue, _hvalid⟩
+  rcases runtimeSlot with ⟨partialValue, runtimeLifetime⟩
+  cases hslotValue
+  exact ⟨value, Step.copy (valueLifetime := runtimeLifetime) hread⟩
+
+/-- `R-Move` progress from relaxed storage abstraction. -/
+theorem progress_move_lval_of_relaxed {store : ProgramStore} {env : Env}
+    {stepLifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty ty) valueLifetime →
+    ∃ value store',
+      Step store stepLifetime (.move lv) store' (.val value) := by
+  intro habstraction htyping
+  have hlocation : LValLocationAbstraction store lv (.ty ty) :=
+    lvalTyping_location_full_of_relaxed habstraction htyping
+  rcases readPreservation_of_location hlocation with
+    ⟨value, runtimeSlot, hread, hslotValue, _hvalid⟩
+  rcases write_defined_of_location (value := PartialValue.undef) hlocation with
+    ⟨store', hwrite⟩
+  rcases runtimeSlot with ⟨partialValue, runtimeLifetime⟩
+  cases hslotValue
+  exact ⟨value, store', Step.move (valueLifetime := runtimeLifetime) hread hwrite⟩
+
+/-- `R-Borrow` progress from relaxed storage abstraction. -/
+theorem progress_borrow_lval_of_relaxed {store : ProgramStore} {env : Env}
+    {stepLifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
+    {mutable : Bool} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty ty) valueLifetime →
+    ∃ location,
+      Step store stepLifetime (.borrow mutable lv) store
+        (.val (.ref { location := location, owner := false })) := by
+  intro habstraction htyping
+  rcases lvalTyping_location_full_of_relaxed habstraction htyping with
+    ⟨location, _slot, hloc, _hslot, _hvalid⟩
+  exact ⟨location, Step.borrow hloc⟩
+
+theorem progress_copy_typing_of_relaxed {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {stepLifetime : Lifetime} {lv : LVal} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    TermTyping env typing stepLifetime (.copy lv) ty env₂ →
+    ProgressResult store stepLifetime (.copy lv) := by
+  intro habstraction htyping
+  cases htyping with
+  | copy hLv _copyTy _hreadProhibited =>
+      rcases progress_copy_lval_of_relaxed habstraction hLv with
+        ⟨value, hstep⟩
+      exact Or.inr ⟨store, .val value, hstep⟩
+
+theorem progress_move_typing_of_relaxed {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {stepLifetime : Lifetime} {lv : LVal} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    TermTyping env typing stepLifetime (.move lv) ty env₂ →
+    ProgressResult store stepLifetime (.move lv) := by
+  intro habstraction htyping
+  cases htyping with
+  | move hLv _hwriteProhibited _hmove =>
+      rcases progress_move_lval_of_relaxed habstraction hLv with
+        ⟨value, store', hstep⟩
+      exact Or.inr ⟨store', .val value, hstep⟩
+
+theorem progress_borrow_typing_of_relaxed {store : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {stepLifetime : Lifetime}
+    {lv : LVal} {ty : Ty} {mutable : Bool} :
+    RelaxedRuntimeEnvAbstraction store env →
+    TermTyping env typing stepLifetime (.borrow mutable lv) ty env₂ →
+    ProgressResult store stepLifetime (.borrow mutable lv) := by
+  intro habstraction htyping
+  cases htyping with
+  | mutBorrow hLv _hmut _hwriteProhibited =>
+      rcases progress_borrow_lval_of_relaxed (mutable := true)
+          habstraction hLv with
+        ⟨location, hstep⟩
+      exact Or.inr ⟨store, .val (.ref { location := location, owner := false }),
+        hstep⟩
+  | immBorrow hLv _hreadProhibited =>
+      rcases progress_borrow_lval_of_relaxed (mutable := false)
+          habstraction hLv with
+        ⟨location, hstep⟩
+      exact Or.inr ⟨store, .val (.ref { location := location, owner := false }),
+        hstep⟩
+
+theorem progress_assign_value_typing_of_relaxed {store : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lhs : LVal} {value : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    OperationalStoreProgress store →
+    TermTyping env typing lifetime (.assign lhs (.val value)) ty env₂ →
+    ProgressResult store lifetime (.assign lhs (.val value)) := by
+  intro habstraction hstore htyping
+  cases htyping with
+  | assign hRhs hLhsPost _hshape _hwf _hwriteEnv _hranked _htargets
+      _hnotWriteProhibited =>
+      cases hRhs with
+      | const _hvalue =>
+          rcases read_defined_of_allocated
+              (lvalTyping_allocated_location_of_relaxed habstraction hLhsPost) with
+            ⟨oldSlot, hread⟩
+          exact progress_assign_value hstore hread
+
+theorem progress_assign_typing_of_relaxed {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lhs : LVal} {rhs : Term} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime (.assign lhs rhs) ty env₂ →
+    ProgressResult store lifetime rhs →
+    ProgressResult store lifetime (.assign lhs rhs) := by
+  intro habstraction hstore htyping hprogress
+  exact hprogress.elim_value
+    (fun value hrhs => by
+      subst hrhs
+      exact progress_assign_value_typing_of_relaxed habstraction hstore htyping)
+    progress_subAssign
+
+theorem runtimeBorrowTarget_of_lvalTyping_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty}
+    {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty (.borrow mutable targets pointee)) lifetime →
+    RuntimeBorrowTarget store lv targets := by
+  intro habstraction htyping
+  rcases lvalTyping_location_full_of_relaxed habstraction htyping with
+    ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hvalid⟩
+  rcases sourceSlot with ⟨sourceValue, slotLifetime⟩
+  cases hvalid with
+  | borrow hmem htargetLoc =>
+      exact ⟨sourceLocation, _, _, slotLifetime,
+        hsourceLoc, by simpa using hsourceSlot, hmem, htargetLoc⟩
+
+theorem runtimeCoherent_selectedTarget_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty}
+    {borrowLifetime targetLifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty (.borrow mutable targets pointee)) borrowLifetime →
+    LValTargetsTyping env targets (.ty pointee) targetLifetime →
+    ∃ target targetTy selectedLifetime borrowedLocation,
+      target ∈ targets ∧
+        LValTyping env target (.ty targetTy) selectedLifetime ∧
+        PartialTyStrengthens (.ty targetTy) (.ty pointee) ∧
+        store.loc target = some borrowedLocation ∧
+        RuntimeBorrowPointsTo store lv borrowedLocation := by
+  intro habstraction htyping htargets
+  rcases RuntimeBorrowTarget.pointsTo
+      (runtimeBorrowTarget_of_lvalTyping_relaxed habstraction htyping) with
+    ⟨target, borrowedLocation, htarget, htargetLoc, hpointsTo⟩
+  rcases lvalTargetsTyping_member_strengthens htargets target htarget with
+    ⟨targetTy, selectedLifetime, htargetTyping, hstrength⟩
+  exact ⟨target, targetTy, selectedLifetime, borrowedLocation, htarget,
+    htargetTyping, hstrength, htargetLoc, hpointsTo⟩
+
+theorem lval_loc_var_rank_le_base_of_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
+    {x : Name} {φ : Name → Nat} :
+    LinearizedBy φ env →
+    RelaxedRuntimeEnvAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    LValTyping env lv partialTy lifetime →
+    store.loc lv = some (VariableProjection x) →
+    φ x ≤ φ (LVal.base lv) := by
+  intro hφ habstraction hheap htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv partialTy lifetime _ =>
+      store.loc lv = some (VariableProjection x) →
+      φ x ≤ φ (LVal.base lv))
+    (motive_2 := fun targets partialTy lifetime _ =>
+      ∀ target, target ∈ targets →
+        store.loc target = some (VariableProjection x) →
+        φ x ≤ φ (LVal.base target))
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
+  · intro y slot _hslot hloc
+    simp [ProgramStore.loc, VariableProjection] at hloc
+    cases hloc
+    exact Nat.le_refl _
+  · intro source inner sourceLifetime hsource _ih hloc
+    have hsourceAbs :
+        RelaxedLValLocationAbstraction store source (.box inner) :=
+      lvalTyping_relaxed_defined_location_of_relaxed
+        habstraction hsource
+    rcases hsourceAbs with
+      ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+        sourceEvidence, _⟩
+    rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+    let hbox :=
+      RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv sourceEvidence
+    have hsourceValueEq :
+        sourceValue =
+          .value (.ref { location := hbox.location, owner := true }) := by
+      simpa using hbox.value_eq
+    have hderefLoc : store.loc source.deref = some hbox.location := by
+      simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hsourceValueEq]
+    have hownerEq : hbox.location = VariableProjection x := by
+      rw [hloc] at hderefLoc
+      exact (Option.some.inj hderefLoc).symm
+    have hownsBox : ProgramStore.Owns store hbox.location := by
+      exact ⟨sourceLocation, sourceSlotLifetime, by
+        simpa [owningRef, hsourceValueEq] using hsourceSlot⟩
+    have howns : ProgramStore.Owns store (VariableProjection x) := by
+      simpa [hownerEq] using hownsBox
+    exact False.elim ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
+  · intro source mutable targets pointee borrowLifetime targetLifetime
+      hsource htargets _ihSource ihTargets hloc
+    rcases runtimeCoherent_selectedTarget_of_relaxed
+        habstraction hsource htargets with
+      ⟨selected, _selectedTy, _selectedLifetime, selectedLocation,
+        hmem, _hselectedTyping, _hstrength, hselectedLoc, hpointsTo⟩
+    have hderefLoc : store.loc source.deref = some selectedLocation := by
+      rcases hpointsTo with
+        ⟨sourceLocation, slotLifetime, hsourceLoc, hsourceSlot⟩
+      simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+    have hselectedLocationEq : selectedLocation = VariableProjection x := by
+      rw [hloc] at hderefLoc
+      exact (Option.some.inj hderefLoc).symm
+    subst hselectedLocationEq
+    have hxLeSelected : φ x ≤ φ (LVal.base selected) :=
+      ihTargets selected hmem hselectedLoc
+    have hselectedMemVars :
+        LVal.base selected ∈ PartialTy.vars
+          (.ty (.borrow mutable targets pointee)) := by
+      exact mem_partialTy_vars_iff.mpr
+        ⟨mutable, targets, pointee, selected, PartialTyContains.here,
+          hmem, rfl⟩
+    have hselectedLtSource :
+        φ (LVal.base selected) < φ (LVal.base source) :=
+      (lvalTyping_vars_rank_lt hφ).1 hsource
+        (LVal.base selected) hselectedMemVars
+    exact le_trans hxLeSelected (Nat.le_of_lt hselectedLtSource)
+  · intro ty _hvars target hmem _hloc
+    cases hmem
+  · intro target ty targetLifetime htarget ihTarget selected hmem hloc
+    simp at hmem
+    subst hmem
+    exact ihTarget hloc
+  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+      htarget hrest _hunion _hintersection ihTarget ihRest selected hmem hloc
+    simp at hmem
+    rcases hmem with hselected | hselected
+    · subst hselected
+      exact ihTarget hloc
+    · exact ihRest selected hselected hloc
+
+theorem RuntimeFrame.loc_intrinsicRootRank_of_relaxed
+    {store : ProgramStore} {env : Env} {φ : Name → Nat}
+    {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
+    {location : Location} :
+    LinearizedBy φ env →
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv pt lifetime →
+    store.loc lv = some location →
+    ∃ root,
+      ProtectedByBase store root location ∧
+      φ root ≤ φ (LVal.base lv) := by
+  intro hφ habstraction htyping hloc
+  exact go hφ habstraction htyping hloc
+where
+  go {store : ProgramStore} {env : Env} {φ : Name → Nat}
+      {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
+      {location : Location}
+      (hφ : LinearizedBy φ env)
+      (habstraction : RelaxedRuntimeEnvAbstraction store env)
+      (htyping : LValTyping env lv pt lifetime)
+      (hloc : store.loc lv = some location) :
+      ∃ root,
+        ProtectedByBase store root location ∧
+        φ root ≤ φ (LVal.base lv) := by
+    cases lv with
+    | var x =>
+        have hlocEq : location = VariableProjection x := by
+          simp [ProgramStore.loc] at hloc
+          exact hloc.symm
+        subst hlocEq
+        exact ⟨x, Or.inl rfl, le_refl _⟩
+    | deref source =>
+        cases htyping with
+        | box hsource =>
+            have hsourceAbs :
+                RelaxedLValLocationAbstraction store source (.box _) :=
+              lvalTyping_relaxed_defined_location_of_relaxed
+                habstraction hsource
+            rcases hsourceAbs with
+              ⟨middle, middleSlot, hmiddleLoc, hmiddleSlot,
+                hmiddleEvidence, _⟩
+            rcases go hφ habstraction hsource hmiddleLoc with
+              ⟨root, hprotMiddle, hrank⟩
+            rcases middleSlot with ⟨middleValue, middleLifetime⟩
+            let hbox :=
+              RuntimeFrame.RelaxedValidPartialValueEvidence.box_inv
+                hmiddleEvidence
+            have hmiddleValueEq :
+                middleValue =
+                  .value (.ref { location := hbox.location, owner := true }) := by
+              simpa using hbox.value_eq
+            have hderefLoc : store.loc (.deref source) = some hbox.location := by
+              simp [ProgramStore.loc, hmiddleLoc, hmiddleSlot,
+                hmiddleValueEq]
+            have hlocEq : location = hbox.location := by
+              rw [hloc] at hderefLoc
+              exact Option.some.inj hderefLoc
+            have howns : ProgramStore.OwnsAt store hbox.location middle := by
+              exact ⟨middleLifetime, by
+                simpa [owningRef, hmiddleValueEq] using hmiddleSlot⟩
+            refine ⟨root, ?_, by simpa [LVal.base] using hrank⟩
+            simpa [hlocEq] using
+              ProtectedByBase.trans_owned hprotMiddle howns
+        | @borrow _ mutable targets pointee borrowLifetime targetLifetime
+            hsource htargets =>
+            rcases runtimeCoherent_selectedTarget_of_relaxed
+                habstraction hsource htargets with
+              ⟨selected, _selectedTy, _selectedLifetime, selectedLocation,
+                hselectedMem, hselectedTyping, _hstrength,
+                hselectedLoc, hpointsTo⟩
+            have hderefLoc : store.loc (.deref source) = some selectedLocation := by
+              rcases hpointsTo with
+                ⟨sourceLocation, slotLifetime, hsourceLoc, hsourceSlot⟩
+              simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+            have hlocEq : location = selectedLocation := by
+              rw [hloc] at hderefLoc
+              exact Option.some.inj hderefLoc
+            subst hlocEq
+            have hselectedMemVars :
+                LVal.base selected ∈ PartialTy.vars
+                  (.ty (.borrow mutable targets pointee)) :=
+              mem_partialTy_vars_iff.mpr
+                ⟨mutable, targets, pointee, selected,
+                  PartialTyContains.here, hselectedMem, rfl⟩
+            have hselectedLtSource :
+                φ (LVal.base selected) < φ (LVal.base source) :=
+              (lvalTyping_vars_rank_lt hφ).1 hsource
+                (LVal.base selected) hselectedMemVars
+            rcases go hφ habstraction hselectedTyping hselectedLoc with
+              ⟨root, hprotSelected, hrootLeSelected⟩
+            exact ⟨root, hprotSelected,
+              by
+                simpa [LVal.base] using
+                  le_of_lt (lt_of_le_of_lt hrootLeSelected
+                    hselectedLtSource)⟩
+  termination_by (φ (LVal.base lv), sizeOf lv)
+  decreasing_by
+    all_goals
+      simp_wf
+      try subst_vars
+      try simp [LVal.base]
+      first
+      | exact Prod.Lex.right _ (by simp)
+      | exact Prod.Lex.left _ _ (by assumption)
+
+theorem RelaxedRuntimeEnvAbstraction.strengthen {store : ProgramStore}
+    {source result : Env} :
+    RelaxedRuntimeEnvAbstraction store source →
+    EnvStrengthens source result →
+    RelaxedRuntimeEnvAbstraction store result := by
+  intro habstraction hstrength
+  constructor
+  · exact (RuntimeFrame.RelaxedSafeAbstraction.strengthen
+      habstraction.relaxedSafe hstrength).1
+  · intro x resultSlot hresultSlot
+    have hx := hstrength x
+    cases hsourceSlot : source.slotAt x with
+    | none =>
+        rw [hsourceSlot, hresultSlot] at hx
+        cases hx
+    | some sourceSlot =>
+        rw [hsourceSlot, hresultSlot] at hx
+        rcases habstraction.2 x sourceSlot hsourceSlot with
+          ⟨value, hstoreSlot, sourceEvidence, hprotected⟩
+        rcases RuntimeFrame.RelaxedValidPartialValueEvidence.strengthen_exists
+            sourceEvidence hx.2 with
+          ⟨resultEvidence, hrel⟩
+        refine ⟨value, ?_, resultEvidence, ?_⟩
+        · simpa [hx.1] using hstoreSlot
+        · intro location hdependency
+          exact hprotected location
+            (RuntimeFrame.RelaxedEvidenceBorrowDependency.of_strengthens
+              hrel hdependency)
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen
+    {store : ProgramStore} {source result : Env} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store source →
+    EnvStrengthens source result →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store result := by
+  intro habstraction hstrength
+  constructor
+  · exact (RuntimeFrame.RelaxedSafeAbstraction.strengthen
+      habstraction.relaxed.relaxedSafe hstrength).1
+  · intro x resultSlot hresultSlot
+    have hx := hstrength x
+    cases hsourceSlot : source.slotAt x with
+    | none =>
+        rw [hsourceSlot, hresultSlot] at hx
+        cases hx
+    | some sourceSlot =>
+        rw [hsourceSlot, hresultSlot] at hx
+        rcases habstraction.2 x sourceSlot hsourceSlot with
+          ⟨value, hstoreSlot, sourceEvidence, hprotected⟩
+        rcases RuntimeFrame.RelaxedValidPartialValueEvidence.strengthen_exists
+            sourceEvidence hx.2 with
+          ⟨resultEvidence, hrel⟩
+        refine ⟨value, ?_, resultEvidence, ?_⟩
+        · simpa [hx.1] using hstoreSlot
+        · intro location hdependency
+          have hdependencyOld :
+              RuntimeFrame.RelaxedEvidenceBorrowDependency store sourceEvidence
+                location :=
+            RuntimeFrame.RelaxedEvidenceBorrowDependency.of_strengthens
+              hrel hdependency
+          rcases hprotected location hdependencyOld with
+            ⟨base, baseSlot, hbaseSlot, hbaseOutlives, hprotectedBase⟩
+          rcases EnvStrengthens.slot_forward hstrength hbaseSlot with
+            ⟨resultBaseSlot, hresultBaseSlot, hbaseLifetime, _hbaseStrength⟩
+          have hbaseOutlivesResult :
+              resultBaseSlot.lifetime ≤ resultSlot.lifetime := by
+            rw [← hbaseLifetime, ← hx.1]
+            exact hbaseOutlives
+          exact ⟨base, resultBaseSlot, hresultBaseSlot, hbaseOutlivesResult,
+            hprotectedBase⟩
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen_join_left
+    {store : ProgramStore} {left right join : Env} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store left →
+    EnvJoin left right join →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store join := by
+  intro habstraction hjoin
+  exact RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen habstraction
+    (EnvJoin.left_le hjoin)
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen_join_right
+    {store : ProgramStore} {left right join : Env} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store right →
+    EnvJoin left right join →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store join := by
+  intro habstraction hjoin
+  exact RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen habstraction
+    (EnvJoin.right_le hjoin)
+
+theorem RelaxedRuntimeEnvAbstraction.strengthen_join_left
+    {store : ProgramStore} {left right join : Env} :
+    RelaxedRuntimeEnvAbstraction store left →
+    EnvJoin left right join →
+    RelaxedRuntimeEnvAbstraction store join := by
+  intro habstraction hjoin
+  exact RelaxedRuntimeEnvAbstraction.strengthen habstraction
+    (EnvJoin.left_le hjoin)
+
+theorem RelaxedRuntimeEnvAbstraction.strengthen_join_right
+    {store : ProgramStore} {left right join : Env} :
+    RelaxedRuntimeEnvAbstraction store right →
+    EnvJoin left right join →
+    RelaxedRuntimeEnvAbstraction store join := by
+  intro habstraction hjoin
+  exact RelaxedRuntimeEnvAbstraction.strengthen habstraction
+    (EnvJoin.right_le hjoin)
+
+/--
+Relaxed runtime abstraction for declaring a fresh variable.
+
+This is the join-friendly analogue of `RuntimeEnvAbstraction.declare`: existing
+slots may carry concrete evidence hidden below an abstract `undef`, and that
+evidence is transported through the fresh store extension.
+-/
+theorem RelaxedRuntimeEnvAbstraction.declare
+    {store : ProgramStore} {env : Env} {x : Name}
+    {lifetime : Lifetime} {value : Value} {newTy : PartialTy} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.fresh x →
+    (newEvidence : RuntimeFrame.RelaxedValidPartialValueEvidence
+      (store.declare x lifetime value) (.value value) newTy) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency
+        (store.declare x lifetime value) newEvidence location →
+      ∃ base,
+        ProtectedByBase (store.declare x lifetime value) base location) →
+    RelaxedRuntimeEnvAbstraction (store.declare x lifetime value)
+      (env.update x { ty := newTy, lifetime := lifetime }) := by
+  intro habstraction hfresh newEvidence hnewProtected
+  have hfreshStore : store.fresh (VariableProjection x) := by
+    unfold ProgramStore.fresh
+    cases hslot : store.slotAt (VariableProjection x) with
+    | none =>
+        rfl
+    | some slot =>
+        rcases (habstraction.1 x).mp ⟨slot, hslot⟩ with ⟨envSlot, henvSlot⟩
+        unfold Env.fresh at hfresh
+        rw [hfresh] at henvSlot
+        cases henvSlot
+  constructor
+  · intro y
+    constructor
+    · intro hstoreDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ ty := newTy, lifetime := lifetime }, by simp [Env.update]⟩
+      · rcases hstoreDomain with ⟨slot, hslot⟩
+        have hstoreOld :
+            ∃ slot, store.slotAt (VariableProjection y) = some slot := by
+          exact ⟨slot, by
+            simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+              hyx] using hslot⟩
+        rcases (habstraction.1 y).mp hstoreOld with ⟨envSlot, henvSlot⟩
+        exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+    · intro henvDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ value := .value value, lifetime := lifetime }, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection]⟩
+      · rcases henvDomain with ⟨envSlot, henvSlotUpdate⟩
+        have henvOld : ∃ envSlot, env.slotAt y = some envSlot :=
+          ⟨envSlot, by simpa [Env.update, hyx] using henvSlotUpdate⟩
+        rcases (habstraction.1 y).mpr henvOld with ⟨storeSlot, hstoreSlot⟩
+        exact ⟨storeSlot, by
+          simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+            hyx] using hstoreSlot⟩
+  · intro y resultSlot hresultSlot
+    by_cases hyx : y = x
+    · subst hyx
+      have hslotEq :
+          resultSlot = { ty := newTy, lifetime := lifetime } := by
+        have h :
+            { ty := newTy, lifetime := lifetime } = resultSlot := by
+          simpa [Env.update] using hresultSlot
+        exact h.symm
+      subst hslotEq
+      exact ⟨.value value, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection],
+        newEvidence, hnewProtected⟩
+    · have henvSlotOld : env.slotAt y = some resultSlot := by
+        simpa [Env.update, hyx] using hresultSlot
+      rcases habstraction.2 y resultSlot henvSlotOld with
+        ⟨oldValue, hstoreSlot, evidence, hprotected⟩
+      rcases RuntimeFrame.relaxedValidPartialValueEvidence_declare_of_fresh
+          evidence hfreshStore with
+        ⟨evidence', hdependencyBack⟩
+      refine ⟨oldValue, ?_, evidence', ?_⟩
+      · simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+          hyx] using hstoreSlot
+      · intro dependency hdependency
+        rcases hprotected dependency (hdependencyBack dependency hdependency) with
+          ⟨base, hprotectedOld⟩
+        exact ⟨base, ProtectedByBase.declare_of_fresh hfreshStore hprotectedOld⟩
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.declare
+    {store : ProgramStore} {env : Env} {x : Name}
+    {lifetime : Lifetime} {value : Value} {newTy : PartialTy} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    env.fresh x →
+    (newEvidence : RuntimeFrame.RelaxedValidPartialValueEvidence
+      (store.declare x lifetime value) (.value value) newTy) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency
+        (store.declare x lifetime value) newEvidence location →
+      ProtectedByBaseOutliving
+        (store.declare x lifetime value)
+        (env.update x { ty := newTy, lifetime := lifetime })
+        lifetime location) →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection
+      (store.declare x lifetime value)
+      (env.update x { ty := newTy, lifetime := lifetime }) := by
+  intro habstraction hfresh newEvidence hnewProtected
+  have hfreshStore : store.fresh (VariableProjection x) := by
+    unfold ProgramStore.fresh
+    cases hslot : store.slotAt (VariableProjection x) with
+    | none =>
+        rfl
+    | some slot =>
+        rcases (habstraction.1 x).mp ⟨slot, hslot⟩ with ⟨envSlot, henvSlot⟩
+        unfold Env.fresh at hfresh
+        rw [hfresh] at henvSlot
+        cases henvSlot
+  constructor
+  · intro y
+    constructor
+    · intro hstoreDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ ty := newTy, lifetime := lifetime }, by simp [Env.update]⟩
+      · rcases hstoreDomain with ⟨slot, hslot⟩
+        have hstoreOld :
+            ∃ slot, store.slotAt (VariableProjection y) = some slot := by
+          exact ⟨slot, by
+            simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+              hyx] using hslot⟩
+        rcases (habstraction.1 y).mp hstoreOld with ⟨envSlot, henvSlot⟩
+        exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+    · intro henvDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ value := .value value, lifetime := lifetime }, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection]⟩
+      · rcases henvDomain with ⟨envSlot, henvSlotUpdate⟩
+        have henvOld : ∃ envSlot, env.slotAt y = some envSlot :=
+          ⟨envSlot, by simpa [Env.update, hyx] using henvSlotUpdate⟩
+        rcases (habstraction.1 y).mpr henvOld with ⟨storeSlot, hstoreSlot⟩
+        exact ⟨storeSlot, by
+          simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+            hyx] using hstoreSlot⟩
+  · intro y resultSlot hresultSlot
+    by_cases hyx : y = x
+    · subst hyx
+      have hslotEq :
+          resultSlot = { ty := newTy, lifetime := lifetime } := by
+        have h :
+            { ty := newTy, lifetime := lifetime } = resultSlot := by
+          simpa [Env.update] using hresultSlot
+        exact h.symm
+      subst hslotEq
+      exact ⟨.value value, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection],
+        newEvidence, hnewProtected⟩
+    · have henvSlotOld : env.slotAt y = some resultSlot := by
+        simpa [Env.update, hyx] using hresultSlot
+      rcases habstraction.2 y resultSlot henvSlotOld with
+        ⟨oldValue, hstoreSlot, evidence, hprotected⟩
+      rcases RuntimeFrame.relaxedValidPartialValueEvidence_declare_of_fresh
+          evidence hfreshStore with
+        ⟨evidence', hdependencyBack⟩
+      refine ⟨oldValue, ?_, evidence', ?_⟩
+      · simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+          hyx] using hstoreSlot
+      · intro dependency hdependency
+        have hdependencyOld := hdependencyBack dependency hdependency
+        rcases hprotected dependency hdependencyOld with
+          ⟨base, baseSlot, hbaseSlot, hbaseOutlives, hprotectedOld⟩
+        have hbaseSlotUpdate :
+            (env.update x { ty := newTy, lifetime := lifetime }).slotAt base =
+              some baseSlot := by
+          by_cases hbaseEq : base = x
+          · subst hbaseEq
+            unfold Env.fresh at hfresh
+            rw [hfresh] at hbaseSlot
+            cases hbaseSlot
+          · simpa [Env.update, hbaseEq] using hbaseSlot
+        exact ⟨base, baseSlot, hbaseSlotUpdate, hbaseOutlives,
+          ProtectedByBase.declare_of_fresh hfreshStore hprotectedOld⟩
+
+/--
+Evidence-aware write frame for the relaxed runtime abstraction.
+
+The frame obligations range over the concrete relaxed evidence carried by each
+represented slot, including any evidence hidden below an abstract `undef`.
+-/
+def RelaxedRuntimeEnvEvidenceUpdateFrame
+    (store : ProgramStore) (env : Env) (updated : Location)
+    (newSlot : StoreSlot) : Prop :=
+  ∀ x envSlot value
+    (evidence :
+      RuntimeFrame.RelaxedValidPartialValueEvidence store value envSlot.ty)
+    (_henvSlot : env.slotAt x = some envSlot)
+    (_hstoreSlot :
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime }),
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceOwnerReach store evidence location →
+      location ≠ updated) ∧
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      location ≠ updated) ∧
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      ∀ base,
+        ProtectedByBase store base location →
+        ProtectedByBase (store.update updated newSlot) base location)
+
+theorem RelaxedRuntimeEnvAbstraction.update_of_evidenceFrame
+    {store : ProgramStore} {env : Env} {updated : Location}
+    {newSlot : StoreSlot} :
+    RelaxedRuntimeEnvAbstraction store env →
+    (∀ x,
+      ((∃ slot,
+        (store.update updated newSlot).slotAt (VariableProjection x) =
+          some slot) ↔
+        ∃ slot, store.slotAt (VariableProjection x) = some slot)) →
+    (∀ x envSlot value,
+      env.slotAt x = some envSlot →
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } →
+      (store.update updated newSlot).slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime }) →
+    RelaxedRuntimeEnvEvidenceUpdateFrame store env updated newSlot →
+    RelaxedRuntimeEnvAbstraction (store.update updated newSlot) env := by
+  intro habstraction hdomain hslotPreserved hframe
+  constructor
+  · intro x
+    rw [hdomain x]
+    exact habstraction.1 x
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, evidence, hprotected⟩
+    rcases hframe x envSlot value evidence henvSlot hstoreSlot with
+      ⟨hownersAvoid, hdepsAvoid, hprotectedTransport⟩
+    rcases
+        RuntimeFrame.relaxedValidPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+          evidence hownersAvoid hdepsAvoid with
+      ⟨evidence', hdependencyBack⟩
+    refine ⟨value, hslotPreserved x envSlot value henvSlot hstoreSlot,
+      evidence', ?_⟩
+    intro dependency hdependency
+    have hdependencyOld := hdependencyBack dependency hdependency
+    rcases hprotected dependency hdependencyOld with
+      ⟨base, hprotectedOld⟩
+    exact ⟨base,
+      hprotectedTransport dependency hdependencyOld base hprotectedOld⟩
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.update_of_evidenceFrame
+    {store : ProgramStore} {env : Env} {updated : Location}
+    {newSlot : StoreSlot} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    (∀ x,
+      ((∃ slot,
+        (store.update updated newSlot).slotAt (VariableProjection x) =
+          some slot) ↔
+        ∃ slot, store.slotAt (VariableProjection x) = some slot)) →
+    (∀ x envSlot value,
+      env.slotAt x = some envSlot →
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } →
+      (store.update updated newSlot).slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime }) →
+    RelaxedRuntimeEnvEvidenceUpdateFrame store env updated newSlot →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection
+      (store.update updated newSlot) env := by
+  intro habstraction hdomain hslotPreserved hframe
+  constructor
+  · intro x
+    rw [hdomain x]
+    exact habstraction.1 x
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨value, hstoreSlot, evidence, hprotected⟩
+    rcases hframe x envSlot value evidence henvSlot hstoreSlot with
+      ⟨hownersAvoid, hdepsAvoid, hprotectedTransport⟩
+    rcases
+        RuntimeFrame.relaxedValidPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+          evidence hownersAvoid hdepsAvoid with
+      ⟨evidence', hdependencyBack⟩
+    refine ⟨value, hslotPreserved x envSlot value henvSlot hstoreSlot,
+      evidence', ?_⟩
+    intro dependency hdependency
+    have hdependencyOld := hdependencyBack dependency hdependency
+    rcases hprotected dependency hdependencyOld with
+      ⟨base, baseSlot, hbaseSlot, hbaseOutlives, hprotectedOld⟩
+    exact ⟨base, baseSlot, hbaseSlot, hbaseOutlives,
+      hprotectedTransport dependency hdependencyOld base hprotectedOld⟩
+
+theorem RelaxedRuntimeEnvAbstraction.update_var
+    {store : ProgramStore} {env : Env} {x : Name}
+    {oldEnvSlot : EnvSlot} {newStoreSlot : StoreSlot} {newTy : PartialTy} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.slotAt x = some oldEnvSlot →
+    newStoreSlot.lifetime = oldEnvSlot.lifetime →
+    (newEvidence : RuntimeFrame.RelaxedValidPartialValueEvidence
+      (store.update (VariableProjection x) newStoreSlot)
+      newStoreSlot.value newTy) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency
+        (store.update (VariableProjection x) newStoreSlot)
+        newEvidence location →
+      ∃ base,
+        ProtectedByBase (store.update (VariableProjection x) newStoreSlot)
+          base location) →
+      (∀ y envSlot value
+        (evidence :
+          RuntimeFrame.RelaxedValidPartialValueEvidence store value envSlot.ty),
+        y ≠ x →
+        env.slotAt y = some envSlot →
+        store.slotAt (VariableProjection y) =
+          some { value := value, lifetime := envSlot.lifetime } →
+        (∀ location,
+          RuntimeFrame.RelaxedEvidenceOwnerReach store evidence location →
+          location ≠ VariableProjection x) ∧
+        (∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+          location ≠ VariableProjection x)) →
+      (∀ y envSlot value
+        (evidence :
+          RuntimeFrame.RelaxedValidPartialValueEvidence store value envSlot.ty),
+        y ≠ x →
+        env.slotAt y = some envSlot →
+        store.slotAt (VariableProjection y) =
+          some { value := value, lifetime := envSlot.lifetime } →
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+        ∀ base,
+          ProtectedByBase store base location →
+          ProtectedByBase (store.update (VariableProjection x) newStoreSlot)
+            base location) →
+      RelaxedRuntimeEnvAbstraction
+        (store.update (VariableProjection x) newStoreSlot)
+        (env.update x { oldEnvSlot with ty := newTy }) := by
+  intro habstraction henvX hnewLifetime hnewEvidence hnewProtected
+    hotherFrame hprotectedTransport
+  constructor
+  · intro y
+    constructor
+    · intro hstoreDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ oldEnvSlot with ty := newTy }, by simp [Env.update]⟩
+      · have hvarNe : VariableProjection y ≠ VariableProjection x := by
+          intro h
+          cases h
+          exact hyx rfl
+        rcases hstoreDomain with ⟨slot, hslot⟩
+        have hslotOld : store.slotAt (VariableProjection y) = some slot := by
+          simpa [ProgramStore.update, hvarNe] using hslot
+        rcases (habstraction.1 y).mp ⟨slot, hslotOld⟩ with
+          ⟨envSlot, henvSlot⟩
+        exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+    · intro henvDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨newStoreSlot, by simp [ProgramStore.update]⟩
+      · rcases henvDomain with ⟨envSlot, henvSlotUpdate⟩
+        have henvSlotOld : env.slotAt y = some envSlot := by
+          simpa [Env.update, hyx] using henvSlotUpdate
+        rcases (habstraction.1 y).mpr ⟨envSlot, henvSlotOld⟩ with
+          ⟨slot, hslot⟩
+        have hvarNe : VariableProjection y ≠ VariableProjection x := by
+          intro h
+          cases h
+          exact hyx rfl
+        exact ⟨slot, by simpa [ProgramStore.update, hvarNe] using hslot⟩
+  · intro y resultSlot hresultSlot
+    by_cases hyx : y = x
+    · subst hyx
+      have hslotEq :
+          resultSlot = { oldEnvSlot with ty := newTy } := by
+        have hsome :
+            some { oldEnvSlot with ty := newTy } = some resultSlot := by
+          simpa [Env.update] using hresultSlot
+        exact (Option.some.inj hsome).symm
+      subst hslotEq
+      refine ⟨newStoreSlot.value, ?_, hnewEvidence, hnewProtected⟩
+      cases newStoreSlot with
+      | mk value lifetime =>
+          have hlifetime : lifetime = oldEnvSlot.lifetime := by
+            simpa using hnewLifetime
+          simp [ProgramStore.update, hlifetime]
+    · have henvSlotOld : env.slotAt y = some resultSlot := by
+        simpa [Env.update, hyx] using hresultSlot
+      rcases habstraction.2 y resultSlot henvSlotOld with
+        ⟨value, hstoreSlot, evidence, hprotected⟩
+      rcases hotherFrame y resultSlot value evidence hyx henvSlotOld hstoreSlot with
+        ⟨hownersAvoid, hdepsAvoid⟩
+      rcases
+          RuntimeFrame.relaxedValidPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+            evidence hownersAvoid hdepsAvoid with
+        ⟨evidence', hdependencyBack⟩
+      have hvarNe : VariableProjection y ≠ VariableProjection x := by
+        intro h
+        cases h
+        exact hyx rfl
+      refine ⟨value, ?_, evidence', ?_⟩
+      · simpa [ProgramStore.update, hvarNe] using hstoreSlot
+      · intro dependency hdependency
+        rcases hprotected dependency (hdependencyBack dependency hdependency) with
+          ⟨base, hprotectedOld⟩
+        exact ⟨base,
+          hprotectedTransport y resultSlot value evidence hyx henvSlotOld
+            hstoreSlot dependency (hdependencyBack dependency hdependency)
+            base hprotectedOld⟩
+
+theorem RelaxedRuntimeEnvAbstraction.boxAt
+    {store : ProgramStore} {env : Env} {address : Nat} {value : Value} :
+    StoreOwnersAllocated store →
+    store.fresh (.heap address) →
+    RelaxedRuntimeEnvAbstraction store env →
+    RelaxedRuntimeEnvAbstraction (store.boxAt address value).1 env := by
+  intro hallocated hfresh habstraction
+  change RelaxedRuntimeEnvAbstraction
+    (store.update (.heap address)
+      { value := .value value, lifetime := Lifetime.root }) env
+  exact RelaxedRuntimeEnvAbstraction.update_of_evidenceFrame
+    (updated := .heap address)
+    (newSlot := { value := .value value, lifetime := Lifetime.root })
+    habstraction
+    (by
+      intro x
+      have hne : VariableProjection x ≠ Location.heap address := by
+        simp [VariableProjection]
+      constructor
+      · intro hslot
+        rcases hslot with ⟨slot, hslot⟩
+        exact ⟨slot, by
+          simpa [ProgramStore.update, hne] using hslot⟩
+      · intro hslot
+        rcases hslot with ⟨slot, hslot⟩
+        exact ⟨slot, by
+          simpa [ProgramStore.update, hne] using hslot⟩)
+    (by
+      intro x envSlot oldValue henvSlot hstoreSlot
+      have hne : VariableProjection x ≠ Location.heap address := by
+        simp [VariableProjection]
+      simpa [ProgramStore.update, hne] using hstoreSlot)
+    (by
+      intro x envSlot oldValue evidence henvSlot hstoreSlot
+      refine ⟨?_, ?_, ?_⟩
+      · intro location hreach hlocation
+        subst hlocation
+        exact RuntimeFrame.RelaxedEvidenceOwnerReach.ne_fresh hfresh hreach
+      · intro location hdependency hlocation
+        subst hlocation
+        exact RuntimeFrame.RelaxedEvidenceBorrowDependency.ne_fresh
+          hfresh hdependency
+      · intro location hdependency base hprotected
+        exact ProtectedByBase.update_of_not_protected hprotected
+          (ProtectedByBase.not_fresh_heap_of_storeOwnersAllocated
+            hallocated hfresh))
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.boxAt
+    {store : ProgramStore} {env : Env} {address : Nat} {value : Value} :
+    StoreOwnersAllocated store →
+    store.fresh (.heap address) →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection
+      (store.boxAt address value).1 env := by
+  intro hallocated hfresh habstraction
+  change RelaxedRuntimeEnvAbstractionWithSlotProtection
+    (store.update (.heap address)
+      { value := .value value, lifetime := Lifetime.root }) env
+  exact RelaxedRuntimeEnvAbstractionWithSlotProtection.update_of_evidenceFrame
+    (updated := .heap address)
+    (newSlot := { value := .value value, lifetime := Lifetime.root })
+    habstraction
+    (by
+      intro x
+      have hne : VariableProjection x ≠ Location.heap address := by
+        simp [VariableProjection]
+      constructor
+      · intro hslot
+        rcases hslot with ⟨slot, hslot⟩
+        exact ⟨slot, by
+          simpa [ProgramStore.update, hne] using hslot⟩
+      · intro hslot
+        rcases hslot with ⟨slot, hslot⟩
+        exact ⟨slot, by
+          simpa [ProgramStore.update, hne] using hslot⟩)
+    (by
+      intro x envSlot oldValue henvSlot hstoreSlot
+      have hne : VariableProjection x ≠ Location.heap address := by
+        simp [VariableProjection]
+      simpa [ProgramStore.update, hne] using hstoreSlot)
+    (by
+      intro x envSlot oldValue evidence henvSlot hstoreSlot
+      refine ⟨?_, ?_, ?_⟩
+      · intro location hreach hlocation
+        subst hlocation
+        exact RuntimeFrame.RelaxedEvidenceOwnerReach.ne_fresh hfresh hreach
+      · intro location hdependency hlocation
+        subst hlocation
+        exact RuntimeFrame.RelaxedEvidenceBorrowDependency.ne_fresh
+          hfresh hdependency
+      · intro location hdependency base hprotected
+        exact ProtectedByBase.update_of_not_protected hprotected
+          (ProtectedByBase.not_fresh_heap_of_storeOwnersAllocated
+            hallocated hfresh))
+
+theorem RelaxedRuntimeEnvAbstraction.drops_of_orphaned_values
+    {store store' : ProgramStore} {env : Env} {values : List PartialValue} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
+    (∀ owned, owned ∈ partialValuesOwningLocations values →
+      ¬ ProgramStore.Owns store owned) →
+    Drops store values store' →
+    RelaxedRuntimeEnvAbstraction store' env := by
+  intro habstraction hvalidStore hheap hdropValuesHeap hdropOwnersOrphaned
+    hdrops
+  have hdropValuesUnprotected :
+      ∀ dropValue, dropValue ∈ values →
+        ∀ owned, owned ∈ partialValueOwningLocations dropValue →
+          ∀ base, ¬ ProtectedByBase store base owned :=
+    dropValues_unprotected_of_disjoint hheap hdropValuesHeap hdropOwnersOrphaned
+  constructor
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases hstoreDomain with ⟨slot, hslot⟩
+      have hslotOld : store.slotAt (VariableProjection x) = some slot :=
+        drops_slotAt_of_slotAt hdrops hslot
+      exact (habstraction.1 x).mp ⟨slot, hslotOld⟩
+    · intro henvDomain
+      rcases (habstraction.1 x).mpr henvDomain with ⟨slot, hslot⟩
+      have havoidVar : DropsAvoids store values (VariableProjection x) :=
+        dropsAvoids_var_of_ownerTargetsHeap hdrops hheap hdropValuesHeap
+      exact ⟨slot, dropsAvoids_slotAt_preserved hdrops havoidVar hslot⟩
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨oldValue, hstoreSlot, evidence, hdepsProtected⟩
+    have havoidVar : DropsAvoids store values (VariableProjection x) :=
+      dropsAvoids_var_of_ownerTargetsHeap hdrops hheap hdropValuesHeap
+    have hstoreSlot' :
+        store'.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } :=
+      dropsAvoids_slotAt_preserved hdrops havoidVar hstoreSlot
+    have hownerAvoids :
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceOwnerReach store evidence location →
+          DropsAvoids store values location := by
+      intro reached hownerReach
+      exact dropsAvoids_of_ownsTransitively_orphaned_values
+        hdrops hvalidStore hdropOwnersOrphaned
+        (RuntimeFrame.ownsTransitively_of_relaxedEvidenceOwnerReach_stored
+          hstoreSlot hownerReach)
+        havoidVar
+    have hdependencyAvoids :
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+          DropsAvoids store values location := by
+      intro dependency hdependency
+      rcases hdepsProtected dependency hdependency with
+        ⟨base, hprotected⟩
+      exact dropsAvoids_of_protectedByBase_unprotected_values
+        hdrops hvalidStore hheap hdropValuesHeap
+        (by
+          intro dropValue hmem owned howned
+          exact hdropValuesUnprotected dropValue hmem owned howned base)
+        hprotected
+    rcases
+        RuntimeFrame.relaxedValidPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+          hdrops evidence hownerAvoids hdependencyAvoids with
+      ⟨evidence', hdependencyBack⟩
+    refine ⟨oldValue, hstoreSlot', evidence', ?_⟩
+    intro dependency hdependency
+    rcases hdepsProtected dependency (hdependencyBack dependency hdependency) with
+      ⟨base, hprotected⟩
+    exact ⟨base,
+      ProtectedByBase.drops_of_unprotected_values hdrops hvalidStore hheap
+        hdropValuesHeap
+        (by
+          intro dropValue hmem owned howned
+          exact hdropValuesUnprotected dropValue hmem owned howned base)
+        hprotected⟩
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.drops_of_orphaned_values
+    {store store' : ProgramStore} {env : Env} {values : List PartialValue} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
+    (∀ owned, owned ∈ partialValuesOwningLocations values →
+      ¬ ProgramStore.Owns store owned) →
+    Drops store values store' →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store' env := by
+  intro habstraction hvalidStore hheap hdropValuesHeap hdropOwnersOrphaned
+    hdrops
+  have hdropValuesUnprotected :
+      ∀ dropValue, dropValue ∈ values →
+        ∀ owned, owned ∈ partialValueOwningLocations dropValue →
+          ∀ base, ¬ ProtectedByBase store base owned :=
+    dropValues_unprotected_of_disjoint hheap hdropValuesHeap hdropOwnersOrphaned
+  have hrelaxed :
+      RelaxedRuntimeEnvAbstraction store env :=
+    habstraction.relaxed
+  constructor
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases hstoreDomain with ⟨slot, hslot⟩
+      have hslotOld : store.slotAt (VariableProjection x) = some slot :=
+        drops_slotAt_of_slotAt hdrops hslot
+      exact (hrelaxed.1 x).mp ⟨slot, hslotOld⟩
+    · intro henvDomain
+      rcases (hrelaxed.1 x).mpr henvDomain with ⟨slot, hslot⟩
+      have havoidVar : DropsAvoids store values (VariableProjection x) :=
+        dropsAvoids_var_of_ownerTargetsHeap hdrops hheap hdropValuesHeap
+      exact ⟨slot, dropsAvoids_slotAt_preserved hdrops havoidVar hslot⟩
+  · intro x envSlot henvSlot
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨oldValue, hstoreSlot, evidence, hdepsProtected⟩
+    have havoidVar : DropsAvoids store values (VariableProjection x) :=
+      dropsAvoids_var_of_ownerTargetsHeap hdrops hheap hdropValuesHeap
+    have hstoreSlot' :
+        store'.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } :=
+      dropsAvoids_slotAt_preserved hdrops havoidVar hstoreSlot
+    have hownerAvoids :
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceOwnerReach store evidence location →
+          DropsAvoids store values location := by
+      intro reached hownerReach
+      exact dropsAvoids_of_ownsTransitively_orphaned_values
+        hdrops hvalidStore hdropOwnersOrphaned
+        (RuntimeFrame.ownsTransitively_of_relaxedEvidenceOwnerReach_stored
+          hstoreSlot hownerReach)
+        havoidVar
+    have hdependencyAvoids :
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+          DropsAvoids store values location := by
+      intro dependency hdependency
+      rcases hdepsProtected dependency hdependency with
+        ⟨base, _baseSlot, _hbaseSlot, _hbaseOutlives, hprotected⟩
+      exact dropsAvoids_of_protectedByBase_unprotected_values
+        hdrops hvalidStore hheap hdropValuesHeap
+        (by
+          intro dropValue hmem owned howned
+          exact hdropValuesUnprotected dropValue hmem owned howned base)
+        hprotected
+    rcases
+        RuntimeFrame.relaxedValidPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+          hdrops evidence hownerAvoids hdependencyAvoids with
+      ⟨evidence', hdependencyBack⟩
+    refine ⟨oldValue, hstoreSlot', evidence', ?_⟩
+    intro dependency hdependency
+    have hdependencyOld := hdependencyBack dependency hdependency
+    rcases hdepsProtected dependency hdependencyOld with
+      ⟨base, baseSlot, hbaseSlot, hbaseOutlives, hprotected⟩
+    exact ⟨base, baseSlot, hbaseSlot, hbaseOutlives,
+      ProtectedByBase.drops_of_unprotected_values hdrops hvalidStore hheap
+        hdropValuesHeap
+        (by
+          intro dropValue hmem owned howned
+          exact hdropValuesUnprotected dropValue hmem owned howned base)
+        hprotected⟩
+
+/--
+`R-Seq` transport for relaxed runtime abstraction.
+
+Dropping the value produced by a completed block head cannot remove storage
+represented by the surrounding environment: any owned cells in that head value
+are disjoint from the store by the valid-runtime-state invariant.  The relaxed
+version is the storage abstraction needed after undef/nonundef joins.
+-/
+theorem RelaxedRuntimeEnvAbstraction.seq_value_drop
+    {store store' : ProgramStore} {env : Env}
+    {blockLifetime : Lifetime} {value : Value} {next : Term}
+    {rest : List Term} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
+    Drops store [.value value] store' →
+    RelaxedRuntimeEnvAbstraction store' env := by
+  intro habstraction hvalidRuntime hdrops
+  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+    ValueOwnerTargetsHeap.partial
+      (TermOwnerTargetsHeap.value
+        (termOwnerTargetsHeap_block_head
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+  have hdropValuesHeap :
+      ∀ dropValue, dropValue ∈ [.value value] →
+        PartialValueOwnerTargetsHeap dropValue := by
+    intro dropValue hmem
+    simp at hmem
+    subst hmem
+    exact hvalueHeap
+  have hdropOwnersOrphaned :
+      ∀ owned, owned ∈ partialValuesOwningLocations [.value value] →
+        ¬ ProgramStore.Owns store owned := by
+    intro owned howned howns
+    have hownedValue : owned ∈ valueOwningLocations value := by
+      simpa [partialValuesOwningLocations, partialValueOwningLocations] using howned
+    exact (ValidRuntimeState.storeTermDisjoint hvalidRuntime owned
+      (by
+        simp [termOwningLocations, termValues]
+        exact Or.inl hownedValue)) howns
+  exact RelaxedRuntimeEnvAbstraction.drops_of_orphaned_values habstraction
+    (ValidRuntimeState.validStore hvalidRuntime)
+    (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+    hdropValuesHeap hdropOwnersOrphaned hdrops
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.seq_value_drop
+    {store store' : ProgramStore} {env : Env}
+    {blockLifetime : Lifetime} {value : Value} {next : Term}
+    {rest : List Term} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
+    Drops store [.value value] store' →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store' env := by
+  intro habstraction hvalidRuntime hdrops
+  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+    ValueOwnerTargetsHeap.partial
+      (TermOwnerTargetsHeap.value
+        (termOwnerTargetsHeap_block_head
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+  have hdropValuesHeap :
+      ∀ dropValue, dropValue ∈ [.value value] →
+        PartialValueOwnerTargetsHeap dropValue := by
+    intro dropValue hmem
+    simp at hmem
+    subst hmem
+    exact hvalueHeap
+  have hdropOwnersOrphaned :
+      ∀ owned, owned ∈ partialValuesOwningLocations [.value value] →
+        ¬ ProgramStore.Owns store owned := by
+    intro owned howned howns
+    have hownedValue : owned ∈ valueOwningLocations value := by
+      simpa [partialValuesOwningLocations, partialValueOwningLocations] using howned
+    exact (ValidRuntimeState.storeTermDisjoint hvalidRuntime owned
+      (by
+        simp [termOwningLocations, termValues]
+        exact Or.inl hownedValue)) howns
+  exact RelaxedRuntimeEnvAbstractionWithSlotProtection.drops_of_orphaned_values
+    habstraction
+    (ValidRuntimeState.validStore hvalidRuntime)
+    (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+    hdropValuesHeap hdropOwnersOrphaned hdrops
+
 theorem RuntimeEnvAbstraction.envJoinSameShape_of_strengthens
     {store : ProgramStore} {source result : Env} :
     RuntimeEnvAbstraction store source →
@@ -8283,6 +10685,85 @@ theorem RuntimeEnvAbstraction.update_var_drops_of_orphaned_values
     hvalidStore hheap hdropValuesHeap hdropOwnersOrphaned hdrops
 
 /--
+Runtime abstraction for declaring a fresh variable.
+
+Old represented slots are transported through the fresh store extension.  The new
+slot receives explicit proof-carrying evidence for the evaluated value, plus the
+protected-dependency payload for that evidence.
+-/
+theorem RuntimeEnvAbstraction.declare
+    {store : ProgramStore} {env : Env} {x : Name}
+    {lifetime : Lifetime} {value : Value} {newTy : PartialTy} :
+    RuntimeEnvAbstraction store env →
+    env.fresh x →
+    (newEvidence : RuntimeFrame.ValidPartialValueEvidence
+      (store.declare x lifetime value) (.value value) newTy) →
+    (∀ location,
+      RuntimeFrame.EvidenceBorrowDependency
+        (store.declare x lifetime value) newEvidence location →
+      ∃ base,
+        ProtectedByBase (store.declare x lifetime value) base location) →
+    RuntimeEnvAbstraction (store.declare x lifetime value)
+      (env.update x { ty := newTy, lifetime := lifetime }) := by
+  intro habstraction hfresh newEvidence hnewProtected
+  have hfreshStore : store.fresh (VariableProjection x) :=
+    safeAbstraction_store_fresh_var habstraction.safe hfresh
+  constructor
+  · intro y
+    constructor
+    · intro hstoreDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ ty := newTy, lifetime := lifetime }, by simp [Env.update]⟩
+      · rcases hstoreDomain with ⟨slot, hslot⟩
+        have hstoreOld :
+            ∃ slot, store.slotAt (VariableProjection y) = some slot := by
+          exact ⟨slot, by
+            simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+              hyx] using hslot⟩
+        rcases (habstraction.1 y).mp hstoreOld with ⟨envSlot, henvSlot⟩
+        exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+    · intro henvDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ value := .value value, lifetime := lifetime }, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection]⟩
+      · rcases henvDomain with ⟨envSlot, henvSlotUpdate⟩
+        have henvOld : ∃ envSlot, env.slotAt y = some envSlot :=
+          ⟨envSlot, by simpa [Env.update, hyx] using henvSlotUpdate⟩
+        rcases (habstraction.1 y).mpr henvOld with ⟨storeSlot, hstoreSlot⟩
+        exact ⟨storeSlot, by
+          simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+            hyx] using hstoreSlot⟩
+  · intro y resultSlot hresultSlot
+    by_cases hyx : y = x
+    · subst hyx
+      have hslotEq :
+          resultSlot = { ty := newTy, lifetime := lifetime } := by
+        have h :
+            { ty := newTy, lifetime := lifetime } = resultSlot := by
+          simpa [Env.update] using hresultSlot
+        exact h.symm
+      subst hslotEq
+      exact ⟨.value value, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection],
+        newEvidence, hnewProtected⟩
+    · have henvSlotOld : env.slotAt y = some resultSlot := by
+        simpa [Env.update, hyx] using hresultSlot
+      rcases habstraction.2 y resultSlot henvSlotOld with
+        ⟨oldValue, hstoreSlot, evidence, hprotected⟩
+      rcases RuntimeFrame.validPartialValueEvidence_declare_of_fresh
+          evidence hfreshStore with
+        ⟨evidence', hdependencyBack⟩
+      refine ⟨oldValue, ?_, evidence', ?_⟩
+      · simpa [ProgramStore.declare, ProgramStore.update, VariableProjection,
+          hyx] using hstoreSlot
+      · intro dependency hdependency
+        rcases hprotected dependency (hdependencyBack dependency hdependency) with
+          ⟨base, hprotectedOld⟩
+        exact ⟨base, ProtectedByBase.declare_of_fresh hfreshStore hprotectedOld⟩
+
+/--
 Runtime abstraction through an owner-spine leaf update.
 
 This is the proof-carrying analogue of
@@ -8708,6 +11189,378 @@ theorem RuntimeEnvInvariant.strengthen_sameShape {store : ProgramStore}
     RuntimeEnvAbstraction.strengthen_sameShape hinv.1 hmap,
     hslots⟩
 
+/--
+Runtime-facing invariant with relaxed storage evidence.
+
+This is the join-friendly analogue of `RuntimeEnvInvariant`: the static
+component remains slot outliving, while the store/environment abstraction may
+hide concrete initialized evidence behind an abstract `undef` upper bound.
+-/
+def RelaxedRuntimeEnvInvariant
+    (store : ProgramStore) (env : Env) (lifetime : Lifetime) : Prop :=
+  RelaxedRuntimeEnvAbstraction store env ∧ EnvSlotsOutlive env lifetime
+
+theorem RuntimeEnvInvariant.relaxed {store : ProgramStore} {env : Env}
+    {lifetime : Lifetime} :
+    RuntimeEnvInvariant store env lifetime →
+    RelaxedRuntimeEnvInvariant store env lifetime := by
+  intro hinv
+  exact ⟨hinv.1.relaxed, hinv.2⟩
+
+theorem RelaxedRuntimeEnvInvariant.relaxedSafe {store : ProgramStore}
+    {env : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariant store env lifetime →
+    RuntimeFrame.RelaxedSafeAbstraction store env := by
+  intro hinv
+  exact hinv.1.relaxedSafe
+
+theorem RelaxedRuntimeEnvInvariant.strengthen {store : ProgramStore}
+    {source result : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariant store source lifetime →
+    EnvStrengthens source result →
+    EnvSlotsOutlive result lifetime →
+    RelaxedRuntimeEnvInvariant store result lifetime := by
+  intro hinv hstrength hslots
+  exact ⟨RelaxedRuntimeEnvAbstraction.strengthen hinv.1 hstrength, hslots⟩
+
+theorem RelaxedRuntimeEnvInvariant.strengthen_join_left
+    {store : ProgramStore} {left right join : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariant store left lifetime →
+    EnvJoin left right join →
+    EnvSlotsOutlive join lifetime →
+    RelaxedRuntimeEnvInvariant store join lifetime := by
+  intro hinv hjoin hslots
+  exact hinv.strengthen (EnvJoin.left_le hjoin) hslots
+
+theorem RelaxedRuntimeEnvInvariant.strengthen_join_right
+    {store : ProgramStore} {left right join : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariant store right lifetime →
+    EnvJoin left right join →
+    EnvSlotsOutlive join lifetime →
+    RelaxedRuntimeEnvInvariant store join lifetime := by
+  intro hinv hjoin hslots
+  exact hinv.strengthen (EnvJoin.right_le hjoin) hslots
+
+theorem RelaxedRuntimeEnvInvariant.seq_value_drop
+    {store store' : ProgramStore} {env : Env}
+    {lifetime blockLifetime : Lifetime} {value : Value} {next : Term}
+    {rest : List Term} :
+    RelaxedRuntimeEnvInvariant store env lifetime →
+    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
+    Drops store [.value value] store' →
+    RelaxedRuntimeEnvInvariant store' env lifetime := by
+  intro hinv hvalidRuntime hdrops
+  exact ⟨RelaxedRuntimeEnvAbstraction.seq_value_drop hinv.1 hvalidRuntime hdrops,
+    hinv.2⟩
+
+/--
+Relaxed runtime invariant with lifetime-qualified dependency protection.
+
+This is the transport layer needed by lifetime drops after the undef/nonundef
+merge: abstract `undef` evidence remains lossy, while live concrete dependency
+evidence remembers a protecting base slot that outlives the slot carrying the
+evidence.
+-/
+def RelaxedRuntimeEnvInvariantWithSlotProtection
+    (store : ProgramStore) (env : Env) (lifetime : Lifetime) : Prop :=
+  RelaxedRuntimeEnvAbstractionWithSlotProtection store env ∧
+    EnvSlotsOutlive env lifetime
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.relaxed
+    {store : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariantWithSlotProtection store env lifetime →
+    RelaxedRuntimeEnvInvariant store env lifetime := by
+  intro hinv
+  exact ⟨hinv.1.relaxed, hinv.2⟩
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.of_wellFormed
+    {store : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    RelaxedRuntimeEnvInvariantWithSlotProtection store env lifetime := by
+  intro hwellFormed hsafe hvalidStore hheap
+  exact ⟨
+    RelaxedRuntimeEnvAbstractionWithSlotProtection.of_wellFormed
+      hwellFormed hsafe hvalidStore hheap,
+    hwellFormed.2.1⟩
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.strengthen
+    {store : ProgramStore} {source result : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariantWithSlotProtection store source lifetime →
+    EnvStrengthens source result →
+    EnvSlotsOutlive result lifetime →
+    RelaxedRuntimeEnvInvariantWithSlotProtection store result lifetime := by
+  intro hinv hstrength hslots
+  exact ⟨
+    RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen
+      hinv.1 hstrength,
+    hslots⟩
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.strengthen_join_left
+    {store : ProgramStore} {left right join : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariantWithSlotProtection store left lifetime →
+    EnvJoin left right join →
+    EnvSlotsOutlive join lifetime →
+    RelaxedRuntimeEnvInvariantWithSlotProtection store join lifetime := by
+  intro hinv hjoin hslots
+  exact hinv.strengthen (EnvJoin.left_le hjoin) hslots
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.strengthen_join_right
+    {store : ProgramStore} {left right join : Env} {lifetime : Lifetime} :
+    RelaxedRuntimeEnvInvariantWithSlotProtection store right lifetime →
+    EnvJoin left right join →
+    EnvSlotsOutlive join lifetime →
+    RelaxedRuntimeEnvInvariantWithSlotProtection store join lifetime := by
+  intro hinv hjoin hslots
+  exact hinv.strengthen (EnvJoin.right_le hjoin) hslots
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.seq_value_drop
+    {store store' : ProgramStore} {env : Env}
+    {lifetime blockLifetime : Lifetime} {value : Value} {next : Term}
+    {rest : List Term} :
+    RelaxedRuntimeEnvInvariantWithSlotProtection store env lifetime →
+    ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
+    Drops store [.value value] store' →
+    RelaxedRuntimeEnvInvariantWithSlotProtection store' env lifetime := by
+  intro hinv hvalidRuntime hdrops
+  exact ⟨
+    RelaxedRuntimeEnvAbstractionWithSlotProtection.seq_value_drop
+      hinv.1 hvalidRuntime hdrops,
+    hinv.2⟩
+
+/--
+Progress with join-friendly storage evidence.
+
+The proof mirrors `progress_typing_bounded`, but lvalue reads/writes consume the
+relaxed abstraction so a joined `undef` type may be represented by an initialized
+runtime slot.
+-/
+theorem progress_typing_relaxed_bounded {store : ProgramStore} (fuel : Nat)
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    term.size ≤ fuel →
+    ValidStoreTyping store term typing →
+    EnvSlotsOutlive env₁ lifetime →
+    RelaxedRuntimeEnvAbstraction store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  induction fuel generalizing env₁ env₂ typing lifetime term ty with
+  | zero =>
+      intro hsize _hvalidStoreTyping _hslotsOutlive _habstraction _hstore _htyping
+      cases term <;> simp [Term.size] at hsize
+  | succ fuel ihFuel =>
+  intro hsize hvalidStoreTyping hslotsOutlive habstraction hstore htyping
+  revert hsize hvalidStoreTyping hslotsOutlive habstraction hstore
+  refine TermTyping.rec
+    (motive_1 := fun env typing lifetime term ty env₂ _ =>
+      term.size ≤ fuel.succ →
+      ValidStoreTyping store term typing →
+      EnvSlotsOutlive env lifetime →
+      RelaxedRuntimeEnvAbstraction store env →
+      OperationalStoreProgress store →
+      ProgressResult store lifetime term)
+    (motive_2 := fun env typing blockLifetime terms ty env₂ _ =>
+      Term.size (.block blockLifetime terms) ≤ fuel.succ →
+      ValidStoreTyping store (.block blockLifetime terms) typing →
+      ∀ lifetime,
+        EnvSlotsOutlive env blockLifetime →
+        RelaxedRuntimeEnvAbstraction store env →
+        OperationalStoreProgress store →
+        ProgressResult store lifetime (.block blockLifetime terms))
+    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare
+    ?assign ?eq ?ite ?iteDiverging ?whileLoopDiverging ?whileLoop
+    ?singleton ?cons htyping
+  case const =>
+    intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf
+      _habstraction _hstore
+    exact progress_value store lifetime value
+  case missing =>
+    intro _env _typing lifetime _ty _hwellTy _hloanFree _hsize _hvst _hwf
+      _habstraction _hstore
+    exact Or.inr ⟨store, .missing, Step.missing⟩
+  case copy =>
+    intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy
+      hreadProhibited _hsize _hvst _hwf habstraction _hstore
+    exact progress_copy_typing_of_relaxed (typing := _typing) habstraction
+      (TermTyping.copy (typing := _typing) hLv hcopy hreadProhibited)
+  case move =>
+    intro _env₁ _env₂ _typing lifetime _valueLifetime _lv _ty hLv
+      hwriteProhibited hmove _hsize _hvst _hwf habstraction _hstore
+    exact progress_move_typing_of_relaxed (typing := _typing) habstraction
+      (TermTyping.move (typing := _typing) hLv hwriteProhibited hmove)
+  case mutBorrow =>
+    intro _env _typing lifetime _valueLifetime _lv _ty hLv hmutable
+      hwriteProhibited _hsize _hvst _hwf habstraction _hstore
+    exact progress_borrow_typing_of_relaxed (typing := _typing) habstraction
+      (TermTyping.mutBorrow (typing := _typing) hLv hmutable hwriteProhibited)
+  case immBorrow =>
+    intro _env _typing lifetime _valueLifetime _lv _ty hLv hreadProhibited
+      _hsize _hvst _hwf habstraction _hstore
+    exact progress_borrow_typing_of_relaxed (typing := _typing) habstraction
+      (TermTyping.immBorrow (typing := _typing) hLv hreadProhibited)
+  case box =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hsize hvst hwf
+      habstraction hstore
+    exact progress_box_typing hstore (TermTyping.box hterm)
+      (ih (by simp [Term.size] at hsize ⊢; omega)
+        (validStoreTyping_box_inner hvst) hwf habstraction hstore)
+  case block =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _blockLifetime _terms _ty hchild
+      _hterms _hwellTy _hdrop ih hsize hvst houtlives habstraction hstore
+    exact ih hsize hvst lifetime
+      (EnvSlotsOutlive.weaken houtlives (LifetimeChild.outlives hchild))
+      habstraction hstore
+  case declare =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm
+      hfreshOut hcoh henv ih hsize hvst hwf habstraction hstore
+    exact progress_declare_typing
+      (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
+      (ih (by simp [Term.size] at hsize ⊢; omega)
+        (validStoreTyping_declare_inner hvst) hwf habstraction hstore)
+  case assign =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs
+      _rhsTy hRhs hLhsPost hshape hwfTy hwrite hranked htargets hnotWrite
+      ih hsize hvst hwf habstraction hstore
+    exact progress_assign_typing_of_relaxed habstraction hstore
+      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hranked htargets
+        hnotWrite)
+      (ih (by simp [Term.size] at hsize ⊢; omega)
+        (validStoreTyping_assign_inner hvst) hwf habstraction hstore)
+  case eq =>
+    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing lifetime lhs rhs lhsTy
+      rhsTy hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs hnotMention
+      _henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize hvst hwf
+      habstraction hstore
+    rcases ihL (by simp [Term.size] at hsize ⊢; omega) hvst.eq_lhs hwf
+        habstraction hstore with
+      hterminalL | hstepL
+    · rcases (terminal_iff_value lhs).mp hterminalL with ⟨lhsValue, hlhs⟩
+      subst hlhs
+      cases hLhs with
+      | const _hvalueL =>
+          have hRhs :=
+                    TermTyping.erase_ghost
+                      (env := _env₁)
+                      (ghostSlot := { ty := .ty lhsTy, lifetime := lifetime })
+                      hfresh htypeFresh
+                      (by
+                        intro hv
+                        exact htyFresh
+                          (Ty.vars_subset_allVars (ty := lhsTy)
+                            (by simpa [PartialTy.vars] using hv)))
+                      hstoreFresh hnotMention hghostRhs
+          rcases ihFuel (by simp [Term.size] at hsize ⊢; omega)
+              hvst.eq_rhs hwf habstraction hstore hRhs with
+            hterminalR | hstepR
+          · rcases (terminal_iff_value rhs).mp hterminalR with ⟨rhsValue, hrhs⟩
+            subst hrhs
+            exact progress_eq_values
+          · exact progress_subEqRight hstepR
+    · exact progress_subEqLeft hstepL
+  case ite =>
+    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
+      falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin
+      _henvJoin _hwellJoin _hlinear _hborrowSafe _hresultSafe ihCondition
+      _ihTrue _ihFalse hsize hvst hwf habstraction hstore
+    rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
+        hvst.ite_condition hwf habstraction hstore with
+      hterminalCondition | hstepCondition
+    · rcases (terminal_iff_value condition).mp hterminalCondition with
+        ⟨conditionValue, hconditionValue⟩
+      subst hconditionValue
+      cases hcondition with
+      | const hvalueTyping =>
+          exact progress_ite_value hvalueTyping hvst.ite_condition
+    · exact progress_subIte hstepCondition
+  case iteDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
+      falseBranch trueTy falseTy hcondition _htrue _hfalse _hdiverges
+      ihCondition _ihTrue _ihFalse hsize hvst hwf habstraction hstore
+    rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
+        hvst.ite_condition hwf habstraction hstore with
+      hterminalCondition | hstepCondition
+    · rcases (terminal_iff_value condition).mp hterminalCondition with
+        ⟨conditionValue, hconditionValue⟩
+      subst hconditionValue
+      cases hcondition with
+      | const hvalueTyping =>
+          exact progress_ite_value hvalueTyping hvst.ite_condition
+    · exact progress_subIte hstepCondition
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
+      _bodyTy _hchild _hcond _hbody _hdiverges _ihCond _ihBody _hsize _hvst
+      _hwf _habstraction _hstore
+    exact Or.inr ⟨store, _, Step.whileStart⟩
+  case whileLoop =>
+    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+      lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy _hchild
+      _hjoin _hlin _hbse _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
+      _hcondEntry _hbodyEntry _ihCondInv _ihBodyInv _ihCondEntry
+      _ihBodyEntry _hsize _hvst _hwf _habstraction _hstore
+    exact Or.inr ⟨store, _, Step.whileStart⟩
+  case singleton =>
+    intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hsize hvst
+      outerLifetime hwf habstraction hstore
+    exact progress_block_of_head_progress hstore
+      (ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        (validStoreTyping_block_singleton_inner hvst) hwf habstraction hstore)
+  case cons =>
+    intro _env₁ _env₂ _env₃ _typing _blockLifetime _term _rest _termTy
+      _finalTy _hterm _hrest ihHead _ihRest hsize hvst outerLifetime hwf
+      habstraction hstore
+    exact progress_block_of_head_progress hstore
+      (ihHead (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        (validStoreTyping_block_head hvst) hwf habstraction hstore)
+
+theorem progress_typing_of_relaxed {store : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    ValidStoreTyping store term typing →
+    EnvSlotsOutlive env₁ lifetime →
+    RelaxedRuntimeEnvAbstraction store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  intro hvalidStoreTyping hslotsOutlive habstraction hstore htyping
+  exact progress_typing_relaxed_bounded term.size (Nat.le_refl _)
+    hvalidStoreTyping hslotsOutlive habstraction hstore htyping
+
+theorem progress_termList_typing_of_relaxed {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime blockLifetime : Lifetime} {terms : List Term} {ty : Ty} :
+    ValidStoreTyping store (.block blockLifetime terms) typing →
+    EnvSlotsOutlive env₁ blockLifetime →
+    RelaxedRuntimeEnvAbstraction store env₁ →
+    OperationalStoreProgress store →
+    TermListTyping env₁ typing blockLifetime terms ty env₂ →
+    ProgressResult store lifetime (.block blockLifetime terms) := by
+  intro hvalidStoreTyping hslotsOutlive habstraction hstore htyping
+  cases htyping with
+  | singleton hterm =>
+      exact progress_block_of_head_progress hstore
+        (progress_typing_of_relaxed
+          (validStoreTyping_block_singleton_inner hvalidStoreTyping)
+          hslotsOutlive habstraction hstore hterm)
+  | cons hterm _hrest =>
+      exact progress_block_of_head_progress hstore
+        (progress_typing_of_relaxed
+          (validStoreTyping_block_head hvalidStoreTyping)
+          hslotsOutlive habstraction hstore hterm)
+
+theorem RelaxedRuntimeEnvInvariant.progress {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    RelaxedRuntimeEnvInvariant store env₁ lifetime →
+    ValidStoreTyping store term typing →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  intro hinv hstoreTyping hstoreProgress htyping
+  exact progress_typing_of_relaxed hstoreTyping hinv.2 hinv.1 hstoreProgress
+    htyping
+
 def RuntimeBorrowSafeEnvInvariant
     (store : ProgramStore) (env : Env) (lifetime : Lifetime) : Prop :=
   RuntimeEnvInvariant store env lifetime ∧ BorrowSafeEnv env
@@ -8888,6 +11741,1408 @@ theorem TerminalStateRuntimeSafe.safe {store : ProgramStore}
   intro hterminal
   exact ⟨hterminal.1, hterminal.2.1.safe, hterminal.2.2⟩
 
+/--
+Terminal safety with relaxed storage abstraction.
+
+This is the terminal-state shape needed at control-flow joins after premise
+removal: the final value is still valid at the result type, while environment
+slots are related to the concrete store by relaxed evidence that may hide an
+initialized value behind an abstract `undef` slot.
+-/
+def TerminalStateRelaxedRuntimeSafe
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  ValidRuntimeState store (.val value) ∧
+    RelaxedRuntimeEnvAbstraction store env ∧
+    ValidValue store value ty
+
+theorem TerminalStateRuntimeSafe.relaxed {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateRuntimeSafe store value env ty →
+    TerminalStateRelaxedRuntimeSafe store value env ty := by
+  intro hterminal
+  exact ⟨hterminal.1,
+    hterminal.2.1.relaxed,
+    hterminal.2.2⟩
+
+theorem TerminalStateRelaxedRuntimeSafe.relaxedSafe {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateRelaxedRuntimeSafe store value env ty →
+    RuntimeFrame.RelaxedSafeAbstraction store env := by
+  intro hterminal
+  exact hterminal.2.1.relaxedSafe
+
+theorem TerminalStateSafe.relaxed_of_wellFormed {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    TerminalStateSafe store value env ty →
+    TerminalStateRelaxedRuntimeSafe store value env ty := by
+  intro hwellFormed hterminal
+  exact ⟨hterminal.1,
+    (RuntimeEnvAbstraction.of_containedBorrowsWellFormed hwellFormed.1
+      hterminal.2.1
+      (ValidRuntimeState.validStore hterminal.1)
+      (ValidRuntimeState.storeOwnerTargetsHeap hterminal.1)).relaxed,
+    hterminal.2.2⟩
+
+/--
+Protected relaxed evidence for a terminal value.
+
+This is the value-side payload needed by declaration preservation after premise
+removal: if a terminal value is stored into a fresh environment slot, its
+selected borrow dependencies must already be protected by live runtime roots.
+-/
+def TerminalValueProtected
+    (store : ProgramStore) (value : Value) (ty : Ty) : Prop :=
+  ∃ evidence :
+    RuntimeFrame.RelaxedValidPartialValueEvidence store (.value value) (.ty ty),
+    ∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      ∃ base, ProtectedByBase store base location
+
+theorem TerminalValueProtected.validValue {store : ProgramStore}
+    {value : Value} {ty : Ty} :
+    TerminalValueProtected store value ty →
+    ValidValue store value ty := by
+  intro hprotected
+  rcases hprotected with ⟨evidence, _hdeps⟩
+  exact (RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_full
+    evidence).valid
+
+theorem TerminalValueProtected.of_relaxedEvidence_eq {store : ProgramStore}
+    {partialValue : PartialValue} {value : Value} {ty : Ty} :
+    partialValue = .value value →
+    (evidence :
+      RuntimeFrame.RelaxedValidPartialValueEvidence store partialValue (.ty ty)) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      ∃ base, ProtectedByBase store base location) →
+    TerminalValueProtected store value ty := by
+  intro hvalue evidence hprotected
+  cases hvalue
+  exact ⟨evidence, hprotected⟩
+
+theorem TerminalValueProtected.of_protected_read {store : ProgramStore}
+    {lv : LVal} {value : Value} {ty : Ty} {lifetime : Lifetime} :
+    ProtectedRelaxedLValLocationAbstraction store lv (.ty ty) →
+    store.read lv = some { value := .value value, lifetime := lifetime } →
+    TerminalValueProtected store value ty := by
+  intro hprotected hread
+  rcases hprotected with
+    ⟨location, slot, hloc, hslot, evidence, hdepsProtected⟩
+  have hslotEq : slot = { value := .value value, lifetime := lifetime } := by
+    simp [ProgramStore.read, hloc, hslot] at hread
+    exact hread
+  subst hslotEq
+  exact TerminalValueProtected.of_relaxedEvidence_eq rfl evidence hdepsProtected
+
+theorem TerminalValueProtected.unit {store : ProgramStore} :
+    TerminalValueProtected store .unit .unit := by
+  refine ⟨RuntimeFrame.RelaxedValidPartialValueEvidence.unit, ?_⟩
+  intro location hdependency
+  cases hdependency
+
+theorem TerminalValueProtected.int {store : ProgramStore} {value : Int} :
+    TerminalValueProtected store (.int value) .int := by
+  refine ⟨RuntimeFrame.RelaxedValidPartialValueEvidence.int, ?_⟩
+  intro location hdependency
+  cases hdependency
+
+theorem TerminalValueProtected.bool {store : ProgramStore} {value : Bool} :
+    TerminalValueProtected store (.bool value) .bool := by
+  refine ⟨RuntimeFrame.RelaxedValidPartialValueEvidence.bool, ?_⟩
+  intro location hdependency
+  cases hdependency
+
+theorem TerminalValueProtected.borrow {store : ProgramStore}
+    {location : Location} {mutable : Bool} {targets : List LVal}
+    {pointee : Ty} {target : LVal} :
+    target ∈ targets →
+    store.loc target = some location →
+    (∀ dependency,
+      RuntimeFrame.LocReads store target dependency →
+      ∃ base, ProtectedByBase store base dependency) →
+    TerminalValueProtected store
+      (.ref { location := location, owner := false })
+      (.borrow mutable targets pointee) := by
+  intro hmem hloc hreadsProtected
+  refine ⟨RuntimeFrame.RelaxedValidPartialValueEvidence.borrow
+      target hmem hloc, ?_⟩
+  intro dependency hdependency
+  cases hdependency with
+  | borrow hreads =>
+      exact hreadsProtected dependency hreads
+
+theorem TerminalValueProtected.borrow_of_lval_relaxed
+    {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : Ty} {lifetime : Lifetime}
+    {mutable : Bool} {location : Location} :
+    RelaxedRuntimeEnvAbstraction store env →
+    LValTyping env lv (.ty ty) lifetime →
+    store.loc lv = some location →
+    TerminalValueProtected store
+      (.ref { location := location, owner := false })
+      (.borrow mutable [lv] ty) := by
+  intro habstraction htyping hloc
+  exact TerminalValueProtected.borrow (target := lv)
+    (targets := [lv]) (pointee := ty) (mutable := mutable)
+    (location := location) (by simp) hloc
+    (lvalTyping_loc_and_reads_protected_of_relaxed
+      habstraction htyping).2
+
+theorem TerminalValueProtected.of_sourceValue {store : ProgramStore}
+    {typing : StoreTyping} {value : Value} {ty : Ty} :
+    SourceValue value →
+    ValueTyping typing value ty →
+    TerminalValueProtected store value ty := by
+  intro hsource htyping
+  cases value with
+  | unit =>
+      cases htyping
+      exact TerminalValueProtected.unit
+  | int n =>
+      cases htyping
+      exact TerminalValueProtected.int
+  | bool b =>
+      cases htyping
+      exact TerminalValueProtected.bool
+  | ref ref =>
+      cases hsource
+
+theorem TerminalValueProtected.boxAt_ref {store : ProgramStore}
+    {address : Nat} {value : Value} {ty : Ty} :
+    StoreOwnersAllocated store →
+    store.fresh (.heap address) →
+    TerminalValueProtected store value ty →
+    TerminalValueProtected (store.boxAt address value).1
+      (.ref (store.boxAt address value).2) (.box ty) := by
+  intro hallocated hfresh hprotected
+  rcases hprotected with ⟨oldEvidence, holdProtected⟩
+  rcases
+      RuntimeFrame.relaxedValidPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+        (updated := .heap address)
+        (newSlot := { value := .value value, lifetime := Lifetime.root })
+        oldEvidence
+        (by
+          intro location hreach hlocation
+          subst hlocation
+          exact RuntimeFrame.RelaxedEvidenceOwnerReach.ne_fresh hfresh hreach)
+        (by
+          intro location hdependency hlocation
+          subst hlocation
+          exact RuntimeFrame.RelaxedEvidenceBorrowDependency.ne_fresh
+            hfresh hdependency) with
+    ⟨newEvidence, hdependencyBack⟩
+  have hnewProtected :
+      ∀ location,
+        RuntimeFrame.RelaxedEvidenceBorrowDependency
+          (store.update (.heap address)
+            { value := .value value, lifetime := Lifetime.root })
+          newEvidence location →
+        ∃ base,
+          ProtectedByBase
+            (store.update (.heap address)
+              { value := .value value, lifetime := Lifetime.root })
+            base location := by
+    intro location hdependency
+    rcases holdProtected location
+        (hdependencyBack location hdependency) with
+      ⟨base, hprotectedOld⟩
+    exact ⟨base,
+      ProtectedByBase.update_of_not_protected hprotectedOld
+        (ProtectedByBase.not_fresh_heap_of_storeOwnersAllocated
+          hallocated hfresh)⟩
+  change TerminalValueProtected
+    (store.update (.heap address)
+      { value := .value value, lifetime := Lifetime.root })
+    (.ref { location := .heap address, owner := true }) (.box ty)
+  refine ⟨RuntimeFrame.RelaxedValidPartialValueEvidence.boxFull
+      (location := .heap address)
+      (slot := { value := .value value, lifetime := Lifetime.root })
+      (by simp [ProgramStore.update]) newEvidence, ?_⟩
+  intro location hdependency
+  cases hdependency with
+  | boxFullInner hinner =>
+      exact hnewProtected location hinner
+
+theorem TerminalValueProtected.strengthen {store : ProgramStore}
+    {value : Value} {sourceTy resultTy : Ty} :
+    TerminalValueProtected store value sourceTy →
+    PartialTyStrengthens (.ty sourceTy) (.ty resultTy) →
+    TerminalValueProtected store value resultTy := by
+  intro hprotected hstrength
+  rcases hprotected with ⟨oldEvidence, holdProtected⟩
+  rcases RuntimeFrame.RelaxedValidPartialValueEvidence.strengthen_exists
+      oldEvidence hstrength with
+    ⟨newEvidence, hrel⟩
+  refine ⟨newEvidence, ?_⟩
+  intro location hdependency
+  exact holdProtected location
+    (RuntimeFrame.RelaxedEvidenceBorrowDependency.of_strengthens
+      hrel hdependency)
+
+theorem TerminalValueProtected.strengthen_join_left {store : ProgramStore}
+    {value : Value} {leftTy rightTy joinTy : Ty} :
+    PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy) →
+    TerminalValueProtected store value leftTy →
+    TerminalValueProtected store value joinTy := by
+  intro hjoin hprotected
+  exact hprotected.strengthen (PartialTyUnion.left_strengthens hjoin)
+
+theorem TerminalValueProtected.strengthen_join_right {store : ProgramStore}
+    {value : Value} {leftTy rightTy joinTy : Ty} :
+    PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy) →
+    TerminalValueProtected store value rightTy →
+    TerminalValueProtected store value joinTy := by
+  intro hjoin hprotected
+  exact hprotected.strengthen (PartialTyUnion.right_strengthens hjoin)
+
+theorem TerminalStateRelaxedRuntimeSafe.strengthen
+    {finalStore : ProgramStore} {finalValue : Value}
+    {source result : Env} {sourceTy resultTy : Ty}
+    (henvStrengthens : EnvStrengthens source result)
+    (htyStrengthens : PartialTyStrengthens (.ty sourceTy) (.ty resultTy))
+    (hterminal :
+      TerminalStateRelaxedRuntimeSafe finalStore finalValue source sourceTy) :
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue result resultTy := by
+  exact ⟨hterminal.1,
+    RelaxedRuntimeEnvAbstraction.strengthen hterminal.2.1 henvStrengthens,
+    safeStrengthening_of_strengthens htyStrengthens hterminal.2.2⟩
+
+theorem TerminalStateRelaxedRuntimeSafe.strengthen_join_left
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateRelaxedRuntimeSafe finalStore finalValue left leftTy) :
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.left_le henvJoin)
+    (PartialTyUnion.left_strengthens htyJoin)
+
+theorem TerminalStateRelaxedRuntimeSafe.strengthen_join_right
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateRelaxedRuntimeSafe finalStore finalValue right rightTy) :
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.right_le henvJoin)
+    (PartialTyUnion.right_strengthens htyJoin)
+
+/--
+Relaxed terminal safety plus protected value evidence.
+
+This is the recursive preservation target needed for `let mut`: the terminal
+store/environment relation is relaxed, and the terminal value can be safely
+inserted into a fresh slot without reconstructing full static well-formedness.
+-/
+def TerminalStateRelaxedValueSafe
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  TerminalStateRelaxedRuntimeSafe store value env ty ∧
+    TerminalValueProtected store value ty
+
+theorem TerminalStateRelaxedValueSafe.terminal {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateRelaxedValueSafe store value env ty →
+    TerminalStateRelaxedRuntimeSafe store value env ty := by
+  intro hterminal
+  exact hterminal.1
+
+theorem TerminalStateRelaxedValueSafe.valueProtected {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateRelaxedValueSafe store value env ty →
+    TerminalValueProtected store value ty := by
+  intro hterminal
+  exact hterminal.2
+
+theorem TerminalStateRuntimeSafe.relaxedValueSafe {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateRuntimeSafe store value env ty →
+    TerminalValueProtected store value ty →
+    TerminalStateRelaxedValueSafe store value env ty := by
+  intro hterminal hprotected
+  exact ⟨hterminal.relaxed, hprotected⟩
+
+theorem TerminalStateSafe.relaxedValueSafe_of_wellFormed {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    TerminalStateSafe store value env ty →
+    TerminalValueProtected store value ty →
+    TerminalStateRelaxedValueSafe store value env ty := by
+  intro hwellFormed hterminal hprotected
+  exact ⟨TerminalStateSafe.relaxed_of_wellFormed hwellFormed hterminal,
+    hprotected⟩
+
+theorem TerminalStateRelaxedValueSafe.strengthen
+    {finalStore : ProgramStore} {finalValue : Value}
+    {source result : Env} {sourceTy resultTy : Ty}
+    (henvStrengthens : EnvStrengthens source result)
+    (htyStrengthens : PartialTyStrengthens (.ty sourceTy) (.ty resultTy))
+    (hterminal :
+      TerminalStateRelaxedValueSafe finalStore finalValue source sourceTy) :
+    TerminalStateRelaxedValueSafe finalStore finalValue result resultTy := by
+  exact ⟨hterminal.1.strengthen henvStrengthens htyStrengthens,
+    hterminal.2.strengthen htyStrengthens⟩
+
+theorem TerminalStateRelaxedValueSafe.strengthen_join_left
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateRelaxedValueSafe finalStore finalValue left leftTy) :
+    TerminalStateRelaxedValueSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.left_le henvJoin)
+    (PartialTyUnion.left_strengthens htyJoin)
+
+theorem TerminalStateRelaxedValueSafe.strengthen_join_right
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateRelaxedValueSafe finalStore finalValue right rightTy) :
+    TerminalStateRelaxedValueSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.right_le henvJoin)
+    (PartialTyUnion.right_strengthens htyJoin)
+
+/--
+Terminal safety with the lifetime-qualified relaxed storage abstraction.
+
+This is the preservation invariant used internally by lifetime-drop-sensitive
+rules: top-level `undef` remains relaxed, but selected non-`undef` dependencies
+remember a protecting base slot that outlives the slot carrying the evidence.
+-/
+def TerminalStateSlotProtectedRuntimeSafe
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  ValidRuntimeState store (.val value) ∧
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env ∧
+    ValidValue store value ty
+
+theorem TerminalStateSlotProtectedRuntimeSafe.relaxed {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSlotProtectedRuntimeSafe store value env ty →
+    TerminalStateRelaxedRuntimeSafe store value env ty := by
+  intro hterminal
+  exact ⟨hterminal.1, hterminal.2.1.relaxed, hterminal.2.2⟩
+
+theorem TerminalStateSlotProtectedRuntimeSafe.strengthen
+    {finalStore : ProgramStore} {finalValue : Value}
+    {source result : Env} {sourceTy resultTy : Ty}
+    (henvStrengthens : EnvStrengthens source result)
+    (htyStrengthens : PartialTyStrengthens (.ty sourceTy) (.ty resultTy))
+    (hterminal :
+      TerminalStateSlotProtectedRuntimeSafe finalStore finalValue source sourceTy) :
+    TerminalStateSlotProtectedRuntimeSafe finalStore finalValue result resultTy := by
+  exact ⟨hterminal.1,
+    RelaxedRuntimeEnvAbstractionWithSlotProtection.strengthen hterminal.2.1
+      henvStrengthens,
+    safeStrengthening_of_strengthens htyStrengthens hterminal.2.2⟩
+
+theorem TerminalStateSlotProtectedRuntimeSafe.strengthen_join_left
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateSlotProtectedRuntimeSafe finalStore finalValue left leftTy) :
+    TerminalStateSlotProtectedRuntimeSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.left_le henvJoin)
+    (PartialTyUnion.left_strengthens htyJoin)
+
+theorem TerminalStateSlotProtectedRuntimeSafe.strengthen_join_right
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateSlotProtectedRuntimeSafe finalStore finalValue right rightTy) :
+    TerminalStateSlotProtectedRuntimeSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.right_le henvJoin)
+    (PartialTyUnion.right_strengthens htyJoin)
+
+def TerminalStateSlotProtectedValueSafe
+    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
+  TerminalStateSlotProtectedRuntimeSafe store value env ty ∧
+    TerminalValueProtected store value ty
+
+theorem TerminalStateSlotProtectedValueSafe.relaxed {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} :
+    TerminalStateSlotProtectedValueSafe store value env ty →
+    TerminalStateRelaxedValueSafe store value env ty := by
+  intro hterminal
+  exact ⟨hterminal.1.relaxed, hterminal.2⟩
+
+theorem TerminalStateSlotProtectedValueSafe.strengthen
+    {finalStore : ProgramStore} {finalValue : Value}
+    {source result : Env} {sourceTy resultTy : Ty}
+    (henvStrengthens : EnvStrengthens source result)
+    (htyStrengthens : PartialTyStrengthens (.ty sourceTy) (.ty resultTy))
+    (hterminal :
+      TerminalStateSlotProtectedValueSafe finalStore finalValue source sourceTy) :
+    TerminalStateSlotProtectedValueSafe finalStore finalValue result resultTy := by
+  exact ⟨hterminal.1.strengthen henvStrengthens htyStrengthens,
+    hterminal.2.strengthen htyStrengthens⟩
+
+theorem TerminalStateSlotProtectedValueSafe.strengthen_join_left
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateSlotProtectedValueSafe finalStore finalValue left leftTy) :
+    TerminalStateSlotProtectedValueSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.left_le henvJoin)
+    (PartialTyUnion.left_strengthens htyJoin)
+
+theorem TerminalStateSlotProtectedValueSafe.strengthen_join_right
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal :
+      TerminalStateSlotProtectedValueSafe finalStore finalValue right rightTy) :
+    TerminalStateSlotProtectedValueSafe finalStore finalValue join joinTy := by
+  exact hterminal.strengthen (EnvJoin.right_le henvJoin)
+    (PartialTyUnion.right_strengthens htyJoin)
+
+theorem TerminalStateRuntimeSafe.relaxed_strengthen_join_left
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue left leftTy) :
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue join joinTy :=
+  TerminalStateRelaxedRuntimeSafe.strengthen_join_left
+    henvJoin htyJoin hterminal.relaxed
+
+theorem TerminalStateRuntimeSafe.relaxed_strengthen_join_right
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue right rightTy) :
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue join joinTy :=
+  TerminalStateRelaxedRuntimeSafe.strengthen_join_right
+    henvJoin htyJoin hterminal.relaxed
+
+theorem TerminalStateRuntimeSafe.runtimeInvariant {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    TerminalStateRuntimeSafe store value env ty →
+    EnvSlotsOutlive env lifetime →
+    RuntimeEnvInvariant store env lifetime := by
+  intro hterminal hslots
+  exact ⟨hterminal.2.1, hslots⟩
+
+theorem TerminalStateRuntimeSafe.relaxedRuntimeInvariant {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    TerminalStateRuntimeSafe store value env ty →
+    EnvSlotsOutlive env lifetime →
+    RelaxedRuntimeEnvInvariant store env lifetime := by
+  intro hterminal hslots
+  exact ⟨hterminal.2.1.relaxed, hslots⟩
+
+theorem TerminalStateRelaxedRuntimeSafe.relaxedRuntimeInvariant
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty}
+    {lifetime : Lifetime} :
+    TerminalStateRelaxedRuntimeSafe store value env ty →
+    EnvSlotsOutlive env lifetime →
+    RelaxedRuntimeEnvInvariant store env lifetime := by
+  intro hterminal hslots
+  exact ⟨hterminal.2.1, hslots⟩
+
+theorem TerminalStateSlotProtectedRuntimeSafe.runtimeInvariant
+    {store : ProgramStore} {value : Value} {env : Env} {ty : Ty}
+    {lifetime : Lifetime} :
+    TerminalStateSlotProtectedRuntimeSafe store value env ty →
+    EnvSlotsOutlive env lifetime →
+    RelaxedRuntimeEnvInvariantWithSlotProtection store env lifetime := by
+  intro hterminal hslots
+  exact ⟨hterminal.2.1, hslots⟩
+
+theorem TerminalStateRelaxedRuntimeSafe.value_tail
+    {store finalStore : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    TerminalStateRelaxedRuntimeSafe store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env ty := by
+  intro hterminal hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact hterminal
+
+theorem TerminalStateSlotProtectedRuntimeSafe.value_tail
+    {store finalStore : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    TerminalStateSlotProtectedRuntimeSafe store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSlotProtectedRuntimeSafe finalStore finalValue env ty := by
+  intro hterminal hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact hterminal
+
+theorem TerminalStateRelaxedValueSafe.value_tail
+    {store finalStore : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    TerminalStateRelaxedValueSafe store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env ty := by
+  intro hterminal hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact hterminal
+
+theorem TerminalStateSlotProtectedValueSafe.value_tail
+    {store finalStore : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    TerminalStateSlotProtectedValueSafe store value env ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe finalStore finalValue env ty := by
+  intro hterminal hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact hterminal
+
+theorem TerminalStateRelaxedValueSafe.of_sourceValue {store : ProgramStore}
+    {env : Env} {typing : StoreTyping} {value : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.val value) →
+    SourceValue value →
+    ValueTyping typing value ty →
+    TerminalStateRelaxedValueSafe store value env ty := by
+  intro habstraction hvalidRuntime hsource htyping
+  have hprotected : TerminalValueProtected store value ty :=
+    TerminalValueProtected.of_sourceValue hsource htyping
+  exact ⟨⟨hvalidRuntime, habstraction, hprotected.validValue⟩, hprotected⟩
+
+theorem TerminalStateSlotProtectedValueSafe.of_sourceValue {store : ProgramStore}
+    {env : Env} {typing : StoreTyping} {value : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    ValidRuntimeState store (.val value) →
+    SourceValue value →
+    ValueTyping typing value ty →
+    TerminalStateSlotProtectedValueSafe store value env ty := by
+  intro habstraction hvalidRuntime hsource htyping
+  have hprotected : TerminalValueProtected store value ty :=
+    TerminalValueProtected.of_sourceValue hsource htyping
+  exact ⟨⟨hvalidRuntime, habstraction, hprotected.validValue⟩, hprotected⟩
+
+theorem preservation_relaxedRuntime_multistep_of_step_to_value
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateRelaxedRuntimeSafe store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateRelaxedRuntimeSafe store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact TerminalStateRelaxedRuntimeSafe.value_tail hpreserved htail)
+    hmulti
+
+theorem preservation_relaxedValue_multistep_of_step_to_value
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateRelaxedValueSafe store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateRelaxedValueSafe store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact TerminalStateRelaxedValueSafe.value_tail hpreserved htail)
+    hmulti
+
+theorem preservation_slotProtectedValue_multistep_of_step_to_value
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      TerminalStateSlotProtectedValueSafe store' value env ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe finalStore finalValue env ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      TerminalStateSlotProtectedValueSafe store' value env ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact TerminalStateSlotProtectedValueSafe.value_tail hpreserved htail)
+    hmulti
+
+/-- `R-Copy` multistep preservation from relaxed runtime abstraction. -/
+theorem preservation_copy_multistep_runtime_of_relaxed
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env₂ ty := by
+  intro habstraction hvalidRuntime htyping hmulti
+  cases htyping with
+  | copy hLv hcopy hreadProhibited =>
+      exact preservation_relaxedRuntime_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | copy _hread =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | copy hread =>
+              have hlocation :
+                  LValLocationAbstraction store lv (.ty ty) :=
+                lvalTyping_location_full_of_relaxed habstraction hLv
+              rcases readPreservation_of_location hlocation with
+                ⟨readValue, runtimeSlot, hreadPreserved, hslotValue,
+                  hvalidValue⟩
+              rw [hread] at hreadPreserved
+              injection hreadPreserved with hslotEq
+              cases hslotEq
+              cases hslotValue
+              have hnonOwner : valueOwnedLocation? value = none :=
+                copy_value_nonOwner hcopy hvalidValue
+              have htermHeap : TermOwnerTargetsHeap (.val value) :=
+                termOwnerTargetsHeap_value_nonOwner hnonOwner
+              exact ⟨
+                ⟨⟨ValidRuntimeState.validStore hvalidRuntime,
+                    validTerm_value_nonOwner hnonOwner,
+                    by
+                      intro owned hmem
+                      simp [termOwningLocations, termValues,
+                        valueOwningLocations, hnonOwner] at hmem⟩,
+                  storeOwnersAllocated_copy_step
+                    (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+                    (Step.copy (lifetime := lifetime) hread),
+                  ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+                  ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+                  htermHeap⟩,
+                habstraction,
+                hvalidValue⟩)
+        hmulti
+
+/-- `R-Copy` multistep preservation with protected terminal-value evidence. -/
+theorem preservation_copy_multistep_value_of_relaxed
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env₂ ty := by
+  intro habstraction hvalidRuntime htyping hmulti
+  cases htyping with
+  | copy hLv hcopy hreadProhibited =>
+      exact preservation_relaxedValue_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | copy _hread =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | copy hread =>
+              have hprotectedLocation :
+                  ProtectedRelaxedLValLocationAbstraction store lv (.ty ty) :=
+                lvalTyping_protected_location_full_of_relaxed
+                  habstraction hLv
+              rcases hprotectedLocation with
+                ⟨location, protectedSlot, hloc, hslot, protectedEvidence,
+                  hprotectedDeps⟩
+              have hlocation :
+                  LValLocationAbstraction store lv (.ty ty) :=
+                ⟨location, protectedSlot, hloc, hslot,
+                  (RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_full
+                    protectedEvidence).valid⟩
+              rcases readPreservation_of_location hlocation with
+                ⟨readValue, runtimeSlot, hreadPreserved, hslotValue,
+                  hvalidValue⟩
+              have hreadProtected : store.read lv = some protectedSlot := by
+                simp [ProgramStore.read, hloc, hslot]
+              have hruntimeSlotEq : runtimeSlot = protectedSlot := by
+                have hsomeEq : some runtimeSlot = some protectedSlot := by
+                  rw [← hreadPreserved, hreadProtected]
+                exact Option.some.inj hsomeEq
+              cases hruntimeSlotEq
+              have hprotectedValueEq :
+                  protectedSlot.value = PartialValue.value value := by
+                have hsomeEq := Eq.trans hreadProtected.symm hread
+                have hslotEq := Option.some.inj hsomeEq
+                exact congrArg (fun slot : StoreSlot => slot.value) hslotEq
+              have hvalueEq : readValue = value := by
+                have hpartialEq :
+                    PartialValue.value readValue =
+                      PartialValue.value value :=
+                  Eq.trans hslotValue.symm hprotectedValueEq
+                simpa using hpartialEq
+              cases hvalueEq
+              have hvalueProtected : TerminalValueProtected store value ty :=
+                TerminalValueProtected.of_relaxedEvidence_eq
+                  hprotectedValueEq protectedEvidence hprotectedDeps
+              have hnonOwner : valueOwnedLocation? value = none :=
+                copy_value_nonOwner hcopy hvalidValue
+              have htermHeap : TermOwnerTargetsHeap (.val value) :=
+                termOwnerTargetsHeap_value_nonOwner hnonOwner
+              exact ⟨⟨
+                ⟨⟨ValidRuntimeState.validStore hvalidRuntime,
+                    validTerm_value_nonOwner hnonOwner,
+                    by
+                      intro owned hmem
+                      simp [termOwningLocations, termValues,
+                        valueOwningLocations, hnonOwner] at hmem⟩,
+                  storeOwnersAllocated_copy_step
+                    (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+                    (Step.copy (lifetime := lifetime) hread),
+                  ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+                  ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+                  htermHeap⟩,
+                habstraction,
+                hvalidValue⟩,
+                hvalueProtected⟩)
+        hmulti
+
+theorem preservation_copy_multistep_value_of_slotProtected
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe finalStore finalValue env₂ ty := by
+  intro habstraction hvalidRuntime htyping hmulti
+  cases htyping with
+  | copy hLv hcopy hreadProhibited =>
+      exact preservation_slotProtectedValue_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | copy _hread =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | copy hread =>
+              have hprotectedLocation :
+                  ProtectedRelaxedLValLocationAbstraction store lv (.ty ty) :=
+                lvalTyping_protected_location_full_of_relaxed
+                  habstraction.relaxed hLv
+              rcases hprotectedLocation with
+                ⟨location, protectedSlot, hloc, hslot, protectedEvidence,
+                  hprotectedDeps⟩
+              have hlocation :
+                  LValLocationAbstraction store lv (.ty ty) :=
+                ⟨location, protectedSlot, hloc, hslot,
+                  (RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_full
+                    protectedEvidence).valid⟩
+              rcases readPreservation_of_location hlocation with
+                ⟨readValue, runtimeSlot, hreadPreserved, hslotValue,
+                  hvalidValue⟩
+              have hreadProtected : store.read lv = some protectedSlot := by
+                simp [ProgramStore.read, hloc, hslot]
+              have hruntimeSlotEq : runtimeSlot = protectedSlot := by
+                have hsomeEq : some runtimeSlot = some protectedSlot := by
+                  rw [← hreadPreserved, hreadProtected]
+                exact Option.some.inj hsomeEq
+              cases hruntimeSlotEq
+              have hprotectedValueEq :
+                  protectedSlot.value = PartialValue.value value := by
+                have hsomeEq := Eq.trans hreadProtected.symm hread
+                have hslotEq := Option.some.inj hsomeEq
+                exact congrArg (fun slot : StoreSlot => slot.value) hslotEq
+              have hvalueEq : readValue = value := by
+                have hpartialEq :
+                    PartialValue.value readValue =
+                      PartialValue.value value :=
+                  Eq.trans hslotValue.symm hprotectedValueEq
+                simpa using hpartialEq
+              cases hvalueEq
+              have hvalueProtected : TerminalValueProtected store value ty :=
+                TerminalValueProtected.of_relaxedEvidence_eq
+                  hprotectedValueEq protectedEvidence hprotectedDeps
+              have hnonOwner : valueOwnedLocation? value = none :=
+                copy_value_nonOwner hcopy hvalidValue
+              have htermHeap : TermOwnerTargetsHeap (.val value) :=
+                termOwnerTargetsHeap_value_nonOwner hnonOwner
+              exact ⟨⟨
+                ⟨⟨ValidRuntimeState.validStore hvalidRuntime,
+                    validTerm_value_nonOwner hnonOwner,
+                    by
+                      intro owned hmem
+                      simp [termOwningLocations, termValues,
+                        valueOwningLocations, hnonOwner] at hmem⟩,
+                  storeOwnersAllocated_copy_step
+                    (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+                    (Step.copy (lifetime := lifetime) hread),
+                  ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+                  ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+                  htermHeap⟩,
+                habstraction,
+                hvalidValue⟩,
+                hvalueProtected⟩)
+        hmulti
+
+/-- `R-Borrow` multistep preservation from relaxed runtime abstraction. -/
+theorem preservation_borrow_multistep_runtime_of_relaxed
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {mutable : Bool} {finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.borrow mutable lv) →
+    TermTyping env typing lifetime (.borrow mutable lv)
+      (.borrow mutable [lv] ty) env₂ →
+    MultiStep store lifetime (.borrow mutable lv) finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env₂
+      (.borrow mutable [lv] ty) := by
+  intro habstraction hvalidRuntime htyping hmulti
+  cases htyping with
+  | mutBorrow hLv hmutable hnotWrite =>
+      exact preservation_relaxedRuntime_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | borrow _hloc =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | borrow hloc =>
+              exact ⟨validRuntimeState_borrow_step hvalidRuntime
+                  (Step.borrow (lifetime := lifetime) hloc),
+                habstraction,
+                ValidPartialValue.borrow (by simp) hloc⟩)
+        hmulti
+  | immBorrow hLv hnotRead =>
+      exact preservation_relaxedRuntime_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | borrow _hloc =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | borrow hloc =>
+              exact ⟨validRuntimeState_borrow_step hvalidRuntime
+                  (Step.borrow (lifetime := lifetime) hloc),
+                habstraction,
+                ValidPartialValue.borrow (by simp) hloc⟩)
+        hmulti
+
+/-- `R-Borrow` multistep preservation with protected terminal-value evidence. -/
+theorem preservation_borrow_multistep_value_of_relaxed
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {mutable : Bool} {finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.borrow mutable lv) →
+    TermTyping env typing lifetime (.borrow mutable lv)
+      (.borrow mutable [lv] ty) env₂ →
+    MultiStep store lifetime (.borrow mutable lv) finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env₂
+      (.borrow mutable [lv] ty) := by
+  intro habstraction hvalidRuntime htyping hmulti
+  cases htyping with
+  | mutBorrow hLv hmutable hnotWrite =>
+      exact preservation_relaxedValue_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | borrow _hloc =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | borrow hloc =>
+              exact ⟨⟨validRuntimeState_borrow_step hvalidRuntime
+                    (Step.borrow (lifetime := lifetime) hloc),
+                  habstraction,
+                  ValidPartialValue.borrow (by simp) hloc⟩,
+                TerminalValueProtected.borrow_of_lval_relaxed
+                  habstraction hLv hloc⟩)
+        hmulti
+  | immBorrow hLv hnotRead =>
+      exact preservation_relaxedValue_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | borrow _hloc =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | borrow hloc =>
+              exact ⟨⟨validRuntimeState_borrow_step hvalidRuntime
+                    (Step.borrow (lifetime := lifetime) hloc),
+                  habstraction,
+                  ValidPartialValue.borrow (by simp) hloc⟩,
+                TerminalValueProtected.borrow_of_lval_relaxed
+                  habstraction hLv hloc⟩)
+        hmulti
+
+theorem preservation_borrow_multistep_value_of_slotProtected
+    {store finalStore : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {mutable : Bool} {finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    ValidRuntimeState store (.borrow mutable lv) →
+    TermTyping env typing lifetime (.borrow mutable lv)
+      (.borrow mutable [lv] ty) env₂ →
+    MultiStep store lifetime (.borrow mutable lv) finalStore (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe finalStore finalValue env₂
+      (.borrow mutable [lv] ty) := by
+  intro habstraction hvalidRuntime htyping hmulti
+  cases htyping with
+  | mutBorrow hLv hmutable hnotWrite =>
+      exact preservation_slotProtectedValue_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | borrow _hloc =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | borrow hloc =>
+              exact ⟨⟨validRuntimeState_borrow_step hvalidRuntime
+                    (Step.borrow (lifetime := lifetime) hloc),
+                  habstraction,
+                  ValidPartialValue.borrow (by simp) hloc⟩,
+                TerminalValueProtected.borrow_of_lval_relaxed
+                  habstraction.relaxed hLv hloc⟩)
+        hmulti
+  | immBorrow hLv hnotRead =>
+      exact preservation_slotProtectedValue_multistep_of_step_to_value
+        (env := _) (ty := _)
+        (by intro hterminal; simp [Terminal] at hterminal)
+        (by
+          intro _store' _term' hstep
+          cases hstep with
+          | borrow _hloc =>
+              exact ⟨_, rfl⟩)
+        (by
+          intro _store' value hstep
+          cases hstep with
+          | borrow hloc =>
+              exact ⟨⟨validRuntimeState_borrow_step hvalidRuntime
+                    (Step.borrow (lifetime := lifetime) hloc),
+                  habstraction,
+                  ValidPartialValue.borrow (by simp) hloc⟩,
+                TerminalValueProtected.borrow_of_lval_relaxed
+                  habstraction.relaxed hLv hloc⟩)
+        hmulti
+
+/-- `R-Box` one-step preservation with relaxed terminal-value evidence. -/
+theorem preservation_box_redex_value_of_relaxed
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.box (.val value)) →
+    TerminalValueProtected store value ty →
+    Step store lifetime (.box (.val value)) store' (.val finalValue) →
+    TerminalStateRelaxedValueSafe store' finalValue env (.box ty) := by
+  intro habstraction hvalidRuntime hprotected hstep
+  cases hstep with
+  | box hfresh hbox =>
+      cases hbox
+      exact ⟨⟨validRuntimeState_box_step_of_validValue hvalidRuntime
+            hprotected.validValue
+            (Step.box (lifetime := lifetime) hfresh rfl),
+          RelaxedRuntimeEnvAbstraction.boxAt
+            (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+            hfresh habstraction,
+          validValue_boxAt_ref hfresh hprotected.validValue⟩,
+        TerminalValueProtected.boxAt_ref
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          hfresh hprotected⟩
+
+theorem preservation_box_redex_value_of_slotProtected
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    ValidRuntimeState store (.box (.val value)) →
+    TerminalValueProtected store value ty →
+    Step store lifetime (.box (.val value)) store' (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe store' finalValue env (.box ty) := by
+  intro habstraction hvalidRuntime hprotected hstep
+  cases hstep with
+  | box hfresh hbox =>
+      cases hbox
+      exact ⟨⟨validRuntimeState_box_step_of_validValue hvalidRuntime
+            hprotected.validValue
+            (Step.box (lifetime := lifetime) hfresh rfl),
+          RelaxedRuntimeEnvAbstractionWithSlotProtection.boxAt
+            (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+            hfresh habstraction,
+          validValue_boxAt_ref hfresh hprotected.validValue⟩,
+        TerminalValueProtected.boxAt_ref
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          hfresh hprotected⟩
+
+/-- `T-Box` composition with a relaxed value-safe inner preservation result. -/
+theorem preservation_box_context_multistep_value_of_relaxed
+    {store midStore finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {value finalValue : Value} {ty : Ty} :
+    (ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      RelaxedRuntimeEnvAbstraction store env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      TerminalStateRelaxedValueSafe midStore value env₂ ty) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    RelaxedRuntimeEnvAbstraction store env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime term midStore (.val value) →
+    Step midStore lifetime (.box (.val value)) finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env₂ (.box ty) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping habstraction htyping
+    hinnerMulti hboxStep
+  cases htyping with
+  | box hinnerTyping =>
+      have hterminalInner :=
+        hinnerPreservation
+          (validRuntimeState_box_inner hvalidRuntime)
+          (validStoreTyping_box_inner hvalidStoreTyping)
+          habstraction hinnerTyping hinnerMulti
+      exact preservation_box_redex_value_of_relaxed
+        hterminalInner.1.2.1
+        (validRuntimeState_box_value_of_value hterminalInner.1.1)
+        hterminalInner.2
+        hboxStep
+
+/-- `T-Box` multistep preservation with relaxed value-safe terminal evidence. -/
+theorem preservation_box_context_terminal_multistep_value_of_relaxed
+    {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    (∀ {midStore value},
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      RelaxedRuntimeEnvAbstraction store env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      TerminalStateRelaxedValueSafe midStore value env₂ ty) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    RelaxedRuntimeEnvAbstraction store env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime (.box term) finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env₂ (.box ty) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping habstraction htyping hmulti
+  rcases multistep_box_to_value_inv hmulti with
+    ⟨midStore, value, hinnerMulti, hboxStep⟩
+  exact preservation_box_context_multistep_value_of_relaxed
+    (midStore := midStore)
+    (value := value)
+    (by
+      intro hvalidInner hvalidStoreTypingInner habstractionInner hinnerTyping
+        hmultiInner
+      exact hinnerPreservation hvalidInner hvalidStoreTypingInner
+        habstractionInner hinnerTyping hmultiInner)
+    hvalidRuntime hvalidStoreTyping habstraction htyping hinnerMulti hboxStep
+
+theorem preservation_box_context_multistep_value_of_slotProtected
+    {store midStore finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {value finalValue : Value} {ty : Ty} :
+    (ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      RelaxedRuntimeEnvAbstractionWithSlotProtection store env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      TerminalStateSlotProtectedValueSafe midStore value env₂ ty) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime term midStore (.val value) →
+    Step midStore lifetime (.box (.val value)) finalStore (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe finalStore finalValue env₂ (.box ty) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping habstraction htyping
+    hinnerMulti hboxStep
+  cases htyping with
+  | box hinnerTyping =>
+      have hterminalInner :=
+        hinnerPreservation
+          (validRuntimeState_box_inner hvalidRuntime)
+          (validStoreTyping_box_inner hvalidStoreTyping)
+          habstraction hinnerTyping hinnerMulti
+      exact preservation_box_redex_value_of_slotProtected
+        hterminalInner.1.2.1
+        (validRuntimeState_box_value_of_value hterminalInner.1.1)
+        hterminalInner.2
+        hboxStep
+
+theorem preservation_box_context_terminal_multistep_value_of_slotProtected
+    {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    (∀ {midStore value},
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      RelaxedRuntimeEnvAbstractionWithSlotProtection store env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      TerminalStateSlotProtectedValueSafe midStore value env₂ ty) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime (.box term) finalStore (.val finalValue) →
+    TerminalStateSlotProtectedValueSafe finalStore finalValue env₂ (.box ty) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping habstraction htyping hmulti
+  rcases multistep_box_to_value_inv hmulti with
+    ⟨midStore, value, hinnerMulti, hboxStep⟩
+  exact preservation_box_context_multistep_value_of_slotProtected
+    (midStore := midStore)
+    (value := value)
+    (by
+      intro hvalidInner hvalidStoreTypingInner habstractionInner hinnerTyping
+        hmultiInner
+      exact hinnerPreservation hvalidInner hvalidStoreTypingInner
+        habstractionInner hinnerTyping hmultiInner)
+    hvalidRuntime hvalidStoreTyping habstraction htyping hinnerMulti hboxStep
+
+/-- Relaxed terminal-safety variant of the block first-step dispatcher. -/
+theorem preservation_block_terminal_relaxedRuntimeSafe_of_first_step
+    {store finalStore : ProgramStore} {env' : Env}
+    {lifetime blockLifetime : Lifetime} {terms : List Term}
+    {finalValue : Value} {ty : Ty} :
+    (∀ value next rest store',
+      terms = .val value :: next :: rest →
+      Drops store [.value value] store' →
+      MultiStep store' lifetime (.block blockLifetime (next :: rest))
+        finalStore (.val finalValue) →
+      TerminalStateRelaxedRuntimeSafe finalStore finalValue env' ty) →
+    (∀ term rest store' term',
+      terms = term :: rest →
+      Step store blockLifetime term store' term' →
+      MultiStep store' lifetime (.block blockLifetime (term' :: rest))
+        finalStore (.val finalValue) →
+      TerminalStateRelaxedRuntimeSafe finalStore finalValue env' ty) →
+    (∀ value store',
+      terms = [.val value] →
+      DropsLifetime store blockLifetime store' →
+      MultiStep store' lifetime (.val value) finalStore (.val finalValue) →
+      TerminalStateRelaxedRuntimeSafe finalStore finalValue env' ty) →
+    MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env' ty := by
+  intro hseq hblockA hblockB hmulti
+  rcases multistep_block_to_value_first_step_inv hmulti with
+    hseqCase | hblockACase | hblockBCase
+  · rcases hseqCase with ⟨value, next, rest, store', hterms, hdrops, htail⟩
+    exact hseq value next rest store' hterms hdrops htail
+  · rcases hblockACase with ⟨term, rest, store', term', hterms, hstep, htail⟩
+    exact hblockA term rest store' term' hterms hstep htail
+  · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
+    exact hblockB value store' hterms hdrops htail
+
+/-- Relaxed value-safe variant of the block first-step dispatcher. -/
+theorem preservation_block_terminal_relaxedValueSafe_of_first_step
+    {store finalStore : ProgramStore} {env' : Env}
+    {lifetime blockLifetime : Lifetime} {terms : List Term}
+    {finalValue : Value} {ty : Ty} :
+    (∀ value next rest store',
+      terms = .val value :: next :: rest →
+      Drops store [.value value] store' →
+      MultiStep store' lifetime (.block blockLifetime (next :: rest))
+        finalStore (.val finalValue) →
+      TerminalStateRelaxedValueSafe finalStore finalValue env' ty) →
+    (∀ term rest store' term',
+      terms = term :: rest →
+      Step store blockLifetime term store' term' →
+      MultiStep store' lifetime (.block blockLifetime (term' :: rest))
+        finalStore (.val finalValue) →
+      TerminalStateRelaxedValueSafe finalStore finalValue env' ty) →
+    (∀ value store',
+      terms = [.val value] →
+      DropsLifetime store blockLifetime store' →
+      MultiStep store' lifetime (.val value) finalStore (.val finalValue) →
+      TerminalStateRelaxedValueSafe finalStore finalValue env' ty) →
+    MultiStep store lifetime (.block blockLifetime terms) finalStore (.val finalValue) →
+    TerminalStateRelaxedValueSafe finalStore finalValue env' ty := by
+  intro hseq hblockA hblockB hmulti
+  rcases multistep_block_to_value_first_step_inv hmulti with
+    hseqCase | hblockACase | hblockBCase
+  · rcases hseqCase with ⟨value, next, rest, store', hterms, hdrops, htail⟩
+    exact hseq value next rest store' hterms hdrops htail
+  · rcases hblockACase with ⟨term, rest, store', term', hterms, hstep, htail⟩
+    exact hblockA term rest store' term' hterms hstep htail
+  · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
+    exact hblockB value store' hterms hdrops htail
+
+/--
+`R-Declare` relaxed runtime preservation, with the initializer's protected
+dependency evidence made explicit.
+
+This is the runtime-facing replacement for recovering declaration safety from a
+full output `WellFormedEnv`: old environment slots are transported by
+`RelaxedRuntimeEnvAbstraction.declare`, while the newly stored initializer
+contributes its own relaxed evidence and protected-dependency payload.
+-/
+theorem preservation_declare_redex_runtime_of_relaxed
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.fresh x →
+    ValidRuntimeState store (.letMut x (.val value)) →
+    ValidValue store value ty →
+    (newEvidence : RuntimeFrame.RelaxedValidPartialValueEvidence
+      (store.declare x lifetime value) (.value value) (.ty ty)) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency
+        (store.declare x lifetime value) newEvidence location →
+      ∃ base,
+        ProtectedByBase (store.declare x lifetime value) base location) →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    TerminalStateRelaxedRuntimeSafe store' .unit
+      (env.update x { ty := .ty ty, lifetime := lifetime }) .unit := by
+  intro habstraction hfresh hvalidRuntime hvalidValue newEvidence
+    hnewProtected hstep
+  have hfreshStore : store.fresh (VariableProjection x) := by
+    unfold ProgramStore.fresh
+    cases hslot : store.slotAt (VariableProjection x) with
+    | none =>
+        rfl
+    | some slot =>
+        rcases (habstraction.1 x).mp ⟨slot, hslot⟩ with ⟨envSlot, henvSlot⟩
+        unfold Env.fresh at hfresh
+        rw [hfresh] at henvSlot
+        cases henvSlot
+  cases hstep with
+  | declare hstore' =>
+      subst hstore'
+      exact ⟨
+        validRuntimeState_declare_step_of_validValue hvalidRuntime
+          (by simpa [VariableProjection] using hfreshStore) hvalidValue
+          (Step.declare (lifetime := lifetime) rfl),
+        RelaxedRuntimeEnvAbstraction.declare habstraction hfresh newEvidence
+          hnewProtected,
+        ValidPartialValue.unit⟩
+
+/--
+`R-Declare` relaxed runtime preservation from old-store initializer evidence.
+
+This is the form expected from a future relaxed recursive preservation
+invariant: the initializer value brings evidence in the pre-declaration store,
+and the fresh-declaration frame transports that evidence into the new slot.
+-/
+theorem preservation_declare_redex_runtime_of_relaxedEvidence
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.fresh x →
+    ValidRuntimeState store (.letMut x (.val value)) →
+    (oldEvidence : RuntimeFrame.RelaxedValidPartialValueEvidence store
+      (.value value) (.ty ty)) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store oldEvidence location →
+      ∃ base, ProtectedByBase store base location) →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    TerminalStateRelaxedRuntimeSafe store' .unit
+      (env.update x { ty := .ty ty, lifetime := lifetime }) .unit := by
+  intro habstraction hfresh hvalidRuntime oldEvidence hprotectedOld hstep
+  have hfreshStore : store.fresh (VariableProjection x) := by
+    unfold ProgramStore.fresh
+    cases hslot : store.slotAt (VariableProjection x) with
+    | none =>
+        rfl
+    | some slot =>
+        rcases (habstraction.1 x).mp ⟨slot, hslot⟩ with ⟨envSlot, henvSlot⟩
+        unfold Env.fresh at hfresh
+        rw [hfresh] at henvSlot
+        cases henvSlot
+  rcases RuntimeFrame.relaxedValidPartialValueEvidence_declare_of_fresh
+      oldEvidence hfreshStore with
+    ⟨newEvidence, hdependencyBack⟩
+  exact preservation_declare_redex_runtime_of_relaxed
+    habstraction hfresh hvalidRuntime
+    (RuntimeFrame.RelaxedValidPartialValueEvidence.to_strict_full
+      oldEvidence).valid
+    newEvidence
+    (by
+      intro location hdependency
+      rcases hprotectedOld location
+          (hdependencyBack location hdependency) with
+        ⟨base, hprotected⟩
+      exact ⟨base, ProtectedByBase.declare_of_fresh hfreshStore hprotected⟩)
+    hstep
+
+theorem preservation_declare_redex_valueSafe_of_relaxedEvidence
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.fresh x →
+    ValidRuntimeState store (.letMut x (.val value)) →
+    (oldEvidence : RuntimeFrame.RelaxedValidPartialValueEvidence store
+      (.value value) (.ty ty)) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store oldEvidence location →
+      ∃ base, ProtectedByBase store base location) →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    TerminalStateRelaxedValueSafe store' .unit
+      (env.update x { ty := .ty ty, lifetime := lifetime }) .unit := by
+  intro habstraction hfresh hvalidRuntime oldEvidence hprotectedOld hstep
+  exact ⟨preservation_declare_redex_runtime_of_relaxedEvidence
+      habstraction hfresh hvalidRuntime oldEvidence hprotectedOld hstep,
+    TerminalValueProtected.unit⟩
+
 theorem TerminalStateRuntimeSafe.of_wellFormed {store : ProgramStore}
     {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
     WellFormedEnv env lifetime →
@@ -8900,6 +13155,90 @@ theorem TerminalStateRuntimeSafe.of_wellFormed {store : ProgramStore}
       (ValidRuntimeState.validStore hterminal.1)
       (ValidRuntimeState.storeOwnerTargetsHeap hterminal.1),
     hterminal.2.2⟩
+
+theorem preservation_move_var_multistep_runtimeSafe_of_wellFormed
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
+    {x : Name} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move (.var x)) →
+    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    EnvMove env₁ (.var x) env₂ →
+    TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
+    MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
+    TerminalStateRuntimeSafe finalStore finalValue env₂ ty := by
+  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hmulti
+  cases htyping with
+  | move hLv hnotWrite hmoveTyping =>
+      have hterminal : TerminalStateSafe finalStore finalValue env₂ ty :=
+        preservation_move_var_multistep_runtime_of_wellFormed
+          hwellFormed hsafe hvalidRuntime henvSlot hmove
+          (TermTyping.move (typing := typing) hLv hnotWrite hmoveTyping)
+          hmulti
+      have hwellOut : WellFormedEnv env₂ lifetime :=
+        (move_preserves_wellFormed hwellFormed hLv hnotWrite hmove).1
+      exact TerminalStateRuntimeSafe.of_wellFormed hwellOut hterminal
+
+theorem preservation_move_var_multistep_relaxedRuntime_of_wellFormed
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
+    {x : Name} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move (.var x)) →
+    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    EnvMove env₁ (.var x) env₂ →
+    TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
+    MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env₂ ty := by
+  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hmulti
+  exact (preservation_move_var_multistep_runtimeSafe_of_wellFormed
+    hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hmulti).relaxed
+
+theorem preservation_move_deref_box_multistep_runtimeSafe_of_wellFormed
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
+    {source : LVal} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move source.deref) →
+    LValTyping env₁ source (.box (.ty ty)) valueLifetime →
+    ¬ WriteProhibited env₁ source.deref →
+    EnvMove env₁ source.deref env₂ →
+    TermTyping env₁ typing lifetime (.move source.deref) ty env₂ →
+    MultiStep store lifetime (.move source.deref) finalStore (.val finalValue) →
+    TerminalStateRuntimeSafe finalStore finalValue env₂ ty := by
+  intro hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove htyping
+    hmulti
+  have hterminal : TerminalStateSafe finalStore finalValue env₂ ty :=
+    preservation_move_deref_box_multistep_runtime_of_wellFormed
+      hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove htyping
+      hmulti
+  have hLv : LValTyping env₁ source.deref (.ty ty) valueLifetime :=
+    LValTyping.box hsourceBox
+  have hwellOut : WellFormedEnv env₂ lifetime :=
+    (move_preserves_wellFormed hwellFormed hLv hnotWrite hmove).1
+  exact TerminalStateRuntimeSafe.of_wellFormed hwellOut hterminal
+
+theorem preservation_move_deref_box_multistep_relaxedRuntime_of_wellFormed
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
+    {source : LVal} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env₁ lifetime →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move source.deref) →
+    LValTyping env₁ source (.box (.ty ty)) valueLifetime →
+    ¬ WriteProhibited env₁ source.deref →
+    EnvMove env₁ source.deref env₂ →
+    TermTyping env₁ typing lifetime (.move source.deref) ty env₂ →
+    MultiStep store lifetime (.move source.deref) finalStore (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe finalStore finalValue env₂ ty := by
+  intro hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove htyping
+    hmulti
+  exact (preservation_move_deref_box_multistep_runtimeSafe_of_wellFormed
+    hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove htyping
+    hmulti).relaxed
 
 theorem TerminalStateRuntimeSafe.strengthen_join_runtime {finalStore : ProgramStore}
     {finalValue : Value} {branchEnv joinEnv : Env}
@@ -9785,6 +14124,53 @@ theorem preservation_assign_var_box_redex_runtime_of_runtimeEnvAbstraction
               (by simpa [hwrittenStore] using hdrops)
           exact ⟨hterminalSafe.1, habstractionFinal, hterminalSafe.2.2⟩
 
+theorem preservation_assign_var_envShape_redex_relaxedRuntime_of_runtimeEnvAbstraction
+    {store store' : ProgramStore} {env env' : Env}
+    {lifetime targetLifetime rhsWellLifetime : Lifetime} {x : Name}
+    {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
+    WellFormedEnv env lifetime →
+    RuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.assign (.var x) (.val value)) →
+    LValTyping env (.var x) oldTy targetLifetime →
+    EnvWrite 0 env (.var x) rhsTy env' →
+    (∀ envSlot,
+      env.slotAt x = some envSlot →
+      envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
+        (∃ inner, envSlot.ty = .undef inner) ∨
+        ∃ mutable targets pointee,
+          envSlot.ty = .ty (.borrow mutable targets pointee)) →
+    WellFormedTy env rhsTy rhsWellLifetime →
+    ¬ WriteProhibited env' (.var x) →
+    ValidValue store value rhsTy →
+    Step store lifetime (.assign (.var x) (.val value)) store' (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe store' finalValue env' .unit := by
+  intro hwellFormed habstraction hvalidRuntime hLhs hwrite hshapeEnv hwellTy
+    hnotWrite hvalidValue hstep
+  exact (preservation_assign_var_envShape_redex_runtime_of_runtimeEnvAbstraction
+    hwellFormed habstraction hvalidRuntime hLhs hwrite hshapeEnv hwellTy
+    hnotWrite hvalidValue hstep).relaxed
+
+theorem preservation_assign_var_box_redex_relaxedRuntime_of_runtimeEnvAbstraction
+    {store store' : ProgramStore} {env env' : Env}
+    {lifetime targetLifetime rhsWellLifetime : Lifetime} {x : Name}
+    {leftInner rightInner : Ty} {value finalValue : Value} :
+    WellFormedEnv env lifetime →
+    RuntimeEnvAbstraction store env →
+    ValidRuntimeState store (.assign (.var x) (.val value)) →
+    LValTyping env (.var x) (.ty (.box leftInner)) targetLifetime →
+    ShapeCompatible env (.ty leftInner) (.ty rightInner) →
+    WellFormedTy env (.box rightInner) rhsWellLifetime →
+    EnvWrite 0 env (.var x) (.box rightInner) env' →
+    ¬ WriteProhibited env' (.var x) →
+    ValidValue store value (.box rightInner) →
+    Step store lifetime (.assign (.var x) (.val value)) store' (.val finalValue) →
+    TerminalStateRelaxedRuntimeSafe store' finalValue env' .unit := by
+  intro hwellFormed habstraction hvalidRuntime hLhs hinnerShape hwellTy hwrite
+    hnotWrite hvalidValue hstep
+  exact (preservation_assign_var_box_redex_runtime_of_runtimeEnvAbstraction
+    hwellFormed habstraction hvalidRuntime hLhs hinnerShape hwellTy hwrite
+    hnotWrite hvalidValue hstep).relaxed
+
 /--
 Dropping orphaned values preserves safe abstraction from the proof-carrying
 runtime environment abstraction.
@@ -10011,6 +14397,344 @@ theorem lifetimeDrop_dropSetOwnersOrphaned
   exact hdropDisjoint dropLocation dropSlot hdropSlot hdropLifetime
     (by simpa [hownedEq] using howns)
 
+theorem lifetimeDrop_heads_unprotected_of_base_outlives_relaxed
+    {store : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {base : Name} :
+    RelaxedRuntimeEnvAbstraction store env →
+    EnvSlotsOutlive env parent →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    ∀ value, value ∈ dropSet →
+      ∀ owned, owned ∈ partialValueOwningLocations value →
+        ¬ ProtectedByBase store base owned := by
+  intro habstraction hslots hdropSet hdropDisjoint hchild
+    value hmem owned howned hprotected
+  rcases (hdropSet value).mp hmem with
+    ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
+  have hownedEq : owned = dropLocation :=
+    eq_location_of_mem_lifetime_drop_value hdropValue howned
+  rcases hprotected with hroot | hpath
+  · have hdropSlotBase :
+        store.slotAt (VariableProjection base) = some dropSlot := by
+      have hdropLocationEq : dropLocation = VariableProjection base := by
+        rw [← hownedEq, hroot]
+      simpa [hdropLocationEq] using hdropSlot
+    rcases (habstraction.1 base).mp ⟨dropSlot, hdropSlotBase⟩ with
+      ⟨envSlot, henvSlot⟩
+    rcases habstraction.2 base envSlot henvSlot with
+      ⟨baseValue, hstoreSlot, _evidence, _hprotected⟩
+    rw [hdropSlotBase] at hstoreSlot
+    injection hstoreSlot with hslotEq
+    have hslotLifetime : dropSlot.lifetime = envSlot.lifetime :=
+      congrArg StoreSlot.lifetime hslotEq
+    have hchildParent : child ≤ parent := by
+      rw [← hdropLifetime, hslotLifetime]
+      exact hslots base envSlot henvSlot
+    exact LifetimeChild.not_child_outlives_parent hchild hchildParent
+  · exact hdropDisjoint owned dropSlot
+      (by simpa [hownedEq] using hdropSlot) hdropLifetime
+      (ProgramStore.OwnsTransitively.to_owns hpath)
+
+theorem dropsAvoids_of_protectedByBase_lifetimeDrop_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {base : Name} {location : Location} :
+    RelaxedRuntimeEnvAbstraction store env →
+    EnvSlotsOutlive env parent →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    ProtectedByBase store base location →
+    DropsAvoids store dropSet location := by
+  intro habstraction hslots hvalid hheap hdropSet hdrops hdropDisjoint
+    hchild hprotected
+  exact dropsAvoids_of_protectedByBase_unprotected_heads
+    hdrops hvalid hheap
+    (lifetimeDrop_heads_unprotected_of_base_outlives_relaxed
+      habstraction hslots hdropSet hdropDisjoint hchild)
+    hprotected
+
+theorem ProtectedByBase.drops_lifetime_of_base_outlives_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {base : Name} {location : Location} :
+    RelaxedRuntimeEnvAbstraction store env →
+    EnvSlotsOutlive env parent →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    ProtectedByBase store base location →
+    ProtectedByBase store' base location := by
+  intro habstraction hslots hvalid hheap hdropSet hdrops hdropDisjoint
+    hchild hprotected
+  exact ProtectedByBase.drops_of_unprotected_heads
+    hdrops hvalid hheap
+    (lifetimeDrop_heads_unprotected_of_base_outlives_relaxed
+      habstraction hslots hdropSet hdropDisjoint hchild)
+    hprotected
+
+theorem lifetimeDrop_heads_unprotected_of_base_slot_outlives_relaxed
+    {store : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {base : Name} {baseSlot : EnvSlot} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.slotAt base = some baseSlot →
+    baseSlot.lifetime ≤ parent →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    ∀ value, value ∈ dropSet →
+      ∀ owned, owned ∈ partialValueOwningLocations value →
+        ¬ ProtectedByBase store base owned := by
+  intro habstraction hbaseSlot hbaseParent hdropSet hdropDisjoint hchild
+    value hmem owned howned hprotected
+  rcases (hdropSet value).mp hmem with
+    ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
+  have hownedEq : owned = dropLocation :=
+    eq_location_of_mem_lifetime_drop_value hdropValue howned
+  rcases hprotected with hroot | hpath
+  · have hdropSlotBase :
+        store.slotAt (VariableProjection base) = some dropSlot := by
+      have hdropLocationEq : dropLocation = VariableProjection base := by
+        rw [← hownedEq, hroot]
+      simpa [hdropLocationEq] using hdropSlot
+    rcases habstraction.2 base baseSlot hbaseSlot with
+      ⟨baseValue, hstoreSlot, _evidence, _hprotected⟩
+    rw [hdropSlotBase] at hstoreSlot
+    injection hstoreSlot with hslotEq
+    have hslotLifetime : dropSlot.lifetime = baseSlot.lifetime :=
+      congrArg StoreSlot.lifetime hslotEq
+    have hchildParent : child ≤ parent := by
+      rw [← hdropLifetime, hslotLifetime]
+      exact hbaseParent
+    exact LifetimeChild.not_child_outlives_parent hchild hchildParent
+  · exact hdropDisjoint owned dropSlot
+      (by simpa [hownedEq] using hdropSlot) hdropLifetime
+      (ProgramStore.OwnsTransitively.to_owns hpath)
+
+theorem dropsAvoids_of_protectedByBase_lifetimeDrop_base_slot_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {base : Name} {baseSlot : EnvSlot}
+    {location : Location} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.slotAt base = some baseSlot →
+    baseSlot.lifetime ≤ parent →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    ProtectedByBase store base location →
+    DropsAvoids store dropSet location := by
+  intro habstraction hbaseSlot hbaseParent hvalid hheap hdropSet hdrops
+    hdropDisjoint hchild hprotected
+  exact dropsAvoids_of_protectedByBase_unprotected_heads
+    hdrops hvalid hheap
+    (lifetimeDrop_heads_unprotected_of_base_slot_outlives_relaxed
+      habstraction hbaseSlot hbaseParent hdropSet hdropDisjoint hchild)
+    hprotected
+
+theorem ProtectedByBase.drops_lifetime_of_base_slot_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} {base : Name} {baseSlot : EnvSlot}
+    {location : Location} :
+    RelaxedRuntimeEnvAbstraction store env →
+    env.slotAt base = some baseSlot →
+    baseSlot.lifetime ≤ parent →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    ProtectedByBase store base location →
+    ProtectedByBase store' base location := by
+  intro habstraction hbaseSlot hbaseParent hvalid hheap hdropSet hdrops
+    hdropDisjoint hchild hprotected
+  exact ProtectedByBase.drops_of_unprotected_heads
+    hdrops hvalid hheap
+    (lifetimeDrop_heads_unprotected_of_base_slot_outlives_relaxed
+      habstraction hbaseSlot hbaseParent hdropSet hdropDisjoint hchild)
+    hprotected
+
+theorem RelaxedRuntimeEnvAbstractionWithSlotProtection.dropLifetime_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} :
+    RelaxedRuntimeEnvAbstractionWithSlotProtection store env →
+    EnvSlotsOutlive env child →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    DropsLifetime store child store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    RelaxedRuntimeEnvAbstraction store' (env.dropLifetime child) := by
+  intro habstraction hslotsChild hvalidStore hheap hdropSet hdrops
+    hdropsLifetime hdropDisjoint hchild
+  have hrelaxed :
+      RelaxedRuntimeEnvAbstraction store env :=
+    habstraction.relaxed
+  have hdropOwnersOrphaned :
+      ∀ owned, owned ∈ partialValuesOwningLocations dropSet →
+        ¬ ProgramStore.Owns store owned :=
+    lifetimeDrop_dropSetOwnersOrphaned hdropSet hdropDisjoint
+  constructor
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases hstoreDomain with ⟨slot, hslotFinal⟩
+      have hslotOld : store.slotAt (VariableProjection x) = some slot :=
+        dropsLifetime_slotAt_of_slotAt hdropsLifetime hslotFinal
+      rcases (hrelaxed.1 x).mp ⟨slot, hslotOld⟩ with
+        ⟨envSlot, henvSlot⟩
+      have hslotLifetime : slot.lifetime = envSlot.lifetime := by
+        rcases hrelaxed.2 x envSlot henvSlot with
+          ⟨value, hstoreSlot, _evidence, _hprotected⟩
+        rw [hslotOld] at hstoreSlot
+        injection hstoreSlot with hslotEq
+        exact congrArg StoreSlot.lifetime hslotEq
+      have hsurvives : envSlot.lifetime ≠ child := by
+        intro hdropped
+        exact dropsLifetime_slot_not_dropped hdropsLifetime hslotFinal
+          (by simpa [hslotLifetime] using hdropped)
+      exact ⟨envSlot,
+        Env.dropLifetime_slotAt_eq_some.mpr ⟨henvSlot, hsurvives⟩⟩
+    · intro henvDomain
+      rcases henvDomain with ⟨envSlot, henvDropped⟩
+      rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
+        ⟨henvSlot, hsurvives⟩
+      rcases (hrelaxed.1 x).mpr ⟨envSlot, henvSlot⟩ with
+        ⟨slot, hslotOld⟩
+      have hslotLifetime : slot.lifetime = envSlot.lifetime := by
+        rcases hrelaxed.2 x envSlot henvSlot with
+          ⟨value, hstoreSlot, _evidence, _hprotected⟩
+        rw [hslotOld] at hstoreSlot
+        injection hstoreSlot with hslotEq
+        exact congrArg StoreSlot.lifetime hslotEq
+      exact ⟨slot,
+        dropsLifetime_preserves_var_slot_of_not_lifetime hdropsLifetime hheap
+          (by simpa [VariableProjection] using hslotOld)
+          (by simpa [hslotLifetime] using hsurvives)⟩
+  · intro x envSlot henvDropped
+    rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
+      ⟨henvSlot, hsurvives⟩
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨oldValue, hstoreSlot, evidence, hdepsProtected⟩
+    have hslotParent : envSlot.lifetime ≤ parent :=
+      LifetimeChild.parent_of_outlives_child_ne hchild
+        (hslotsChild x envSlot henvSlot) hsurvives
+    have havoidVar : DropsAvoids store dropSet (VariableProjection x) :=
+      dropsAvoids_var_of_base_outlives_lifetimeDrop_of_relaxed
+        hrelaxed hheap hdropSet hdrops hchild henvSlot hslotParent
+    have hownerAvoids :
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceOwnerReach store evidence location →
+          DropsAvoids store dropSet location := by
+      intro reached hownerReach
+      exact dropsAvoids_of_ownsTransitively_orphaned_values
+        hdrops hvalidStore hdropOwnersOrphaned
+        (RuntimeFrame.ownsTransitively_of_relaxedEvidenceOwnerReach_stored
+          hstoreSlot hownerReach)
+        havoidVar
+    have hdependencyAvoids :
+        ∀ location,
+          RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+          DropsAvoids store dropSet location := by
+      intro dependency hdependency
+      rcases hdepsProtected dependency hdependency with
+        ⟨base, baseSlot, hbaseSlot, hbaseOutlivesSlot, hprotected⟩
+      have hbaseParent : baseSlot.lifetime ≤ parent :=
+        LifetimeOutlives.trans hbaseOutlivesSlot hslotParent
+      exact dropsAvoids_of_protectedByBase_lifetimeDrop_base_slot_relaxed
+        hrelaxed hbaseSlot hbaseParent hvalidStore hheap hdropSet hdrops
+        hdropDisjoint hchild hprotected
+    rcases
+        RuntimeFrame.relaxedValidPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+          hdrops evidence hownerAvoids hdependencyAvoids with
+      ⟨evidence', hdependencyBack⟩
+    have hstoreSlot' :
+        store'.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } :=
+      dropsLifetime_preserves_var_slot_of_not_lifetime hdropsLifetime hheap
+        (by simpa [VariableProjection] using hstoreSlot) hsurvives
+    refine ⟨oldValue, hstoreSlot', evidence', ?_⟩
+    intro location hdependency
+    have hdependencyOld := hdependencyBack location hdependency
+    rcases hdepsProtected location hdependencyOld with
+      ⟨base, baseSlot, hbaseSlot, hbaseOutlivesSlot, hprotected⟩
+    have hbaseParent : baseSlot.lifetime ≤ parent :=
+      LifetimeOutlives.trans hbaseOutlivesSlot hslotParent
+    exact ⟨base,
+      ProtectedByBase.drops_lifetime_of_base_slot_relaxed
+        hrelaxed hbaseSlot hbaseParent hvalidStore hheap hdropSet hdrops
+        hdropDisjoint hchild hprotected⟩
+
+theorem RelaxedRuntimeEnvInvariantWithSlotProtection.dropLifetime
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} :
+    RelaxedRuntimeEnvInvariantWithSlotProtection store env child →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    DropsLifetime store child store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    RelaxedRuntimeEnvInvariant store' (env.dropLifetime child) parent := by
+  intro hinv hvalidStore hheap hdropSet hdrops hdropsLifetime hdropDisjoint
+    hchild
+  exact ⟨
+    RelaxedRuntimeEnvAbstractionWithSlotProtection.dropLifetime_relaxed
+      hinv.1 hinv.2 hvalidStore hheap hdropSet hdrops hdropsLifetime
+      hdropDisjoint hchild,
+    EnvSlotsOutlive.dropLifetime_child hchild hinv.2⟩
+
 /--
 Runtime frame for a lifetime drop.
 
@@ -10117,6 +14841,152 @@ theorem safeAbstraction_dropLifetime_of_runtimeFrame
     dropsLifetime_preserves_var_slot_of_not_lifetime hdropsLifetime hheap
       (by simpa [VariableProjection] using hstoreSlot) hsurvives
   exact ⟨oldValue, hstoreSlot', evidence'.valid⟩
+
+def RelaxedRuntimeLifetimeDropFrame
+    (store store' : ProgramStore) (env : Env) (dropSet : List PartialValue)
+    (child : Lifetime) : Prop :=
+  ∀ x envSlot value
+    (evidence :
+      RuntimeFrame.RelaxedValidPartialValueEvidence store value envSlot.ty)
+    (_henvSlot : env.slotAt x = some envSlot)
+    (_hstoreSlot :
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime })
+    (_hsurvives : envSlot.lifetime ≠ child),
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      ∃ base, ProtectedByBase store base location) →
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceOwnerReach store evidence location →
+      DropsAvoids store dropSet location) ∧
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      DropsAvoids store dropSet location) ∧
+    (∀ location,
+      RuntimeFrame.RelaxedEvidenceBorrowDependency store evidence location →
+      ∀ base,
+        ProtectedByBase store base location →
+        ProtectedByBase store' base location)
+
+theorem RelaxedRuntimeLifetimeDropFrame.of_relaxed
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {parent child : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    EnvSlotsOutlive env parent →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    (∀ value, value ∈ dropSet ↔
+      ∃ location storeSlot,
+        store.slotAt location = some storeSlot ∧
+          storeSlot.lifetime = child ∧
+          value = PartialValue.value
+            (Value.ref { location := location, owner := true })) →
+    Drops store dropSet store' →
+    LifetimeDropOwnersDisjoint store child →
+    LifetimeChild parent child →
+    RelaxedRuntimeLifetimeDropFrame store store' env dropSet child := by
+  intro habstraction hslots hvalidStore hheap hdropSet hdrops hdropDisjoint
+    hchild
+  have hdropOwnersOrphaned :
+      ∀ owned, owned ∈ partialValuesOwningLocations dropSet →
+        ¬ ProgramStore.Owns store owned :=
+    lifetimeDrop_dropSetOwnersOrphaned hdropSet hdropDisjoint
+  intro x envSlot value evidence henvSlot hstoreSlot hsurvives hdepsProtected
+  have hslotParent : envSlot.lifetime ≤ parent :=
+    hslots x envSlot henvSlot
+  have havoidVar : DropsAvoids store dropSet (VariableProjection x) :=
+    dropsAvoids_var_of_base_outlives_lifetimeDrop_of_relaxed
+      habstraction hheap hdropSet hdrops hchild henvSlot hslotParent
+  constructor
+  · intro reached hownerReach
+    exact dropsAvoids_of_ownsTransitively_orphaned_values
+      hdrops hvalidStore hdropOwnersOrphaned
+      (RuntimeFrame.ownsTransitively_of_relaxedEvidenceOwnerReach_stored
+        hstoreSlot hownerReach)
+      havoidVar
+  · constructor
+    · intro dependency hdependency
+      rcases hdepsProtected dependency hdependency with
+        ⟨base, hprotected⟩
+      exact dropsAvoids_of_protectedByBase_lifetimeDrop_relaxed
+        habstraction hslots
+        hvalidStore hheap hdropSet hdrops hdropDisjoint hchild hprotected
+    · intro dependency hdependency base hprotected
+      exact ProtectedByBase.drops_lifetime_of_base_outlives_relaxed
+        habstraction hslots
+        hvalidStore hheap hdropSet hdrops hdropDisjoint hchild hprotected
+
+theorem RelaxedRuntimeEnvAbstraction.dropLifetime_of_runtimeFrame
+    {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
+    {lifetime : Lifetime} :
+    RelaxedRuntimeEnvAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    Drops store dropSet store' →
+    DropsLifetime store lifetime store' →
+    RelaxedRuntimeLifetimeDropFrame store store' env dropSet lifetime →
+    RelaxedRuntimeEnvAbstraction store' (env.dropLifetime lifetime) := by
+  intro habstraction hheap hdrops hdropsLifetime hframe
+  constructor
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases hstoreDomain with ⟨slot, hslotFinal⟩
+      have hslotOld : store.slotAt (VariableProjection x) = some slot :=
+        dropsLifetime_slotAt_of_slotAt hdropsLifetime hslotFinal
+      rcases (habstraction.1 x).mp ⟨slot, hslotOld⟩ with
+        ⟨envSlot, henvSlot⟩
+      have hslotLifetime : slot.lifetime = envSlot.lifetime := by
+        rcases habstraction.2 x envSlot henvSlot with
+          ⟨value, hstoreSlot, _evidence, _hprotected⟩
+        rw [hslotOld] at hstoreSlot
+        injection hstoreSlot with hslotEq
+        exact congrArg StoreSlot.lifetime hslotEq
+      have hsurvives : envSlot.lifetime ≠ lifetime := by
+        intro hdropped
+        exact dropsLifetime_slot_not_dropped hdropsLifetime hslotFinal
+          (by simpa [hslotLifetime] using hdropped)
+      exact ⟨envSlot,
+        Env.dropLifetime_slotAt_eq_some.mpr ⟨henvSlot, hsurvives⟩⟩
+    · intro henvDomain
+      rcases henvDomain with ⟨envSlot, henvDropped⟩
+      rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
+        ⟨henvSlot, hsurvives⟩
+      rcases (habstraction.1 x).mpr ⟨envSlot, henvSlot⟩ with
+        ⟨slot, hslotOld⟩
+      have hslotLifetime : slot.lifetime = envSlot.lifetime := by
+        rcases habstraction.2 x envSlot henvSlot with
+          ⟨value, hstoreSlot, _evidence, _hprotected⟩
+        rw [hslotOld] at hstoreSlot
+        injection hstoreSlot with hslotEq
+        exact congrArg StoreSlot.lifetime hslotEq
+      exact ⟨slot,
+        dropsLifetime_preserves_var_slot_of_not_lifetime hdropsLifetime hheap
+          (by simpa [VariableProjection] using hslotOld)
+          (by simpa [hslotLifetime] using hsurvives)⟩
+  · intro x envSlot henvDropped
+    rcases Env.dropLifetime_slotAt_eq_some.mp henvDropped with
+      ⟨henvSlot, hsurvives⟩
+    rcases habstraction.2 x envSlot henvSlot with
+      ⟨oldValue, hstoreSlot, evidence, hdepsProtected⟩
+    rcases hframe x envSlot oldValue evidence henvSlot hstoreSlot
+        hsurvives hdepsProtected with
+      ⟨hownerAvoids, hdependencyAvoids, hprotectedTransport⟩
+    rcases
+        RuntimeFrame.relaxedValidPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+          hdrops evidence hownerAvoids hdependencyAvoids with
+      ⟨evidence', hdependencyBack⟩
+    have hstoreSlot' :
+        store'.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } :=
+      dropsLifetime_preserves_var_slot_of_not_lifetime hdropsLifetime hheap
+        (by simpa [VariableProjection] using hstoreSlot) hsurvives
+    refine ⟨oldValue, hstoreSlot', evidence', ?_⟩
+    intro location hdependency
+    have hdependencyOld := hdependencyBack location hdependency
+    rcases hdepsProtected location hdependencyOld with
+      ⟨base, hprotected⟩
+    exact ⟨base,
+      hprotectedTransport location hdependencyOld base hprotected⟩
 
 /--
 GRAPH LEMMA B — the overwritten value's owners are orphaned by the write.
@@ -12688,7 +17558,13 @@ namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Lemma 4.9, Borrow Invariance. -/
+/--
+Residual static fragment of Lemma 4.9 after removing the rule-carried premises.
+
+The full borrow-invariance conclusion is now a runtime/evidence transport
+problem; the static theorem that still follows directly from typing is slot
+lifetime preservation.
+-/
 theorem lemma_4_9_borrowInvariance
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
@@ -12698,8 +17574,8 @@ theorem lemma_4_9_borrowInvariance
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂) :
-    WellFormedEnv env₂ lifetime :=
-  borrowInvariance_of_ruleCarriedObligations
-    hrefs hvalid hstoreTyping hwellFormed hsafe htyping
+    EnvSlotsOutlive env₂ lifetime :=
+  typingPreservesSlotsOutlive_of_ruleCarriedObligations
+    hrefs hvalid hstoreTyping hwellFormed.2.1 hsafe htyping
 
 end LwRust.Paper.Soundness
