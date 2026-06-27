@@ -1,73 +1,51 @@
 # Agent Handoff
 
-## STATUS (session 2 end): GREEN BUILD RESTORED — premise removal to be redone incrementally
+## STATUS: FULL BUILD GREEN (3003 jobs), no sorry, all developed theorems kept
 
-`lake build` is GREEN (3003 jobs) again. Root-cause diagnosis (verified):
-commit `81a25bf` "Reduce the typing premises" removed `EnvJoinSameShape`+`Coherent`
-from T-If/T-While (and `ContainedBorrowsWellFormed`+`Coherent` from T-While,
-`Coherent` from T-Assign) AND switched preservation to a relaxed abstraction, but
-left the migration UNFINISHED — 5 preservation cases + `Theorem_4_12`/`Appendix9`
-broken. Its parent `9c8daae` builds green. So this session restored the green
-baseline by `git checkout 9c8daae -- LwRust/` (the unfinished breaking migration
-is reverted in the working tree; `81a25bf` is preserved in git history).
+Phase 1 DONE. The working tree builds green via a merge that keeps everything:
+- `9c8daae`'s rules (`Typing.lean`) + working `WellFormed`-threading preservation
+  (`Lemma_4_11`) + downstream (`Theorem_4_12`/`Appendix9`/extractor/examples).
+- The developed relaxed infrastructure is PRESERVED: `Frame.lean` relaxed evidence
+  (235 refs) and `Lemma_4_9`'s relaxed layer incl. `WritableRootsUnborrowed`,
+  `containedBorrowsWellFormed_join_of_runtimeAbstraction`,
+  `preservation_move_var_multistep_relaxedValue_of_invariant` (182 refs).
+- How the merge was made consistent: un-commented the static `WellFormed` block;
+  replaced the arity-modified `retype_of_sourceTerm` and `typingPreservesSlotsOutlive`
+  with their `9c8daae` versions; fixed the `assign`/`ite`/`whileLoop` case-intro
+  arity in the relaxed progress proof (~line 11616) to `9c8daae`'s field counts.
 
-### Why a wholesale "remove all three at once" migration is the wrong shape
-The removed facts are load-bearing for preservation (move/assign frames need
-`ContainedBorrowsWellFormed`; the WellFormed-preservation rec needs same-shape +
-`Coherent` at joins). Removing them all at once breaks the chain. BUT they are
-NOT all equally hard to re-derive:
-- `EnvJoinSameShape`: **derivable** from the kept `EnvJoin` + the runtime
-  abstraction — `EnvJoin.sameShape_{left,right}_of_safeAbstraction`
-  (RuntimeFacts ~1107) / `_of_runtimeEnvAbstraction` (Lemma_4_9 ~8740) already
-  exist. Paper Def 3.10 confirms same-shape is a join INVARIANT ("will always be
-  the case"), so removing it as a premise and deriving it is the paper-faithful
-  move.
-- `ContainedBorrowsWellFormed`: derivable from `Coherent`+same-shape via
-  `containedBorrowsWellFormed_join` (Lemma_4_9 ~3169) — supply same-shape from the
-  abstraction.
-- `Coherent`: removal is the HARD one — `Coherent`-of-join needs
-  `EnvJoinCoherenceObligations` (RuntimeFacts ~30), whose target-transport has a
-  circularity (forward `LValTyping` transport itself needs `Coherent` of the join,
-  via `lvalTyping_transport_of_sameShapeStrengthening` Lemma_4_9 ~3050). Paper
-  Def 3.8 treats coherence as built into the join, so keeping `Coherent` as a
-  rule obligation is defensibly paper-faithful; full removal needs a non-circular
-  runtime-coherence argument (`RuntimeCoherent`, RuntimeFacts ~1489–1690).
+This green base carries the premises (`9c8daae` rules: `EnvJoinSameShape`,
+`Coherent`, `CBWF`). Phase 2 removes them incrementally for paper-faithfulness.
 
-### Recommended incremental plan (each step ends GREEN)
-Work from the green baseline. For each premise, change the rule, then derive it at
-every use (thread the runtime abstraction into `typingPreservesWellFormed` so the
-join cases call the `*_of_runtimeEnvAbstraction` lemmas), and fix the constructor
-arity at every match (preservation, progress, Theorem_4_12, extractor, examples).
-Order: (1) drop `EnvJoinSameShape` (derive); (2) drop `ContainedBorrowsWellFormed`
-from T-While (derive); (3) decide on `Coherent` (keep as paper-faithful invariant,
-or remove via the runtime-coherence route). Verify `lake build` green after each.
+## PHASE 2: incremental premise removal (paper-faithful), keep green each step
 
-### Session-2 relaxed-abstraction artifacts (now reverted in tree, in history)
-The relaxed `WritableRootsUnborrowed` move-frame layer +
-`preservation_move_var_multistep_relaxedValue_of_invariant` +
-`containedBorrowsWellFormed_join_of_runtimeAbstraction` were built and compiled on
-top of `81a25bf` this session (see git stash / the `81a25bf` tree). They are an
-alternative (relaxed) route; the incremental-from-green route above is simpler.
+Paper basis: Def 3.10 makes same-shape a join INVARIANT (not a premise); Def 3.8
+builds coherence into the join. So removing them as rule premises and DERIVING
+them is paper-faithful. Lemmas already built & compiling:
+`EnvJoin.sameShape_{left,right}_of_runtimeEnvAbstraction`,
+`containedBorrowsWellFormed_join_of_runtimeAbstraction`.
+
+KEY OBSTACLE for removal: the static `typingPreservesWellFormed` block derives the
+join facts from rule premises (`hsameLeft/hsameRight/hcoh`). To remove
+`EnvJoinSameShape`/`CBWF` you must supply same-shape/CBWF from the runtime
+abstraction — but the static block has only `store ∼ₛ env₁`, NOT `∼ₛ` at the join
+env. So the `WellFormed`-preservation that the 5 redex helpers need must be
+re-established INSIDE `Lemma_4_11` (the relaxed/strict motive there threads `∼ₛ`
+at every env, including joins) rather than via the static block. Plan per premise:
+  1. `EnvJoinSameShape`: drop from T-If/T-While; in `Lemma_4_11` derive it at each
+     join via `EnvJoin.sameShape_*_of_runtimeEnvAbstraction` (or `_of_safeAbstraction`)
+     from the threaded `∼ₛ`; fix the constructor-arity sites everywhere.
+  2. `CBWF` (T-While `envInv`): drop; derive via
+     `containedBorrowsWellFormed_join_of_runtimeAbstraction` (needs Coherent join,
+     available) + the per-rule CBWF lemmas.
+  3. `Coherent`: hardest. Either keep as paper-faithful premise (Def 3.8), or derive
+     via the well-founded `RuntimeCoherent` route (RuntimeFacts ~1489-1690) —
+     `lvalTyping_transport_of_sameShapeStrengthening`'s Coherent use is well-founded
+     on borrow-nesting depth, so the apparent circularity is actually structural
+     recursion and is provable.
+Verify `lake build` green after each premise removal.
 
 ---
-
-
-## Mission
-
-Validate the transport layers by continuing the attempt to remove the extra
-premises from `LwRust/Paper/Typing.lean`. The target is that preservation and
-soundness should no longer depend on the old paper-extension premises:
-
-- `EnvJoinSameShape`
-- `Coherent`
-- `ContainedBorrowsWellFormed`
-
-Do not re-add those premises to typing rules. Derive whatever weak runtime
-facts are actually needed from the remaining premises.
-
-The current user hint is important: for the `undef`/non-`undef` merge, relax the
-storage abstraction. This is already the right direction. The relaxation should
-be at the runtime evidence boundary, not by weakening typing.
 
 ## PAPER EVIDENCE (settles the strategy) — read with the breakthrough below
 
