@@ -772,7 +772,7 @@ theorem progress_assign_value_typing_of_safe {store : ProgramStore} {env env₂ 
   intro hsafe hstore htyping
   cases htyping with
   | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
-      _hnotWriteProhibited =>
+      _hcontained _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
@@ -994,11 +994,11 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
         (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-      hRhs hLhsPost hshape hwfTy hwrite hranked htargets hnotWrite ih
+      hRhs hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite ih
       hsize hvst hwf hsafe hstore
     exact progress_assign_typing hsafe hstore
-      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hranked htargets
-        hnotWrite)
+      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
+        hcontained hnotWrite)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
   case eq =>
@@ -1033,8 +1033,8 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
-      _hwellJoin _hlinear _hborrowSafe _hresultSafe ihCondition _ihTrue _ihFalse
-      hsize hvst hwf hsafe hstore
+      _hsameLeft _hsameRight _hwellJoin _hcoherent _hlinear _hborrowSafe
+      _hresultSafe ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
     rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
         hvst.ite_condition hwf hsafe hstore with
       hterminalCondition | hstepCondition
@@ -1067,7 +1067,8 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hjoin _hlin _hbse _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
+      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
       _hcondEntry _hbodyEntry _ihCondInv _ihBodyInv _ihCondEntry
       _ihBodyEntry
       _hsize _hvst _hwf _hsafe _hstore

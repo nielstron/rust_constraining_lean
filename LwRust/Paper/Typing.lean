@@ -1585,6 +1585,7 @@ mutual
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
+        Coherent env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
@@ -1620,11 +1621,17 @@ mutual
     post-condition environment, and the resulting type/environment are the
     joins (Definitions 3.8 and 3.10) of the branch results.
 
-    Mechanisation obligations on the joined result are kept to the invariants
-    that the typing rule cannot reconstruct from dynamic transport:
+    Mechanisation obligations on the joined result, following the repo
+    convention of rule-carried obligations (cf. `T-Assign`):
 
-    * `Linearizable` — needed to type dereferences through joined borrow target
-      lists;
+    * `EnvJoinSameShape` for both branches — branches must agree on each
+      variable's initialisation state (see that definition for why the
+      paper's more liberal join is unsound against Definition 4.4 as
+      printed);
+    * `Coherent`, `Linearizable` — the result invariants needed to type
+      dereferences through joined borrow target lists.  The per-target
+      `ContainedBorrowsWellFormed` invariant is derived in the preservation
+      proof from the branch invariants plus these result obligations;
     * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
       variables into one target list, in which case the joined environment
       is genuinely not borrow safe even though each branch is.  The
@@ -1644,7 +1651,10 @@ mutual
         TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
         PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
         EnvJoin env₃ env₄ env₅ →
+        EnvJoinSameShape env₃ env₅ →
+        EnvJoinSameShape env₄ env₅ →
         WellFormedTy env₅ joinTy lifetime →
+        Coherent env₅ →
         Linearizable env₅ →
         BorrowSafeEnv env₅ →
         TyBorrowSafeAgainstEnv env₅ joinTy →
@@ -1697,9 +1707,11 @@ mutual
     that widen borrow target lists across iterations (e.g. re-pointing an
     outer `&mut` inside the body).
 
-    Obligations follow the weakened `T-If` convention: joins merge borrow target
-    lists, and runtime entry/back-edge states transport into the invariant via
-    the abstraction/strengthening lemmas used by the preservation argument.
+    Obligations follow the `T-If` convention: joins merge borrow target
+    lists, so shape agreement and the well-formedness/borrow-safety kit for
+    the invariant are rule-carried.  Runtime entry/back-edge states transport
+    into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
+    the `T-If` preservation argument.
 
     The final two premises re-type the condition and body from the
     *entry-side* environments.  In real Rust this is implied: per-code
@@ -1716,6 +1728,10 @@ mutual
         {condition body : Term} {bodyTy bodyEntryTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
         EnvJoin env₁ envBack envInv →
+        EnvJoinSameShape env₁ envInv →
+        EnvJoinSameShape envBack envInv →
+        ContainedBorrowsWellFormed envInv →
+        Coherent envInv →
         Linearizable envInv →
         BorrowSafeEnv envInv →
         LoopInvariantNameFresh env₁ envInv condition body →
@@ -1767,15 +1783,15 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcoherence
         _hcontained _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs
         _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
       rw [henvEq]
       exact (ihRhs (ihLhs hfinite).update).erase)
-    (fun _hcondition _htrue _hfalse _htyJoin henvJoin
-        _hwellTy _hlinear _hborrowSafe _htySafe
+    (fun _hcondition _htrue _hfalse _htyJoin henvJoin _hsameLeft
+        _hsameRight _hwellTy _hcoherent _hlinear _hborrowSafe _htySafe
         ihCondition ihTrue _ihFalse hfinite =>
       EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
@@ -1783,7 +1799,8 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
       ihTrue (ihCondition hfinite))
     (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
       ihCondition hfinite)
-    (fun _hchild hjoin _hlinear _hborrowSafe _hnameFresh _hcondition _hbody _hwellTy
+    (fun _hchild hjoin _hsameEntry _hsameBack _hcontained _hcoherent
+        _hlinear _hborrowSafe _hnameFresh _hcondition _hbody _hwellTy
         _hback _hentryCondition _hentryBody ihCondition _ihBody
         _ihEntryCondition _ihEntryBody hfinite =>
       ihCondition (EnvJoin.finiteSupport_left hjoin hfinite))
