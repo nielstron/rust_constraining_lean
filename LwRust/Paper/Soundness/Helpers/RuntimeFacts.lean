@@ -1018,6 +1018,112 @@ theorem safeStrengthening {store : ProgramStore} {env : Env}
   exact validPartialValue_strengthen_sameShape hvalid hstrength
     (by simpa [PartialTy.sameShape] using ty_sameShape_of_strengthens hstrength)
 
+theorem safeStrengthening_of_strengthens {store : ProgramStore}
+    {left right : Ty} {value : Value} :
+    PartialTyStrengthens (.ty left) (.ty right) →
+    ValidValue store value left →
+    ValidValue store value right := by
+  intro hstrength hvalid
+  exact validPartialValue_strengthen_sameShape hvalid hstrength
+    (by simpa [PartialTy.sameShape] using ty_sameShape_of_strengthens hstrength)
+
+/--
+Runtime-backed strengthening cannot change shape.
+
+The shape-changing strengthening rules target `undef`, but the safe
+abstraction relation validates `undef` only against the concrete `undef`
+partial value.  So if the same runtime value is valid at both endpoints of a
+strengthening, those shape-changing cases are impossible.
+-/
+theorem validPartialValue_sameShape_of_strengthens {store : ProgramStore}
+    {value : PartialValue} {oldTy newTy : PartialTy} :
+    ValidPartialValue store value oldTy →
+    PartialTyStrengthens oldTy newTy →
+    ValidPartialValue store value newTy →
+    PartialTy.sameShape oldTy newTy := by
+  intro hvalidOld hstrength
+  induction hstrength generalizing value with
+  | reflex =>
+      intro _hvalidNew
+      exact PartialTy.sameShape_refl _
+  | box _hinner ih =>
+      intro hvalidNew
+      cases hvalidOld with
+      | box hslotOld hinnerOld =>
+          cases hvalidNew with
+          | box hslotNew hinnerNew =>
+              have hownedSlotEq := Option.some.inj (hslotOld.symm.trans hslotNew)
+              cases hownedSlotEq
+              exact ih hinnerOld hinnerNew
+  | tyBox hinner =>
+      intro _hvalidNew
+      simpa [PartialTy.sameShape] using
+        ty_sameShape_of_strengthens (PartialTyStrengthens.tyBox hinner)
+  | borrow _hsubset =>
+      intro _hvalidNew
+      exact ⟨rfl, Ty.sameShape_refl _⟩
+  | undefLeft hinner =>
+      intro _hvalidNew
+      simpa [PartialTy.sameShape] using ty_sameShape_of_strengthens hinner
+  | intoUndef _hinner =>
+      intro hvalidNew
+      cases hvalidNew
+      cases hvalidOld
+  | boxIntoUndef _hinner _ih =>
+      intro hvalidNew
+      cases hvalidNew
+      cases hvalidOld
+
+/--
+If two environments abstract the same concrete store and one strengthens to the
+other, every common slot keeps the same structural shape.
+-/
+theorem SafeAbstraction.envJoinSameShape_of_strengthens {store : ProgramStore}
+    {source result : Env} :
+    store ∼ₛ source →
+    store ∼ₛ result →
+    EnvStrengthens source result →
+    EnvJoinSameShape source result := by
+  intro hsafeSource hsafeResult hstrength x sourceSlot resultSlot hsource hresult
+  have hslotStrength := hstrength x
+  rw [hsource, hresult] at hslotStrength
+  rcases hslotStrength with ⟨_hlifetime, htyStrength⟩
+  rcases hsafeSource.2 x sourceSlot hsource with
+    ⟨sourceValue, hstoreSource, hvalidSource⟩
+  rcases hsafeResult.2 x resultSlot hresult with
+    ⟨resultValue, hstoreResult, hvalidResult⟩
+  have hstoreSlot :
+      StoreSlot.mk sourceValue sourceSlot.lifetime =
+        StoreSlot.mk resultValue resultSlot.lifetime :=
+    Option.some.inj (hstoreSource.symm.trans hstoreResult)
+  have hvalueEq : sourceValue = resultValue :=
+    congrArg StoreSlot.value hstoreSlot
+  have hvalidResultSource :
+      ValidPartialValue store sourceValue resultSlot.ty := by
+    simpa [hvalueEq] using hvalidResult
+  exact validPartialValue_sameShape_of_strengthens
+    hvalidSource htyStrength hvalidResultSource
+
+theorem EnvJoin.sameShape_left_of_safeAbstraction {store : ProgramStore}
+    {left right join : Env} :
+    store ∼ₛ left →
+    store ∼ₛ join →
+    EnvJoin left right join →
+    EnvJoinSameShape left join := by
+  intro hsafeLeft hsafeJoin hjoin
+  exact SafeAbstraction.envJoinSameShape_of_strengthens
+    hsafeLeft hsafeJoin (EnvJoin.left_le hjoin)
+
+theorem EnvJoin.sameShape_right_of_safeAbstraction {store : ProgramStore}
+    {left right join : Env} :
+    store ∼ₛ right →
+    store ∼ₛ join →
+    EnvJoin left right join →
+    EnvJoinSameShape right join := by
+  intro hsafeRight hsafeJoin hjoin
+  exact SafeAbstraction.envJoinSameShape_of_strengthens
+    hsafeRight hsafeJoin (EnvJoin.right_le hjoin)
+
 /--
 Lemma 9.7, Value Typing.
 
@@ -1283,6 +1389,115 @@ def LValLocationAbstraction
     ValidPartialValue store slot.value ty
 
 /--
+Runtime interpretation of an abstract borrow target list.
+
+If `lv` currently stores a borrowed reference, the abstract target list is
+conservative when it contains at least one lvalue whose runtime location is the
+reference target.  The source slot and slot lifetime are included so callers can
+line this fact up with read/write frame lemmas without re-reading the store.
+-/
+def RuntimeBorrowTarget
+    (store : ProgramStore) (lv : LVal) (targets : List LVal) : Prop :=
+  ∃ sourceLocation borrowedLocation target slotLifetime,
+    store.loc lv = some sourceLocation ∧
+      store.slotAt sourceLocation =
+        some (StoreSlot.mk
+          (.value (.ref { location := borrowedLocation, owner := false }))
+          slotLifetime) ∧
+      target ∈ targets ∧
+      store.loc target = some borrowedLocation
+
+def RuntimeBorrowPointsTo
+    (store : ProgramStore) (lv : LVal) (borrowedLocation : Location) : Prop :=
+  ∃ sourceLocation slotLifetime,
+    store.loc lv = some sourceLocation ∧
+      store.slotAt sourceLocation =
+        some (StoreSlot.mk
+          (.value (.ref { location := borrowedLocation, owner := false }))
+          slotLifetime)
+
+theorem RuntimeBorrowTarget.pointsTo {store : ProgramStore} {lv : LVal}
+    {targets : List LVal} :
+    RuntimeBorrowTarget store lv targets →
+    ∃ target borrowedLocation,
+      target ∈ targets ∧
+        store.loc target = some borrowedLocation ∧
+        RuntimeBorrowPointsTo store lv borrowedLocation := by
+  rintro ⟨sourceLocation, borrowedLocation, target, slotLifetime,
+    hsourceLoc, hsourceSlot, htarget, htargetLoc⟩
+  exact ⟨target, borrowedLocation, htarget, htargetLoc,
+    sourceLocation, slotLifetime, hsourceLoc, hsourceSlot⟩
+
+theorem RuntimeBorrowPointsTo.unique {store : ProgramStore} {lv : LVal}
+    {left right : Location} :
+    RuntimeBorrowPointsTo store lv left →
+    RuntimeBorrowPointsTo store lv right →
+    left = right := by
+  rintro ⟨leftSource, leftLifetime, hleftLoc, hleftSlot⟩
+    ⟨rightSource, rightLifetime, hrightLoc, hrightSlot⟩
+  have hsourceEq : leftSource = rightSource :=
+    Option.some.inj (hleftLoc.symm.trans hrightLoc)
+  subst hsourceEq
+  have hslotEq :
+      StoreSlot.mk
+        (.value (.ref { location := left, owner := false })) leftLifetime =
+      StoreSlot.mk
+        (.value (.ref { location := right, owner := false })) rightLifetime :=
+    Option.some.inj (hleftSlot.symm.trans hrightSlot)
+  injection hslotEq with hvalueEq _hlifetimeEq
+  injection hvalueEq with hrefEq
+  injection hrefEq with hrefRecordEq
+  exact (Reference.mk.inj hrefRecordEq).1
+
+theorem LValLocationAbstraction.borrow_target {store : ProgramStore}
+    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty} :
+    LValLocationAbstraction store lv (.ty (.borrow mutable targets pointee)) →
+    RuntimeBorrowTarget store lv targets := by
+  rintro ⟨sourceLocation, ⟨slotValue, slotLifetime⟩, hlv, hslot, hvalid⟩
+  cases hvalid with
+  | borrow htarget htargetLoc =>
+      exact ⟨sourceLocation, _, _, slotLifetime, hlv, hslot, htarget, htargetLoc⟩
+
+/--
+Store/environment invariant induced by `S ∼ Γ`: every borrow-typed lvalue that
+the environment can type has a concrete runtime target represented in its
+abstract target list.
+-/
+def RuntimeBorrowTargetsConservative (store : ProgramStore) (env : Env) : Prop :=
+  ∀ {lv mutable targets pointee lifetime},
+    LValTyping env lv (.ty (.borrow mutable targets pointee)) lifetime →
+    RuntimeBorrowTarget store lv targets
+
+/--
+Runtime-facing coherent-borrow invariant.
+
+Unlike `Coherent`, this does not require the whole abstract target list to be
+jointly typable.  It only requires the target selected by the current runtime
+reference to be typable, with a concrete type that strengthens the abstract
+pointee annotation.
+-/
+def RuntimeCoherent (store : ProgramStore) (env : Env) : Prop :=
+  ∀ {lv mutable targets pointee lifetime},
+    LValTyping env lv (.ty (.borrow mutable targets pointee)) lifetime →
+    ∃ target targetTy targetLifetime borrowedLocation,
+      target ∈ targets ∧
+        LValTyping env target (.ty targetTy) targetLifetime ∧
+        PartialTyStrengthens (.ty targetTy) (.ty pointee) ∧
+        store.loc target = some borrowedLocation ∧
+        RuntimeBorrowPointsTo store lv borrowedLocation
+
+theorem RuntimeCoherent.borrowTargetsConservative {store : ProgramStore} {env : Env} :
+    RuntimeCoherent store env →
+    RuntimeBorrowTargetsConservative store env := by
+  intro hcoherent _lv _mutable _targets _pointee _lifetime htyping
+  rcases hcoherent htyping with
+    ⟨target, _targetTy, _targetLifetime, borrowedLocation,
+      htarget, _htargetTyping, _hstrength, htargetLoc, hpointsTo⟩
+  rcases hpointsTo with ⟨sourceLocation, slotLifetime, hsourceLoc, hsourceSlot⟩
+  exact ⟨sourceLocation, borrowedLocation, target, slotLifetime,
+    hsourceLoc, hsourceSlot, htarget, htargetLoc⟩
+
+/--
 The readable part of Lemma 9.3.  Undefined shadow types record declared but
 moved-out storage; the operational `read`/`copy` premises only need a concrete
 location for full and boxed partial types.
@@ -1347,13 +1562,12 @@ recursive theorem over `LValTyping`.  Undefined shadow types are intentionally
 excluded from the concrete-location conclusion, since they are not readable
 runtime values.
 -/
-theorem lvalTyping_defined_location {store : ProgramStore} {env : Env}
-    {current : Lifetime} {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    WellFormedEnv env current →
+theorem lvalTyping_defined_location_of_safe {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     store ∼ₛ env →
     LValTyping env lv ty lifetime →
     LValDefinedLocationAbstraction store lv ty := by
-  intro hwellFormed hsafe htyping
+  intro hsafe htyping
   refine LValTyping.rec
     (motive_1 := fun lv ty _ _ => LValDefinedLocationAbstraction store lv ty)
     (motive_2 := fun targets unionTy _ _ =>
@@ -1393,7 +1607,7 @@ theorem lvalTyping_defined_location {store : ProgramStore} {env : Env}
           hselectedSlot,
           by
             simpa [hselectedValue, ValidValue] using
-              safeStrengthening hwellFormed hsafe hstrength hvalidSelectedValue⟩
+              safeStrengthening_of_strengthens hstrength hvalidSelectedValue⟩
   · intro ty _hvars selected hmem
     simp at hmem
   · intro target ty _lifetime _htarget ihTarget selected hmem
@@ -1412,17 +1626,79 @@ theorem lvalTyping_defined_location {store : ProgramStore} {env : Env}
         partialTyStrengthens_trans hstrength
           (PartialTyUnion.right_strengthens hunion)⟩
 
-/-- A well-typed lval denotes allocated storage, even when its type is undefined. -/
-def LValAllocatedLocation (store : ProgramStore) (lv : LVal) : Prop :=
-  ∃ location slot, store.loc lv = some location ∧ store.slotAt location = some slot
-
-theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
+theorem lvalTyping_defined_location {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
     store ∼ₛ env →
     LValTyping env lv ty lifetime →
+    LValDefinedLocationAbstraction store lv ty := by
+  intro _hwellFormed hsafe htyping
+  exact lvalTyping_defined_location_of_safe hsafe htyping
+
+theorem runtimeBorrowTarget_of_lvalTyping_safe {store : ProgramStore} {env : Env}
+    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty}
+    {lifetime : Lifetime} :
+    store ∼ₛ env →
+    LValTyping env lv (.ty (.borrow mutable targets pointee)) lifetime →
+    RuntimeBorrowTarget store lv targets := by
+  intro hsafe htyping
+  exact LValLocationAbstraction.borrow_target
+    (lvalTyping_defined_location_of_safe hsafe htyping)
+
+theorem runtimeBorrowTargetsConservative_of_safe {store : ProgramStore} {env : Env} :
+    store ∼ₛ env →
+    RuntimeBorrowTargetsConservative store env := by
+  intro hsafe _lv _mutable _targets _pointee _lifetime htyping
+  exact runtimeBorrowTarget_of_lvalTyping_safe hsafe htyping
+
+/--
+Weak runtime coherence for the borrow edge selected by the concrete store.
+
+Unlike `Coherent env`, this does not require a joint target-list typing for
+every borrow stored in the environment.  It is enough for operational
+dereference reasoning: if the borrow source is typed and the dereference rule
+has a target-list typing premise, the target actually selected by the runtime
+reference is typed and strengthens the borrow's pointee annotation.
+-/
+theorem runtimeCoherent_selectedTarget_of_safe {store : ProgramStore} {env : Env}
+    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty}
+    {borrowLifetime targetLifetime : Lifetime} :
+    store ∼ₛ env →
+    LValTyping env lv (.ty (.borrow mutable targets pointee)) borrowLifetime →
+    LValTargetsTyping env targets (.ty pointee) targetLifetime →
+    ∃ target targetTy selectedLifetime borrowedLocation,
+      target ∈ targets ∧
+        LValTyping env target (.ty targetTy) selectedLifetime ∧
+        PartialTyStrengthens (.ty targetTy) (.ty pointee) ∧
+        store.loc target = some borrowedLocation ∧
+        RuntimeBorrowPointsTo store lv borrowedLocation := by
+  intro hsafe htyping htargets
+  rcases RuntimeBorrowTarget.pointsTo
+      (runtimeBorrowTarget_of_lvalTyping_safe hsafe htyping) with
+    ⟨target, borrowedLocation, htarget, htargetLoc, hpointsTo⟩
+  rcases lvalTargetsTyping_member_strengthens htargets target htarget with
+    ⟨targetTy, selectedLifetime, htargetTyping, hstrength⟩
+  exact ⟨target, targetTy, selectedLifetime, borrowedLocation, htarget,
+    htargetTyping, hstrength, htargetLoc, hpointsTo⟩
+
+theorem runtimeCoherent_of_coherent_safe {store : ProgramStore} {env : Env} :
+    Coherent env →
+    store ∼ₛ env →
+    RuntimeCoherent store env := by
+  intro hcoherent hsafe _lv _mutable _targets _pointee _lifetime htyping
+  rcases hcoherent _ _ _ _ _ htyping with ⟨targetLifetime, htargets⟩
+  exact runtimeCoherent_selectedTarget_of_safe hsafe htyping htargets
+
+/-- A well-typed lval denotes allocated storage, even when its type is undefined. -/
+def LValAllocatedLocation (store : ProgramStore) (lv : LVal) : Prop :=
+  ∃ location slot, store.loc lv = some location ∧ store.slotAt location = some slot
+
+theorem lvalTyping_allocated_location_of_safe {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    store ∼ₛ env →
+    LValTyping env lv ty lifetime →
     LValAllocatedLocation store lv := by
-  intro hwellFormed hsafe htyping
+  intro hsafe htyping
   refine LValTyping.rec
     (motive_1 := fun lv _ _ _ => LValAllocatedLocation store lv)
     (motive_2 := fun targets _ _ _ =>
@@ -1433,12 +1709,12 @@ theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
       ⟨location, runtimeSlot, hloc, hslotRuntime, _hvalid⟩
     exact ⟨location, runtimeSlot, hloc, hslotRuntime⟩
   · intro _lv _inner _lifetime hbox _ih
-    rcases location_box (lvalTyping_defined_location hwellFormed hsafe hbox) with
+    rcases location_box (lvalTyping_defined_location_of_safe hsafe hbox) with
       ⟨location, slot, hloc, hslot, _hvalid⟩
     exact ⟨location, slot, hloc, hslot⟩
   · intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
       hborrow _htargets _ihBorrow ihTargets
-    rcases lvalTyping_defined_location hwellFormed hsafe hborrow with
+    rcases lvalTyping_defined_location_of_safe hsafe hborrow with
       ⟨source, sourceSlot, hsourceLoc, hsourceSlot, hvalidBorrow⟩
     rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
     cases hvalidBorrow with
@@ -1462,6 +1738,15 @@ theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
     · subst hselected
       exact ihHead
     · exact ihRest selected hselected
+
+theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
+    {current : Lifetime} {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    LValTyping env lv ty lifetime →
+    LValAllocatedLocation store lv := by
+  intro _hwellFormed hsafe htyping
+  exact lvalTyping_allocated_location_of_safe hsafe htyping
 
 /-- Lemma 9.3 operational corollary: locating an lval makes `write` defined. -/
 theorem write_defined_of_location {store : ProgramStore} {lv : LVal}
@@ -1527,6 +1812,18 @@ theorem readPreservation_of_location {store : ProgramStore} {lv : LVal} {ty : Ty
     hvalue,
     hvalidValue⟩
 
+theorem readPreservation_of_safe {store : ProgramStore} {env : Env}
+    {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
+    store ∼ₛ env →
+    LValTyping env lv (.ty ty) lifetime →
+    ∃ value slot,
+      store.read lv = some slot ∧
+      slot.value = .value value ∧
+      ValidValue store value ty := by
+  intro hsafe htyping
+  exact readPreservation_of_location
+    (lvalTyping_defined_location_of_safe hsafe htyping)
+
 /-- Corollary 9.4, Read Preservation. -/
 theorem readPreservation {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
@@ -1537,9 +1834,8 @@ theorem readPreservation {store : ProgramStore} {env : Env}
       store.read lv = some slot ∧
       slot.value = .value value ∧
       ValidValue store value ty := by
-  intro hwellFormed hsafe htyping
-  exact readPreservation_of_location
-    (lvalTyping_defined_location hwellFormed hsafe htyping)
+  intro _hwellFormed hsafe htyping
+  exact readPreservation_of_safe hsafe htyping
 
 end Paper
 end LwRust

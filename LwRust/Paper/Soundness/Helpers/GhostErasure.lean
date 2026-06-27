@@ -2332,7 +2332,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
             (by simpa [PartialTy.allVars] using htrueTyFresh)
             (by simpa [PartialTy.allVars] using hfalseTyFresh)
         simpa [PartialTy.allVars] using hpartial
-      have hfreshJoin :=
+      have hfreshJoin : Env.TypeNameFresh (env₅.erase ghost) ghost :=
         EnvJoin.typeNameFresh_erase henvJoin hfreshTrue hfreshFalse
       exact ⟨TermTyping.ite hconditionErased htrueErased hfalseErased
         htyJoin (EnvJoin.erase_ghost henvJoin)

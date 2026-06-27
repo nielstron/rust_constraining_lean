@@ -764,6 +764,36 @@ theorem EnvSlotsOutlive.update_same_lifetime {env : Env} {x : Name}
       simpa [Env.update, hy] using hupdated
     exact houtlives y updatedSlot hold
 
+theorem EnvSlotsOutlive.update_current {env : Env} {x : Name}
+    {partialTy : PartialTy} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    EnvSlotsOutlive (env.update x { ty := partialTy, lifetime := current }) current := by
+  intro houtlives y updatedSlot hupdated
+  by_cases hy : y = x
+  · subst hy
+    have hslot :
+        updatedSlot = { ty := partialTy, lifetime := current } := by
+      have h :
+          { ty := partialTy, lifetime := current } = updatedSlot := by
+        simpa [Env.update] using hupdated
+      exact h.symm
+    subst hslot
+    exact LifetimeOutlives.refl current
+  · have hold : env.slotAt y = some updatedSlot := by
+      simpa [Env.update, hy] using hupdated
+    exact houtlives y updatedSlot hold
+
+theorem EnvSlotsOutlive.erase {env : Env} {x : Name} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    EnvSlotsOutlive (env.erase x) current := by
+  intro houtlives y slot herased
+  by_cases hy : y = x
+  · subst hy
+    simp [Env.erase] at herased
+  · have hold : env.slotAt y = some slot := by
+      simpa [Env.erase, hy] using herased
+    exact houtlives y slot hold
+
 /--
 An environment update relation preserves the allocation lifetime of every slot
 that remains in the result.  This isolates the domain/lifetime part of
@@ -1290,15 +1320,15 @@ theorem LifetimeIntersection.right_le {left right intersection : Lifetime} :
   intro hintersection
   exact hintersection.1 (by simp)
 
-theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
-    WellFormedEnv env current →
+theorem LValTyping.lifetime_outlives_of_slots {env : Env} {current : Lifetime} :
+    EnvSlotsOutlive env current →
     (∀ {lv ty lifetime},
       LValTyping env lv ty lifetime →
       lifetime ≤ current) ∧
     (∀ {targets ty lifetime},
       LValTargetsTyping env targets ty lifetime →
       lifetime ≤ current) := by
-  intro hwellEnv
+  intro houtlives
   constructor
   · intro lv ty lifetime htyping
     exact LValTyping.rec
@@ -1306,7 +1336,7 @@ theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
       (motive_2 := fun _targets _ty lifetime _ => lifetime ≤ current)
       (by
         intro x slot hslot
-        exact hwellEnv.2.1 x slot hslot)
+        exact houtlives x slot hslot)
       (by
         intro _lv _inner _lifetime _htyping ih
         exact ih)
@@ -1331,7 +1361,7 @@ theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
       (motive_2 := fun _targets _ty lifetime _ => lifetime ≤ current)
       (by
         intro x slot hslot
-        exact hwellEnv.2.1 x slot hslot)
+        exact houtlives x slot hslot)
       (by
         intro _lv _inner _lifetime _htyping ih
         exact ih)
@@ -1351,6 +1381,17 @@ theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
         exact LifetimeIntersection.le_of_le hintersection ihHead ihRest)
       htyping
 
+theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
+    WellFormedEnv env current →
+    (∀ {lv ty lifetime},
+      LValTyping env lv ty lifetime →
+      lifetime ≤ current) ∧
+    (∀ {targets ty lifetime},
+      LValTargetsTyping env targets ty lifetime →
+      lifetime ≤ current) := by
+  intro hwellEnv
+  exact LValTyping.lifetime_outlives_of_slots hwellEnv.2.1
+
 theorem LValTyping.lifetime_outlives_one {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
@@ -1359,18 +1400,26 @@ theorem LValTyping.lifetime_outlives_one {env : Env} {current : Lifetime}
   intro hwellEnv htyping
   exact (LValTyping.lifetime_outlives hwellEnv).1 htyping
 
-theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
+theorem LValTyping.lifetime_outlives_one_of_slots {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    WellFormedEnv env current →
+    EnvSlotsOutlive env current →
+    LValTyping env lv ty lifetime →
+    lifetime ≤ current := by
+  intro houtlives htyping
+  exact (LValTyping.lifetime_outlives_of_slots houtlives).1 htyping
+
+theorem LValTyping.base_outlives_one_of_slots {env : Env} {current : Lifetime}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    EnvSlotsOutlive env current →
     LValTyping env lv ty lifetime →
     LValBaseOutlives env lv current := by
-  intro hwellEnv htyping
+  intro houtlives htyping
   exact LValTyping.rec
     (motive_1 := fun lv _ty _lifetime _ => LValBaseOutlives env lv current)
     (motive_2 := fun _targets _ty _lifetime _ => True)
     (by
       intro x slot hslot
-      exact ⟨slot, hslot, hwellEnv.2.1 x slot hslot⟩)
+      exact ⟨slot, hslot, houtlives x slot hslot⟩)
     (by
       intro _lv _inner _lifetime _htyping ih
       exact ih)
@@ -1389,6 +1438,73 @@ theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
         _hhead _hrest _hunion _hintersection _ihHead _ihRest
       trivial)
     htyping
+
+theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
+    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
+    WellFormedEnv env current →
+    LValTyping env lv ty lifetime →
+    LValBaseOutlives env lv current := by
+  intro hwellEnv htyping
+  exact LValTyping.base_outlives_one_of_slots hwellEnv.2.1 htyping
+
+theorem LValTargetsTyping.borrowTargetsWellFormed_of_slots {env : Env}
+    {targets : List LVal} {ty : PartialTy} {targetLifetime current : Lifetime} :
+    EnvSlotsOutlive env current →
+    LValTargetsTyping env targets ty targetLifetime →
+    BorrowTargetsWellFormed env targets current := by
+  intro houtlives htyping
+  refine BorrowTargetsWellFormed.intro ?_
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _lv _partialTy _lifetime _ => True)
+    (motive_2 := fun typedTargets _partialTy _lifetime _ =>
+      ∀ target,
+        target ∈ typedTargets →
+        ∃ targetTy targetLifetime,
+          LValTyping env target (.ty targetTy) targetLifetime ∧
+          targetLifetime ≤ current ∧
+          LValBaseOutlives env target current)
+    ?var ?box ?borrow ?empty ?singleton ?cons htyping
+  · intro _x _slot _hslot
+    trivial
+  · intro _lv _inner _lifetime _htyping _ih
+    trivial
+  · intro _lv _mutable _typedTargets _pointee _borrowLifetime _typedTargetLifetime
+      _hborrow _htargets _ihBorrow _ihTargets
+    trivial
+  · intro _ty _hvars target htarget
+    cases htarget
+  · intro target targetTy lifetime htarget _ih selected hselected
+    rw [List.mem_singleton] at hselected
+    subst hselected
+    exact ⟨targetTy, lifetime, htarget,
+      LValTyping.lifetime_outlives_one_of_slots houtlives htarget,
+      LValTyping.base_outlives_one_of_slots houtlives htarget⟩
+  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+      hhead _hrest _hunion _hintersection _ihHead ihRest selected hselected
+    rcases List.mem_cons.mp hselected with hselectedHead | hselectedRest
+    · subst hselectedHead
+      exact ⟨headTy, headLifetime, hhead,
+        LValTyping.lifetime_outlives_one_of_slots houtlives hhead,
+        LValTyping.base_outlives_one_of_slots houtlives hhead⟩
+    · exact ihRest selected hselectedRest
+
+theorem copyTy_result_wellFormed_of_coherent_slots {env : Env} {lv : LVal}
+    {ty : Ty} {valueLifetime lifetime : Lifetime} :
+    Coherent env →
+    EnvSlotsOutlive env lifetime →
+    LValTyping env lv (.ty ty) valueLifetime →
+    CopyTy ty →
+    WellFormedTy env ty lifetime := by
+  intro hcoherent houtlives hLv hcopy
+  cases hcopy with
+  | unit | int | bool =>
+      constructor
+  | immBorrow =>
+      rename_i targets pointee
+      rcases hcoherent lv false targets pointee valueLifetime hLv with
+        ⟨targetLifetime, htargets⟩
+      exact WellFormedTy.borrow
+        (LValTargetsTyping.borrowTargetsWellFormed_of_slots houtlives htargets)
 
 theorem LValTyping.var_inv {env : Env} {x : Name}
     {ty : PartialTy} {lifetime : Lifetime} :

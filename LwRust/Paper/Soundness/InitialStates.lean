@@ -481,7 +481,7 @@ theorem emptyInitial_progress {term : Term} {lifetime : Lifetime}
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hborrowSafe,
       hstoreProgress, _hrefs⟩
-  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _)
+  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _).2.1
     hsafe hstoreProgress htyping
 
 /--

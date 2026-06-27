@@ -13,6 +13,27 @@ open Core
 
 /-! ## Appendix 9.4: Value Preservation Fragments -/
 
+/-- Lemma 9.9, `R-Copy` one-step value preservation fragment, safe-only form. -/
+theorem valuePreservation_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    Step store lifetime (.copy lv) store (.val value) →
+    ValidValue store value ty := by
+  intro hsafe htyping hstep
+  cases htyping with
+  | copy hLv _hcopy _hreadProhibited =>
+      cases hstep with
+      | copy hread =>
+          rcases readPreservation_of_safe hsafe hLv with
+            ⟨readValue, runtimeSlot, hreadPreserved, hslotValue, hvalidValue⟩
+          rw [hread] at hreadPreserved
+          injection hreadPreserved with hslotEq
+          cases hslotEq
+          cases hslotValue
+          exact hvalidValue
+
 /-- Lemma 9.9, `R-Copy` one-step value preservation fragment. -/
 theorem valuePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
@@ -22,12 +43,23 @@ theorem valuePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     ValidValue store value ty := by
-  intro hwellFormed hsafe htyping hstep
+  intro _hwellFormed hsafe htyping hstep
+  exact valuePreservation_copy_step_of_safe hsafe htyping hstep
+
+/-- Lemma 9.9, `R-Move` one-step value preservation fragment, safe-only form. -/
+theorem valuePreservation_move_step_of_safe {store store' : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) ty env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    ValidValue store value ty := by
+  intro hsafe htyping hstep
   cases htyping with
-  | copy hLv _hcopy _hreadProhibited =>
+  | move hLv _hwriteProhibited _hmove =>
       cases hstep with
-      | copy hread =>
-          rcases readPreservation hwellFormed hsafe hLv with
+      | move hread _hwrite =>
+          rcases readPreservation_of_safe hsafe hLv with
             ⟨readValue, runtimeSlot, hreadPreserved, hslotValue, hvalidValue⟩
           rw [hread] at hreadPreserved
           injection hreadPreserved with hslotEq
@@ -44,18 +76,8 @@ theorem valuePreservation_move_step {store store' : ProgramStore} {env env₂ : 
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store value ty := by
-  intro hwellFormed hsafe htyping hstep
-  cases htyping with
-  | move hLv _hwriteProhibited _hmove =>
-      cases hstep with
-      | move hread _hwrite =>
-          rcases readPreservation hwellFormed hsafe hLv with
-            ⟨readValue, runtimeSlot, hreadPreserved, hslotValue, hvalidValue⟩
-          rw [hread] at hreadPreserved
-          injection hreadPreserved with hslotEq
-          cases hslotEq
-          cases hslotValue
-          exact hvalidValue
+  intro _hwellFormed hsafe htyping hstep
+  exact valuePreservation_move_step_of_safe hsafe htyping hstep
 
 /--
 `R-Move` value preservation in the post-write store, factored through an
@@ -65,10 +87,9 @@ explicit frame condition.
 the location overwritten by `move` must not be one of the locations inspected by
 the moved value's validity derivation in the pre-write store.
 -/
-theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
-    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+theorem valuePreservation_move_step_of_not_reaches_of_safe {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {lv : LVal} {value : Value} {ty : Ty} :
-    WellFormedEnv env current →
     store ∼ₛ env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
@@ -77,9 +98,9 @@ theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
       store.slotAt updated = some slot →
       ∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ updated) →
     ValidValue store' value ty := by
-  intro hwellFormed hsafe htyping hstep hframe
+  intro hsafe htyping hstep hframe
   have hvalidStore : ValidValue store value ty :=
-    valuePreservation_move_step hwellFormed hsafe htyping hstep
+    valuePreservation_move_step_of_safe hsafe htyping hstep
   cases hstep with
   | move hread hwrite =>
       cases hloc : store.loc lv with
@@ -99,6 +120,36 @@ theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
               exact RuntimeFrame.validValue_update_of_not_reaches hvalidStore
                 (hframe updated oldSlot hloc hslot)
 
+theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+    {lv : LVal} {value : Value} {ty : Ty} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) ty env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    (∀ updated slot,
+      store.loc lv = some updated →
+      store.slotAt updated = some slot →
+      ∀ ℓ, RuntimeFrame.Reaches store (.value value) (.ty ty) ℓ → ℓ ≠ updated) →
+    ValidValue store' value ty := by
+  intro _hwellFormed hsafe htyping hstep hframe
+  exact valuePreservation_move_step_of_not_reaches_of_safe hsafe htyping hstep hframe
+
+/-- `R-Move` post-write value preservation for unit values, safe-only form. -/
+theorem valuePreservation_move_step_unit_post_of_safe {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lv : LVal} {value : Value} :
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) .unit env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    ValidValue store' value .unit := by
+  intro hsafe htyping hstep
+  exact valuePreservation_move_step_of_not_reaches_of_safe
+    hsafe htyping hstep
+    (by
+      intro _updated _slot _hloc _hslot ℓ hreach
+      cases hreach)
+
 /-- `R-Move` post-write value preservation for unit values. -/
 theorem valuePreservation_move_step_unit_post {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
@@ -108,9 +159,20 @@ theorem valuePreservation_move_step_unit_post {store store' : ProgramStore}
     TermTyping env typing lifetime (.move lv) .unit env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .unit := by
-  intro hwellFormed hsafe htyping hstep
-  exact valuePreservation_move_step_of_not_reaches
-    hwellFormed hsafe htyping hstep
+  intro _hwellFormed hsafe htyping hstep
+  exact valuePreservation_move_step_unit_post_of_safe hsafe htyping hstep
+
+/-- `R-Move` post-write value preservation for integer values, safe-only form. -/
+theorem valuePreservation_move_step_int_post_of_safe {store store' : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {lv : LVal} {value : Value} :
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.move lv) .int env₂ →
+    Step store lifetime (.move lv) store' (.val value) →
+    ValidValue store' value .int := by
+  intro hsafe htyping hstep
+  exact valuePreservation_move_step_of_not_reaches_of_safe
+    hsafe htyping hstep
     (by
       intro _updated _slot _hloc _hslot ℓ hreach
       cases hreach)
@@ -124,12 +186,8 @@ theorem valuePreservation_move_step_int_post {store store' : ProgramStore}
     TermTyping env typing lifetime (.move lv) .int env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .int := by
-  intro hwellFormed hsafe htyping hstep
-  exact valuePreservation_move_step_of_not_reaches
-    hwellFormed hsafe htyping hstep
-    (by
-      intro _updated _slot _hloc _hslot ℓ hreach
-      cases hreach)
+  intro _hwellFormed hsafe htyping hstep
+  exact valuePreservation_move_step_int_post_of_safe hsafe htyping hstep
 
 /-- Lemma 9.9, `R-Borrow` one-step value preservation fragment. -/
 theorem valuePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
@@ -167,23 +225,22 @@ theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
       | borrow _hmem _hloc =>
           rfl
 
-/-- Lemma 9.8, `R-Copy` valid-state preservation fragment. -/
-theorem validState_copy_step {store : ProgramStore} {env env₂ : Env}
-    {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
+/-- Lemma 9.8, `R-Copy` valid-state preservation fragment, safe-only form. -/
+theorem validState_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
-    WellFormedEnv env current →
     store ∼ₛ env →
     ValidState store (.copy lv) →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     ValidState store (.val value) := by
-  intro hwellFormed hsafe hvalidState htyping hstep
+  intro hsafe hvalidState htyping hstep
   rcases hvalidState with ⟨hvalidStore, _hvalidTerm, _hdisjoint⟩
   cases htyping with
   | copy hLv hcopy _hreadProhibited =>
       cases hstep with
       | copy hread =>
-          rcases readPreservation hwellFormed hsafe hLv with
+          rcases readPreservation_of_safe hsafe hLv with
             ⟨readValue, runtimeSlot, hreadPreserved, hslotValue, hvalidValue⟩
           rw [hread] at hreadPreserved
           injection hreadPreserved with hslotEq
@@ -197,6 +254,19 @@ theorem validState_copy_step {store : ProgramStore} {env env₂ : Env}
               intro owned hmem
               simp [termOwningLocations, termValues, valueOwningLocations,
                 hnonOwner] at hmem⟩
+
+/-- Lemma 9.8, `R-Copy` valid-state preservation fragment. -/
+theorem validState_copy_step {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
+    {value : Value} {ty : Ty} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    ValidState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    Step store lifetime (.copy lv) store (.val value) →
+    ValidState store (.val value) := by
+  intro _hwellFormed hsafe hvalidState htyping hstep
+  exact validState_copy_step_of_safe hsafe hvalidState htyping hstep
 
 /-- Lemma 9.8, `R-Borrow` valid-state preservation fragment. -/
 theorem validState_borrow_step {store : ProgramStore} {lifetime : Lifetime}
@@ -408,6 +478,30 @@ theorem storeOwnersAllocated_box_step_of_validValue {store store' : ProgramStore
 
 /-! ### Composed Runtime Validity Preservation Fragments -/
 
+/-- Runtime-validity preservation for `R-Copy`, safe-only form. -/
+theorem validRuntimeState_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    Step store lifetime (.copy lv) store (.val value) →
+    ValidRuntimeState store (.val value) := by
+  intro hsafe hvalidRuntime htyping hstep
+  have htermHeap : TermOwnerTargetsHeap (.val value) := by
+    cases htyping with
+    | copy hLv hcopy hreadProhibited =>
+        exact termOwnerTargetsHeap_value_nonOwner
+          (copy_value_nonOwner hcopy
+            (valuePreservation_copy_step_of_safe hsafe
+              (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep))
+  exact ⟨validState_copy_step_of_safe hsafe hvalidRuntime.1 htyping hstep,
+    storeOwnersAllocated_copy_step
+      (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
+    ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
+    ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
+    htermHeap⟩
+
 /-- Runtime-validity preservation for `R-Copy`. -/
 theorem validRuntimeState_copy_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
@@ -418,20 +512,8 @@ theorem validRuntimeState_copy_step {store : ProgramStore} {env env₂ : Env}
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     ValidRuntimeState store (.val value) := by
-  intro hwellFormed hsafe hvalidRuntime htyping hstep
-  have htermHeap : TermOwnerTargetsHeap (.val value) := by
-    cases htyping with
-    | copy hLv hcopy hreadProhibited =>
-        exact termOwnerTargetsHeap_value_nonOwner
-          (copy_value_nonOwner hcopy
-            (valuePreservation_copy_step hwellFormed hsafe
-              (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep))
-  exact ⟨validState_copy_step hwellFormed hsafe hvalidRuntime.1 htyping hstep,
-    storeOwnersAllocated_copy_step
-      (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
-    ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
-    ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
-    htermHeap⟩
+  intro _hwellFormed hsafe hvalidRuntime htyping hstep
+  exact validRuntimeState_copy_step_of_safe hsafe hvalidRuntime htyping hstep
 
 /-- Runtime-validity preservation for `R-Borrow`. -/
 theorem validRuntimeState_borrow_step {store : ProgramStore}
@@ -677,6 +759,21 @@ theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
           subst hmem
           exact ⟨_, rfl⟩⟩
 
+/-- Lemma 9.10, `R-Copy` store-preservation fragment, safe-only form. -/
+theorem storePreservation_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    Step store lifetime (.copy lv) store (.val value) →
+    store ∼ₛ env₂ ∧ ValidValue store value ty := by
+  intro hsafe htyping hstep
+  cases htyping with
+  | copy hLv hcopy hreadProhibited =>
+      exact ⟨hsafe,
+        valuePreservation_copy_step_of_safe (typing := typing) hsafe
+          (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep⟩
+
 /-- Lemma 9.10, `R-Copy` store-preservation fragment. -/
 theorem storePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
@@ -686,12 +783,8 @@ theorem storePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     store ∼ₛ env₂ ∧ ValidValue store value ty := by
-  intro hwellFormed hsafe htyping hstep
-  cases htyping with
-  | copy hLv hcopy hreadProhibited =>
-      exact ⟨hsafe,
-        valuePreservation_copy_step (typing := typing) hwellFormed hsafe
-          (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep⟩
+  intro _hwellFormed hsafe htyping hstep
+  exact storePreservation_copy_step_of_safe hsafe htyping hstep
 
 /-- Lemma 9.10, `R-Borrow` store-preservation fragment. -/
 theorem storePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
@@ -717,6 +810,27 @@ theorem storePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
           (TermTyping.immBorrow (typing := typing) hLv hnotRead) hstep⟩
 
 /--
+Lemma 4.11, `R-Copy` one-step preservation fragment, safe-only form.
+
+This is the combination of the runtime-validity, store-preservation, and
+value-preservation facts for a copy step.
+-/
+theorem preservation_copy_step_runtime_of_safe {store : ProgramStore} {env env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    Step store lifetime (.copy lv) store (.val value) →
+    ValidRuntimeState store (.val value) ∧ store ∼ₛ env₂ ∧
+      ValidValue store value ty := by
+  intro hsafe hvalidRuntime htyping hstep
+  rcases storePreservation_copy_step_of_safe hsafe htyping hstep with
+    ⟨hsafe₂, hvalidValue⟩
+  exact ⟨validRuntimeState_copy_step_of_safe hsafe hvalidRuntime htyping hstep,
+    hsafe₂, hvalidValue⟩
+
+/--
 Lemma 4.11, `R-Copy` one-step preservation fragment.
 
 This is the paper-facing combination of the runtime-validity, store-preservation,
@@ -732,11 +846,8 @@ theorem preservation_copy_step_runtime {store : ProgramStore} {env env₂ : Env}
     Step store lifetime (.copy lv) store (.val value) →
     ValidRuntimeState store (.val value) ∧ store ∼ₛ env₂ ∧
       ValidValue store value ty := by
-  intro hwellFormed hsafe hvalidRuntime htyping hstep
-  rcases storePreservation_copy_step hwellFormed hsafe htyping hstep with
-    ⟨hsafe₂, hvalidValue⟩
-  exact ⟨validRuntimeState_copy_step hwellFormed hsafe hvalidRuntime htyping hstep,
-    hsafe₂, hvalidValue⟩
+  intro _hwellFormed hsafe hvalidRuntime htyping hstep
+  exact preservation_copy_step_runtime_of_safe hsafe hvalidRuntime htyping hstep
 
 /--
 Lemma 4.11, `R-Borrow` one-step preservation fragment.
@@ -827,7 +938,7 @@ theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStor
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
     hvalueFrame hotherFrames
   have hvalidStore : ValidValue store value ty :=
-    valuePreservation_move_step hwellFormed hsafe htyping hstep
+    valuePreservation_move_step_of_safe hsafe htyping hstep
   rcases hsafe.2 x { ty := .ty ty, lifetime := valueLifetime } henvSlot with
     ⟨sourceValue, hsourceSlot, _hsourceValid⟩
   have hsourceSlotVar :
@@ -1181,18 +1292,17 @@ theorem preservation_blockB_value_step_runtime_no_slots
 
 /-! ### Multistep Preservation Fragments -/
 
-/-- Lemma 4.11, multistep preservation for `R-Copy` redexes. -/
-theorem preservation_copy_multistep_runtime {store finalStore : ProgramStore}
-    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+/-- Lemma 4.11, multistep preservation for `R-Copy` redexes, safe-only form. -/
+theorem preservation_copy_multistep_runtime_of_safe {store finalStore : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {lv : LVal} {finalValue : Value} {ty : Ty} :
-    WellFormedEnv env current →
     store ∼ₛ env →
     ValidRuntimeState store (.copy lv) →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
       ValidValue finalStore finalValue ty := by
-  intro hwellFormed hsafe hvalidRuntime htyping hmulti
+  intro hsafe hvalidRuntime htyping hmulti
   exact preservation_runtime_multistep_of_step_to_value
     (by intro hterminal; simp [Terminal] at hterminal)
     (by
@@ -1204,9 +1314,23 @@ theorem preservation_copy_multistep_runtime {store finalStore : ProgramStore}
       intro _store' _value hstep
       cases hstep with
       | copy hread =>
-          exact preservation_copy_step_runtime hwellFormed hsafe hvalidRuntime htyping
+          exact preservation_copy_step_runtime_of_safe hsafe hvalidRuntime htyping
             (Step.copy (lifetime := lifetime) hread))
     hmulti
+
+/-- Lemma 4.11, multistep preservation for `R-Copy` redexes. -/
+theorem preservation_copy_multistep_runtime {store finalStore : ProgramStore}
+    {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
+    {lv : LVal} {finalValue : Value} {ty : Ty} :
+    WellFormedEnv env current →
+    store ∼ₛ env →
+    ValidRuntimeState store (.copy lv) →
+    TermTyping env typing lifetime (.copy lv) ty env₂ →
+    MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
+      ValidValue finalStore finalValue ty := by
+  intro _hwellFormed hsafe hvalidRuntime htyping hmulti
+  exact preservation_copy_multistep_runtime_of_safe hsafe hvalidRuntime htyping hmulti
 
 /-- Lemma 4.11, multistep preservation for `R-Borrow` redexes. -/
 theorem preservation_borrow_multistep_runtime {store finalStore : ProgramStore}

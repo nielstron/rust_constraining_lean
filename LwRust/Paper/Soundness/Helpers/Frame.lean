@@ -67,6 +67,48 @@ theorem loc_update_of_not_locReads {store : ProgramStore}
           rw [hlocEq]
           exact hloc
 
+/--
+Reads observed after an update were already present before the update, provided
+the original resolution of the lvalue avoided the updated location.
+-/
+theorem locReads_update_to_store_of_not_locReads {store : ProgramStore}
+    {updated : Location} {slot : StoreSlot} :
+    ∀ {lv : LVal} {location read : Location},
+      store.loc lv = some location →
+      (∀ mid, LocReads store lv mid → mid ≠ updated) →
+      LocReads (store.update updated slot) lv read →
+      LocReads store lv read := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro location read _hloc _hreads hpost
+      cases hpost
+  | deref lv ih =>
+      intro location read hloc hreads hpost
+      cases hsource : store.loc lv with
+      | none =>
+          simp [ProgramStore.loc, hsource] at hloc
+      | some source =>
+          have hsource' :
+              (store.update updated slot).loc lv = some source :=
+            loc_update_of_not_locReads hsource (by
+              intro mid hmid
+              exact hreads mid (LocReads.there hmid))
+          cases hpost with
+          | here hpostSource =>
+              have hreadEq : read = source := by
+                rw [hsource'] at hpostSource
+                exact (Option.some.inj hpostSource).symm
+              subst hreadEq
+              exact LocReads.here hsource
+          | there hpostRead =>
+              exact LocReads.there
+                (ih hsource
+                  (by
+                    intro mid hmid
+                    exact hreads mid (LocReads.there hmid))
+                  hpostRead)
+
 /-- If an erase misses every location read while resolving `lv`, resolution is unchanged. -/
 theorem loc_erase_of_not_locReads {store : ProgramStore}
     {erased : Location} :
@@ -136,6 +178,47 @@ theorem loc_erase_some_to_store {store : ProgramStore}
               simp [ProgramStore.loc, hsourceErased, hslotErased] at hloc
               simp [ProgramStore.loc, hsource, hslot, hloc]
 
+/-- If a drop sequence avoids every location read while resolving `lv`, then
+`lv` resolves to the same location after the drop. -/
+theorem loc_drops_of_not_locReads {store store' : ProgramStore}
+    {values : List PartialValue} :
+    Drops store values store' →
+    ∀ {lv : LVal} {location : Location},
+      store.loc lv = some location →
+      (∀ mid, LocReads store lv mid → DropsAvoids store values mid) →
+      store'.loc lv = some location := by
+  intro hdrops lv
+  induction lv with
+  | var x =>
+      intro location hloc _hreads
+      simpa [ProgramStore.loc] using hloc
+  | deref source ih =>
+      intro location hloc hreads
+      cases hsource : store.loc source with
+      | none =>
+          simp [ProgramStore.loc, hsource] at hloc
+      | some sourceLocation =>
+          cases hsourceSlot : store.slotAt sourceLocation with
+          | none =>
+              simp [ProgramStore.loc, hsource, hsourceSlot] at hloc
+          | some sourceSlot =>
+              have hsource' :
+                  store'.loc source = some sourceLocation :=
+                ih hsource (by
+                  intro mid hmid
+                  exact hreads mid (LocReads.there hmid))
+              have hsourceSlot' :
+                  store'.slotAt sourceLocation = some sourceSlot :=
+                dropsAvoids_slotAt_preserved hdrops
+                  (hreads sourceLocation (LocReads.here hsource))
+                  hsourceSlot
+              have hlocEq :
+                  store'.loc (.deref source) = store.loc (.deref source) := by
+                simp [ProgramStore.loc, hsource, hsource', hsourceSlot,
+                  hsourceSlot']
+              rw [hlocEq]
+              exact hloc
+
 /-- Location reads observed after an erase are reads of the original store. -/
 theorem locReads_erase_to_store {store : ProgramStore}
     {erased : Location} {lv : LVal} {location : Location} :
@@ -147,6 +230,45 @@ theorem locReads_erase_to_store {store : ProgramStore}
       exact LocReads.here (loc_erase_some_to_store hloc)
   | there _hreads ih =>
       exact LocReads.there ih
+
+/-- If `loc` resolves after a recursive drop, it also resolved in the original store. -/
+theorem loc_drops_to_store {store store' : ProgramStore}
+    {values : List PartialValue} :
+    Drops store values store' →
+    ∀ {lv : LVal} {location : Location},
+      store'.loc lv = some location →
+      store.loc lv = some location := by
+  intro hdrops
+  induction hdrops with
+  | nil =>
+      intro lv location hloc
+      exact hloc
+  | nonOwner _hnonOwner _hdrops ih =>
+      intro lv location hloc
+      exact ih hloc
+  | ownerMissing _howner _hmissing _hdrops ih =>
+      intro lv location hloc
+      exact ih hloc
+  | ownerPresent _howner _hslot _hdrops ih =>
+      intro lv location hloc
+      exact loc_erase_some_to_store (ih hloc)
+
+/-- Location reads observed after a recursive drop are reads of the original store. -/
+theorem locReads_drops_to_store {store store' : ProgramStore}
+    {values : List PartialValue} {lv : LVal} {location : Location} :
+    Drops store values store' →
+    LocReads store' lv location →
+    LocReads store lv location := by
+  intro hdrops hreads
+  induction hdrops with
+  | nil =>
+      exact hreads
+  | nonOwner _hnonOwner _hdrops ih =>
+      exact ih hreads
+  | ownerMissing _howner _hmissing _hdrops ih =>
+      exact ih hreads
+  | ownerPresent _howner _hslot _hdrops ih =>
+      exact locReads_erase_to_store (ih hreads)
 
 /--
 The store locations whose slots are inspected while checking
@@ -312,6 +434,289 @@ theorem SelectedBorrowDependency.borrowDependency {store : ProgramStore}
   | @boxFullInner location slot innerTy hslot hinner dependency _hdependency ih =>
       exact BorrowDependency.boxFullInner hslot ih
 
+/--
+Proof-carrying runtime evidence for `ValidPartialValue`.
+
+The paper-level validity judgement is a `Prop`, so it cannot reliably remember
+which borrow target witnessed a reference after a target-list widening.  This
+evidence object mirrors the validity constructors in `Type` and stores that
+chosen target as data.
+-/
+inductive ValidPartialValueEvidence (store : ProgramStore) :
+    PartialValue → PartialTy → Type where
+  | unit :
+      ValidPartialValueEvidence store (.value .unit) (.ty .unit)
+  | int {value : Int} :
+      ValidPartialValueEvidence store (.value (.int value)) (.ty .int)
+  | bool {value : Bool} :
+      ValidPartialValueEvidence store (.value (.bool value)) (.ty .bool)
+  | undef {ty : Ty} :
+      ValidPartialValueEvidence store .undef (.undef ty)
+  | borrow {location : Location} {mutable : Bool}
+      {targets : List LVal} {pointee : Ty} (target : LVal) :
+      target ∈ targets →
+      store.loc target = some location →
+      ValidPartialValueEvidence store
+        (.value (.ref { location := location, owner := false }))
+        (.ty (.borrow mutable targets pointee))
+  | box {location : Location} {slot : StoreSlot} {inner : PartialTy} :
+      store.slotAt location = some slot →
+      ValidPartialValueEvidence store slot.value inner →
+      ValidPartialValueEvidence store
+        (.value (.ref { location := location, owner := true }))
+        (.box inner)
+  | boxFull {location : Location} {slot : StoreSlot} {ty : Ty} :
+      store.slotAt location = some slot →
+      ValidPartialValueEvidence store slot.value (.ty ty) →
+      ValidPartialValueEvidence store
+        (.value (.ref { location := location, owner := true }))
+        (.ty (.box ty))
+
+def ValidPartialValueEvidence.valid {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValueEvidence store value ty →
+    ValidPartialValue store value ty
+  | unit => ValidPartialValue.unit
+  | int => ValidPartialValue.int
+  | bool => ValidPartialValue.bool
+  | undef => ValidPartialValue.undef
+  | borrow _target hmem hloc => ValidPartialValue.borrow hmem hloc
+  | box hslot hinner => ValidPartialValue.box hslot hinner.valid
+  | boxFull hslot hinner => ValidPartialValue.boxFull hslot hinner.valid
+
+theorem ValidPartialValueEvidence.exists_of_valid {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValue store value ty →
+    ∃ _evidence : ValidPartialValueEvidence store value ty, True := by
+  intro hvalid
+  induction hvalid with
+  | unit => exact ⟨ValidPartialValueEvidence.unit, trivial⟩
+  | int => exact ⟨ValidPartialValueEvidence.int, trivial⟩
+  | bool => exact ⟨ValidPartialValueEvidence.bool, trivial⟩
+  | undef => exact ⟨ValidPartialValueEvidence.undef, trivial⟩
+  | borrow hmem hloc =>
+      exact ⟨ValidPartialValueEvidence.borrow _ hmem hloc, trivial⟩
+  | box hslot _hinner ih =>
+      rcases ih with ⟨innerEvidence, _⟩
+      exact ⟨ValidPartialValueEvidence.box hslot innerEvidence, trivial⟩
+  | boxFull hslot _hinner ih =>
+      rcases ih with ⟨innerEvidence, _⟩
+      exact ⟨ValidPartialValueEvidence.boxFull hslot innerEvidence, trivial⟩
+
+inductive ValidPartialValueEvidence.StrengthensSameShape
+    {store : ProgramStore} :
+    {value : PartialValue} → {oldTy : PartialTy} →
+      ValidPartialValueEvidence store value oldTy →
+      {newTy : PartialTy} →
+      ValidPartialValueEvidence store value newTy → Prop where
+  | unit :
+      StrengthensSameShape ValidPartialValueEvidence.unit
+        ValidPartialValueEvidence.unit
+  | int {value : Int} :
+      StrengthensSameShape
+        (ValidPartialValueEvidence.int (value := value))
+        ValidPartialValueEvidence.int
+  | bool {value : Bool} :
+      StrengthensSameShape
+        (ValidPartialValueEvidence.bool (value := value))
+        ValidPartialValueEvidence.bool
+  | undef {oldTy newTy : Ty} :
+      StrengthensSameShape
+        (ValidPartialValueEvidence.undef (ty := oldTy))
+        (ValidPartialValueEvidence.undef (ty := newTy))
+  | borrow {location : Location} {mutable : Bool} {leftTargets rightTargets : List LVal}
+      {pointee : Ty} {target : LVal} {hmem : target ∈ leftTargets}
+      {hloc : store.loc target = some location}
+      (hsubset : leftTargets.Subset rightTargets) :
+      StrengthensSameShape
+        (ValidPartialValueEvidence.borrow (pointee := pointee) target hmem hloc)
+        (ValidPartialValueEvidence.borrow (pointee := pointee) target
+          (hsubset hmem) hloc)
+  | box {location : Location} {slot : StoreSlot}
+      {oldInner newInner : PartialTy}
+      {oldEvidence : ValidPartialValueEvidence store slot.value oldInner}
+      {newEvidence : ValidPartialValueEvidence store slot.value newInner}
+      {hslot : store.slotAt location = some slot} :
+      StrengthensSameShape oldEvidence newEvidence →
+      StrengthensSameShape
+        (ValidPartialValueEvidence.box hslot oldEvidence)
+        (ValidPartialValueEvidence.box hslot newEvidence)
+  | boxFull {location : Location} {slot : StoreSlot}
+      {oldInner newInner : Ty}
+      {oldEvidence : ValidPartialValueEvidence store slot.value (.ty oldInner)}
+      {newEvidence : ValidPartialValueEvidence store slot.value (.ty newInner)}
+      {hslot : store.slotAt location = some slot} :
+      StrengthensSameShape oldEvidence newEvidence →
+      StrengthensSameShape
+        (ValidPartialValueEvidence.boxFull hslot oldEvidence)
+        (ValidPartialValueEvidence.boxFull hslot newEvidence)
+
+theorem ValidPartialValueEvidence.StrengthensSameShape.refl
+    {store : ProgramStore} {value : PartialValue} {ty : PartialTy}
+    (evidence : ValidPartialValueEvidence store value ty) :
+    ValidPartialValueEvidence.StrengthensSameShape evidence evidence := by
+  induction evidence with
+  | unit => exact ValidPartialValueEvidence.StrengthensSameShape.unit
+  | int => exact ValidPartialValueEvidence.StrengthensSameShape.int
+  | bool => exact ValidPartialValueEvidence.StrengthensSameShape.bool
+  | undef => exact ValidPartialValueEvidence.StrengthensSameShape.undef
+  | @borrow location mutable targets pointee target hmem hloc =>
+      exact ValidPartialValueEvidence.StrengthensSameShape.borrow
+        (mutable := mutable) (pointee := pointee) (target := target)
+        (hmem := hmem) (hloc := hloc) (List.Subset.refl _)
+  | box hslot hinner ih =>
+      exact ValidPartialValueEvidence.StrengthensSameShape.box ih
+  | boxFull hslot hinner ih =>
+      exact ValidPartialValueEvidence.StrengthensSameShape.boxFull ih
+
+theorem ValidPartialValueEvidence.strengthen_sameShape_exists
+    {store : ProgramStore} {value : PartialValue}
+    {oldTy newTy : PartialTy}
+    (evidence : ValidPartialValueEvidence store value oldTy)
+    (hstrength : PartialTyStrengthens oldTy newTy)
+    (hshape : PartialTy.sameShape oldTy newTy) :
+    ∃ newEvidence : ValidPartialValueEvidence store value newTy,
+      ValidPartialValueEvidence.StrengthensSameShape evidence newEvidence := by
+  induction evidence generalizing newTy with
+  | unit =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.unit,
+            ValidPartialValueEvidence.StrengthensSameShape.unit⟩
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | int =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.int,
+            ValidPartialValueEvidence.StrengthensSameShape.int⟩
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | bool =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.bool,
+            ValidPartialValueEvidence.StrengthensSameShape.bool⟩
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | undef =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.undef,
+            ValidPartialValueEvidence.StrengthensSameShape.undef⟩
+      | undefLeft _ =>
+          exact ⟨ValidPartialValueEvidence.undef,
+            ValidPartialValueEvidence.StrengthensSameShape.undef⟩
+  | @borrow location mutable targets pointee target hmem hloc =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.borrow target hmem hloc,
+            ValidPartialValueEvidence.StrengthensSameShape.borrow
+              (mutable := mutable) (pointee := pointee) (target := target)
+              (hmem := hmem) (hloc := hloc) (List.Subset.refl _)⟩
+      | borrow hsubset =>
+          exact ⟨ValidPartialValueEvidence.borrow target (hsubset hmem) hloc,
+            ValidPartialValueEvidence.StrengthensSameShape.borrow
+              (mutable := mutable) (pointee := pointee) (target := target)
+              (hmem := hmem) (hloc := hloc) hsubset⟩
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | box hslot hinner ih =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.box hslot hinner,
+            ValidPartialValueEvidence.StrengthensSameShape.box
+              (ValidPartialValueEvidence.StrengthensSameShape.refl hinner)⟩
+      | box hinnerStrength =>
+          rcases ih hinnerStrength
+              (by simpa [PartialTy.sameShape] using hshape) with
+            ⟨newEvidence, hrel⟩
+          exact ⟨ValidPartialValueEvidence.box hslot newEvidence,
+            ValidPartialValueEvidence.StrengthensSameShape.box hrel⟩
+      | boxIntoUndef _ => simp [PartialTy.sameShape] at hshape
+  | boxFull hslot hinner ih =>
+      cases hstrength with
+      | reflex =>
+          exact ⟨ValidPartialValueEvidence.boxFull hslot hinner,
+            ValidPartialValueEvidence.StrengthensSameShape.boxFull
+              (ValidPartialValueEvidence.StrengthensSameShape.refl hinner)⟩
+      | tyBox hinnerStrength =>
+          rcases ih hinnerStrength
+              (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape) with
+            ⟨newEvidence, hrel⟩
+          exact ⟨ValidPartialValueEvidence.boxFull hslot newEvidence,
+            ValidPartialValueEvidence.StrengthensSameShape.boxFull hrel⟩
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+
+inductive EvidenceBorrowDependency (store : ProgramStore) :
+    {value : PartialValue} → {ty : PartialTy} →
+      ValidPartialValueEvidence store value ty → Location → Prop where
+  | borrow {location : Location} {mutable : Bool} {targets : List LVal}
+      {pointee : Ty} {target : LVal} {hmem : target ∈ targets}
+      {hloc : store.loc target = some location} {dependency : Location} :
+      LocReads store target dependency →
+      EvidenceBorrowDependency store
+        (ValidPartialValueEvidence.borrow (pointee := pointee) target hmem hloc)
+        dependency
+  | boxInner {location : Location} {slot : StoreSlot} {inner : PartialTy}
+      {hslot : store.slotAt location = some slot}
+      {hinner : ValidPartialValueEvidence store slot.value inner}
+      {dependency : Location} :
+      EvidenceBorrowDependency store hinner dependency →
+      EvidenceBorrowDependency store (ValidPartialValueEvidence.box hslot hinner)
+        dependency
+  | boxFullInner {location : Location} {slot : StoreSlot} {ty : Ty}
+      {hslot : store.slotAt location = some slot}
+      {hinner : ValidPartialValueEvidence store slot.value (.ty ty)}
+      {dependency : Location} :
+      EvidenceBorrowDependency store hinner dependency →
+      EvidenceBorrowDependency store (ValidPartialValueEvidence.boxFull hslot hinner)
+        dependency
+
+theorem EvidenceBorrowDependency.selected {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : ValidPartialValueEvidence store value ty} {dependency : Location} :
+    EvidenceBorrowDependency store evidence dependency →
+    SelectedBorrowDependency store evidence.valid dependency := by
+  intro hdependency
+  induction hdependency with
+  | @borrow _ location mutable targets pointee target hmem hloc dependency hreads =>
+      exact SelectedBorrowDependency.borrow (mutable := mutable)
+        (pointee := pointee) (target := target) (hmem := hmem)
+        (hloc := hloc) hreads
+  | @boxInner location slot inner hslot hinner dependency _hdependency ih =>
+      exact SelectedBorrowDependency.boxInner (hslot := hslot) ih
+  | @boxFullInner location slot innerTy hslot hinner dependency _hdependency ih =>
+      exact SelectedBorrowDependency.boxFullInner (hslot := hslot) ih
+
+theorem EvidenceBorrowDependency.of_strengthensSameShape
+    {store : ProgramStore} {value : PartialValue}
+    {oldTy newTy : PartialTy}
+    {oldEvidence : ValidPartialValueEvidence store value oldTy}
+    {newEvidence : ValidPartialValueEvidence store value newTy}
+    {dependency : Location} :
+    ValidPartialValueEvidence.StrengthensSameShape oldEvidence newEvidence →
+    EvidenceBorrowDependency store newEvidence dependency →
+    EvidenceBorrowDependency store oldEvidence dependency := by
+  intro hrel hdependency
+  induction hrel with
+  | unit => exact hdependency
+  | int => exact hdependency
+  | bool => exact hdependency
+  | undef => cases hdependency
+  | borrow _hsubset =>
+      rename_i oldMutable newMutable location mutable leftTargets rightTargets pointee
+        target hmem hloc
+      cases hdependency with
+      | borrow hreads =>
+          exact EvidenceBorrowDependency.borrow (mutable := oldMutable)
+            (pointee := pointee) (target := target) (hmem := hmem)
+            (hloc := hloc) hreads
+  | box hinnerRel ih =>
+      cases hdependency with
+      | boxInner hinnerDependency =>
+          exact EvidenceBorrowDependency.boxInner (ih hinnerDependency)
+  | boxFull hinnerRel ih =>
+      cases hdependency with
+      | boxFullInner hinnerDependency =>
+          exact EvidenceBorrowDependency.boxFullInner (ih hinnerDependency)
+
 /-- Frame lemma for `ValidPartialValue`: updating an uninspected location preserves validity. -/
 theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
     {updated : Location} {newSlot : StoreSlot} :
@@ -347,6 +752,129 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
       · rw [ProgramStore.slotAt_update_ne hlocNe]
         exact hslot
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
+
+/--
+Evidence-indexed frame lemma for store updates.
+
+If the update avoids all owned locations and all borrow-resolution dependencies
+recorded by the concrete evidence, validity survives the update with a
+post-update evidence object.  The second component maps every dependency of the
+new evidence back to the old evidence, so runtime environment abstractions can
+transport their protected-dependency invariant through the write.
+-/
+theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+    {store : ProgramStore} {updated : Location} {newSlot : StoreSlot} :
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (evidence : ValidPartialValueEvidence store value ty),
+      (∀ location,
+        OwnerReaches store value ty location →
+        location ≠ updated) →
+      (∀ location,
+        EvidenceBorrowDependency store evidence location →
+        location ≠ updated) →
+      ∃ evidence' :
+        ValidPartialValueEvidence (store.update updated newSlot) value ty,
+        ∀ location,
+          EvidenceBorrowDependency (store.update updated newSlot) evidence' location →
+          EvidenceBorrowDependency store evidence location := by
+  intro value ty evidence
+  induction evidence with
+  | unit =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.unit, by intro location hdep; cases hdep⟩
+  | int =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.int, by intro location hdep; cases hdep⟩
+  | bool =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.bool, by intro location hdep; cases hdep⟩
+  | undef =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.undef, by intro location hdep; cases hdep⟩
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro _howners hdeps
+      have hloc' : (store.update updated newSlot).loc target = some location :=
+        loc_update_of_not_locReads hloc (by
+          intro dependency hreads
+          exact hdeps dependency
+            (EvidenceBorrowDependency.borrow
+              (store := store) (location := location) (mutable := mutable)
+              (targets := targets) (pointee := pointee) (target := target)
+              (hmem := hmem) (hloc := hloc) hreads))
+      refine ⟨ValidPartialValueEvidence.borrow (pointee := pointee)
+        target hmem hloc', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | borrow hreads =>
+          exact EvidenceBorrowDependency.borrow
+            (store := store) (location := location) (mutable := mutable)
+            (targets := targets) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc)
+            (locReads_update_to_store_of_not_locReads hloc
+              (by
+                intro mid hmid
+                exact hdeps mid
+                  (EvidenceBorrowDependency.borrow
+                    (store := store) (location := location) (mutable := mutable)
+                    (targets := targets) (pointee := pointee) (target := target)
+                    (hmem := hmem) (hloc := hloc) hmid))
+              hreads)
+  | @box location slot inner hslot hinner ih =>
+      intro howners hdeps
+      have hlocationNe : location ≠ updated :=
+        howners location (OwnerReaches.boxHere hslot)
+      have hslot' :
+          (store.update updated newSlot).slotAt location = some slot := by
+        rw [ProgramStore.slotAt_update_ne hlocationNe]
+        exact hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (EvidenceBorrowDependency.boxInner
+                (store := store) (location := location) (slot := slot)
+                (inner := inner) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨ValidPartialValueEvidence.box hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxInner hdependency' =>
+          exact EvidenceBorrowDependency.boxInner
+            (store := store) (location := location) (slot := slot)
+            (inner := inner) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
+  | @boxFull location slot innerTy hslot hinner ih =>
+      intro howners hdeps
+      have hlocationNe : location ≠ updated :=
+        howners location (OwnerReaches.boxFullHere hslot)
+      have hslot' :
+          (store.update updated newSlot).slotAt location = some slot := by
+        rw [ProgramStore.slotAt_update_ne hlocationNe]
+        exact hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxFullInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (EvidenceBorrowDependency.boxFullInner
+                (store := store) (location := location) (slot := slot)
+                (ty := innerTy) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨ValidPartialValueEvidence.boxFull hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxFullInner hdependency' =>
+          exact EvidenceBorrowDependency.boxFullInner
+            (store := store) (location := location) (slot := slot)
+            (ty := innerTy) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
 
 /-- Frame lemma for `ValidPartialValue`: erasing an uninspected location preserves validity. -/
 theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
@@ -494,6 +1022,277 @@ theorem validValue_drops_of_avoids_reaches {store store' : ProgramStore}
       DropsAvoids store values location) →
     ValidValue store' value ty :=
   validPartialValue_drops_of_avoids_reaches
+
+/--
+Drop frame for the exact runtime dependencies recorded by a
+`ValidPartialValue` derivation.
+
+The older `validPartialValue_drops_of_avoids_reaches` ranges over every static
+borrow target in the type.  This form only asks that the drop avoid owned
+locations and the selected borrow-resolution dependencies that the validity
+proof actually uses at runtime.
+-/
+theorem validPartialValue_drops_of_owner_and_selected_dependency_frame
+    {store store' : ProgramStore} {values : List PartialValue} :
+    Drops store values store' →
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (hvalid : ValidPartialValue store value ty),
+      (∀ location,
+        OwnerReaches store value ty location →
+        DropsAvoids store values location) →
+      (∀ location,
+        SelectedBorrowDependency store hvalid location →
+        DropsAvoids store values location) →
+      ValidPartialValue store' value ty := by
+  intro hdrops value ty hvalid
+  induction hvalid with
+  | unit =>
+      intro _howners _hdeps
+      exact ValidPartialValue.unit
+  | int =>
+      intro _howners _hdeps
+      exact ValidPartialValue.int
+  | bool =>
+      intro _howners _hdeps
+      exact ValidPartialValue.bool
+  | undef =>
+      intro _howners _hdeps
+      exact ValidPartialValue.undef
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro _howners hdeps
+      refine ValidPartialValue.borrow hmem ?_
+      exact loc_drops_of_not_locReads hdrops hloc (by
+        intro mid hreads
+        exact hdeps mid
+          (SelectedBorrowDependency.borrow
+            (store := store) (location := location) (mutable := mutable)
+            (targets := targets) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc) hreads))
+  | @box location slot inner hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (OwnerReaches.boxHere hslot)
+      refine ValidPartialValue.box (location := location) (slot := slot) ?_ ?_
+      · exact dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      · exact ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (SelectedBorrowDependency.boxInner
+                (store := store) (location := location) (slot := slot)
+                (inner := inner) (hslot := hslot) (hinner := hinner)
+                hdependency))
+  | @boxFull location slot innerTy hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (OwnerReaches.boxFullHere hslot)
+      refine ValidPartialValue.boxFull (location := location) (slot := slot) ?_ ?_
+      · exact dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      · exact ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxFullInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (SelectedBorrowDependency.boxFullInner
+                (store := store) (location := location) (slot := slot)
+                (ty := innerTy) (hslot := hslot) (hinner := hinner)
+                hdependency))
+
+/--
+Evidence-indexed drop frame for runtime validity.
+
+This is the same frame argument as
+`validPartialValue_drops_of_owner_and_selected_dependency_frame`, but the
+borrow target followed by validity is carried as data in
+`ValidPartialValueEvidence`.  This is the form needed by runtime abstractions
+that survive same-shape target-list widening.
+-/
+theorem validPartialValue_drops_of_owner_and_evidence_dependency_frame
+    {store store' : ProgramStore} {values : List PartialValue} :
+    Drops store values store' →
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (evidence : ValidPartialValueEvidence store value ty),
+      (∀ location,
+        OwnerReaches store value ty location →
+        DropsAvoids store values location) →
+      (∀ location,
+        EvidenceBorrowDependency store evidence location →
+        DropsAvoids store values location) →
+      ValidPartialValue store' value ty := by
+  intro hdrops value ty evidence
+  induction evidence with
+  | unit =>
+      intro _howners _hdeps
+      exact ValidPartialValue.unit
+  | int =>
+      intro _howners _hdeps
+      exact ValidPartialValue.int
+  | bool =>
+      intro _howners _hdeps
+      exact ValidPartialValue.bool
+  | undef =>
+      intro _howners _hdeps
+      exact ValidPartialValue.undef
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro _howners hdeps
+      refine ValidPartialValue.borrow hmem ?_
+      exact loc_drops_of_not_locReads hdrops hloc (by
+        intro mid hreads
+        exact hdeps mid
+          (EvidenceBorrowDependency.borrow
+            (store := store) (location := location) (mutable := mutable)
+            (targets := targets) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc) hreads))
+  | @box location slot inner hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (OwnerReaches.boxHere hslot)
+      refine ValidPartialValue.box (location := location) (slot := slot) ?_ ?_
+      · exact dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      · exact ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (EvidenceBorrowDependency.boxInner
+                (store := store) (location := location) (slot := slot)
+                (inner := inner) (hslot := hslot) (hinner := hinner)
+                hdependency))
+  | @boxFull location slot innerTy hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (OwnerReaches.boxFullHere hslot)
+      refine ValidPartialValue.boxFull (location := location) (slot := slot) ?_ ?_
+      · exact dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      · exact ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxFullInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (EvidenceBorrowDependency.boxFullInner
+                (store := store) (location := location) (slot := slot)
+                (ty := innerTy) (hslot := hslot) (hinner := hinner)
+                hdependency))
+
+/--
+Evidence-indexed drop preservation.
+
+Unlike `validPartialValue_drops_of_owner_and_evidence_dependency_frame`, this
+returns a post-drop evidence object and a read-back map for its selected
+dependencies.  This is the form needed by runtime environment abstractions:
+the abstraction can keep following the same borrow target after the concrete
+drop, instead of reconstructing an arbitrary validity proof.
+-/
+theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+    {store store' : ProgramStore} {values : List PartialValue} :
+    Drops store values store' →
+    ∀ {value : PartialValue} {ty : PartialTy}
+      (evidence : ValidPartialValueEvidence store value ty),
+      (∀ location,
+        OwnerReaches store value ty location →
+        DropsAvoids store values location) →
+      (∀ location,
+        EvidenceBorrowDependency store evidence location →
+        DropsAvoids store values location) →
+      ∃ evidence' : ValidPartialValueEvidence store' value ty,
+        ∀ location,
+          EvidenceBorrowDependency store' evidence' location →
+          EvidenceBorrowDependency store evidence location := by
+  intro hdrops value ty evidence
+  induction evidence with
+  | unit =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.unit, by intro location hdep; cases hdep⟩
+  | int =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.int, by intro location hdep; cases hdep⟩
+  | bool =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.bool, by intro location hdep; cases hdep⟩
+  | undef =>
+      intro _howners _hdeps
+      exact ⟨ValidPartialValueEvidence.undef, by intro location hdep; cases hdep⟩
+  | @borrow location mutable targets pointee target hmem hloc =>
+      intro _howners hdeps
+      have hloc' : store'.loc target = some location :=
+        loc_drops_of_not_locReads hdrops hloc (by
+          intro dependency hreads
+          exact hdeps dependency
+            (EvidenceBorrowDependency.borrow
+              (store := store) (location := location) (mutable := mutable)
+              (targets := targets) (pointee := pointee) (target := target)
+              (hmem := hmem) (hloc := hloc) hreads))
+      refine ⟨ValidPartialValueEvidence.borrow (pointee := pointee)
+        target hmem hloc', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | borrow hreads =>
+          exact EvidenceBorrowDependency.borrow
+            (store := store) (location := location) (mutable := mutable)
+            (targets := targets) (pointee := pointee) (target := target)
+            (hmem := hmem) (hloc := hloc)
+            (locReads_drops_to_store hdrops hreads)
+  | @box location slot inner hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (OwnerReaches.boxHere hslot)
+      have hslot' : store'.slotAt location = some slot :=
+        dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (EvidenceBorrowDependency.boxInner
+                (store := store) (location := location) (slot := slot)
+                (inner := inner) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨ValidPartialValueEvidence.box hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxInner hdependency' =>
+          exact EvidenceBorrowDependency.boxInner
+            (store := store) (location := location) (slot := slot)
+            (inner := inner) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
+  | @boxFull location slot innerTy hslot hinner ih =>
+      intro howners hdeps
+      have hlocationAvoid : DropsAvoids store values location :=
+        howners location (OwnerReaches.boxFullHere hslot)
+      have hslot' : store'.slotAt location = some slot :=
+        dropsAvoids_slotAt_preserved hdrops hlocationAvoid hslot
+      rcases ih
+          (by
+            intro reached hreach
+            exact howners reached (OwnerReaches.boxFullInner hslot hreach))
+          (by
+            intro dependency hdependency
+            exact hdeps dependency
+              (EvidenceBorrowDependency.boxFullInner
+                (store := store) (location := location) (slot := slot)
+                (ty := innerTy) (hslot := hslot) (hinner := hinner)
+                hdependency)) with
+        ⟨innerEvidence', hinnerDeps⟩
+      refine ⟨ValidPartialValueEvidence.boxFull hslot' innerEvidence', ?_⟩
+      intro dependency hdependency
+      cases hdependency with
+      | boxFullInner hdependency' =>
+          exact EvidenceBorrowDependency.boxFullInner
+            (store := store) (location := location) (slot := slot)
+            (ty := innerTy) (hslot := hslot) (hinner := hinner)
+            (hinnerDeps dependency hdependency')
 
 theorem reaches_owner_source_of_validPartialValue {env : Env}
     {store : ProgramStore} {slotLifetime : Lifetime}

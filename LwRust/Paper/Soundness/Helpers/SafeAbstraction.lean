@@ -589,6 +589,44 @@ def SafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
 
 infix:50 " ∼ₛ " => SafeAbstraction
 
+theorem SafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
+    {x : Name} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
+    {pointee : Ty} {location : Location} :
+    store ∼ₛ env →
+    env.slotAt x =
+      some { ty := .ty (.borrow mutable targets pointee), lifetime := lifetime } →
+    store.slotAt (VariableProjection x) =
+      some (StoreSlot.mk
+        (.value (.ref { location := location, owner := false })) lifetime) →
+    ∃ target, target ∈ targets ∧ store.loc target = some location := by
+  intro hsafe henv hstore
+  rcases hsafe.2 x { ty := .ty (.borrow mutable targets pointee), lifetime := lifetime }
+      henv with
+    ⟨value, hstoreAbstract, hvalid⟩
+  have hslotEq :
+      StoreSlot.mk value lifetime =
+        StoreSlot.mk
+          (.value (.ref { location := location, owner := false })) lifetime :=
+    Option.some.inj (hstoreAbstract.symm.trans hstore)
+  cases hslotEq
+  cases hvalid with
+  | borrow htarget hloc =>
+      exact ⟨_, htarget, hloc⟩
+
+theorem SafeAbstraction.borrow_read_target {store : ProgramStore} {env : Env}
+    {x : Name} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
+    {pointee : Ty} {location : Location} :
+    store ∼ₛ env →
+    env.slotAt x =
+      some { ty := .ty (.borrow mutable targets pointee), lifetime := lifetime } →
+    store.read (.var x) =
+      some (StoreSlot.mk
+        (.value (.ref { location := location, owner := false })) lifetime) →
+    ∃ target, target ∈ targets ∧ store.loc target = some location := by
+  intro hsafe henv hread
+  exact SafeAbstraction.borrow_value_target hsafe henv
+    (by simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread)
+
 theorem safeAbstraction_of_domain_and_slots {store : ProgramStore} {env : Env} :
     (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
           ∃ envSlot, env.slotAt x = some envSlot) →
