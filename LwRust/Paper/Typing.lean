@@ -1519,7 +1519,7 @@ mutual
         TermTyping env typing lifetime (.val value) ty env
     /-- T-Missing: synthetic extractor placeholder.  The loan-freedom premise
     keeps the placeholder from claiming a borrow of an existing place, which
-    would break borrow safety of the result environment (Corollary 4.14);
+    would break borrow safety of the result environment;
     borrow shapes themselves are allowed via empty target lists. -/
     | missing {env : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {ty : Ty} :
@@ -1634,15 +1634,15 @@ mutual
       proof from the branch invariants plus these result obligations;
     * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
       variables into one target list, in which case the joined environment
-      is genuinely not borrow safe even though each branch is (the paper
-      concedes the corresponding weakening of Corollary 4.14 for this
-      extension in Section 4.5.1).  The preservation architecture threads
+      is genuinely not borrow safe even though each branch is.  The
+      preservation architecture threads
       borrow safety through sequencing, so the mechanised rule only accepts
       conditionals whose join remains borrow safe;
     * `TyBorrowSafeAgainstEnv` for the result type — this is the
-      root-independent result-extension invariant used by Corollary 4.14.
-      It does not follow from branch-local result safety because the joined
-      result can be installed in the joined environment. -/
+      root-independent result-type invariant used by the internal
+      borrow-safety induction.  It does not follow from branch-local result
+      safety because the joined result may later be written through an
+      environment root. -/
     | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy joinTy : Ty} :

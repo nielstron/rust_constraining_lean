@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
+import LwRust.Paper.Soundness.Helpers.BorrowSafety
 
 /-!
 # Lemma 4.11 (Preservation)
@@ -5240,7 +5240,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           (validRuntimeState_assign_inner hvalidRuntime))
         hwellFormed hsafe hRhs).1
     have hborrowSafeInner : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeResult_global
+      (typingPreservesBorrowSafeCore
         (SourceTerm.assign_inner hsource) hborrowSafe hRhs).1
     cases _lhs with
     | var x =>
@@ -5375,7 +5375,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
         (ValidRuntimeState.validState hvalidLeft)
         hwellFormed hsafe _hLhs).1
     have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeResult_global hsourceLeft hborrowSafe _hLhs).1
+      (typingPreservesBorrowSafeCore hsourceLeft hborrowSafe _hLhs).1
     have hvalidRight : ValidRuntimeState midStore _rhs :=
       validRuntimeState_of_sourceTerm hsourceRight hterminalLeft.1
     have hstoreTypingRight : ValidStoreTyping midStore _rhs typing :=
@@ -5419,7 +5419,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     have hbranchShape :=
       EnvJoin.branches_sameShape henvJoin hsameLeft hsameRight
     have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeResult_global hsourceCondition hborrowSafe
+      (typingPreservesBorrowSafeCore hsourceCondition hborrowSafe
         _hcondition).1
     rcases hchosen with htrueChosen | hfalseChosen
     · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
@@ -5495,7 +5495,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
       hvalidStoreTyping.ite_condition
     have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeResult_global hsourceCondition hborrowSafe
+      (typingPreservesBorrowSafeCore hsourceCondition hborrowSafe
         _hcondition).1
     rcases hchosen with htrueChosen | hfalseChosen
     · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
@@ -5584,7 +5584,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           (EnvJoin.lifetimesPreserved_left hjoin),
         hcoh, hlin⟩
     have hbseCondition : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeResult_global hsourceCondition hbse
+      (typingPreservesBorrowSafeCore hsourceCondition hbse
         _hcondInv).1
     rcases multistep_first_step_of_not_terminal (by simp [Terminal])
         hmulti with ⟨store', term', hstep, hrest⟩
@@ -5677,7 +5677,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
               (validRuntimeState_block_head hvalidRuntime))
             hwellFormed hsafe _hterm).1
         have hborrowSafeInner : BorrowSafeEnv _env₂ :=
-          (typingPreservesBorrowSafeResult_global hsourceHead hborrowSafe
+          (typingPreservesBorrowSafeCore hsourceHead hborrowSafe
             _hterm).1
         have hvalueBlockValid :
             ValidRuntimeState midStore
@@ -5765,6 +5765,36 @@ theorem preservation_runtime {store finalStore : ProgramStore} {env₁ env₂ : 
   exact preservation_bounded term.size (Nat.le_refl _) hsource hvalidRuntime
     hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
 
+/--
+Preservation packaged as the runtime-facing environment invariant.
+
+The terminal runtime-safety proof supplies `RuntimeEnvAbstraction` for the final
+store/environment pair; slot outliving is the independent part of typing
+preservation that does not require the full static borrow/coherence package of
+the output environment.
+-/
+theorem preservation_runtimeInvariant {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} {finalValue : Value} :
+    SourceTerm term →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateRuntimeSafe finalStore finalValue env₂ ty ∧
+      RuntimeEnvInvariant finalStore env₂ lifetime := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+    htyping hmulti
+  have hterminal :=
+    preservation_runtime hsource hvalidRuntime hvalidStoreTyping hwellFormed
+      hborrowSafe hsafe htyping hmulti
+  have hslots : EnvSlotsOutlive env₂ lifetime :=
+    typingPreservesSlotsOutlive hwellFormed.2.1 htyping
+  exact ⟨hterminal, hterminal.2.1, hslots⟩
+
 end Paper
 end LwRust
 
@@ -5803,5 +5833,22 @@ theorem lemma_4_11_preservation_runtime
     TerminalStateRuntimeSafe finalStore finalValue env₂ ty :=
   preservation_runtime hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
     htyping hmulti
+
+/-- Lemma 4.11 runtime-invariant strengthening. -/
+theorem lemma_4_11_preservation_runtimeInvariant
+    {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
+    (hsource : SourceTerm term)
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hborrowSafe : BorrowSafeEnv env₁)
+    (hsafe : store ∼ₛ env₁)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂)
+    (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
+    TerminalStateRuntimeSafe finalStore finalValue env₂ ty ∧
+      RuntimeEnvInvariant finalStore env₂ lifetime :=
+  preservation_runtimeInvariant hsource hvalid hstoreTyping hwellFormed hborrowSafe
+    hsafe htyping hmulti
 
 end LwRust.Paper.Soundness

@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Corollary_4_14_BorrowSafety
+import LwRust.Paper.Soundness.Helpers.BorrowSafety
 
 /-!
 # Corollary 9.4 (Read Preservation)

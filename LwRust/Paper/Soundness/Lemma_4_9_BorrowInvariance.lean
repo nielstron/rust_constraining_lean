@@ -32,9 +32,7 @@ keeps its own per-target typing.  With the per-target statement:
 * the single-lval determinism keystone `lvalTyping_eqv`/`lvalTyping_sameShape`
   (from the linearizability rank φ) is fully proven and unconditional.
 
-The old artificial final result-extension form is kept only in explicitly named
-compatibility helpers; the paper-facing wrapper below states the core `Γ₂`
-invariant directly.
+The wrapper below states the core `Γ₂` invariant directly.
 -/
 
 namespace LwRust
