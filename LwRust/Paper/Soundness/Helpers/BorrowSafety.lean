@@ -1142,7 +1142,6 @@ structure BorrowSafetyPreservationObligations : Prop where
       WellFormedTy env₂ rhsTy targetLifetime →
       EnvWrite 0 env₂ lhs rhsTy env₃ →
       (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-      Coherent env₃ →
       ¬ WriteProhibited env₃ lhs →
       BorrowSafeEnv env₃
 
@@ -1174,10 +1173,9 @@ theorem borrowSafetyPreservation_envWrite
     WellFormedTy env₂ rhsTy targetLifetime →
     EnvWrite 0 env₂ lhs rhsTy env₃ →
     (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-    Coherent env₃ →
     ¬ WriteProhibited env₃ lhs →
     BorrowSafeEnv env₃ := by
-  intro hborrowSafe hsafeTy _hLhsPost _hRhs _hshape _hwellTy hwrite hranked _hcoh
+  intro hborrowSafe hsafeTy _hLhsPost _hRhs _hshape _hwellTy hwrite hranked
     _hnotWrite x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
     targetMutable targetOther hcontainsMutable hcontainsOther htargetMutable
     htargetOther hconflict
@@ -1377,7 +1375,7 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
     have hwriteSafe :
         BorrowSafeEnv _env₃ :=
       hobligations.envWrite hRhsSafe.1 hRhsSafe.2 hLhsPost hRhs hshape hwellTy
-        hwrite hranked hcoh hnotWrite
+        hwrite hranked hnotWrite
     exact ⟨hwriteSafe, tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit⟩
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs

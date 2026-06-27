@@ -304,6 +304,68 @@ theorem EnvJoin.right_sameShapeStrengthening {left right join : Env} :
         subst hslotEq
         exact ⟨joinSlot, rfl, hlifetime⟩
 
+theorem EnvJoin.left_sameShapeStrengthening_of_sameShape {left right join : Env} :
+    EnvJoin left right join →
+    EnvJoinSameShape left join →
+    EnvSameShapeStrengthening left join := by
+  intro hjoin hsame
+  constructor
+  · intro x joinSlot hjoinSlot
+    rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+      ⟨leftSlot, hleftSlot, hlifetime⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+      ⟨rightSlot, hrightSlot, _hrightLifetime⟩
+    rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+      ⟨_, _, hunion⟩
+    exact ⟨leftSlot, hleftSlot, hlifetime,
+      PartialTyUnion.left_strengthens hunion,
+      hsame x leftSlot joinSlot hleftSlot hjoinSlot⟩
+  · intro x leftSlot hleftSlot
+    have hle := EnvJoin.le_left hjoin x
+    rw [hleftSlot] at hle
+    cases hjoinSlot : join.slotAt x with
+    | none =>
+        rw [hjoinSlot] at hle
+        exact False.elim hle
+    | some joinSlot =>
+        rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+          ⟨leftSlot', hleftSlot', hlifetime⟩
+        have hslotEq : leftSlot' = leftSlot :=
+          Option.some.inj (hleftSlot'.symm.trans hleftSlot)
+        subst hslotEq
+        exact ⟨joinSlot, rfl, hlifetime⟩
+
+theorem EnvJoin.right_sameShapeStrengthening_of_sameShape {left right join : Env} :
+    EnvJoin left right join →
+    EnvJoinSameShape right join →
+    EnvSameShapeStrengthening right join := by
+  intro hjoin hsame
+  constructor
+  · intro x joinSlot hjoinSlot
+    rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+      ⟨leftSlot, hleftSlot, _hleftLifetime⟩
+    rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+      ⟨rightSlot, hrightSlot, hlifetime⟩
+    rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+      ⟨_, _, hunion⟩
+    exact ⟨rightSlot, hrightSlot, hlifetime,
+      PartialTyUnion.right_strengthens hunion,
+      hsame x rightSlot joinSlot hrightSlot hjoinSlot⟩
+  · intro x rightSlot hrightSlot
+    have hle := EnvJoin.le_right hjoin x
+    rw [hrightSlot] at hle
+    cases hjoinSlot : join.slotAt x with
+    | none =>
+        rw [hjoinSlot] at hle
+        exact False.elim hle
+    | some joinSlot =>
+        rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+          ⟨rightSlot', hrightSlot', hlifetime⟩
+        have hslotEq : rightSlot' = rightSlot :=
+          Option.some.inj (hrightSlot'.symm.trans hrightSlot)
+        subst hslotEq
+        exact ⟨joinSlot, rfl, hlifetime⟩
+
 /-- Transport the concrete terminal state from one branch environment into the
 join environment.  This is the runtime part of the join argument: safe
 abstraction transports along the same-shape strengthening map, and the terminal
@@ -3114,27 +3176,10 @@ theorem containedBorrowsWellFormed_join {left right join : Env}
     (hcbwfR : ContainedBorrowsWellFormed right)
     (hcoh : Coherent join) (hlin : Linearizable join) :
     ContainedBorrowsWellFormed join := by
-  have hbranchShape :
-      ∀ x leftSlot rightSlot,
-        left.slotAt x = some leftSlot →
-        right.slotAt x = some rightSlot →
-        PartialTy.sameShape leftSlot.ty rightSlot.ty := by
-    intro x leftSlot rightSlot hleftSlot hrightSlot
-    have hle := EnvJoin.le_left hjoin x
-    rw [hleftSlot] at hle
-    cases hjoinSlot : join.slotAt x with
-    | none =>
-        rw [hjoinSlot] at hle
-        exact False.elim hle
-    | some joinSlot =>
-        exact PartialTy.sameShape_trans
-          (hssLeft x leftSlot joinSlot hleftSlot hjoinSlot)
-          (PartialTy.sameShape_symm
-            (hssRight x rightSlot joinSlot hrightSlot hjoinSlot))
   have hleftMap : EnvSameShapeStrengthening left join :=
-    EnvJoin.left_sameShapeStrengthening hjoin hbranchShape
+    EnvJoin.left_sameShapeStrengthening_of_sameShape hjoin hssLeft
   have hrightMap : EnvSameShapeStrengthening right join :=
-    EnvJoin.right_sameShapeStrengthening hjoin hbranchShape
+    EnvJoin.right_sameShapeStrengthening_of_sameShape hjoin hssRight
   have hdecompJoin :
       ∀ z zslot m W pointee, join.slotAt z = some zslot →
         PartialTyContains zslot.ty (.borrow m W pointee) →
@@ -8712,6 +8757,118 @@ theorem EnvJoin.sameShape_right_of_runtimeEnvAbstraction
   exact RuntimeEnvAbstraction.envJoinSameShape_of_strengthens
     hright hjoinRuntime (EnvJoin.right_le hjoin)
 
+theorem EnvJoin.left_sameShapeStrengthening_of_runtimeEnvAbstraction
+    {store : ProgramStore} {left right join : Env} :
+    RuntimeEnvAbstraction store left →
+    RuntimeEnvAbstraction store join →
+    EnvJoin left right join →
+    EnvSameShapeStrengthening left join := by
+  intro hleft hjoinRuntime hjoin
+  exact EnvJoin.left_sameShapeStrengthening_of_sameShape hjoin
+    (EnvJoin.sameShape_left_of_runtimeEnvAbstraction hleft hjoinRuntime hjoin)
+
+theorem EnvJoin.right_sameShapeStrengthening_of_runtimeEnvAbstraction
+    {store : ProgramStore} {left right join : Env} :
+    RuntimeEnvAbstraction store right →
+    RuntimeEnvAbstraction store join →
+    EnvJoin left right join →
+    EnvSameShapeStrengthening right join := by
+  intro hright hjoinRuntime hjoin
+  exact EnvJoin.right_sameShapeStrengthening_of_sameShape hjoin
+    (EnvJoin.sameShape_right_of_runtimeEnvAbstraction hright hjoinRuntime hjoin)
+
+theorem EnvJoin.left_sameShapeStrengthening_of_runtimeInvariant
+    {store : ProgramStore} {left right join : Env} {lifetime : Lifetime} :
+    RuntimeEnvInvariant store left lifetime →
+    RuntimeEnvInvariant store join lifetime →
+    EnvJoin left right join →
+    EnvSameShapeStrengthening left join := by
+  intro hleft hjoinRuntime hjoin
+  exact EnvJoin.left_sameShapeStrengthening_of_runtimeEnvAbstraction
+    hleft.1 hjoinRuntime.1 hjoin
+
+theorem EnvJoin.right_sameShapeStrengthening_of_runtimeInvariant
+    {store : ProgramStore} {left right join : Env} {lifetime : Lifetime} :
+    RuntimeEnvInvariant store right lifetime →
+    RuntimeEnvInvariant store join lifetime →
+    EnvJoin left right join →
+    EnvSameShapeStrengthening right join := by
+  intro hright hjoinRuntime hjoin
+  exact EnvJoin.right_sameShapeStrengthening_of_runtimeEnvAbstraction
+    hright.1 hjoinRuntime.1 hjoin
+
+theorem EnvJoin.left_sameShapeStrengthening_of_safeAbstraction
+    {store : ProgramStore} {left right join : Env} :
+    store ∼ₛ left →
+    store ∼ₛ join →
+    EnvJoin left right join →
+    EnvSameShapeStrengthening left join := by
+  intro hleft hjoinSafe hjoin
+  exact EnvJoin.left_sameShapeStrengthening_of_sameShape hjoin
+    (SafeAbstraction.envJoinSameShape_of_strengthens hleft hjoinSafe
+      (EnvJoin.left_le hjoin))
+
+theorem EnvJoin.right_sameShapeStrengthening_of_safeAbstraction
+    {store : ProgramStore} {left right join : Env} :
+    store ∼ₛ right →
+    store ∼ₛ join →
+    EnvJoin left right join →
+    EnvSameShapeStrengthening right join := by
+  intro hright hjoinSafe hjoin
+  exact EnvJoin.right_sameShapeStrengthening_of_sameShape hjoin
+    (SafeAbstraction.envJoinSameShape_of_strengthens hright hjoinSafe
+      (EnvJoin.right_le hjoin))
+
+theorem TerminalStateSafe.strengthen_join_runtime_left_of_safeAbstraction
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (hjoinSafe : finalStore ∼ₛ join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateSafe finalStore finalValue left leftTy) :
+    TerminalStateSafe finalStore finalValue join joinTy := by
+  exact TerminalStateSafe.strengthen_join_runtime
+    (EnvJoin.left_sameShapeStrengthening_of_safeAbstraction
+      hterminal.2.1 hjoinSafe henvJoin)
+    (PartialTyUnion.left_strengthens htyJoin)
+    hterminal
+
+theorem TerminalStateSafe.strengthen_join_runtime_right_of_safeAbstraction
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (hjoinSafe : finalStore ∼ₛ join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateSafe finalStore finalValue right rightTy) :
+    TerminalStateSafe finalStore finalValue join joinTy := by
+  exact TerminalStateSafe.strengthen_join_runtime
+    (EnvJoin.right_sameShapeStrengthening_of_safeAbstraction
+      hterminal.2.1 hjoinSafe henvJoin)
+    (PartialTyUnion.right_strengthens htyJoin)
+    hterminal
+
+theorem TerminalStateSafe.strengthen_join_runtime_left_of_runtimeInvariant
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty} {lifetime : Lifetime}
+    (henvJoin : EnvJoin left right join)
+    (hjoinInvariant : RuntimeEnvInvariant finalStore join lifetime)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateSafe finalStore finalValue left leftTy) :
+    TerminalStateSafe finalStore finalValue join joinTy := by
+  exact TerminalStateSafe.strengthen_join_runtime_left_of_safeAbstraction
+    henvJoin hjoinInvariant.safe htyJoin hterminal
+
+theorem TerminalStateSafe.strengthen_join_runtime_right_of_runtimeInvariant
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty} {lifetime : Lifetime}
+    (henvJoin : EnvJoin left right join)
+    (hjoinInvariant : RuntimeEnvInvariant finalStore join lifetime)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateSafe finalStore finalValue right rightTy) :
+    TerminalStateSafe finalStore finalValue join joinTy := by
+  exact TerminalStateSafe.strengthen_join_runtime_right_of_safeAbstraction
+    henvJoin hjoinInvariant.safe htyJoin hterminal
+
 /--
 Terminal safety with the proof-carrying runtime environment abstraction.
 
@@ -8754,6 +8911,82 @@ theorem TerminalStateRuntimeSafe.strengthen_join_runtime {finalStore : ProgramSt
   exact ⟨hterminal.1,
     RuntimeEnvAbstraction.strengthen_sameShape hterminal.2.1 hmap,
     safeStrengthening_of_strengthens hstrengthens hterminal.2.2⟩
+
+theorem TerminalStateRuntimeSafe.strengthen_join_runtime_left
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (hsameLeft : EnvJoinSameShape left join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue left leftTy) :
+    TerminalStateRuntimeSafe finalStore finalValue join joinTy := by
+  exact TerminalStateRuntimeSafe.strengthen_join_runtime
+    (EnvJoin.left_sameShapeStrengthening_of_sameShape henvJoin hsameLeft)
+    (PartialTyUnion.left_strengthens htyJoin)
+    hterminal
+
+theorem TerminalStateRuntimeSafe.strengthen_join_runtime_right
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (hsameRight : EnvJoinSameShape right join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue right rightTy) :
+    TerminalStateRuntimeSafe finalStore finalValue join joinTy := by
+  exact TerminalStateRuntimeSafe.strengthen_join_runtime
+    (EnvJoin.right_sameShapeStrengthening_of_sameShape henvJoin hsameRight)
+    (PartialTyUnion.right_strengthens htyJoin)
+    hterminal
+
+theorem TerminalStateRuntimeSafe.strengthen_join_runtime_left_of_runtimeEnvAbstraction
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (hjoinRuntime : RuntimeEnvAbstraction finalStore join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue left leftTy) :
+    TerminalStateRuntimeSafe finalStore finalValue join joinTy := by
+  exact TerminalStateRuntimeSafe.strengthen_join_runtime
+    (EnvJoin.left_sameShapeStrengthening_of_runtimeEnvAbstraction
+      hterminal.2.1 hjoinRuntime henvJoin)
+    (PartialTyUnion.left_strengthens htyJoin)
+    hterminal
+
+theorem TerminalStateRuntimeSafe.strengthen_join_runtime_right_of_runtimeEnvAbstraction
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty}
+    (henvJoin : EnvJoin left right join)
+    (hjoinRuntime : RuntimeEnvAbstraction finalStore join)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue right rightTy) :
+    TerminalStateRuntimeSafe finalStore finalValue join joinTy := by
+  exact TerminalStateRuntimeSafe.strengthen_join_runtime
+    (EnvJoin.right_sameShapeStrengthening_of_runtimeEnvAbstraction
+      hterminal.2.1 hjoinRuntime henvJoin)
+    (PartialTyUnion.right_strengthens htyJoin)
+    hterminal
+
+theorem TerminalStateRuntimeSafe.strengthen_join_runtime_left_of_runtimeInvariant
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty} {lifetime : Lifetime}
+    (henvJoin : EnvJoin left right join)
+    (hjoinInvariant : RuntimeEnvInvariant finalStore join lifetime)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue left leftTy) :
+    TerminalStateRuntimeSafe finalStore finalValue join joinTy := by
+  exact TerminalStateRuntimeSafe.strengthen_join_runtime_left_of_runtimeEnvAbstraction
+    henvJoin hjoinInvariant.1 htyJoin hterminal
+
+theorem TerminalStateRuntimeSafe.strengthen_join_runtime_right_of_runtimeInvariant
+    {finalStore : ProgramStore} {finalValue : Value}
+    {left right join : Env} {leftTy rightTy joinTy : Ty} {lifetime : Lifetime}
+    (henvJoin : EnvJoin left right join)
+    (hjoinInvariant : RuntimeEnvInvariant finalStore join lifetime)
+    (htyJoin : PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty joinTy))
+    (hterminal : TerminalStateRuntimeSafe finalStore finalValue right rightTy) :
+    TerminalStateRuntimeSafe finalStore finalValue join joinTy := by
+  exact TerminalStateRuntimeSafe.strengthen_join_runtime_right_of_runtimeEnvAbstraction
+    henvJoin hjoinInvariant.1 htyJoin hterminal
 
 /--
 Direct-variable assignment preservation with runtime abstraction, for the

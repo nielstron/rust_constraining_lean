@@ -5416,8 +5416,6 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
     have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
       hvalidStoreTyping.ite_condition
-    have hbranchShape :=
-      EnvJoin.branches_sameShape henvJoin hsameLeft hsameRight
     have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
       (typingPreservesBorrowSafeCore hsourceCondition hborrowSafe
         _hcondition).1
@@ -5446,9 +5444,8 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
         hterminalTrue
       have hterminalJoin :
           TerminalStateRuntimeSafe finalStore finalValue _env₅ _joinTy :=
-        TerminalStateRuntimeSafe.strengthen_join_runtime
-          (EnvJoin.left_sameShapeStrengthening henvJoin hbranchShape)
-          (PartialTyUnion.left_strengthens hjoin) hterminalTrue
+        TerminalStateRuntimeSafe.strengthen_join_runtime_left
+          henvJoin hsameLeft hjoin hterminalTrue
       exact hterminalJoin
     · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
       rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
@@ -5474,9 +5471,8 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
         hterminalFalse
       have hterminalJoin :
           TerminalStateRuntimeSafe finalStore finalValue _env₅ _joinTy :=
-        TerminalStateRuntimeSafe.strengthen_join_runtime
-          (EnvJoin.right_sameShapeStrengthening henvJoin hbranchShape)
-          (PartialTyUnion.right_strengthens hjoin) hterminalFalse
+        TerminalStateRuntimeSafe.strengthen_join_runtime_right
+          henvJoin hsameRight hjoin hterminalFalse
       exact hterminalJoin
   -- T-IfDiv: only the true branch can terminate.
   case iteDiverging =>
@@ -5572,12 +5568,10 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       SourceTerm.while_condition hsource
     have hsourceBody : SourceTerm _body :=
       SourceTerm.while_body hsource
-    have hbranchShape :=
-      EnvJoin.branches_sameShape hjoin hss1 hss2
     have hentryMap : EnvSameShapeStrengthening _env₁ _envInv :=
-      EnvJoin.left_sameShapeStrengthening hjoin hbranchShape
+      EnvJoin.left_sameShapeStrengthening_of_sameShape hjoin hss1
     have hbackMap : EnvSameShapeStrengthening _envBack _envInv :=
-      EnvJoin.right_sameShapeStrengthening hjoin hbranchShape
+      EnvJoin.right_sameShapeStrengthening_of_sameShape hjoin hss2
     have hwfInv : WellFormedEnv _envInv _lifetime :=
       ⟨hcbwf,
         EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
