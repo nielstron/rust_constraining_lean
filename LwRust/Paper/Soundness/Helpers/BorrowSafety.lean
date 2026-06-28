@@ -455,9 +455,11 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
           _borrowPointee hcontains selected hselected hread
         rcases PartialTyUnion.contained_borrow_member hunion hcontains hselected with
           hselectedHead | hselectedRest
-        · rcases hselectedHead with ⟨headTargets, hheadContains, hselectedHead⟩
+        · rcases hselectedHead with
+            ⟨headTargets, _headPointee, hheadContains, hselectedHead, _hpointee⟩
           exact ihHead hheadContains selected hselectedHead hread
-        · rcases hselectedRest with ⟨restTargets, hrestContains, hselectedRest⟩
+        · rcases hselectedRest with
+            ⟨restTargets, _restPointee, hrestContains, hselectedRest, _hpointee⟩
           exact ihRest hrestContains selected hselectedRest hread)
       htyping
   · intro targets partialTy lifetime htyping
@@ -524,9 +526,11 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
           _borrowPointee hcontains selected hselected hread
         rcases PartialTyUnion.contained_borrow_member hunion hcontains hselected with
           hselectedHead | hselectedRest
-        · rcases hselectedHead with ⟨headTargets, hheadContains, hselectedHead⟩
+        · rcases hselectedHead with
+            ⟨headTargets, _headPointee, hheadContains, hselectedHead, _hpointee⟩
           exact ihHead hheadContains selected hselectedHead hread
-        · rcases hselectedRest with ⟨restTargets, hrestContains, hselectedRest⟩
+        · rcases hselectedRest with
+            ⟨restTargets, _restPointee, hrestContains, hselectedRest, _hpointee⟩
           exact ihRest hrestContains selected hselectedRest hread)
       htyping
 

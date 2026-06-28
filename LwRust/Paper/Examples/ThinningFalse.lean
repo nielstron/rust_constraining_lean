@@ -42,7 +42,8 @@ theorem thinStrongEnv_strengthens : EnvStrengthens thinStrongEnv thinWeakEnv := 
   by_cases hp : x = thinP
   · subst hp
     simp [thinStrongEnv, thinWeakEnv, Env.update]
-    exact ⟨rfl, PartialTyStrengthens.borrow (List.nil_subset _)⟩
+    exact ⟨rfl, PartialTyStrengthens.borrow (List.nil_subset _)
+      PartialTyStrengthens.reflex⟩
   · by_cases hy : x = thinY
     · subst hy
       simp [thinStrongEnv, thinWeakEnv, Env.update, thinY, thinP]
@@ -125,7 +126,8 @@ theorem thinMissingStrongEnv_strengthens :
   by_cases hp : x = thinP
   · subst hp
     simp [thinMissingStrongEnv, thinMissingWeakEnv, Env.update]
-    exact ⟨rfl, PartialTyStrengthens.borrow (List.nil_subset _)⟩
+    exact ⟨rfl, PartialTyStrengthens.borrow (List.nil_subset _)
+      PartialTyStrengthens.reflex⟩
   · simp [thinMissingStrongEnv, thinMissingWeakEnv, Env.update, Env.empty, hp]
 
 theorem thinMissingStrongEnv_types_copy_deref :

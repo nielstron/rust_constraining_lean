@@ -864,7 +864,32 @@ theorem pointerIf_write_deref_p :
         simp [pointerIfEnv, pointerIfPXSlot, Env.update])
       (@UpdateAtPath.mutBorrow pointerIfEnv
         (pointerIfEnv.update "x" pointerIfXSlot) 0 [] [.var "x"] .int .int
+        .int
+        (PointeeUpdateAtPath.weak ShapeCompatible.int
+          (PartialTyJoin.self (.ty .int)))
         htargets))
+
+/-- Regression for reborrow-chain writes: updating through
+`a : &mut[b] (&mut[x] int)` with RHS `&mut[c] int` rebuilds `a` as
+`&mut[b] (&mut[x,c] int)`, not as a stale `&mut[b] (&mut[x] int)`. -/
+theorem reborrowChain_updateAtPath_updates_outer_pointee {env result : Env}
+    (hshape : ShapeCompatible env
+      (.ty (.borrow true [.var "x"] .int))
+      (.ty (.borrow true [.var "c"] .int)))
+    (hjoin : PartialTyJoin
+      (.ty (.borrow true [.var "x"] .int))
+      (.ty (.borrow true [.var "c"] .int))
+      (.ty (.borrow true [.var "x", .var "c"] .int)))
+    (hwrites : WriteBorrowTargets 1 env [] [.var "b"]
+      (.borrow true [.var "c"] .int) result) :
+    UpdateAtPath 0 env [()]
+      (.ty (.borrow true [.var "b"] (.borrow true [.var "x"] .int)))
+      (.borrow true [.var "c"] .int)
+      result
+      (.ty (.borrow true [.var "b"] (.borrow true [.var "x", .var "c"] .int))) := by
+  exact UpdateAtPath.mutBorrow
+    (PointeeUpdateAtPath.weak hshape hjoin)
+    hwrites
 
 theorem pointerIf_write_ranked :
     ∃ φ, LinearizedBy φ pointerIfEnv ∧
@@ -1136,17 +1161,18 @@ theorem partialTyStrengthens_borrow_append {mutable : Bool}
         intro target htarget
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hmem
-        · exact hsubRight hmem)
-  | borrow hsubLeft =>
+        · exact hsubRight hmem) PartialTyStrengthens.reflex
+  | borrow hsubLeft hpointeeLeft =>
       have hsubRight := PartialTyStrengthens.borrow_subset hright
       exact PartialTyStrengthens.borrow (by
         intro target htarget
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hsubLeft hmem
-        · exact hsubRight hmem)
+        · exact hsubRight hmem) hpointeeLeft
   | intoUndef hinner =>
       rcases PartialTyStrengthens.from_borrow_inv hinner with
-        ⟨targetTargets, rfl, hsubLeft⟩
+        ⟨targetTargets, targetPointee, htargetEq, hsubLeft, hpointeeLeft⟩
+      cases htargetEq
       have hsubRight : rightTargets ⊆ targetTargets := by
         cases hright with
         | intoUndef hinner' => exact PartialTyStrengthens.borrow_subset hinner'
@@ -1154,7 +1180,7 @@ theorem partialTyStrengthens_borrow_append {mutable : Bool}
         intro target htarget
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hsubLeft hmem
-        · exact hsubRight hmem))
+        · exact hsubRight hmem) hpointeeLeft)
 
 theorem pointerIfJoin_x_typing :
     LValTyping pointerIfJoinEnv (.var "x") (.ty .int) Lifetime.root := by
@@ -1465,7 +1491,7 @@ theorem pointerIfRetarget_le_join :
       simp at htarget
       subst htarget
       simp
-    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub PartialTyStrengthens.reflex⟩
   · by_cases hy : name = "y"
     · subst hy
       rw [show pointerIfRetargetEnv.slotAt "y" = some pointerIfYSlot by
@@ -1506,7 +1532,7 @@ theorem pointerIfWrite_le_join :
       simp at htarget
       subst htarget
       simp
-    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub PartialTyStrengthens.reflex⟩
   · by_cases hy : name = "y"
     · subst hy
       rw [show pointerIfEnv.slotAt "y" = some pointerIfYSlot by

@@ -64,22 +64,24 @@ theorem partialTyStrengthens_trans {left middle right : PartialTy} :
           | tyBox hrightInner =>
               exact PartialTyStrengthens.intoUndef
                 (PartialTyStrengthens.tyBox (ih hrightInner))
-  | borrow hsubset₁ =>
+  | borrow hsubset₁ hpointee₁ ihPointee =>
       cases hright with
       | reflex =>
-          exact PartialTyStrengthens.borrow hsubset₁
-      | borrow hsubset₂ =>
+          exact PartialTyStrengthens.borrow hsubset₁ hpointee₁
+      | borrow hsubset₂ hpointee₂ =>
           exact PartialTyStrengthens.borrow
             (fun target hmem => hsubset₂ (hsubset₁ hmem))
+            (ihPointee hpointee₂)
       | intoUndef hinner =>
           cases hinner with
           | reflex =>
               exact PartialTyStrengthens.intoUndef
-                (PartialTyStrengthens.borrow hsubset₁)
-          | borrow hsubset₂ =>
+                (PartialTyStrengthens.borrow hsubset₁ hpointee₁)
+          | borrow hsubset₂ hpointee₂ =>
               exact PartialTyStrengthens.intoUndef
                 (PartialTyStrengthens.borrow
-                  (fun target hmem => hsubset₂ (hsubset₁ hmem)))
+                  (fun target hmem => hsubset₂ (hsubset₁ hmem))
+                  (ihPointee hpointee₂))
   | undefLeft hundef ih =>
       cases hright with
       | reflex =>
@@ -106,30 +108,32 @@ theorem partialTyStrengthens_trans {left middle right : PartialTy} :
                 (ih (PartialTyStrengthens.undefLeft hbox))
 
 theorem PartialTyStrengthens.borrow_subset {mutable : Bool}
-    {leftTargets rightTargets : List LVal} {pointee : Ty} :
-    PartialTyStrengthens (.ty (.borrow mutable leftTargets pointee))
-      (.ty (.borrow mutable rightTargets pointee)) →
+    {leftTargets rightTargets : List LVal} {leftPointee rightPointee : Ty} :
+    PartialTyStrengthens (.ty (.borrow mutable leftTargets leftPointee))
+      (.ty (.borrow mutable rightTargets rightPointee)) →
     leftTargets.Subset rightTargets := by
   intro hstrength
   cases hstrength with
   | reflex =>
       intro target hmem
       exact hmem
-  | borrow hsubset =>
+  | borrow hsubset _hpointee =>
       exact hsubset
 
 theorem PartialTyStrengthens.to_borrow_inv {sourceTy : Ty}
     {mutable : Bool} {targets : List LVal} {pointee : Ty} :
     PartialTyStrengthens (.ty sourceTy) (.ty (.borrow mutable targets pointee)) →
-    ∃ sourceTargets,
-      sourceTy = .borrow mutable sourceTargets pointee ∧
-      sourceTargets.Subset targets := by
+    ∃ sourceTargets sourcePointee,
+      sourceTy = .borrow mutable sourceTargets sourcePointee ∧
+      sourceTargets.Subset targets ∧
+        PartialTyStrengthens (.ty sourcePointee) (.ty pointee) := by
   intro hstrength
   cases hstrength with
   | reflex =>
-      exact ⟨targets, rfl, by intro target hmem; exact hmem⟩
-  | borrow hsubset =>
-      exact ⟨_, rfl, hsubset⟩
+      exact ⟨targets, pointee, rfl, by intro target hmem; exact hmem,
+        PartialTyStrengthens.reflex⟩
+  | borrow hsubset hpointee =>
+      exact ⟨_, _, rfl, hsubset, hpointee⟩
 
 theorem PartialTyStrengthens.to_unit_inv {sourceTy : Ty} :
     PartialTyStrengthens (.ty sourceTy) (.ty .unit) →
@@ -200,28 +204,32 @@ theorem PartialTyStrengthens.from_box_ty_inv {sourceInner targetTy : Ty} :
 theorem PartialTyStrengthens.from_borrow_inv {mutable : Bool}
     {sourceTargets : List LVal} {pointee targetTy : Ty} :
     PartialTyStrengthens (.ty (.borrow mutable sourceTargets pointee)) (.ty targetTy) →
-    ∃ targetTargets,
-      targetTy = .borrow mutable targetTargets pointee ∧
-        sourceTargets.Subset targetTargets := by
+    ∃ targetTargets targetPointee,
+      targetTy = .borrow mutable targetTargets targetPointee ∧
+        sourceTargets.Subset targetTargets ∧
+        PartialTyStrengthens (.ty pointee) (.ty targetPointee) := by
   intro hstrength
   cases hstrength with
   | reflex =>
-      exact ⟨sourceTargets, rfl, by intro target hmem; exact hmem⟩
-  | borrow hsubset =>
-      exact ⟨_, rfl, hsubset⟩
+      exact ⟨sourceTargets, pointee, rfl, by intro target hmem; exact hmem,
+        PartialTyStrengthens.reflex⟩
+  | borrow hsubset hpointee =>
+      exact ⟨_, _, rfl, hsubset, hpointee⟩
 
 theorem PartialTyStrengthens.to_borrow_right {source : PartialTy}
     {mutable : Bool} {targets : List LVal} {pointee : Ty} :
     PartialTyStrengthens source (.ty (.borrow mutable targets pointee)) →
-    ∃ sourceTargets,
-      source = .ty (.borrow mutable sourceTargets pointee) ∧
-      sourceTargets.Subset targets := by
+    ∃ sourceTargets sourcePointee,
+      source = .ty (.borrow mutable sourceTargets sourcePointee) ∧
+      sourceTargets.Subset targets ∧
+        PartialTyStrengthens (.ty sourcePointee) (.ty pointee) := by
   intro hstrength
   cases hstrength with
   | reflex =>
-      exact ⟨targets, rfl, by intro target hmem; exact hmem⟩
-  | borrow hsubset =>
-      exact ⟨_, rfl, hsubset⟩
+      exact ⟨targets, pointee, rfl, by intro target hmem; exact hmem,
+        PartialTyStrengthens.reflex⟩
+  | borrow hsubset hpointee =>
+      exact ⟨_, _, rfl, hsubset, hpointee⟩
 
 theorem PartialTyStrengthens.box_inv {left right : PartialTy} :
     PartialTyStrengthens (.box left) (.box right) →
@@ -634,11 +642,12 @@ theorem PartialTyUnion.box {left right union : PartialTy} :
         exact PartialTyStrengthens.boxIntoUndef hunionUpper
 
 theorem PartialTyUnion.borrow_member {mutable : Bool}
-    {leftTargets rightTargets unionTargets : List LVal} {pointee : Ty}
+    {leftTargets rightTargets unionTargets : List LVal}
+    {leftPointee rightPointee unionPointee : Ty}
     {target : LVal} :
-    PartialTyUnion (.ty (.borrow mutable leftTargets pointee))
-      (.ty (.borrow mutable rightTargets pointee))
-      (.ty (.borrow mutable unionTargets pointee)) →
+    PartialTyUnion (.ty (.borrow mutable leftTargets leftPointee))
+      (.ty (.borrow mutable rightTargets rightPointee))
+      (.ty (.borrow mutable unionTargets unionPointee)) →
     target ∈ unionTargets →
     target ∈ leftTargets ∨ target ∈ rightTargets := by
   intro hunion hmem
@@ -655,28 +664,40 @@ theorem PartialTyUnion.borrow_member {mutable : Bool}
   have hrightSubsetUnion : rightTargets.Subset unionTargets := by
     exact PartialTyStrengthens.borrow_subset
       (PartialTyUnion.right_strengthens hunion)
-  have hleftLeFilter : PartialTyStrengthens (.ty (.borrow mutable leftTargets pointee))
-      (.ty (.borrow mutable (unionTargets.filter (fun x => x ≠ target)) pointee)) := by
+  rcases PartialTyStrengthens.from_borrow_inv
+      (PartialTyUnion.left_strengthens hunion) with
+    ⟨_leftUnionTargets, _leftUnionPointee, hleftUnionEq, _hleftSubset,
+      hleftPointee⟩
+  cases hleftUnionEq
+  rcases PartialTyStrengthens.from_borrow_inv
+      (PartialTyUnion.right_strengthens hunion) with
+    ⟨_rightUnionTargets, _rightUnionPointee, hrightUnionEq, _hrightSubset,
+      hrightPointee⟩
+  cases hrightUnionEq
+  have hleftLeFilter : PartialTyStrengthens (.ty (.borrow mutable leftTargets leftPointee))
+      (.ty (.borrow mutable (unionTargets.filter (fun x => x ≠ target)) unionPointee)) := by
     apply PartialTyStrengthens.borrow
-    intro x hx
-    have hxUnion := hleftSubsetUnion hx
-    have hne : x ≠ target := by
-      intro heq
-      subst heq
-      exact hnotLeft hx
-    simp [hxUnion, hne]
-  have hrightLeFilter : PartialTyStrengthens (.ty (.borrow mutable rightTargets pointee))
-      (.ty (.borrow mutable (unionTargets.filter (fun x => x ≠ target)) pointee)) := by
+    · intro x hx
+      have hxUnion := hleftSubsetUnion hx
+      have hne : x ≠ target := by
+        intro heq
+        subst heq
+        exact hnotLeft hx
+      simp [hxUnion, hne]
+    · exact hleftPointee
+  have hrightLeFilter : PartialTyStrengthens (.ty (.borrow mutable rightTargets rightPointee))
+      (.ty (.borrow mutable (unionTargets.filter (fun x => x ≠ target)) unionPointee)) := by
     apply PartialTyStrengthens.borrow
-    intro x hx
-    have hxUnion := hrightSubsetUnion hx
-    have hne : x ≠ target := by
-      intro heq
-      subst heq
-      exact hnotRight hx
-    simp [hxUnion, hne]
-  have hunionLeFilter : PartialTyStrengthens (.ty (.borrow mutable unionTargets pointee))
-      (.ty (.borrow mutable (unionTargets.filter (fun x => x ≠ target)) pointee)) := by
+    · intro x hx
+      have hxUnion := hrightSubsetUnion hx
+      have hne : x ≠ target := by
+        intro heq
+        subst heq
+        exact hnotRight hx
+      simp [hxUnion, hne]
+    · exact hrightPointee
+  have hunionLeFilter : PartialTyStrengthens (.ty (.borrow mutable unionTargets unionPointee))
+      (.ty (.borrow mutable (unionTargets.filter (fun x => x ≠ target)) unionPointee)) := by
     exact hunion.2 (by
       intro ty hty
       simp at hty
@@ -695,35 +716,41 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
     PartialTyUnion left right union →
     PartialTyContains union (.borrow mutable targets pointee) →
     target ∈ targets →
-    (∃ leftTargets,
-      PartialTyContains left (.borrow mutable leftTargets pointee) ∧
-        target ∈ leftTargets) ∨
-    (∃ rightTargets,
-      PartialTyContains right (.borrow mutable rightTargets pointee) ∧
-        target ∈ rightTargets) := by
+    (∃ leftTargets leftPointee,
+      PartialTyContains left (.borrow mutable leftTargets leftPointee) ∧
+        target ∈ leftTargets ∧
+        PartialTyStrengthens (.ty leftPointee) (.ty pointee)) ∨
+    (∃ rightTargets rightPointee,
+      PartialTyContains right (.borrow mutable rightTargets rightPointee) ∧
+        target ∈ rightTargets ∧
+        PartialTyStrengthens (.ty rightPointee) (.ty pointee)) := by
   refine PartialTy.rec
     (motive_1 := fun unionTy =>
       ∀ left right mutable targets pointee target,
         PartialTyUnion left right (.ty unionTy) →
         PartialTyContains (.ty unionTy) (.borrow mutable targets pointee) →
         target ∈ targets →
-        (∃ leftTargets,
-          PartialTyContains left (.borrow mutable leftTargets pointee) ∧
-            target ∈ leftTargets) ∨
-        (∃ rightTargets,
-          PartialTyContains right (.borrow mutable rightTargets pointee) ∧
-            target ∈ rightTargets))
+        (∃ leftTargets leftPointee,
+          PartialTyContains left (.borrow mutable leftTargets leftPointee) ∧
+            target ∈ leftTargets ∧
+            PartialTyStrengthens (.ty leftPointee) (.ty pointee)) ∨
+        (∃ rightTargets rightPointee,
+          PartialTyContains right (.borrow mutable rightTargets rightPointee) ∧
+            target ∈ rightTargets ∧
+            PartialTyStrengthens (.ty rightPointee) (.ty pointee)))
     (motive_2 := fun union =>
       ∀ left right mutable targets pointee target,
         PartialTyUnion left right union →
         PartialTyContains union (.borrow mutable targets pointee) →
         target ∈ targets →
-        (∃ leftTargets,
-          PartialTyContains left (.borrow mutable leftTargets pointee) ∧
-            target ∈ leftTargets) ∨
-        (∃ rightTargets,
-          PartialTyContains right (.borrow mutable rightTargets pointee) ∧
-            target ∈ rightTargets))
+        (∃ leftTargets leftPointee,
+          PartialTyContains left (.borrow mutable leftTargets leftPointee) ∧
+            target ∈ leftTargets ∧
+            PartialTyStrengthens (.ty leftPointee) (.ty pointee)) ∨
+        (∃ rightTargets rightPointee,
+          PartialTyContains right (.borrow mutable rightTargets rightPointee) ∧
+            target ∈ rightTargets ∧
+            PartialTyStrengthens (.ty rightPointee) (.ty pointee)))
     ?unit ?int ?borrow ?boxTy ?bool ?ty ?boxPartial ?undef union
     left right mutable targets pointee target
   · intro left right mutable targets pointee target _hunion hcontains _htarget
@@ -736,13 +763,15 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
     | here =>
       rcases PartialTyStrengthens.to_borrow_right
           (PartialTyUnion.left_strengthens hunion) with
-        ⟨leftTargets, rfl, _hleftSubset⟩
+        ⟨leftTargets, leftPointee, rfl, _hleftSubset, hleftPointee⟩
       rcases PartialTyStrengthens.to_borrow_right
           (PartialTyUnion.right_strengthens hunion) with
-        ⟨rightTargets, rfl, _hrightSubset⟩
+        ⟨rightTargets, rightPointee, rfl, _hrightSubset, hrightPointee⟩
       rcases PartialTyUnion.borrow_member hunion htarget with hleft | hright
-      · exact Or.inl ⟨leftTargets, PartialTyContains.here, hleft⟩
-      · exact Or.inr ⟨rightTargets, PartialTyContains.here, hright⟩
+      · exact Or.inl ⟨leftTargets, leftPointee, PartialTyContains.here,
+          hleft, hleftPointee⟩
+      · exact Or.inr ⟨rightTargets, rightPointee, PartialTyContains.here,
+          hright, hrightPointee⟩
   · intro inner ih left right mutable targets pointee target hunion hcontains htarget
     cases hcontains with
     | tyBox hinner =>
@@ -765,12 +794,16 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
       rcases ih _ _ mutable targets pointee target
           (PartialTyUnion.tyBox_inv hunion) hinner htarget with
         hleftBorrow | hrightBorrow
-      · rcases hleftBorrow with ⟨leftTargets, hcontainsLeft, hleftMem⟩
+      · rcases hleftBorrow with
+          ⟨leftTargets, leftPointee, hcontainsLeft, hleftMem, hleftPointee⟩
         exact Or.inl
-          ⟨leftTargets, PartialTyContains.tyBox hcontainsLeft, hleftMem⟩
-      · rcases hrightBorrow with ⟨rightTargets, hcontainsRight, hrightMem⟩
+          ⟨leftTargets, leftPointee, PartialTyContains.tyBox hcontainsLeft,
+            hleftMem, hleftPointee⟩
+      · rcases hrightBorrow with
+          ⟨rightTargets, rightPointee, hcontainsRight, hrightMem, hrightPointee⟩
         exact Or.inr
-          ⟨rightTargets, PartialTyContains.tyBox hcontainsRight, hrightMem⟩
+          ⟨rightTargets, rightPointee, PartialTyContains.tyBox hcontainsRight,
+            hrightMem, hrightPointee⟩
   · intro left right mutable targets pointee target _hunion hcontains _htarget
     cases hcontains
   · intro ty ih left right mutable targets pointee target hunion hcontains htarget
@@ -781,22 +814,28 @@ theorem PartialTyUnion.contained_borrow_member {left right union : PartialTy}
       have hleft := PartialTyUnion.left_strengthens hunion
       cases hleft with
       | reflex =>
-          exact Or.inl ⟨targets, PartialTyContains.box hinner, htarget⟩
+          exact Or.inl ⟨targets, pointee, PartialTyContains.box hinner,
+            htarget, PartialTyStrengthens.reflex⟩
       | box hleftInner =>
           have hright := PartialTyUnion.right_strengthens hunion
           cases hright with
           | reflex =>
-              exact Or.inr ⟨targets, PartialTyContains.box hinner, htarget⟩
+              exact Or.inr ⟨targets, pointee, PartialTyContains.box hinner,
+                htarget, PartialTyStrengthens.reflex⟩
           | box hrightInner =>
               rcases ih _ _ mutable targets pointee target
                   (PartialTyUnion.box_inv hunion) hinner htarget with
                 hleftBorrow | hrightBorrow
-              · rcases hleftBorrow with ⟨leftTargets, hcontainsLeft, hleftMem⟩
+              · rcases hleftBorrow with
+                  ⟨leftTargets, leftPointee, hcontainsLeft, hleftMem, hleftPointee⟩
                 exact Or.inl
-                  ⟨leftTargets, PartialTyContains.box hcontainsLeft, hleftMem⟩
-              · rcases hrightBorrow with ⟨rightTargets, hcontainsRight, hrightMem⟩
+                  ⟨leftTargets, leftPointee, PartialTyContains.box hcontainsLeft,
+                    hleftMem, hleftPointee⟩
+              · rcases hrightBorrow with
+                  ⟨rightTargets, rightPointee, hcontainsRight, hrightMem, hrightPointee⟩
                 exact Or.inr
-                  ⟨rightTargets, PartialTyContains.box hcontainsRight, hrightMem⟩
+                  ⟨rightTargets, rightPointee, PartialTyContains.box hcontainsRight,
+                    hrightMem, hrightPointee⟩
   · intro shape _ih left right mutable targets pointee target _hunion hcontains _htarget
     cases hcontains
 
@@ -876,13 +915,14 @@ theorem partialTyUnion_vars_subset {a b u : PartialTy} {v : Name} :
   rcases mem_partialTy_vars_iff.mp hv with
     ⟨mutable, targets, pointee, target, hcontains, htarget, hbase⟩
   rcases PartialTyUnion.contained_borrow_member hunion hcontains htarget with
-    ⟨leftTargets, hcl, htl⟩ | ⟨rightTargets, hcr, htr⟩
+    ⟨leftTargets, leftPointee, hcl, htl, _hpointee⟩ |
+    ⟨rightTargets, rightPointee, hcr, htr, _hpointee⟩
   · exact Or.inl
       (mem_partialTy_vars_iff.mpr
-        ⟨mutable, leftTargets, pointee, target, hcl, htl, hbase⟩)
+        ⟨mutable, leftTargets, leftPointee, target, hcl, htl, hbase⟩)
   · exact Or.inr
       (mem_partialTy_vars_iff.mpr
-        ⟨mutable, rightTargets, pointee, target, hcr, htr, hbase⟩)
+        ⟨mutable, rightTargets, rightPointee, target, hcr, htr, hbase⟩)
 
 /--
 `lw_rust_followup` Proposition 2 (rank decrease).
@@ -1160,7 +1200,7 @@ inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop
     (motive_2 := fun _ => True) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ t
   · trivial
   · trivial
-  · intro _ _ _ _ih; exact ⟨rfl, fun _ h => h, fun _ h => h, rfl⟩
+  · intro _ _ _ ih; exact ⟨rfl, fun _ h => h, fun _ h => h, ih⟩
   · intro _ ih; exact ih
   · trivial
   · intro _ _; trivial
@@ -1172,7 +1212,7 @@ inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop
     (motive_2 := fun pt => PartialTy.eqv pt pt) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ pt
   · trivial
   · trivial
-  · intro _ _ _ _ih; exact ⟨rfl, fun _ h => h, fun _ h => h, rfl⟩
+  · intro _ _ _ ih; exact ⟨rfl, fun _ h => h, fun _ h => h, ih⟩
   · intro _ ih; exact ih
   · trivial
   · intro _ ih; exact ih
@@ -1238,10 +1278,10 @@ theorem ty_sameShape_of_strengthens {a b : Ty}
         intro a b hleft hright
         cases hleft; cases hright
         simpa [Ty.sameShape] using ih rfl rfl
-    | borrow _ =>
+    | borrow _ _ ih =>
         intro a b hleft hright
         cases hleft; cases hright
-        exact ⟨rfl, Ty.sameShape_refl _⟩
+        exact ⟨rfl, ih rfl rfl⟩
     | undefLeft _hinner _ih =>
         intro _a _b hleft _hright
         cases hleft
@@ -1326,9 +1366,10 @@ theorem partialTyUnion_ty_left_sameShape {head rest union : Ty} :
       have : union = .bool := PartialTyStrengthens.from_bool_inv hstr
       subst this; simp [Ty.sameShape]
   | borrow m tgts pointee =>
-      rcases PartialTyStrengthens.from_borrow_inv hstr with ⟨ut, hu, _⟩
-      subst hu
-      exact ⟨rfl, Ty.sameShape_refl pointee⟩
+      rcases PartialTyStrengthens.from_borrow_inv hstr with
+        ⟨ut, unionPointee, hunionEq, _hsubset, hpointee⟩
+      subst hunionEq
+      exact ⟨rfl, Ty.sameShape_symm (ty_sameShape_of_strengthens hpointee)⟩
   | box t =>
       rcases PartialTyStrengthens.from_box_ty_inv hstr with
         ⟨unionInner, hunionEq, hinnerStr⟩

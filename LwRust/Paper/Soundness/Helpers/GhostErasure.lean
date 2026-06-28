@@ -353,13 +353,13 @@ theorem PartialTyStrengthens.allVars_mono {left right : PartialTy}
   | tyBox _hinner ih =>
       intro hv
       exact ih (by simpa [PartialTy.allVars, Ty.allVars] using hv)
-  | borrow hsubset =>
+  | borrow hsubset _hpointee ihPointee =>
       intro hv
       simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv ⊢
       rcases hv with hvTargets | hvPointee
       · rcases hvTargets with ⟨target, hmem, hbase⟩
         exact Or.inl ⟨target, hsubset hmem, hbase⟩
-      · exact Or.inr hvPointee
+      · exact Or.inr (ihPointee hvPointee)
   | undefLeft _hinner ih =>
       intro hv
       exact ih (by simpa [PartialTy.allVars] using hv)
@@ -388,15 +388,10 @@ theorem PartialTyStrengthens.to_eraseName_of_fresh {left right : PartialTy}
       intro hfresh
       exact PartialTyStrengthens.tyBox
         (ih (by simpa [PartialTy.allVars, Ty.allVars] using hfresh))
-  | @borrow mutable pointee leftTargets rightTargets hsubset =>
+  | @borrow mutable leftPointee rightPointee leftTargets rightTargets hsubset
+      hpointee ihPointee =>
       intro hfresh
-      have hpointee : Ty.eraseName ghost pointee = pointee := by
-        apply Ty.eraseName_eq_of_allVars_fresh
-        intro hv
-        exact hfresh (by
-          simp [PartialTy.allVars, Ty.allVars]
-          exact Or.inr hv)
-      rw [PartialTy.eraseName, Ty.eraseName, hpointee]
+      rw [PartialTy.eraseName, Ty.eraseName]
       exact PartialTyStrengthens.borrow (by
         intro target hmem
         simp [List.mem_filter]
@@ -406,6 +401,11 @@ theorem PartialTyStrengthens.to_eraseName_of_fresh {left right : PartialTy}
           exact hfresh (by
             simp [PartialTy.allVars, Ty.allVars, List.mem_map]
             exact Or.inl ⟨target, hmem, hbase⟩))
+        (ihPointee (by
+          intro hv
+          exact hfresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)))
   | undefLeft _hinner ih =>
       intro hfresh
       exact PartialTyStrengthens.undefLeft
@@ -1472,6 +1472,71 @@ private theorem prependPath_not_mentions {path : List Unit} {target : LVal}
     simpa [base_prependPath] using hprepBase
   exact hnot ((LVal.mentions_iff_base (ghost := ghost) target).2 hbase)
 
+theorem PointeeUpdateAtPath.erase_ghost {rank : Nat} {env : Env}
+    {path : List Unit} {oldTy rhsTy updatedTy : Ty} {ghost : Name} :
+    PointeeUpdateAtPath rank env path oldTy rhsTy updatedTy →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    ghost ∉ Ty.allVars oldTy →
+    ghost ∉ Ty.allVars rhsTy →
+    PointeeUpdateAtPath rank (env.erase ghost) path oldTy rhsTy updatedTy := by
+  intro hupdate hfresh holdFresh htyFresh
+  induction hupdate with
+  | strong =>
+      exact PointeeUpdateAtPath.strong
+  | weak hshape hjoin =>
+      exact PointeeUpdateAtPath.weak
+        (ShapeCompatible.erase_ghost hshape hfresh
+          (by simpa [PartialTy.allVars] using holdFresh)
+          (by simpa [PartialTy.allVars] using htyFresh))
+        hjoin
+  | box _hinner ih =>
+      exact PointeeUpdateAtPath.box (ih hfresh
+        (by simpa [Ty.allVars] using holdFresh) htyFresh)
+  | @mutBorrow env rank path targets oldPointee updatedPointee ty _hinner ih =>
+      have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+        intro hv
+        exact holdFresh (by
+          simp [Ty.allVars]
+          exact Or.inr hv)
+      exact PointeeUpdateAtPath.mutBorrow
+        (ih hfresh holdPointeeFresh htyFresh)
+
+theorem PointeeUpdateAtPath.typeNameFresh {rank : Nat} {env : Env}
+    {path : List Unit} {oldTy rhsTy updatedTy : Ty} {ghost : Name} :
+    PointeeUpdateAtPath rank env path oldTy rhsTy updatedTy →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    ghost ∉ Ty.allVars oldTy →
+    ghost ∉ Ty.allVars rhsTy →
+    ghost ∉ Ty.allVars updatedTy := by
+  intro hupdate hfresh holdFresh htyFresh
+  induction hupdate with
+  | strong =>
+      exact htyFresh
+  | weak hshape hjoin =>
+      exact (by
+        simpa [PartialTy.allVars] using
+          (PartialTyJoin.allVars_fresh_of_shapeCompatible hshape hjoin
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh))
+  | box _hinner ih =>
+      exact (by
+        simpa [Ty.allVars] using ih hfresh
+          (by simpa [Ty.allVars] using holdFresh) htyFresh)
+  | @mutBorrow env rank path targets oldPointee updatedPointee ty _hinner ih =>
+      have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+        intro hv
+        exact holdFresh (by
+          simp [Ty.allVars]
+          exact Or.inr hv)
+      have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
+        ih hfresh holdPointeeFresh htyFresh
+      intro hv
+      simp [Ty.allVars, List.mem_map] at hv
+      rcases hv with ⟨target, hmem, hbase⟩ | hpointee
+      · exact holdFresh (by
+          simp [Ty.allVars, List.mem_map]
+          exact Or.inl ⟨target, hmem, hbase⟩)
+      · exact hupdatedPointeeFresh hpointee
+
 mutual
   theorem UpdateAtPath.erase_ghost {rank : Nat} {env₁ env₂ : Env}
       {path : List Unit} {oldTy updatedTy : PartialTy} {ty : Ty}
@@ -1517,12 +1582,21 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _htargets ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          hpointee _htargets ih
           hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        exact UpdateAtPath.mutBorrow (ih hfresh htargetsNot htyFresh))
+        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+          intro hv
+          exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)
+        exact UpdateAtPath.mutBorrow
+          (PointeeUpdateAtPath.erase_ghost hpointee hfresh holdPointeeFresh
+            htyFresh)
+          (ih hfresh htargetsNot htyFresh))
       (by
         intro rank env path ty hfresh hnot htyFresh
         exact WriteBorrowTargets.nil)
@@ -1614,12 +1688,21 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _htargets ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          hpointee _htargets ih
           hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        exact UpdateAtPath.mutBorrow (ih hfresh htargetsNot htyFresh))
+        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+          intro hv
+          exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)
+        exact UpdateAtPath.mutBorrow
+          (PointeeUpdateAtPath.erase_ghost hpointee hfresh holdPointeeFresh
+            htyFresh)
+          (ih hfresh htargetsNot htyFresh))
       (by
         intro rank env path ty hfresh hnot htyFresh
         exact WriteBorrowTargets.nil)
@@ -1710,12 +1793,21 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _htargets ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          hpointee _htargets ih
           hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        exact UpdateAtPath.mutBorrow (ih hfresh htargetsNot htyFresh))
+        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+          intro hv
+          exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)
+        exact UpdateAtPath.mutBorrow
+          (PointeeUpdateAtPath.erase_ghost hpointee hfresh holdPointeeFresh
+            htyFresh)
+          (ih hfresh htargetsNot htyFresh))
       (by
         intro rank env path ty hfresh hnot htyFresh
         exact WriteBorrowTargets.nil)
@@ -1808,12 +1900,28 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _htargets ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          hpointee _htargets ih
           hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        exact ⟨ih hfresh htargetsNot htyFresh, holdFresh⟩)
+        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+          intro hv
+          exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)
+        have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
+          PointeeUpdateAtPath.typeNameFresh hpointee hfresh holdPointeeFresh
+            htyFresh
+        refine ⟨ih hfresh htargetsNot htyFresh, ?_⟩
+        intro hv
+        simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv
+        rcases hv with ⟨target, hmem, hbase⟩ | hpointeeVar
+        · exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars, List.mem_map]
+            exact Or.inl ⟨target, hmem, hbase⟩)
+        · exact hupdatedPointeeFresh hpointeeVar)
       (by
         intro rank env path ty hfresh _hnot _htyFresh
         exact hfresh)
@@ -1892,12 +2000,28 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _htargets ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          hpointee _htargets ih
           hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        exact ⟨ih hfresh htargetsNot htyFresh, holdFresh⟩)
+        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+          intro hv
+          exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)
+        have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
+          PointeeUpdateAtPath.typeNameFresh hpointee hfresh holdPointeeFresh
+            htyFresh
+        refine ⟨ih hfresh htargetsNot htyFresh, ?_⟩
+        intro hv
+        simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv
+        rcases hv with ⟨target, hmem, hbase⟩ | hpointeeVar
+        · exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars, List.mem_map]
+            exact Or.inl ⟨target, hmem, hbase⟩)
+        · exact hupdatedPointeeFresh hpointeeVar)
       (by
         intro rank env path ty hfresh _hnot _htyFresh
         exact hfresh)
@@ -1975,12 +2099,28 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _htargets ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          hpointee _htargets ih
           hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        exact ⟨ih hfresh htargetsNot htyFresh, holdFresh⟩)
+        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
+          intro hv
+          exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars]
+            exact Or.inr hv)
+        have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
+          PointeeUpdateAtPath.typeNameFresh hpointee hfresh holdPointeeFresh
+            htyFresh
+        refine ⟨ih hfresh htargetsNot htyFresh, ?_⟩
+        intro hv
+        simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv
+        rcases hv with ⟨target, hmem, hbase⟩ | hpointeeVar
+        · exact holdFresh (by
+            simp [PartialTy.allVars, Ty.allVars, List.mem_map]
+            exact Or.inl ⟨target, hmem, hbase⟩)
+        · exact hupdatedPointeeFresh hpointeeVar)
       (by
         intro rank env path ty hfresh _hnot _htyFresh
         exact hfresh)

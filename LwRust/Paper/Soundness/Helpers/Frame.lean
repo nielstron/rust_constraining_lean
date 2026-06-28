@@ -525,12 +525,12 @@ inductive ValidPartialValueEvidence.StrengthensSameShape
         (ValidPartialValueEvidence.undef (ty := oldTy))
         (ValidPartialValueEvidence.undef (ty := newTy))
   | borrow {location : Location} {mutable : Bool} {leftTargets rightTargets : List LVal}
-      {pointee : Ty} {target : LVal} {hmem : target ∈ leftTargets}
+      {leftPointee rightPointee : Ty} {target : LVal} {hmem : target ∈ leftTargets}
       {hloc : store.loc target = some location}
       (hsubset : leftTargets.Subset rightTargets) :
       StrengthensSameShape
-        (ValidPartialValueEvidence.borrow (pointee := pointee) target hmem hloc)
-        (ValidPartialValueEvidence.borrow (pointee := pointee) target
+        (ValidPartialValueEvidence.borrow (pointee := leftPointee) target hmem hloc)
+        (ValidPartialValueEvidence.borrow (pointee := rightPointee) target
           (hsubset hmem) hloc)
   | box {location : Location} {slot : StoreSlot}
       {oldInner newInner : PartialTy}
@@ -562,7 +562,8 @@ theorem ValidPartialValueEvidence.StrengthensSameShape.refl
   | undef => exact ValidPartialValueEvidence.StrengthensSameShape.undef
   | @borrow location mutable targets pointee target hmem hloc =>
       exact ValidPartialValueEvidence.StrengthensSameShape.borrow
-        (mutable := mutable) (pointee := pointee) (target := target)
+        (mutable := mutable) (leftPointee := pointee) (rightPointee := pointee)
+        (target := target)
         (hmem := hmem) (hloc := hloc) (List.Subset.refl _)
   | box hslot hinner ih =>
       exact ValidPartialValueEvidence.StrengthensSameShape.box ih
@@ -609,12 +610,13 @@ theorem ValidPartialValueEvidence.strengthen_sameShape_exists
       | reflex =>
           exact ⟨ValidPartialValueEvidence.borrow target hmem hloc,
             ValidPartialValueEvidence.StrengthensSameShape.borrow
-              (mutable := mutable) (pointee := pointee) (target := target)
+              (mutable := mutable) (leftPointee := pointee) (rightPointee := pointee)
+              (target := target)
               (hmem := hmem) (hloc := hloc) (List.Subset.refl _)⟩
-      | borrow hsubset =>
+      | borrow hsubset _hpointee =>
           exact ⟨ValidPartialValueEvidence.borrow target (hsubset hmem) hloc,
             ValidPartialValueEvidence.StrengthensSameShape.borrow
-              (mutable := mutable) (pointee := pointee) (target := target)
+              (mutable := mutable) (leftPointee := pointee) (target := target)
               (hmem := hmem) (hloc := hloc) hsubset⟩
       | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | box hslot hinner ih =>
@@ -701,12 +703,12 @@ theorem EvidenceBorrowDependency.of_strengthensSameShape
   | bool => exact hdependency
   | undef => cases hdependency
   | borrow _hsubset =>
-      rename_i oldMutable newMutable location mutable leftTargets rightTargets pointee
+      rename_i location mutable leftTargets rightTargets leftPointee rightPointee
         target hmem hloc
       cases hdependency with
       | borrow hreads =>
-          exact EvidenceBorrowDependency.borrow (mutable := oldMutable)
-            (pointee := pointee) (target := target) (hmem := hmem)
+          exact EvidenceBorrowDependency.borrow (mutable := mutable)
+            (pointee := leftPointee) (target := target) (hmem := hmem)
             (hloc := hloc) hreads
   | box hinnerRel ih =>
       cases hdependency with

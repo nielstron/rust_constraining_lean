@@ -171,11 +171,12 @@ inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
       PartialTyStrengthens (.ty left) (.ty right) →
       PartialTyStrengthens (.ty (.box left)) (.ty (.box right))
   /-- W-Bor. -/
-  | borrow {mutable : Bool} {pointee : Ty}
+  | borrow {mutable : Bool} {leftPointee rightPointee : Ty}
       {leftTargets rightTargets : List LVal} :
       leftTargets.Subset rightTargets →
-      PartialTyStrengthens (.ty (.borrow mutable leftTargets pointee))
-        (.ty (.borrow mutable rightTargets pointee))
+      PartialTyStrengthens (.ty leftPointee) (.ty rightPointee) →
+      PartialTyStrengthens (.ty (.borrow mutable leftTargets leftPointee))
+        (.ty (.borrow mutable rightTargets rightPointee))
   /-- W-UndefA. -/
   | undefLeft {left right : Ty} :
       PartialTyStrengthens (.ty left) (.ty right) →
@@ -821,17 +822,15 @@ def PartialTy.sameShape : PartialTy → PartialTy → Prop
   | .undef t₁, .undef t₂ => Ty.sameShape t₁ t₂
   | _, _ => False
 
-/-- Finer type equivalence than `sameShape`: structural, and borrow target
-lists must be subset-equivalent (same set).  The carried borrow pointee
-annotation is syntactic in this equivalence, matching `W-Bor`: the target list
-may grow/shrink extensionally, but the dereference annotation is not rewritten
-inside the borrow constructor. -/
+/-- Finer type equivalence than `sameShape`: structural, borrow target lists
+must be subset-equivalent (same set), and borrow pointee annotations are
+equivalent recursively. -/
 def Ty.eqv : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
   | .bool, .bool => True
   | .borrow m₁ t₁ p₁, .borrow m₂ t₂ p₂ =>
-      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁ ∧ p₁ = p₂
+      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁ ∧ Ty.eqv p₁ p₂
   | .box t₁, .box t₂ => Ty.eqv t₁ t₂
   | _, _ => False
 
@@ -1397,6 +1396,32 @@ def prependPath : List Unit → LVal → LVal
   | [], lv => lv
   | _ :: path, lv => .deref (prependPath path lv)
 
+/--
+Pure type-level counterpart of `UpdateAtPath` for the pointee annotation stored
+inside a mutable borrow.
+
+`WriteBorrowTargets` performs the real environment fan-out.  This relation
+mirrors the same path update on the borrow's carried pointee type so rebuilt
+reborrows continue to describe the type of their targets after the fan-out.
+-/
+inductive PointeeUpdateAtPath : Nat → Env → List Unit → Ty → Ty → Ty → Prop where
+  | strong {env : Env} {old ty : Ty} :
+      PointeeUpdateAtPath 0 env [] old ty ty
+  | weak {env : Env} {rank : Nat} {old joined ty : Ty} :
+      ShapeCompatible env (.ty old) (.ty ty) →
+      PartialTyJoin (.ty old) (.ty ty) (.ty joined) →
+      PointeeUpdateAtPath (rank + 1) env [] old ty joined
+  | box {env : Env} {rank : Nat} {path : List Unit}
+      {inner updatedInner ty : Ty} :
+      PointeeUpdateAtPath rank env path inner ty updatedInner →
+      PointeeUpdateAtPath rank env (() :: path) (.box inner) ty (.box updatedInner)
+  | mutBorrow {env : Env} {rank : Nat} {path : List Unit}
+      {targets : List LVal} {oldPointee updatedPointee ty : Ty} :
+      PointeeUpdateAtPath (rank + 1) env path oldPointee ty updatedPointee →
+      PointeeUpdateAtPath rank env (() :: path)
+        (.borrow true targets oldPointee) ty
+        (.borrow true targets updatedPointee)
+
 mutual
   /-- Definition 3.23, `update_k(Γ, π | T̃, T)`. -/
   inductive UpdateAtPath : Nat → Env → List Unit → PartialTy → Ty → Env → PartialTy → Prop where
@@ -1411,10 +1436,11 @@ mutual
         UpdateAtPath rank env₁ path inner ty env₂ updatedInner →
         UpdateAtPath rank env₁ (() :: path) (.box inner) ty env₂ (.box updatedInner)
     | mutBorrow {env₁ env₂ : Env} {rank : Nat} {path : List Unit}
-        {targets : List LVal} {oldPointee ty : Ty} :
+        {targets : List LVal} {oldPointee updatedPointee ty : Ty} :
+        PointeeUpdateAtPath (rank + 1) env₁ path oldPointee ty updatedPointee →
         WriteBorrowTargets (rank + 1) env₁ path targets ty env₂ →
         UpdateAtPath rank env₁ (() :: path) (.ty (.borrow true targets oldPointee)) ty
-          env₂ (.ty (.borrow true targets oldPointee))
+          env₂ (.ty (.borrow true targets updatedPointee))
 
   /-- The joined environment from updating each possible target of a borrow.
 
@@ -1471,7 +1497,8 @@ theorem EnvWrite.finiteSupport {rank : Nat} {env result : Env}
     (fun {env rank old joined ty} _hshape _hjoin hfinite => hfinite)
     (fun {env₁ env₂ rank path inner updatedInner ty} _hupdate ih hfinite =>
       ih hfinite)
-    (fun {env₁ env₂ rank path targets oldPointee ty} _htargets ih hfinite =>
+    (fun {env₁ env₂ rank path targets oldPointee updatedPointee ty}
+        _hpointee _htargets ih hfinite =>
       ih hfinite)
     (fun {rank env path ty} hfinite => hfinite)
     (fun {rank env updated path target ty} _hwrite _hleafTyping ih hfinite =>

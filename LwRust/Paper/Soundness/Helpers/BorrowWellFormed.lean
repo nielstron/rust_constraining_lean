@@ -907,7 +907,8 @@ theorem UpdateWrite.lifetimesPreserved :
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
         exact ih)
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _hwrites ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          _hpointee _hwrites ih
         exact ih)
       (by
         intro rank env path ty
@@ -943,7 +944,8 @@ theorem UpdateWrite.lifetimesPreserved :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
-          intro env₁ env₂ rank path targets oldPointee ty _hwrites ih
+          intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+            _hpointee _hwrites ih
           exact ih)
         (by
           intro rank env path ty
@@ -978,7 +980,8 @@ theorem UpdateWrite.lifetimesPreserved :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
-          intro env₁ env₂ rank path targets oldPointee ty _hwrites ih
+          intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+            _hpointee _hwrites ih
           exact ih)
         (by
           intro rank env path ty
@@ -1010,16 +1013,17 @@ theorem UpdateAtPath.cons_inv {rank : Nat} {env₁ env₂ : Env}
       oldTy = .box inner ∧
       updatedTy = .box updatedInner ∧
       UpdateAtPath rank env₁ path inner ty env₂ updatedInner) ∨
-    (∃ targets oldPointee,
+    (∃ targets oldPointee updatedPointee,
       oldTy = .ty (.borrow true targets oldPointee) ∧
-      updatedTy = .ty (.borrow true targets oldPointee) ∧
+      updatedTy = .ty (.borrow true targets updatedPointee) ∧
+      PointeeUpdateAtPath (rank + 1) env₁ path oldPointee ty updatedPointee ∧
       WriteBorrowTargets (rank + 1) env₁ path targets ty env₂) := by
   intro hupdate
   cases hupdate with
   | box hinner =>
       exact Or.inl ⟨_, _, rfl, rfl, hinner⟩
-  | mutBorrow hwrites =>
-      exact Or.inr ⟨_, _, rfl, rfl, hwrites⟩
+  | mutBorrow hpointee hwrites =>
+      exact Or.inr ⟨_, _, _, rfl, rfl, hpointee, hwrites⟩
 
 @[simp] theorem List.Unit_append_singleton (path : List Unit) :
     path ++ [()] = () :: path := by
@@ -1132,7 +1136,8 @@ theorem UpdateWrite.lifetimesSurvive :
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
         exact ih)
       (by
-        intro env₁ env₂ rank path targets oldPointee ty _hwrites ih
+        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+          _hpointee _hwrites ih
         exact ih)
       (by
         intro rank env path ty
@@ -1168,7 +1173,8 @@ theorem UpdateWrite.lifetimesSurvive :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
-          intro env₁ env₂ rank path targets oldPointee ty _hwrites ih
+          intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+            _hpointee _hwrites ih
           exact ih)
         (by
           intro rank env path ty
@@ -1203,7 +1209,8 @@ theorem UpdateWrite.lifetimesSurvive :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
-          intro env₁ env₂ rank path targets oldPointee ty _hwrites ih
+          intro env₁ env₂ rank path targets oldPointee updatedPointee ty
+            _hpointee _hwrites ih
           exact ih)
         (by
           intro rank env path ty

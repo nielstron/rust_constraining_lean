@@ -803,7 +803,7 @@ theorem whileJoinEntry_le_inv :
   by_cases hq : name = "q"
   · subst hq
     rw [whileJoinEnv_slotAt_q, whileJoinEnv_slotAt_q]
-    refine ⟨rfl, PartialTyStrengthens.borrow ?_⟩
+    refine ⟨rfl, PartialTyStrengthens.borrow ?_ PartialTyStrengthens.reflex⟩
     intro target htarget
     simp at htarget
     subst htarget
@@ -826,7 +826,7 @@ theorem whileJoinBack_le_inv :
   by_cases hq : name = "q"
   · subst hq
     rw [whileJoinEnv_slotAt_q, whileJoinEnv_slotAt_q]
-    refine ⟨rfl, PartialTyStrengthens.borrow ?_⟩
+    refine ⟨rfl, PartialTyStrengthens.borrow ?_ PartialTyStrengthens.reflex⟩
     intro target htarget
     simp at htarget
     subst htarget

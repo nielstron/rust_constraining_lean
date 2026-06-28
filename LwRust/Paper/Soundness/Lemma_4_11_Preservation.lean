@@ -1001,12 +1001,12 @@ theorem RuntimePathSelected.of_partialTyUnion {store : ProgramStore} {env : Env}
       left right hunion
     rcases PartialTyStrengthens.to_borrow_right
         (PartialTyUnion.left_strengthens hunion) with
-      ⟨leftTargets, hleftEq, _hleftSubset⟩
+      ⟨leftTargets, _leftPointee, hleftEq, _hleftSubset, _hleftPointee⟩
     rcases PartialTyStrengthens.to_borrow_right
         (PartialTyUnion.right_strengthens hunion) with
-      ⟨rightTargets, hrightEq, _hrightSubset⟩
-    subst hleftEq
-    subst hrightEq
+      ⟨rightTargets, _rightPointee, hrightEq, _hrightSubset, _hrightPointee⟩
+    cases hleftEq
+    cases hrightEq
     rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
     · exact Or.inl (RuntimePathSelected.borrowHere hleft htyping hloc hslot hty)
     · exact Or.inr (RuntimePathSelected.borrowHere hright htyping hloc hslot hty)
@@ -1033,12 +1033,12 @@ theorem RuntimePathSelected.of_partialTyUnion {store : ProgramStore} {env : Env}
     | target hmem htargetTyping hpath =>
         rcases PartialTyStrengthens.to_borrow_right
             (PartialTyUnion.left_strengthens hunion) with
-          ⟨leftTargets, hleftEq, _hleftSubset⟩
+          ⟨leftTargets, _leftPointee, hleftEq, _hleftSubset, _hleftPointee⟩
         rcases PartialTyStrengthens.to_borrow_right
             (PartialTyUnion.right_strengthens hunion) with
-          ⟨rightTargets, hrightEq, _hrightSubset⟩
-        subst hleftEq
-        subst hrightEq
+          ⟨rightTargets, _rightPointee, hrightEq, _hrightSubset, _hrightPointee⟩
+        cases hleftEq
+        cases hrightEq
         rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
         · exact Or.inl (RuntimePathSelected.borrowStep
             (RuntimeTargetsPathSelected.target hleft htargetTyping hpath))
@@ -1207,7 +1207,9 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with
+          ⟨writeTargets, oldPointee, updatedPointee, htyEq, hupdatedEq,
+            hpointee, hwrites⟩
         cases htyEq
         cases hupdatedEq
         have htargetRank :
@@ -1224,8 +1226,14 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
             (fun branchResult hbranchWrite =>
               hbranchHere (Nat.succ_pos rank) htargetRank htargetTyping
                 htargetLoc hbranchWrite)
-        exact ⟨hmap, PartialTyStrengthens.reflex,
-          PartialTy.sameShape_refl _⟩
+        exact ⟨hmap,
+          PartialTyStrengthens.borrow (List.Subset.refl _)
+            (PointeeUpdateAtPath.strengthens_of_positive hpointee
+              (Nat.succ_pos rank)),
+          by
+            simp [PartialTy.sameShape, Ty.sameShape]
+            exact PointeeUpdateAtPath.sameShape_of_positive hpointee
+              (Nat.succ_pos rank)⟩
   case box =>
       intro inner path selectedName selectedSlot selectedSlotTy hinner ih
         rank updatedTy writeEnv hbelow hupdate hbranchHere hbranchStep
@@ -1241,7 +1249,9 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
           ⟨hmap, hstrength, hshape⟩
         exact ⟨hmap, PartialTyStrengthens.box hstrength,
           by simpa [PartialTy.sameShape] using hshape⟩
-      · rcases hborrow with ⟨targets, oldPointee, htyEq, _hupdatedEq, _hwrites⟩
+      · rcases hborrow with
+          ⟨targets, oldPointee, updatedPointee, htyEq, _hupdatedEq,
+            _hpointee, _hwrites⟩
         cases htyEq
   case borrowStep =>
       intro mutable targets pointee path selectedName selectedSlot selectedSlotTy
@@ -1250,7 +1260,9 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with
+          ⟨writeTargets, oldPointee, updatedPointee, htyEq, hupdatedEq,
+            hpointee, hwrites⟩
         cases htyEq
         cases hupdatedEq
         cases htargetsSelected with
@@ -1271,8 +1283,14 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
                 (fun branchResult hbranchWrite =>
                   hbranchStep (Nat.succ_pos rank) htargetRank htargetTyping htargetSelected
                     hbranchWrite)
-            exact ⟨hmap, PartialTyStrengthens.reflex,
-              PartialTy.sameShape_refl _⟩
+            exact ⟨hmap,
+              PartialTyStrengthens.borrow (List.Subset.refl _)
+                (PointeeUpdateAtPath.strengthens_of_positive hpointee
+                  (Nat.succ_pos rank)),
+              by
+                simp [PartialTy.sameShape, Ty.sameShape]
+                exact PointeeUpdateAtPath.sameShape_of_positive hpointee
+                  (Nat.succ_pos rank)⟩
   case target =>
       intros
       trivial
@@ -1622,12 +1640,12 @@ theorem RuntimeSpinePathSelected.of_partialTyUnion {store : ProgramStore}
       selectedTargetLifetime address hmem htyping hloc left right hunion
     rcases PartialTyStrengthens.to_borrow_right
         (PartialTyUnion.left_strengthens hunion) with
-      ⟨leftTargets, hleftEq, _hleftSubset⟩
+      ⟨leftTargets, _leftPointee, hleftEq, _hleftSubset, _hleftPointee⟩
     rcases PartialTyStrengthens.to_borrow_right
         (PartialTyUnion.right_strengthens hunion) with
-      ⟨rightTargets, hrightEq, _hrightSubset⟩
-    subst hleftEq
-    subst hrightEq
+      ⟨rightTargets, _rightPointee, hrightEq, _hrightSubset, _hrightPointee⟩
+    cases hleftEq
+    cases hrightEq
     rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
     · exact Or.inl
         (RuntimeSpinePathSelected.borrowHere hleft htyping hloc)
@@ -1654,12 +1672,12 @@ theorem RuntimeSpinePathSelected.of_partialTyUnion {store : ProgramStore}
     | target hmem htargetTyping hpath =>
         rcases PartialTyStrengthens.to_borrow_right
             (PartialTyUnion.left_strengthens hunion) with
-          ⟨leftTargets, hleftEq, _hleftSubset⟩
+          ⟨leftTargets, _leftPointee, hleftEq, _hleftSubset, _hleftPointee⟩
         rcases PartialTyStrengthens.to_borrow_right
             (PartialTyUnion.right_strengthens hunion) with
-          ⟨rightTargets, hrightEq, _hrightSubset⟩
-        subst hleftEq
-        subst hrightEq
+          ⟨rightTargets, _rightPointee, hrightEq, _hrightSubset, _hrightPointee⟩
+        cases hleftEq
+        cases hrightEq
         rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
         · exact Or.inl (RuntimeSpinePathSelected.borrowStep
             (RuntimeSpineTargetsSelected.target hleft htargetTyping hpath))
@@ -1887,7 +1905,9 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with
+          ⟨writeTargets, oldPointee, updatedPointee, htyEq, hupdatedEq,
+            hpointee, hwrites⟩
         cases htyEq
         cases hupdatedEq
         have htargetRank :
@@ -1904,8 +1924,14 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
             (fun branchResult hbranchWrite =>
               hbranchHere (Nat.succ_pos rank) htargetRank htargetTyping
                 htargetLoc hbranchWrite)
-        exact ⟨hmap, PartialTyStrengthens.reflex,
-          PartialTy.sameShape_refl _⟩
+        exact ⟨hmap,
+          PartialTyStrengthens.borrow (List.Subset.refl _)
+            (PointeeUpdateAtPath.strengthens_of_positive hpointee
+              (Nat.succ_pos rank)),
+          by
+            simp [PartialTy.sameShape, Ty.sameShape]
+            exact PointeeUpdateAtPath.sameShape_of_positive hpointee
+              (Nat.succ_pos rank)⟩
   case box =>
       intro inner path address hinner ih
         rank updatedTy writeEnv hbelow hupdate hbranchHere hbranchStep
@@ -1921,7 +1947,9 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
           ⟨hmap, hstrength, hshape⟩
         exact ⟨hmap, PartialTyStrengthens.box hstrength,
           by simpa [PartialTy.sameShape] using hshape⟩
-      · rcases hborrow with ⟨targets, oldPointee, htyEq, _hupdatedEq, _hwrites⟩
+      · rcases hborrow with
+          ⟨targets, oldPointee, updatedPointee, htyEq, _hupdatedEq,
+            _hpointee, _hwrites⟩
         cases htyEq
   case borrowStep =>
       intro mutable targets pointee path address htargetsSelected _ih rank updatedTy
@@ -1929,7 +1957,9 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
         cases htyEq
-      · rcases hborrow with ⟨writeTargets, oldPointee, htyEq, hupdatedEq, hwrites⟩
+      · rcases hborrow with
+          ⟨writeTargets, oldPointee, updatedPointee, htyEq, hupdatedEq,
+            hpointee, hwrites⟩
         cases htyEq
         cases hupdatedEq
         cases htargetsSelected with
@@ -1950,8 +1980,14 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
                 (fun branchResult hbranchWrite =>
                   hbranchStep (Nat.succ_pos rank) htargetRank htargetTyping
                     htargetSelected hbranchWrite)
-            exact ⟨hmap, PartialTyStrengthens.reflex,
-              PartialTy.sameShape_refl _⟩
+            exact ⟨hmap,
+              PartialTyStrengthens.borrow (List.Subset.refl _)
+                (PointeeUpdateAtPath.strengthens_of_positive hpointee
+                  (Nat.succ_pos rank)),
+              by
+                simp [PartialTy.sameShape, Ty.sameShape]
+                exact PointeeUpdateAtPath.sameShape_of_positive hpointee
+                  (Nat.succ_pos rank)⟩
   case target =>
       intros
       trivial
@@ -2786,9 +2822,9 @@ theorem safeAbstraction_assign_deref_drop_of_runtimeDropFrame
                   StoreOwnerSpine.strongLeafUpdate_contains hspine hcontains
                 rcases PartialTyContains.mono_strengthens_sameShape
                     hcontainsStrong hstrengthensXr hshapeXr with
-                  ⟨ts', hcontains', hsubset⟩
+                  ⟨ts', pointee', hcontains', hsubset, _hpointee⟩
                 have hstrict : φ (LVal.base t) < φ xRoot :=
-                  hbelowRhs.1 xRoot resultSlotXr m ts' pointee t hresultXr hcontains'
+                  hbelowRhs.1 xRoot resultSlotXr m ts' pointee' t hresultXr hcontains'
                     (hsubset hmem) ⟨m, ts, pointee, hcontains, hmem⟩
                 exact Nat.lt_irrefl _ (lt_of_le_of_lt hrankW hstrict)
               have hnewValid :
@@ -3179,9 +3215,10 @@ theorem rhsBorrowDependency_not_in_assign_subtree
     ⟨updatedTargets, hcontainsStrong, hsubsetUpdated⟩
   rcases PartialTyContains.mono_strengthens_sameShape
       hcontainsStrong hstrength hshape with
-    ⟨resultTargets, hcontainsResult, hsubsetResult⟩
+    ⟨resultTargets, resultPointee, hcontainsResult, hsubsetResult,
+      _hpointeeResult⟩
   have hstrict : φ (LVal.base target) < φ root :=
-    hbelowRhs.1 root resultSlot mutable resultTargets pointee target
+    hbelowRhs.1 root resultSlot mutable resultTargets resultPointee target
       hresultSlot hcontainsResult (hsubsetResult (hsubsetUpdated target hmem))
       ⟨mutable, targets, pointee, hcontains, hmem⟩
   exact Nat.lt_irrefl _ (lt_of_le_of_lt hrankDependency hstrict)
