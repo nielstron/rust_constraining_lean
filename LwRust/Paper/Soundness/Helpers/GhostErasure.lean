@@ -1284,14 +1284,16 @@ theorem EnvJoin.erase_ghost {left right join : Env} {ghost : Name} :
     EnvJoin left right join →
     EnvJoin (left.erase ghost) (right.erase ghost) (join.erase ghost) := by
   intro hjoin
+  apply EnvJoin.of_isLUB
+  have hjoinLUB := EnvJoin.isLUB hjoin
   refine ⟨?upper, ?least⟩
   · intro candidate hcandidate
     simp at hcandidate
     rcases hcandidate with rfl | rfl
     ·
-      exact EnvStrengthens.erase_ghost (hjoin.1 (by simp))
+      exact EnvStrengthens.erase_ghost (by simpa using hjoinLUB.1 (by simp))
     ·
-      exact EnvStrengthens.erase_ghost (hjoin.1 (by simp))
+      exact EnvStrengthens.erase_ghost (by simpa using hjoinLUB.1 (by simp))
   · intro ub hub
     let ubPlus : Env :=
       { slotAt := fun x => if x = ghost then join.slotAt ghost else ub.slotAt x }
@@ -1302,21 +1304,21 @@ theorem EnvJoin.erase_ghost {left right join : Env} {ghost : Name} :
       ·
         intro x
         by_cases hx : x = ghost
-        · simpa [ubPlus, hx] using hjoin.1 (by simp) x
+        · simpa [ubPlus, hx] using EnvJoin.left_le hjoin x
         · have hleftErase := hub (Set.mem_insert _ _)
           simpa [ubPlus, Env.erase, hx] using hleftErase x
       ·
         intro x
         by_cases hx : x = ghost
-        · simpa [ubPlus, hx] using hjoin.1 (by simp) x
+        · simpa [ubPlus, hx] using EnvJoin.right_le hjoin x
         · have hrightErase := hub (Set.mem_insert_of_mem _ rfl)
           simpa [ubPlus, Env.erase, hx] using hrightErase x
     have hleastJoin : EnvStrengthens join ubPlus :=
-      hjoin.2 hubPlus
+      by simpa using hjoinLUB.2 hubPlus
     intro x
     by_cases hx : x = ghost
     · have hleftErase : EnvStrengthens (left.erase ghost) ub :=
-        hub (Set.mem_insert _ _)
+        by simpa using hub (Set.mem_insert _ _)
       have hubGhost : ub.slotAt x = none := by
         have hcoord := hleftErase x
         cases h : ub.slotAt x with

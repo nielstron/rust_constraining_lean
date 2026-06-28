@@ -411,10 +411,10 @@ theorem PartialTyUnion.tyBox {left right union : Ty} :
   · intro upper hupper
     have hleftUpper :
         PartialTyStrengthens (.ty (.box left)) upper :=
-      hupper (by simp)
+      hupper (.ty (.box left)) (by simp)
     have hrightUpper :
         PartialTyStrengthens (.ty (.box right)) upper :=
-      hupper (by simp)
+      hupper (.ty (.box right)) (by simp)
     cases hleftUpper with
     | reflex =>
         rcases PartialTyStrengthens.from_box_ty_inv hrightUpper with
@@ -498,9 +498,11 @@ theorem PartialTyUnion.tyBox_inv {left right union : Ty} :
           simp at hcandidate
           rcases hcandidate with hcandidate | hcandidate
           · subst hcandidate
-            exact PartialTyStrengthens.tyBox (hupper (by simp))
+            exact PartialTyStrengthens.tyBox
+              (hupper (.ty left) (by simp))
           · subst hcandidate
-            exact PartialTyStrengthens.tyBox (hupper (by simp))
+            exact PartialTyStrengthens.tyBox
+              (hupper (.ty right) (by simp))
         rcases PartialTyStrengthens.from_box_ty_inv (hunion.2 hboxedUpper) with
           ⟨unionUpper, hupperEq, hunionInner⟩
         cases hupperEq
@@ -515,11 +517,13 @@ theorem PartialTyUnion.tyBox_inv {left right union : Ty} :
           · subst hcandidate
             exact PartialTyStrengthens.intoUndef
               (PartialTyStrengthens.tyBox
-                (PartialTyStrengthens.ty_to_undef_inv (hupper (by simp))))
+                (PartialTyStrengthens.ty_to_undef_inv
+                  (hupper (.ty left) (by simp))))
           · subst hcandidate
             exact PartialTyStrengthens.intoUndef
               (PartialTyStrengthens.tyBox
-                (PartialTyStrengthens.ty_to_undef_inv (hupper (by simp))))
+                (PartialTyStrengthens.ty_to_undef_inv
+                  (hupper (.ty right) (by simp))))
         have hboxedUnionToUndef :
             PartialTyStrengthens (.ty (.box union)) (.ty (.box upperTy)) :=
           PartialTyStrengthens.ty_to_undef_inv (hunion.2 hboxedUpper)
@@ -529,7 +533,7 @@ theorem PartialTyUnion.tyBox_inv {left right union : Ty} :
         exact PartialTyStrengthens.intoUndef hunionInner
     | box upperInner =>
         have hleftUpper : PartialTyStrengthens (.ty left) (.box upperInner) :=
-          hupper (show (.ty left : PartialTy) ∈
+          hupper (.ty left) (show (.ty left : PartialTy) ∈
             ({.ty left, .ty right} : Set PartialTy) by simp)
         exact False.elim
           (PartialTyStrengthens.not_ty_to_box hleftUpper)
@@ -568,9 +572,9 @@ theorem PartialTyUnion.box_inv {left right union : PartialTy} :
       simp at hty
       rcases hty with hty | hty
       · subst hty
-        exact PartialTyStrengthens.box (hcandidate (by simp))
+        exact PartialTyStrengthens.box (hcandidate left (by simp))
       · subst hty
-        exact PartialTyStrengthens.box (hcandidate (by simp))
+        exact PartialTyStrengthens.box (hcandidate right (by simp))
     exact PartialTyStrengthens.box_inv (hunion.2 hboxedUpper)
 
 theorem PartialTyUnion.box {left right union : PartialTy} :
@@ -588,10 +592,10 @@ theorem PartialTyUnion.box {left right union : PartialTy} :
   · intro upper hupper
     have hleftUpper :
         PartialTyStrengthens (.box left) upper :=
-      hupper (by simp)
+      hupper (.box left) (by simp)
     have hrightUpper :
         PartialTyStrengthens (.box right) upper :=
-      hupper (by simp)
+      hupper (.box right) (by simp)
     cases hleftUpper with
     | reflex =>
         have hrightLeft :

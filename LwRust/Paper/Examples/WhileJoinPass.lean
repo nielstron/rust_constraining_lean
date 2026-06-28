@@ -899,7 +899,9 @@ theorem whileJoin_envJoin :
     · exact whileJoinEntry_le_inv
     · exact whileJoinBack_le_inv
   · intro env' henv'
-    exact whileJoinInv_least (henv' (by simp)) (henv' (by simp))
+    exact whileJoinInv_least
+      (henv' whileJoinEntryEnv (by simp))
+      (henv' whileJoinBackEnv (by simp))
 
 theorem whileJoinEntry_join_sameShape :
     EnvJoinSameShape whileJoinEntryEnv whileJoinInvEnv := by

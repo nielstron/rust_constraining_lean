@@ -834,18 +834,18 @@ theorem EnvStrengthens.lifetimesPreserved {source result : Env} :
       exact ⟨sourceSlot, by simp, hx.1⟩
 
 theorem EnvJoin.lifetimesPreserved_left {left right join : Env} :
-    EnvJoin left right join →
+  EnvJoin left right join →
     EnvLifetimesPreserved left join := by
   intro hjoin
   exact EnvStrengthens.lifetimesPreserved
-    (hjoin.1 (by simp))
+    (EnvJoin.left_le hjoin)
 
 theorem EnvJoin.lifetimesPreserved_right {left right join : Env} :
-    EnvJoin left right join →
+  EnvJoin left right join →
     EnvLifetimesPreserved right join := by
   intro hjoin
   exact EnvStrengthens.lifetimesPreserved
-    (hjoin.1 (by simp))
+    (EnvJoin.right_le hjoin)
 
 theorem EnvLifetimesPreserved.update_from_source_slot {source middle : Env}
     {x : Name} {slot : EnvSlot} {newTy : PartialTy} :
@@ -1082,11 +1082,11 @@ theorem EnvStrengthens.lifetimesSurvive {source result : Env} :
       exact ⟨resultSlot, by simp, hx.1⟩
 
 theorem EnvJoin.lifetimesSurvive_left {left right join : Env} :
-    EnvJoin left right join →
+  EnvJoin left right join →
     EnvLifetimesSurvive left join := by
   intro hjoin
   exact EnvStrengthens.lifetimesSurvive
-    (hjoin.1 (by simp))
+    (EnvJoin.left_le hjoin)
 
 theorem EnvLifetimesSurvive.update_from_source_slot {source middle : Env}
     {x : Name} {slot : EnvSlot} {newTy : PartialTy} :

@@ -5826,6 +5826,38 @@ theorem preservation_runtimeInvariant {store finalStore : ProgramStore}
     typingPreservesSlotsOutlive hwellFormed.2.1 htyping
   exact ⟨hterminal, hterminal.2.1, hslots⟩
 
+/--
+Preservation packaged with the stronger runtime/static invariant.
+
+This is the invariant package that implies the static premises we eventually
+want out of the typing rules: the terminal store/environment pair has a
+proof-carrying runtime abstraction and the output environment is well formed,
+therefore it is coherent, contained-borrow well formed, and linearizable.
+-/
+theorem preservation_runtimeStaticInvariant {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} {finalValue : Value} :
+    SourceTerm term →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    store ∼ₛ env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    TerminalStateRuntimeSafe finalStore finalValue env₂ ty ∧
+      RuntimeStaticEnvInvariant finalStore env₂ lifetime := by
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+    htyping hmulti
+  have hterminal :=
+    preservation_runtime hsource hvalidRuntime hvalidStoreTyping hwellFormed
+      hborrowSafe hsafe htyping hmulti
+  have hwellOutput : WellFormedEnv env₂ lifetime :=
+    borrowInvariance_of_sourceTerm hsource
+      (ValidRuntimeState.validState hvalidRuntime)
+      hwellFormed hsafe htyping
+  exact ⟨hterminal, hterminal.2.1, hwellOutput⟩
+
 end Paper
 end LwRust
 
@@ -5881,5 +5913,22 @@ theorem lemma_4_11_preservation_runtimeInvariant
       RuntimeEnvInvariant finalStore env₂ lifetime :=
   preservation_runtimeInvariant hsource hvalid hstoreTyping hwellFormed hborrowSafe
     hsafe htyping hmulti
+
+/-- Lemma 4.11 runtime/static invariant strengthening. -/
+theorem lemma_4_11_preservation_runtimeStaticInvariant
+    {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
+    (hsource : SourceTerm term)
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hborrowSafe : BorrowSafeEnv env₁)
+    (hsafe : store ∼ₛ env₁)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂)
+    (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
+    TerminalStateRuntimeSafe finalStore finalValue env₂ ty ∧
+      RuntimeStaticEnvInvariant finalStore env₂ lifetime :=
+  preservation_runtimeStaticInvariant hsource hvalid hstoreTyping hwellFormed
+    hborrowSafe hsafe htyping hmulti
 
 end LwRust.Paper.Soundness

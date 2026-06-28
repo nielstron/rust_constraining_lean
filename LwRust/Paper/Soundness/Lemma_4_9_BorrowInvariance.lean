@@ -8809,6 +8809,112 @@ theorem RuntimeEnvInvariant.strengthen_sameShape {store : ProgramStore}
     RuntimeEnvAbstraction.strengthen_sameShape hinv.1 hmap,
     hslots⟩
 
+/--
+Runtime state plus the full static environment invariant.
+
+`RuntimeEnvInvariant` is intentionally runtime-only and therefore cannot imply
+static coherence: runtime validity only remembers the target selected by the
+current reference value.  This stronger package is the reachable-state invariant
+shape needed when we want static consequences such as `Coherent`,
+`ContainedBorrowsWellFormed`, and `Linearizable` without carrying them as
+individual typing-rule premises.
+-/
+def RuntimeStaticEnvInvariant
+    (store : ProgramStore) (env : Env) (lifetime : Lifetime) : Prop :=
+  RuntimeEnvAbstraction store env ∧ WellFormedEnv env lifetime
+
+theorem RuntimeStaticEnvInvariant.runtime {store : ProgramStore} {env : Env}
+    {lifetime : Lifetime} :
+    RuntimeStaticEnvInvariant store env lifetime →
+    RuntimeEnvInvariant store env lifetime := by
+  intro hinv
+  exact ⟨hinv.1, hinv.2.2.1⟩
+
+theorem RuntimeStaticEnvInvariant.safe {store : ProgramStore} {env : Env}
+    {lifetime : Lifetime} :
+    RuntimeStaticEnvInvariant store env lifetime →
+    store ∼ₛ env := by
+  intro hinv
+  exact hinv.1.safe
+
+theorem RuntimeStaticEnvInvariant.containedBorrowsWellFormed
+    {store : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    RuntimeStaticEnvInvariant store env lifetime →
+    ContainedBorrowsWellFormed env := by
+  intro hinv
+  exact hinv.2.1
+
+theorem RuntimeStaticEnvInvariant.slotsOutlive {store : ProgramStore}
+    {env : Env} {lifetime : Lifetime} :
+    RuntimeStaticEnvInvariant store env lifetime →
+    EnvSlotsOutlive env lifetime := by
+  intro hinv
+  exact hinv.2.2.1
+
+theorem RuntimeStaticEnvInvariant.coherent {store : ProgramStore} {env : Env}
+    {lifetime : Lifetime} :
+    RuntimeStaticEnvInvariant store env lifetime →
+    Coherent env := by
+  intro hinv
+  exact hinv.2.2.2.1
+
+theorem RuntimeStaticEnvInvariant.linearizable {store : ProgramStore}
+    {env : Env} {lifetime : Lifetime} :
+    RuntimeStaticEnvInvariant store env lifetime →
+    Linearizable env := by
+  intro hinv
+  exact hinv.2.2.2.2
+
+theorem RuntimeStaticEnvInvariant.of_wellFormed {store : ProgramStore}
+    {env : Env} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    store ∼ₛ env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    RuntimeStaticEnvInvariant store env lifetime := by
+  intro hwellFormed hsafe hvalidStore hheap
+  exact ⟨
+    RuntimeEnvAbstraction.of_containedBorrowsWellFormed
+      hwellFormed.1 hsafe hvalidStore hheap,
+    hwellFormed⟩
+
+theorem RuntimeStaticEnvInvariant.of_runtime
+    {store : ProgramStore} {env : Env} {lifetime : Lifetime} :
+    RuntimeEnvInvariant store env lifetime →
+    WellFormedEnv env lifetime →
+    RuntimeStaticEnvInvariant store env lifetime := by
+  intro hinv hwellFormed
+  exact ⟨hinv.1, hwellFormed⟩
+
+theorem RuntimeStaticEnvInvariant.progress {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    RuntimeStaticEnvInvariant store env₁ lifetime →
+    ValidStoreTyping store term typing →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  intro hinv hstoreTyping hstoreProgress htyping
+  exact progress_typing hstoreTyping hinv.slotsOutlive hinv.safe
+    hstoreProgress htyping
+
+theorem RuntimeStaticEnvInvariant.preserve_of_typing
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    ValidState store term →
+    ValidStoreTyping store term typing →
+    RuntimeEnvAbstraction store env₂ →
+    RuntimeStaticEnvInvariant store env₁ lifetime →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    RuntimeStaticEnvInvariant store env₂ lifetime ∧
+      WellFormedTy env₂ ty lifetime := by
+  intro hrefs hvalidState hvalidStoreTyping habstraction₂ hinv htyping
+  rcases typingPreservesWellFormed_of_ruleCarriedObligations hrefs hvalidState
+      hvalidStoreTyping hinv.2 hinv.safe htyping with
+    ⟨hwellEnv₂, hwellTy₂⟩
+  exact ⟨⟨habstraction₂, hwellEnv₂⟩, hwellTy₂⟩
+
 def RuntimeBorrowSafeEnvInvariant
     (store : ProgramStore) (env : Env) (lifetime : Lifetime) : Prop :=
   RuntimeEnvInvariant store env lifetime ∧ BorrowSafeEnv env

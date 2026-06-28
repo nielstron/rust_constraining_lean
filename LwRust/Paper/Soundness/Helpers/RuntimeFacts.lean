@@ -122,7 +122,7 @@ theorem EnvJoin.slot_union {left right join : Env} {x : Name}
         by_cases hy : y = x
         · subst hy
           simp [candidateEnv, Env.update, hleftSlot]
-          exact ⟨hleftStrength.1, hcandidate (by simp)⟩
+          exact ⟨hleftStrength.1, hcandidate leftSlot.ty (by simp)⟩
         · have hleftAtY := hjoin.1 hleftMem y
           simpa [candidateEnv, Env.update, hy] using hleftAtY
       · subst henv
@@ -130,7 +130,7 @@ theorem EnvJoin.slot_union {left right join : Env} {x : Name}
         by_cases hy : y = x
         · subst hy
           simp [candidateEnv, Env.update, hrightSlot]
-          exact ⟨hrightStrength.1, hcandidate (by simp)⟩
+          exact ⟨hrightStrength.1, hcandidate rightSlot.ty (by simp)⟩
         · have hrightAtY := hjoin.1 hrightMem y
           simpa [candidateEnv, Env.update, hy] using hrightAtY
     have hjoinStrength := hjoin.2 hupper x

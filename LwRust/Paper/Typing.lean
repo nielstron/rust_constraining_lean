@@ -208,17 +208,47 @@ instance : LE PartialTy where
 /--
 Definition 3.8, type join `T̃₁ ⊔ T̃₂`.
 
-This is the least upper bound for the strengthening preorder from Definition
-3.7.  In the `T-LvBor` rule, the paper writes the same operation over a finite
-target list as `⋃ᵢ Tᵢ`; this is a join/union of static type information, not a
-set union of runtime locations.
+The paper defines this as a partial function returning the strongest
+`T̃₃` such that both inputs strengthen `T̃₃`.  We keep it relational, but spell
+out that paper definition directly: `join` must be a common weakening of the
+two inputs, and every other common weakening must be weaker than `join`.
+
+In the `T-LvBor` rule, the paper writes the same operation over a finite target
+list as `⋃ᵢ Tᵢ`; this is a join/union of static type information, not a set
+union of runtime locations.
 -/
 def PartialTyJoin (left right join : PartialTy) : Prop :=
-  IsLUB ({left, right} : Set PartialTy) join
+  (∀ {candidate},
+      candidate ∈ ({left, right} : Set PartialTy) →
+        PartialTyStrengthens candidate join) ∧
+    ∀ {upper},
+      (∀ candidate,
+        candidate ∈ ({left, right} : Set PartialTy) →
+          PartialTyStrengthens candidate upper) →
+        PartialTyStrengthens join upper
 
 @[simp] theorem PartialTyJoin.self (ty : PartialTy) :
     PartialTyJoin ty ty ty := by
-  simp [PartialTyJoin, IsLUB, IsLeast, upperBounds, lowerBounds]
+  simp [PartialTyJoin]
+
+theorem PartialTyJoin.isLUB {left right join : PartialTy} :
+    PartialTyJoin left right join →
+    IsLUB ({left, right} : Set PartialTy) join := by
+  intro hjoin
+  simpa [PartialTyJoin, IsLUB, IsLeast, upperBounds, lowerBounds,
+    partialTy_le_iff] using hjoin
+
+theorem PartialTyJoin.of_isLUB {left right join : PartialTy} :
+    IsLUB ({left, right} : Set PartialTy) join →
+    PartialTyJoin left right join := by
+  intro hjoin
+  simpa [PartialTyJoin, IsLUB, IsLeast, upperBounds, lowerBounds,
+    partialTy_le_iff] using hjoin
+
+theorem partialTyJoin_iff_isLUB (left right join : PartialTy) :
+    PartialTyJoin left right join ↔
+      IsLUB ({left, right} : Set PartialTy) join :=
+  ⟨PartialTyJoin.isLUB, PartialTyJoin.of_isLUB⟩
 
 /-- Paper-facing name for the type union used in `T-LvBor`. -/
 def PartialTyUnion (left right union : PartialTy) : Prop :=
@@ -258,9 +288,39 @@ instance : LE Env where
     env ≤ env :=
   EnvStrengthens.refl env
 
-/-- Definition 3.10, environment join `Γ₁ ⊔ Γ₂`. -/
+/--
+Definition 3.10, environment join `Γ₁ ⊔ Γ₂`.
+
+As for Definition 3.8, the paper presents this as a partial function returning
+the strongest environment strengthened by both inputs.  The relational encoding
+below is that definition: `join` is a common weakening, and it strengthens every
+other common weakening.
+-/
 def EnvJoin (left right join : Env) : Prop :=
-  IsLUB ({left, right} : Set Env) join
+  (∀ {candidate},
+      candidate ∈ ({left, right} : Set Env) →
+        EnvStrengthens candidate join) ∧
+    ∀ {upper},
+      (∀ candidate,
+        candidate ∈ ({left, right} : Set Env) →
+          EnvStrengthens candidate upper) →
+        EnvStrengthens join upper
+
+theorem EnvJoin.isLUB {left right join : Env} :
+    EnvJoin left right join →
+    IsLUB ({left, right} : Set Env) join := by
+  intro hjoin
+  simpa [EnvJoin, IsLUB, IsLeast, upperBounds, lowerBounds, env_le_iff] using hjoin
+
+theorem EnvJoin.of_isLUB {left right join : Env} :
+    IsLUB ({left, right} : Set Env) join →
+    EnvJoin left right join := by
+  intro hjoin
+  simpa [EnvJoin, IsLUB, IsLeast, upperBounds, lowerBounds, env_le_iff] using hjoin
+
+theorem envJoin_iff_isLUB (left right join : Env) :
+    EnvJoin left right join ↔ IsLUB ({left, right} : Set Env) join :=
+  ⟨EnvJoin.isLUB, EnvJoin.of_isLUB⟩
 
 def LifetimeOutlives (outer inner : Lifetime) : Prop :=
   outer.contains inner
@@ -1262,14 +1322,14 @@ def LoopInvariantNameFresh (entry inv : Env) (condition body : Term) : Prop :=
 
 /-- A join is an upper bound of its left component. -/
 theorem EnvJoin.left_le {left right join : Env} :
-    EnvJoin left right join →
+  EnvJoin left right join →
     EnvStrengthens left join := by
   intro hjoin
   exact hjoin.1 (by simp)
 
 /-- A join is an upper bound of its right component. -/
 theorem EnvJoin.right_le {left right join : Env} :
-    EnvJoin left right join →
+  EnvJoin left right join →
     EnvStrengthens right join := by
   intro hjoin
   exact hjoin.1 (by simp)

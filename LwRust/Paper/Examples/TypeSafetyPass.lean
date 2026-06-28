@@ -74,7 +74,7 @@ theorem ifThenElseInt_typing :
     linearizable_empty
     borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
-  · simp [EnvJoin, IsLUB, IsLeast, upperBounds, lowerBounds]
+  · simp [EnvJoin]
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
   · intro x branchSlot joinSlot hbranch
@@ -116,7 +116,7 @@ theorem ifEqThenElseInt_typing :
     linearizable_empty
     borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
-  · simp [EnvJoin, IsLUB, IsLeast, upperBounds, lowerBounds]
+  · simp [EnvJoin]
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
   · intro x branchSlot joinSlot hbranch
@@ -1630,7 +1630,9 @@ theorem pointerIf_envJoin :
     · exact pointerIfRetarget_le_join
     · exact pointerIfWrite_le_join
   · intro env' henv'
-    exact pointerIfJoin_least (henv' (by simp)) (henv' (by simp))
+    exact pointerIfJoin_least
+      (henv' pointerIfRetargetEnv (by simp))
+      (henv' pointerIfWriteEnv (by simp))
 
 theorem pointerIfRetarget_join_sameShape :
     EnvJoinSameShape pointerIfRetargetEnv pointerIfJoinEnv := by
