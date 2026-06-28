@@ -1733,6 +1733,8 @@ mutual
         {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
         {condition body : Term} {bodyTy bodyEntryTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
+        WhileFixpointIteration env₁ typing lifetime bodyLifetime condition body
+          env₁ envInv env₂ env₃ envBack bodyTy →
         EnvJoin env₁ envBack envInv →
         EnvJoinSameShape env₁ envInv →
         EnvJoinSameShape envBack envInv →
@@ -1762,7 +1764,99 @@ mutual
         TermTyping env₁ typing lifetime term termTy env₂ →
         TermListTyping env₂ typing lifetime rest finalTy env₃ →
         TermListTyping env₁ typing lifetime (term :: rest) finalTy env₃
+
+  /--
+  Finite Kleene-style loop invariant generation.
+
+  Starting from a current candidate, `step` runs one concrete iteration and
+  continues from the resulting candidate.  `done` is accepted only when one more
+  concrete iteration maps the candidate to itself, so the final environment is a
+  real fixed point of the generated transformer rather than a user-supplied
+  postulate.  Each step computes its next candidate as the paper join
+  `envEntry ⊔ envBack`.
+  -/
+  inductive WhileFixpointIteration :
+      Env → StoreTyping → Lifetime → Lifetime → Term → Term →
+      Env → Env → Env → Env → Env → Ty → Prop where
+    | done {envEntry envInv envCond envBody envBack : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty} :
+        TermTyping envInv typing lifetime condition .bool envCond →
+        TermTyping envCond typing bodyLifetime body bodyTy envBody →
+        WellFormedTy envBody bodyTy lifetime →
+        envBody.dropLifetime bodyLifetime = envBack →
+        EnvJoin envEntry envBack envInv →
+        EnvJoinSameShape envEntry envInv →
+        EnvJoinSameShape envBack envInv →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime
+          condition body envInv envInv envCond envBody envBack bodyTy
+    | step {envEntry current next envInv envCond envBody envBack : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty}
+        {stepCond stepBody stepBack : Env} {stepTy : Ty} :
+        TermTyping current typing lifetime condition .bool stepCond →
+        TermTyping stepCond typing bodyLifetime body stepTy stepBody →
+        WellFormedTy stepBody stepTy lifetime →
+        stepBody.dropLifetime bodyLifetime = stepBack →
+        EnvJoin envEntry stepBack next →
+        EnvJoinSameShape envEntry next →
+        EnvJoinSameShape stepBack next →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime
+          condition body next envInv envCond envBody envBack bodyTy →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime
+          condition body current envInv envCond envBody envBack bodyTy
 end
+
+/--
+Source-facing evidence that a loop invariant is produced by the concrete
+iteration starting at the loop-entry environment.
+-/
+def GeneratedWhileInvariant
+    (envEntry : Env) (typing : StoreTyping)
+    (lifetime bodyLifetime : Lifetime) (condition body : Term)
+    (envInv envCond envBody envBack : Env) (bodyTy : Ty) : Prop :=
+  WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+    envEntry envInv envCond envBody envBack bodyTy
+
+/--
+The endpoint of a generated loop invariant is a genuine fixed point of the
+concrete loop transformer.  In particular, the invariant environment is the
+paper join of the loop entry and the final back edge; it cannot be an
+independently over-widened environment.
+-/
+theorem WhileFixpointIteration.finalStep
+    {envEntry : Env} {typing : StoreTyping}
+    {lifetime bodyLifetime : Lifetime} {condition body : Term}
+    {current envInv envCond envBody envBack : Env} {bodyTy : Ty} :
+    WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+      current envInv envCond envBody envBack bodyTy →
+    TermTyping envInv typing lifetime condition .bool envCond ∧
+      TermTyping envCond typing bodyLifetime body bodyTy envBody ∧
+      WellFormedTy envBody bodyTy lifetime ∧
+      envBody.dropLifetime bodyLifetime = envBack ∧
+      EnvJoin envEntry envBack envInv ∧
+      EnvJoinSameShape envEntry envInv ∧
+      EnvJoinSameShape envBack envInv
+  | .done hcondition hbody hwell hdrop hjoin hsameEntry hsameBack =>
+      ⟨hcondition, hbody, hwell, hdrop, hjoin, hsameEntry, hsameBack⟩
+  | .step _hcondition _hbody _hwell _hdrop _hjoin _hsameEntry _hsameBack
+      hiteration =>
+      WhileFixpointIteration.finalStep hiteration
+
+theorem GeneratedWhileInvariant.finalStep
+    {envEntry : Env} {typing : StoreTyping}
+    {lifetime bodyLifetime : Lifetime} {condition body : Term}
+    {envInv envCond envBody envBack : Env} {bodyTy : Ty} :
+    GeneratedWhileInvariant envEntry typing lifetime bodyLifetime condition body
+      envInv envCond envBody envBack bodyTy →
+    TermTyping envInv typing lifetime condition .bool envCond ∧
+      TermTyping envCond typing bodyLifetime body bodyTy envBody ∧
+      WellFormedTy envBody bodyTy lifetime ∧
+      envBody.dropLifetime bodyLifetime = envBack ∧
+      EnvJoin envEntry envBack envInv ∧
+      EnvJoinSameShape envEntry envInv ∧
+      EnvJoinSameShape envBack envInv :=
+  WhileFixpointIteration.finalStep
 
 theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} :
@@ -1775,6 +1869,9 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
       Env.FiniteSupport env → Env.FiniteSupport result)
     (motive_2 := fun env _typing _lifetime _terms _ty result _ =>
       Env.FiniteSupport env → Env.FiniteSupport result)
+    (motive_3 := fun envEntry _typing _lifetime _bodyLifetime _condition
+        _body _current envInv _envCond _envBody _envBack _bodyTy _ =>
+      Env.FiniteSupport envEntry → Env.FiniteSupport envInv)
     (fun _hvalue hfinite => hfinite)
     (fun _hwellTy _hloanFree hfinite => hfinite)
     (fun _hlv _hcopy _hnotRead hfinite => hfinite)
@@ -1805,14 +1902,20 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
       ihTrue (ihCondition hfinite))
     (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
       ihCondition hfinite)
-    (fun _hchild hjoin _hsameEntry _hsameBack _hcontained _hcoherent
-        _hlinear _hborrowSafe _hnameFresh _hcondition _hbody _hwellTy
-        _hback _hentryCondition _hentryBody ihCondition _ihBody
-        _ihEntryCondition _ihEntryBody hfinite =>
-      ihCondition (EnvJoin.finiteSupport_left hjoin hfinite))
+    (fun _hchild _hgenerated _hjoin _hsameEntry _hsameBack _hcontained
+        _hcoherent _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
+        _hwellTy _hback _hentryCondition _hentryBody ihGenerated ihCondition
+        _ihBody _ihEntryCondition _ihEntryBody hfinite =>
+      ihCondition (ihGenerated hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>
       ihRest (ihTerm hfinite))
+    (fun _hcondition _hbody _hwellTy _hback hjoin _hsameEntry _hsameBack
+        _ihCondition _ihBody hfinite =>
+      EnvJoin.finiteSupport_left hjoin hfinite)
+    (fun _hcondition _hbody _hwellTy _hback _hjoin _hsameEntry _hsameBack
+        _hiteration _ihCondition _ihBody ihIteration hfinite =>
+      ihIteration hfinite)
     htyping
 
 /--

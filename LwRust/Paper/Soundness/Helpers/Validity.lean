@@ -184,6 +184,22 @@ def SourceValue : Value → Prop
 def SourceTerm (term : Term) : Prop :=
   ∀ value, value ∈ termValues term → SourceValue value
 
+def BlockScopedControlTerm (term : Term) : Prop :=
+  term.controlBodiesAreBlocks
+
+def BlockScopedSourceTerm (term : Term) : Prop :=
+  SourceTerm term ∧ BlockScopedControlTerm term
+
+theorem BlockScopedSourceTerm.sourceTerm {term : Term} :
+    BlockScopedSourceTerm term →
+    SourceTerm term :=
+  And.left
+
+theorem BlockScopedSourceTerm.controlTerm {term : Term} :
+    BlockScopedSourceTerm term →
+    BlockScopedControlTerm term :=
+  And.right
+
 theorem sourceValue_no_owningLocations {value : Value} :
     SourceValue value →
     valueOwningLocations value = [] := by

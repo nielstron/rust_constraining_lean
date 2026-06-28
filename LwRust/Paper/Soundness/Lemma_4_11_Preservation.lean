@@ -3419,9 +3419,11 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           finalStore (.val finalValue) →
         TerminalStateSafe finalStore finalValue
           (env₂.dropLifetime blockLifetime) ty)
+    (motive_3 := fun _envEntry _typing _lifetime _bodyLifetime _condition
+        _body _current _envInv _envCond _envBody _envBack _bodyTy _ => True)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoop ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons ?done ?step
     htyping hsize rfl hsource store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
     hborrowSafe hsafe hmulti).2
   -- T-Val: a value is already terminal.
@@ -3853,8 +3855,9 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh _hcondInv _hbodyInv _hwellTyBody
-      hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
+      _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh
+      _hcondInv _hbodyInv _hwellTyBody hdropEq _hcondEntry _hbodyEntry
+      _ihGenerated ihCondInv ihBodyInv _ihCondEntry
       _ihBodyEntry hsize htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
     cases htypingEq
@@ -3987,6 +3990,12 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
             intro blockValue storeAfter hterms _hdrops _htailMulti
             cases hterms)
           hblockValueMulti
+  case done =>
+    intros
+    trivial
+  case step =>
+    intros
+    trivial
 
 theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}

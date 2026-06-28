@@ -212,9 +212,11 @@ theorem reachable_progress_bounded (fuel : Nat)
         MultiStep store outerLifetime (.block blockLifetime terms)
           store' term' →
         ProgressResult store' outerLifetime term')
+    (motive_3 := fun _envEntry _typing _lifetime _bodyLifetime _condition
+        _body _current _envInv _envCond _envBody _envBack _bodyTy _ => True)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoop ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons ?done ?step
     htyping hsize rfl hsource store store' term' hvalidRuntime hvalidStoreTyping
     hwellFormed hborrowSafe hsafe hfinite hmulti
   -- T-Const: values are terminal; runs from them are empty.
@@ -801,8 +803,9 @@ theorem reachable_progress_bounded (fuel : Nat)
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh _hcondInv _hbodyInv _hwellTyBody
-      hdropEq _hcondEntry _hbodyEntry ihCondInv ihBodyInv _ihCondEntry
+      _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh
+      _hcondInv _hbodyInv _hwellTyBody hdropEq _hcondEntry _hbodyEntry
+      _ihGenerated ihCondInv ihBodyInv _ihCondEntry
       _ihBodyEntry
       hsize htypingEq hsource store store' term' hvalid hvst hwf
       hbs hsafe hfs hmulti
@@ -1108,6 +1111,12 @@ theorem reachable_progress_bounded (fuel : Nat)
           ((hfs.multiStep hmsHead).drops hdrops)
           hmsTail
       · cases heq
+  case done =>
+    intros
+    trivial
+  case step =>
+    intros
+    trivial
 
 /-- Public reachable-progress theorem, with the size fuel hidden. -/
 theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}

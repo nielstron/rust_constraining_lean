@@ -947,9 +947,11 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
         store ∼ₛ env →
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
+    (motive_3 := fun _envEntry _typing _lifetime _bodyLifetime _condition
+        _body _current _envInv _envCond _envBody _envBack _bodyTy _ => True)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
     ?iteDiverging ?whileLoopDiverging ?whileLoop
-    ?singleton ?cons htyping
+    ?singleton ?cons ?done ?step htyping
   case const =>
     intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
@@ -1067,9 +1069,9 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
+      _hchild _hgenerated _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
       _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
-      _hcondEntry _hbodyEntry _ihCondInv _ihBodyInv _ihCondEntry
+      _hcondEntry _hbodyEntry _ihGenerated _ihCondInv _ihBodyInv _ihCondEntry
       _ihBodyEntry
       _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
@@ -1085,6 +1087,12 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
     exact progress_block_of_head_progress hstore
       (ihHead (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
         (validStoreTyping_block_head hvst) hwf hsafe hstore)
+  case done =>
+    intros
+    trivial
+  case step =>
+    intros
+    trivial
 
 theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :

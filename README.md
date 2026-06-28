@@ -131,12 +131,11 @@ These deviations from the paper should be kept.
   carries the `T-If` obligation kit for the join plus final entry-side typings
   of the condition and body.  In rustc those entry-side typings are implied by
   monotonicity under removing loans, but in this calculus that implication is
-  unprovable (`Examples/ThinningFalse.lean`: borrow types carry pointee
-  information in their target lists, so shrinking a target list can make a
-  dereference typeless).  `T-WhileDiv` types a loop whose body is checked but
-  diverges (`…; panic!()`) with no back-edge obligation — what `ast_copier`
-  relies on when rebuilding a truncated loop body — and the extractor rebuilds
-  partial loop bodies this way (`while c { …stmts…; missing }`).
+  unproved, so the derivations are carried explicitly.  `T-WhileDiv` types a
+  loop whose body is checked but diverges (`…; panic!()`) with no back-edge
+  obligation — what `ast_copier` relies on when rebuilding a truncated loop body
+  — and the extractor rebuilds partial loop bodies this way
+  (`while c { …stmts…; missing }`).
 
 - **`T-Eq` keeps the paper's ghost-slot check, rule-carried.**  The paper
   types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and

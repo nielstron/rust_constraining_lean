@@ -144,6 +144,48 @@ mutual
     | term :: rest => term.size + Term.sizeList rest
 end
 
+def Term.isBlock : Term → Prop
+  | .block _ _ => True
+  | _ => False
+
+mutual
+  /-- Source-facing control flow is block-scoped: each `if` branch and each
+  `while` body must be a block, so declarations inside those bodies cannot
+  leak into the surrounding environment. -/
+  def Term.controlBodiesAreBlocks : Term → Prop
+    | .block _ terms => Term.controlBodiesAreBlocksList terms
+    | .letMut _ initialiser => initialiser.controlBodiesAreBlocks
+    | .assign _ rhs => rhs.controlBodiesAreBlocks
+    | .box operand => operand.controlBodiesAreBlocks
+    | .borrow _ _ => True
+    | .move _ => True
+    | .copy _ => True
+    | .val _ => True
+    | .missing => True
+    | .eq lhs rhs =>
+        lhs.controlBodiesAreBlocks ∧ rhs.controlBodiesAreBlocks
+    | .ite condition trueBranch falseBranch =>
+        condition.controlBodiesAreBlocks ∧
+          trueBranch.isBlock ∧ trueBranch.controlBodiesAreBlocks ∧
+          falseBranch.isBlock ∧ falseBranch.controlBodiesAreBlocks
+    | .whileLoop _ condition body =>
+        condition.controlBodiesAreBlocks ∧
+          body.isBlock ∧ body.controlBodiesAreBlocks
+    | .whileCond _ conditionInFlight condition body =>
+        conditionInFlight.controlBodiesAreBlocks ∧
+          condition.controlBodiesAreBlocks ∧
+          body.isBlock ∧ body.controlBodiesAreBlocks
+    | .whileBody _ bodyInFlight condition body =>
+        bodyInFlight.controlBodiesAreBlocks ∧
+          condition.controlBodiesAreBlocks ∧
+          body.isBlock ∧ body.controlBodiesAreBlocks
+
+  def Term.controlBodiesAreBlocksList : List Term → Prop
+    | [] => True
+    | term :: rest =>
+        term.controlBodiesAreBlocks ∧ Term.controlBodiesAreBlocksList rest
+end
+
 inductive Term.Diverges : Term → Prop where
   | missing : Term.Diverges .missing
   | block {lifetime : Lifetime} {terms : List Term} {term : Term} :

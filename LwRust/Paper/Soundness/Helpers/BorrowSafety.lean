@@ -1219,9 +1219,11 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
         BorrowSafeEnv env →
         BorrowSafeEnv env₂ ∧
           TyBorrowSafeAgainstEnv env₂ _ty)
+    (motive_3 := fun _envEntry _typing _lifetime _bodyLifetime _condition
+        _body _current _envInv _envCond _envBody _envBack _bodyTy _ => True)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoop ?singleton ?cons
+    ?whileLoopDiverging ?whileLoop ?singleton ?cons ?done ?step
     htyping hsource hborrowSafe
   case const =>
     intro _env _typing _lifetime _value _ty hvalueTyping hsource hborrowSafe
@@ -1350,8 +1352,9 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy _hchild
-      _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hnameFresh _hcondInv _hbodyInv _hwellTy
-      _hdrop _hcondEntry _hbodyEntry ihCondInv _ihBodyInv _ihCondEntry
+      _hgenerated _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hnameFresh
+      _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
+      _ihGenerated ihCondInv _ihBodyInv _ihCondEntry
       _ihBodyEntry hsource _hborrowSafe
     exact ⟨(ihCondInv (SourceTerm.while_condition hsource) hbse).1,
       tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit⟩
@@ -1365,6 +1368,12 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
       _hterm _hrest _ihHead _ihRest hsource hborrowSafe
     have hhead := _ihHead (SourceTerm.block_head hsource) hborrowSafe
     exact _ihRest (SourceTerm.block_tail hsource) hhead.1
+  case done =>
+    intros
+    trivial
+  case step =>
+    intros
+    trivial
 
 end Paper
 end LwRust

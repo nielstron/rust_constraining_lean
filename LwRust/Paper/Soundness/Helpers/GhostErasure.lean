@@ -2114,6 +2114,19 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         (envOut.erase ghost) ∧
       Env.TypeNameFresh (envOut.erase ghost) ghost ∧
       ghost ∉ Ty.allVars ty)
+    (motive_3 := fun envEntry typing lifetime bodyLifetime condition body
+        current envInv envCond envBody envBack bodyTy _ =>
+      Env.TypeNameFresh (envEntry.erase ghost) ghost →
+      Env.TypeNameFresh (current.erase ghost) ghost →
+      StoreTyping.TypeNameFresh typing ghost →
+      ¬ Term.Mentions ghost condition →
+      ¬ Term.Mentions ghost body →
+      WhileFixpointIteration (envEntry.erase ghost) typing lifetime bodyLifetime
+        condition body (current.erase ghost) (envInv.erase ghost)
+        (envCond.erase ghost) (envBody.erase ghost) (envBack.erase ghost)
+        bodyTy ∧
+      Env.TypeNameFresh (envInv.erase ghost) ghost ∧
+      ghost ∉ Ty.allVars bodyTy)
     (by
       intro env typing lifetime value ty hvalue hfresh hstore _hnot
       exact ⟨TermTyping.const hvalue, hfresh,
@@ -2446,19 +2459,18 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ typing
         lifetime bodyLifetime condition body bodyTy bodyEntryTy hchild
-        hjoin hsameEntry hsameBack hcontained hcoherent hlinear hborrowSafe
-        hnameFresh hcondition hbody hbodyWell hdrop hentryCondition hentryBody
-        ihCondition ihBody ihEntryCondition ihEntryBody hfresh hstore hnot
+        hgenerated hjoin hsameEntry hsameBack hcontained hcoherent hlinear
+        hborrowSafe hnameFresh hcondition hbody hbodyWell hdrop
+        hentryCondition hentryBody ihGenerated ihCondition ihBody
+        ihEntryCondition ihEntryBody hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
         exact hnot (by simp [Term.Mentions, hmention])
       have hnotBody : ¬ Term.Mentions ghost body := by
         intro hmention
         exact hnot (by simp [Term.Mentions, hmention])
-      have hfreshInv : Env.TypeNameFresh (envInv.erase ghost) ghost := by
-        simpa [Env.eraseMany] using
-          hnameFresh [ghost] ghost (by simpa [Env.eraseMany] using hfresh)
-            hnotCondition hnotBody
+      rcases ihGenerated hfresh hfresh hstore hnotCondition hnotBody with
+        ⟨hgeneratedErased, hfreshInv, _hgeneratedBodyFresh⟩
       have hnameFreshErased :
           LoopInvariantNameFresh (env₁.erase ghost) (envInv.erase ghost)
             condition body := by
@@ -2482,6 +2494,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         rw [← Env.dropLifetime_erase env₃ ghost bodyLifetime]
         simpa [hdrop]
       exact ⟨TermTyping.whileLoop hchild
+        hgeneratedErased
         (EnvJoin.erase_ghost hjoin)
         (EnvJoinSameShape.erase_ghost hsameEntry)
         (EnvJoinSameShape.erase_ghost hsameBack)
@@ -2518,6 +2531,56 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         ⟨hrestErased, hfreshRest, hfinalFresh⟩
       exact ⟨TermListTyping.cons hheadErased hrestErased,
         hfreshRest, hfinalFresh⟩)
+    (by
+      intro envEntry envInv envCond envBody envBack typing lifetime
+        bodyLifetime condition body bodyTy hcondition hbody hbodyWell hdrop
+        hjoin hsameEntry hsameBack ihCondition ihBody hfreshEntry hfreshCurrent
+        hstore hnotCondition hnotBody
+      rcases ihCondition hfreshCurrent hstore hnotCondition with
+        ⟨hconditionErased, hfreshCond, _hboolFresh⟩
+      rcases ihBody hfreshCond hstore hnotBody with
+        ⟨hbodyErased, hfreshBody, hbodyFresh⟩
+      have hdropErased :
+          (envBody.erase ghost).dropLifetime bodyLifetime =
+            envBack.erase ghost := by
+        rw [← Env.dropLifetime_erase envBody ghost bodyLifetime]
+        simpa [hdrop]
+      exact ⟨WhileFixpointIteration.done hconditionErased hbodyErased
+        (WellFormedTy.erase_ghost hbodyWell hfreshBody hbodyFresh)
+        hdropErased (EnvJoin.erase_ghost hjoin)
+        (EnvJoinSameShape.erase_ghost hsameEntry)
+        (EnvJoinSameShape.erase_ghost hsameBack),
+        hfreshCurrent, hbodyFresh⟩)
+    (by
+      intro envEntry current next envInv envCond envBody envBack typing
+        lifetime bodyLifetime condition body bodyTy stepCond stepBody
+        stepBack stepTy hcondition hbody hbodyWell hdrop hjoin hsameEntry
+        hsameBack hiteration ihCondition ihBody ihIteration hfreshEntry
+        hfreshCurrent hstore hnotCondition hnotBody
+      rcases ihCondition hfreshCurrent hstore hnotCondition with
+        ⟨hconditionErased, hfreshCond, _hboolFresh⟩
+      rcases ihBody hfreshCond hstore hnotBody with
+        ⟨hbodyErased, hfreshBody, hstepTyFresh⟩
+      have hdropErased :
+          (stepBody.erase ghost).dropLifetime bodyLifetime =
+            stepBack.erase ghost := by
+        rw [← Env.dropLifetime_erase stepBody ghost bodyLifetime]
+        simpa [hdrop]
+      have hfreshBack : Env.TypeNameFresh (stepBack.erase ghost) ghost := by
+        rw [← hdrop]
+        simpa [Env.dropLifetime_erase stepBody ghost bodyLifetime] using
+          Env.typeNameFresh_dropLifetime hfreshBody
+      have hfreshNext : Env.TypeNameFresh (next.erase ghost) ghost :=
+        EnvJoin.typeNameFresh_erase hjoin hfreshEntry hfreshBack
+      rcases ihIteration hfreshEntry hfreshNext hstore hnotCondition hnotBody with
+        ⟨hiterationErased, hfreshInv, hbodyTyFresh⟩
+      exact ⟨WhileFixpointIteration.step hconditionErased hbodyErased
+        (WellFormedTy.erase_ghost hbodyWell hfreshBody hstepTyFresh)
+        hdropErased (EnvJoin.erase_ghost hjoin)
+        (EnvJoinSameShape.erase_ghost hsameEntry)
+        (EnvJoinSameShape.erase_ghost hsameBack)
+        hiterationErased,
+        hfreshInv, hbodyTyFresh⟩)
     htyping
 
 theorem TermTyping.erase_ghost {env envGhost : Env} {ghost : Name}

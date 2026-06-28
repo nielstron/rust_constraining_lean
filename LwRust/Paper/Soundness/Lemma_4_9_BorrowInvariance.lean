@@ -1066,6 +1066,12 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (motive_2 := fun env _t blockLifetime terms ty env₂ _ =>
       SourceTerm (.block blockLifetime terms) →
       TermListTyping env typing' blockLifetime terms ty env₂)
+    (motive_3 := fun envEntry _t lifetime bodyLifetime condition body
+        current envInv envCond envBody envBack bodyTy _ =>
+      SourceTerm condition →
+      SourceTerm body →
+      WhileFixpointIteration envEntry typing' lifetime bodyLifetime condition body
+        current envInv envCond envBody envBack bodyTy)
     (fun {_env _typing _lifetime value _ty} hvalueTyping hsource => by
       have hsourceValue : SourceValue value :=
         hsource value (by simp [termValues])
@@ -1117,10 +1123,13 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse hnameFresh _hcondInv _hbodyInv
-        hwellTy hdrop _hcondEntry _hbodyEntry
-        ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
-      TermTyping.whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hbse
+    (fun hchild _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse hnameFresh
+        _hcondInv _hbodyInv hwellTy hdrop _hcondEntry _hbodyEntry
+        ihGenerated ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
+      TermTyping.whileLoop hchild
+        (ihGenerated (SourceTerm.while_condition hsource)
+          (SourceTerm.while_body hsource))
+        hjoin hss1 hss2 hcbwf hcoh hlin hbse
         hnameFresh
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
@@ -1132,6 +1141,19 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun _hterm _hrest ihHead ihRest hsource =>
       TermListTyping.cons (ihHead (SourceTerm.block_head hsource))
         (ihRest (SourceTerm.block_tail hsource)))
+    (fun _hcondition _hbody hwell hdrop hjoin hsameEntry hsameBack
+        ihCondition ihBody hsourceCondition hsourceBody =>
+      WhileFixpointIteration.done
+        (ihCondition hsourceCondition)
+        (ihBody hsourceBody)
+        hwell hdrop hjoin hsameEntry hsameBack)
+    (fun _hcondition _hbody hwell hdrop hjoin hsameEntry hsameBack
+        _hiteration ihCondition ihBody ihIteration hsourceCondition hsourceBody =>
+      WhileFixpointIteration.step
+        (ihCondition hsourceCondition)
+        (ihBody hsourceBody)
+        hwell hdrop hjoin hsameEntry hsameBack
+        (ihIteration hsourceCondition hsourceBody))
     htyping hsource
 
 theorem LValTyping.containedBorrowTargetsWellFormed {env : Env} {lv : LVal}
@@ -3578,6 +3600,9 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           currentTyping = typing →
           WellFormedEnv env lifetime →
           WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+        (motive_3 := fun _envEntry _typing _lifetime _bodyLifetime _condition
+            _body _current _envInv _envCond _envBody _envBack _bodyTy _ =>
+          True)
         (fun {_env _typing _lifetime _value _ty} hvalueTyping _hsize
             htypingEq hwellFormed =>
           by
@@ -3723,9 +3748,10 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           ⟨conditionResult.1, WellFormedTy.unit⟩)
         (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
               _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-            _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hnameFresh _hcondInv
-            _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-            ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry hsize htypingEq
+            _hchild _hgenerated hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse
+            _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry
+            _hbodyEntry _ihGenerated ihCondInv _ihBodyInv _ihCondEntry
+            _ihBodyEntry hsize htypingEq
             hwellFormed =>
           let invWellFormed : WellFormedEnv _envInv _lifetime :=
             ⟨hcbwf,
@@ -3749,6 +3775,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           ihRest
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq headResult.1)
+        (by
+          intros
+          trivial)
+        (by
+          intros
+          trivial)
         htyping hsize rfl hwellFormed
 
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
@@ -3772,6 +3804,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       currentTyping = typing →
       WellFormedEnv env lifetime →
       WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime)
+    (motive_3 := fun _envEntry _typing _lifetime _bodyLifetime _condition
+        _body _current _envInv _envCond _envBody _envBack _bodyTy _ => True)
     (fun {_env _typing _lifetime _value _ty} hvalueTyping htypingEq
         hwellFormed =>
       by
@@ -3886,9 +3920,9 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       ⟨conditionResult.1, WellFormedTy.unit⟩)
     (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
           _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-        _hchild hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse _hnameFresh _hcondInv _hbodyInv
-        _hwellTy _hdrop _hcondEntry _hbodyEntry
-        ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
+        _hchild _hgenerated hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse
+        _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry
+        _hbodyEntry _ihGenerated ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
         htypingEq hwellFormed =>
       let invWellFormed : WellFormedEnv _envInv _lifetime :=
         ⟨hcbwf,
@@ -3904,6 +3938,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         _hterm _hrest ihHead ihRest htypingEq hwellFormed =>
       let headResult := ihHead htypingEq hwellFormed
       ihRest htypingEq headResult.1)
+    (by
+      intros
+      trivial)
+    (by
+      intros
+      trivial)
     htyping rfl hwellFormed
 
 theorem borrowInvariance_emptyStoreTyping {store : ProgramStore}

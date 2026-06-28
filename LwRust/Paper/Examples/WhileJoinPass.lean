@@ -1043,12 +1043,49 @@ theorem whileJoinBody_typing (targets : List LVal)
 
 /-! ### The loop typing -/
 
+theorem whileRetargetLoop_generatedInvariant :
+    GeneratedWhileInvariant whileJoinEntryEnv StoreTyping.empty Lifetime.root
+      whileJoinBodyLifetime whileJoinCondition whileJoinBody
+      whileJoinInvEnv whileJoinInvEnv whileJoinBackEnv whileJoinBackEnv
+      .unit := by
+  refine @WhileFixpointIteration.step
+    whileJoinEntryEnv whileJoinEntryEnv whileJoinInvEnv whileJoinInvEnv
+    whileJoinInvEnv whileJoinBackEnv whileJoinBackEnv
+    StoreTyping.empty Lifetime.root whileJoinBodyLifetime
+    whileJoinCondition whileJoinBody .unit
+    whileJoinEntryEnv whileJoinBackEnv whileJoinBackEnv .unit
+    ?entryCondition ?entryBody ?entryWell ?entryBack ?entryJoin
+    ?entrySameEntry ?entrySameBack ?fixed
+  · exact whileJoinCondition_typing [.var "x"] whileJoinEntry_deref_q_typing
+  · exact whileJoinBody_typing [.var "x"] whileJoinEntry_goodTargets
+  · exact WellFormedTy.unit
+  · exact whileJoinBack_dropLifetime
+  · exact whileJoin_envJoin
+  · exact whileJoinEntry_join_sameShape
+  · exact whileJoinBack_join_sameShape
+  · refine @WhileFixpointIteration.done
+      whileJoinEntryEnv whileJoinInvEnv whileJoinInvEnv whileJoinBackEnv
+      whileJoinBackEnv
+      StoreTyping.empty Lifetime.root whileJoinBodyLifetime
+      whileJoinCondition whileJoinBody .unit
+      ?fixedCondition ?fixedBody ?fixedWell ?fixedBack ?fixedJoin
+      ?fixedSameEntry ?fixedSameBack
+    · exact whileJoinCondition_typing [.var "x", .var "y"]
+        whileJoinInv_deref_q_typing
+    · exact whileJoinBody_typing [.var "x", .var "y"] whileJoinInv_goodTargets
+    · exact WellFormedTy.unit
+    · exact whileJoinBack_dropLifetime
+    · exact whileJoin_envJoin
+    · exact whileJoinEntry_join_sameShape
+    · exact whileJoinBack_join_sameShape
+
 theorem whileRetargetLoop_typing :
     TermTyping whileJoinEntryEnv StoreTyping.empty Lifetime.root
       whileRetargetLoop .unit whileJoinInvEnv := by
   unfold whileRetargetLoop
   exact TermTyping.whileLoop
     whileJoin_lifetimeChild
+    whileRetargetLoop_generatedInvariant
     whileJoin_envJoin
     whileJoinEntry_join_sameShape
     whileJoinBack_join_sameShape
