@@ -1095,10 +1095,10 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
       TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
         hfreshOut hcoh henv)
-    (fun _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained
-        hnotWrite ih hsource =>
+    (fun _hRhs hLhsPost hshape hwf hwrite hranked htargetsWellFormed hnotWrite
+        ih hsource =>
       TermTyping.assign (ih (SourceTerm.assign_inner hsource)) hLhsPost
-        hshape hwf hwrite hranked hcoh hcontained hnotWrite)
+        hshape hwf hwrite hranked htargetsWellFormed hnotWrite)
     (fun _hLhs hfresh htypeFresh htyFresh _hstoreFresh _hghostRhs hnotMention henvEq
         hcopyL hcopyR hshape ihL ihGhost hsource =>
       TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
@@ -1106,12 +1106,11 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihGhost (SourceTerm.eq_rhs hsource))
         hnotMention henvEq hcopyL hcopyR hshape)
     (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
-        hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
+        hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear hborrowSafe
-        hresultSafe)
+        hjoin henvJoin hsameLeft hsameRight hwellJoin hlinear hborrowSafe hresultSafe)
     (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
         hsource =>
       TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
@@ -1123,13 +1122,13 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse hnameFresh
+    (fun hchild _hgenerated hjoin hss1 hss2 hcbwf hlin hbse hnameFresh
         _hcondInv _hbodyInv hwellTy hdrop _hcondEntry _hbodyEntry
         ihGenerated ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
       TermTyping.whileLoop hchild
         (ihGenerated (SourceTerm.while_condition hsource)
           (SourceTerm.while_body hsource))
-        hjoin hss1 hss2 hcbwf hcoh hlin hbse
+        hjoin hss1 hss2 hcbwf hlin hbse
         hnameFresh
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
@@ -3659,7 +3658,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
               result.1 result.2 hfreshOut hcohObligations)
         (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs
               _oldTy _rhs _rhsTy}
-            hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+            hRhs _hLhsPost hshape hwellRhs hwrite hranked hrhsWF
             hnotWrite ih hsize htypingEq hwellFormed =>
           by
             let result := ih
@@ -3670,9 +3669,9 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             have hlin3By :=
               EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
                 hwrite hlinBy hbelow
-            have hcoh3 := hwriteCoh
+            have hcoh3 := hrhsWF
             have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
-              (Linearizable.of_linearizedBy hlin3By) hcontained hwrite hnotWrite
+              (Linearizable.of_linearizedBy hlin3By) hrhsWF hwrite hnotWrite
             exact ⟨⟨hcbwf3,
                 EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
                 hcoh3,
@@ -3712,7 +3711,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
         (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
               _trueBranch _falseBranch _trueTy _falseTy _joinTy}
             _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
-            hwellJoin hcoherent hlinear _hborrowSafe _hresultSafe
+            hwellJoin hlinear _hborrowSafe _hresultSafe
             ihCondition ihTrue ihFalse hsize htypingEq hwellFormed =>
           let conditionResult := ihCondition
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
@@ -3723,6 +3722,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           let falseResult := ihFalse
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq conditionResult.1
+          let hcoherent := trueResult.1.2.2.1
           ⟨⟨containedBorrowsWellFormed_join _henvJoin _hsameLeft _hsameRight
               trueResult.1.1 falseResult.1.1 hcoherent hlinear, by
               exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
@@ -3748,11 +3748,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           ⟨conditionResult.1, WellFormedTy.unit⟩)
         (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
               _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-            _hchild _hgenerated hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse
+            _hchild _hgenerated hjoin _hss1 _hss2 hcbwf hlin _hbse
             _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry
             _hbodyEntry _ihGenerated ihCondInv _ihBodyInv _ihCondEntry
             _ihBodyEntry hsize htypingEq
             hwellFormed =>
+          let hcoh := hwellFormed.2.2.1
           let invWellFormed : WellFormedEnv _envInv _lifetime :=
             ⟨hcbwf,
               EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
@@ -3854,8 +3855,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
-        hnotWrite ih
+        hRhs _hLhsPost hshape hwellRhs hwrite hranked hrhsWF hnotWrite ih
         htypingEq hwellFormed =>
       by
         let result := ih htypingEq hwellFormed
@@ -3864,9 +3864,9 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         have hlin3By :=
           EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
             hwrite hlinBy hbelow
-        have hcoh3 := hwriteCoh
+        have hcoh3 := hrhsWF
         have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
-          (Linearizable.of_linearizedBy hlin3By) hcontained hwrite hnotWrite
+          (Linearizable.of_linearizedBy hlin3By) hrhsWF hwrite hnotWrite
         exact ⟨⟨hcbwf3,
             EnvWrite.preserves_slotsOutlive result.1.2.1 hwrite,
             hcoh3,
@@ -3896,11 +3896,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
           _falseBranch _trueTy _falseTy _joinTy}
         _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
-        hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1
       let falseResult := ihFalse htypingEq conditionResult.1
+      let hcoherent := trueResult.1.2.2.1
       ⟨⟨containedBorrowsWellFormed_join _henvJoin _hsameLeft _hsameRight
           trueResult.1.1 falseResult.1.1 hcoherent hlinear, by
           exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
@@ -3920,10 +3921,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       ⟨conditionResult.1, WellFormedTy.unit⟩)
     (fun {_env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
           _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy}
-        _hchild _hgenerated hjoin _hss1 _hss2 hcbwf hcoh hlin _hbse
+        _hchild _hgenerated hjoin _hss1 _hss2 hcbwf hlin _hbse
         _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry
         _hbodyEntry _ihGenerated ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
         htypingEq hwellFormed =>
+      let hcoh := hwellFormed.2.2.1
       let invWellFormed : WellFormedEnv _envInv _lifetime :=
         ⟨hcbwf,
           EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1

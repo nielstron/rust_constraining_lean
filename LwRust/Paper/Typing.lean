@@ -1002,6 +1002,36 @@ def EnvWriteRhsBorrowTargetsBelow (φ : Name → Nat) (result : Env) (rhsTy : Ty
           targetOther ∈ rhsTargets) →
       x = y)
 
+/--
+Generated coherence evidence for assignment writes.
+
+This is not a typing premise.  It is the proof target for the algorithmic
+construction: old-root borrow typings in the result transport back to the
+pre-write environment, and written-root borrow typings supply their joint target
+typing directly in the result.
+-/
+structure EnvWriteCoherenceObligations
+    (env result : Env) (writeBase : Name) : Prop where
+  old_root_transport
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LVal.base lv ≠ writeBase →
+    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
+    (∃ oldBorrowLifetime,
+      LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime) ∧
+      (∀ targetTy targetLifetime,
+        LValTargetsTyping env targets (.ty targetTy) targetLifetime →
+        ∃ resultTargetTy resultTargetLifetime,
+          LValTargetsTyping result targets (.ty resultTargetTy)
+            resultTargetLifetime)
+  written_root_coherent
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
+    {borrowLifetime : Lifetime} :
+    LVal.base lv = writeBase →
+    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping result targets (.ty targetTy) targetLifetime
+
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
   ∃ x targets target,
@@ -1589,7 +1619,6 @@ mutual
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-        Coherent env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
@@ -1660,7 +1689,6 @@ mutual
         EnvJoinSameShape env₃ env₅ →
         EnvJoinSameShape env₄ env₅ →
         WellFormedTy env₅ joinTy lifetime →
-        Coherent env₅ →
         Linearizable env₅ →
         BorrowSafeEnv env₅ →
         TyBorrowSafeAgainstEnv env₅ joinTy →
@@ -1739,7 +1767,6 @@ mutual
         EnvJoinSameShape env₁ envInv →
         EnvJoinSameShape envBack envInv →
         ContainedBorrowsWellFormed envInv →
-        Coherent envInv →
         Linearizable envInv →
         BorrowSafeEnv envInv →
         LoopInvariantNameFresh env₁ envInv condition body →
@@ -1886,15 +1913,15 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcoherence
-        _hcontained _hnotWrite ih hfinite =>
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcontained
+        _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs
         _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
       rw [henvEq]
       exact (ihRhs (ihLhs hfinite).update).erase)
     (fun _hcondition _htrue _hfalse _htyJoin henvJoin _hsameLeft
-        _hsameRight _hwellTy _hcoherent _hlinear _hborrowSafe _htySafe
+        _hsameRight _hwellTy _hlinear _hborrowSafe _htySafe
         ihCondition ihTrue _ihFalse hfinite =>
       EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
@@ -1903,7 +1930,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
       ihCondition hfinite)
     (fun _hchild _hgenerated _hjoin _hsameEntry _hsameBack _hcontained
-        _hcoherent _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
+        _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
         _hwellTy _hback _hentryCondition _hentryBody ihGenerated ihCondition
         _ihBody _ihEntryCondition _ihEntryBody hfinite =>
       ihCondition (ihGenerated hfinite))

@@ -370,7 +370,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           exact extractTermStmts_typed hinit hinit'
   case ctermAssign_assignRhs hrhs =>
       cases htyped with
-      | assign hrhs' _ _ _ _ _ _ _ _ =>
+      | assign hrhs' _ _ _ _ _ _ _ =>
           simp only [extractTermStmts]
           exact extractTermStmts_typed hrhs hrhs'
   case ctermBox_boxOperand hoperand =>
@@ -484,7 +484,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
       cases htyped with
       | whileLoopDiverging hchild hcondition' hbody hdiverges =>
           exact extractTermStmts_typed hcondition hcondition'
-      | whileLoop hchild _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse
+      | whileLoop hchild _hgenerated hjoin hss1 hss2 hcbwf hlin hbse
           _hnameFresh hcondInv hbodyInv hwellTy hdropEq hcondEntry
           hbodyEntry =>
           exact extractTermStmts_typed hcondition hcondEntry
@@ -500,7 +500,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
         cases htyped with
         | whileLoopDiverging hchild hcondition' hbody' _ =>
             exact ⟨_, hchild, hcondition', _, _, hbody'⟩
-        | whileLoop hchild _ _ _ _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
+        | whileLoop hchild _ _ _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
             exact ⟨_, hchild, hcondEntry, _, _, hbodyEntry⟩
       simp only [extractTermStmts]
       cases body
