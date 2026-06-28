@@ -154,8 +154,8 @@ inductive CopyTy : Ty → Prop where
       CopyTy .int
   | bool :
       CopyTy .bool
-  | immBorrow {targets : List LVal} {pointee : Ty} :
-      CopyTy (.borrow false targets pointee)
+  | immBorrow {targets : List LVal} :
+      CopyTy (.borrow false targets)
 
 /-- Definition 3.7, type strengthening `T̃₁ ⊑ T̃₂`. -/
 inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
@@ -171,12 +171,10 @@ inductive PartialTyStrengthens : PartialTy → PartialTy → Prop where
       PartialTyStrengthens (.ty left) (.ty right) →
       PartialTyStrengthens (.ty (.box left)) (.ty (.box right))
   /-- W-Bor. -/
-  | borrow {mutable : Bool} {leftPointee rightPointee : Ty}
-      {leftTargets rightTargets : List LVal} :
+  | borrow {mutable : Bool} {leftTargets rightTargets : List LVal} :
       leftTargets.Subset rightTargets →
-      PartialTyStrengthens (.ty leftPointee) (.ty rightPointee) →
-      PartialTyStrengthens (.ty (.borrow mutable leftTargets leftPointee))
-        (.ty (.borrow mutable rightTargets rightPointee))
+      PartialTyStrengthens (.ty (.borrow mutable leftTargets))
+        (.ty (.borrow mutable rightTargets))
   /-- W-UndefA. -/
   | undefLeft {left right : Ty} :
       PartialTyStrengthens (.ty left) (.ty right) →
@@ -413,24 +411,21 @@ def LVal.base : LVal → Name
 
 /-- Variables occurring in live loans of a full type.
 
-For borrow types, only the target list contributes live loan variables.  The
-carried pointee type is an annotation used for dereference typing, not another
-owned value contained by the reference.
+For borrow types, the target list contributes the live loan variables.
 -/
 def Ty.vars : Ty → List Name
   | .unit => []
   | .int => []
   | .bool => []
-  | .borrow _ targets _pointee => targets.map LVal.base
+  | .borrow _ targets => targets.map LVal.base
   | .box inner => Ty.vars inner
 
-/-- Variables occurring anywhere in full-type annotations, including borrow
-pointee annotations. -/
+/-- Variables occurring anywhere in full-type annotations. -/
 def Ty.allVars : Ty → List Name
   | .unit => []
   | .int => []
   | .bool => []
-  | .borrow _ targets pointee => targets.map LVal.base ++ Ty.allVars pointee
+  | .borrow _ targets => targets.map LVal.base
   | .box inner => Ty.allVars inner
 
 mutual
@@ -445,29 +440,21 @@ mutual
         LValTyping env lv (.box inner) lifetime →
         LValTyping env (.deref lv) inner lifetime
     /--
-    T-LvBor.  The borrow type carries the pointee shape explicitly, while the
-    target list still provides the typing/lifetime evidence for reachable
-    dereferences.
+    T-LvBor.  If `w` has borrow type over target list `u`, then `*w` has the
+    finite union of the target types and the intersection/meet of their
+    lifetimes.
     -/
     | borrow {env : Env} {lv : LVal} {mutable : Bool} {targets : List LVal}
-        {pointee : Ty} {borrowLifetime targetLifetime : Lifetime} :
-        LValTyping env lv (.ty (.borrow mutable targets pointee)) borrowLifetime →
-        LValTargetsTyping env targets (.ty pointee) targetLifetime →
-        LValTyping env (.deref lv) (.ty pointee) targetLifetime
+        {borrowLifetime targetLifetime : Lifetime} {targetTy : PartialTy} :
+        LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
+        LValTargetsTyping env targets targetTy targetLifetime →
+        LValTyping env (.deref lv) targetTy targetLifetime
 
   /--
   The paper premise `Γ ⊢ u : ⟨⋃ᵢ Tᵢ⟩^(⋂ᵢ mᵢ)` for a finite, non-empty list
   of borrowed lvals.
   -/
   inductive LValTargetsTyping : Env → List LVal → PartialTy → Lifetime → Prop where
-    /--
-    Empty target sets are only useful for pointee types whose annotations mention
-    no program variables.  They model unreachable borrows such as `&mut[int] []`
-    without letting `&mut[&y] []` fabricate access to `y`.
-    -/
-    | empty {env : Env} {ty : Ty} :
-        Ty.allVars ty = [] →
-        LValTargetsTyping env [] (.ty ty) Lifetime.root
     | singleton {env : Env} {target : LVal} {ty : Ty} {lifetime : Lifetime} :
         LValTyping env target (.ty ty) lifetime →
         LValTargetsTyping env [target] (.ty ty) lifetime
@@ -697,9 +684,9 @@ mutual
     | unit => intro h; simpa [Ty.vars] using h
     | int => intro h; simpa [Ty.vars] using h
     | bool => intro h; simpa [Ty.vars] using h
-    | borrow mutable targets pointee =>
+    | borrow mutable targets =>
         intro h
-        exact List.mem_append_left _ h
+        simpa [Ty.vars, Ty.allVars] using h
     | box inner =>
         intro h
         exact Ty.vars_subset_allVars (ty := inner) (by simpa [Ty.vars] using h)
@@ -866,12 +853,12 @@ def Linearizable (env : Env) : Prop :=
   ∃ φ : Name → Nat, LinearizedBy φ env
 
 /-- Structural shape equality of full types, ignoring borrow *target lists* but
-keeping the `mutable` flag and carried pointee shape. -/
+keeping the `mutable` flag. -/
 def Ty.sameShape : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
   | .bool, .bool => True
-  | .borrow m₁ _ p₁, .borrow m₂ _ p₂ => m₁ = m₂ ∧ Ty.sameShape p₁ p₂
+  | .borrow m₁ _, .borrow m₂ _ => m₁ = m₂
   | .box t₁, .box t₂ => Ty.sameShape t₁ t₂
   | _, _ => False
 
@@ -882,15 +869,14 @@ def PartialTy.sameShape : PartialTy → PartialTy → Prop
   | .undef t₁, .undef t₂ => Ty.sameShape t₁ t₂
   | _, _ => False
 
-/-- Finer type equivalence than `sameShape`: structural, borrow target lists
-must be subset-equivalent (same set), and borrow pointee annotations are
-equivalent recursively. -/
+/-- Finer type equivalence than `sameShape`: structural, and borrow target
+lists must be subset-equivalent (same set). -/
 def Ty.eqv : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
   | .bool, .bool => True
-  | .borrow m₁ t₁ p₁, .borrow m₂ t₂ p₂ =>
-      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁ ∧ Ty.eqv p₁ p₂
+  | .borrow m₁ t₁, .borrow m₂ t₂ =>
+      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
   | .box t₁, .box t₂ => Ty.eqv t₁ t₂
   | _, _ => False
 
@@ -907,8 +893,8 @@ def PathConflicts (left right : LVal) : Prop :=
 
 infix:50 " ⋈ " => PathConflicts
 
-notation:max "&mut[" pointee "] " targets:max => Ty.borrow true targets pointee
-notation:max "&[" pointee "] " targets:max => Ty.borrow false targets pointee
+notation:max "&mut " targets:max => Ty.borrow true targets
+notation:max "&" targets:max => Ty.borrow false targets
 
 /-- Definition 3.15, type containment inside a variable slot. -/
 inductive PartialTyContains : PartialTy → Ty → Prop where
@@ -923,33 +909,32 @@ inductive PartialTyContains : PartialTy → Ty → Prop where
 
 theorem PartialTyContains.borrow_target_mem_allVars
     {partialTy : PartialTy} {mutable : Bool} {targets : List LVal}
-    {pointee : Ty} {target : LVal} :
-    PartialTyContains partialTy (.borrow mutable targets pointee) →
+    {target : LVal} :
+    PartialTyContains partialTy (.borrow mutable targets) →
     target ∈ targets →
     LVal.base target ∈ PartialTy.allVars partialTy := by
   intro hcontains htarget
   suffices hgeneral :
       ∀ {partialTy : PartialTy} {needle : Ty},
         PartialTyContains partialTy needle →
-        ∀ {mutable : Bool} {targets : List LVal} {pointee : Ty}
-          {target : LVal},
-          needle = .borrow mutable targets pointee →
+        ∀ {mutable : Bool} {targets : List LVal} {target : LVal},
+          needle = .borrow mutable targets →
           target ∈ targets →
           LVal.base target ∈ PartialTy.allVars partialTy by
     exact hgeneral hcontains rfl htarget
   intro partialTy needle hcontains
   induction hcontains with
   | here =>
-      intro mutable targets pointee target hneedle htarget
+      intro mutable targets target hneedle htarget
       subst hneedle
       simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-      exact Or.inl ⟨target, htarget, rfl⟩
+      exact ⟨target, htarget, rfl⟩
   | tyBox _hinner ih =>
-      intro mutable targets pointee target hneedle htarget
+      intro mutable targets target hneedle htarget
       simpa [PartialTy.allVars, Ty.allVars] using
         ih hneedle htarget
   | box _hinner ih =>
-      intro mutable targets pointee target hneedle htarget
+      intro mutable targets target hneedle htarget
       simpa [PartialTy.allVars] using ih hneedle htarget
 
 def EnvContains (env : Env) (x : Name) (ty : Ty) : Prop :=
@@ -960,31 +945,30 @@ notation:50 env:51 " ⊢ " x:51 " ↝ " ty:51 => EnvContains env x ty
 /--
 Coherence obligations for adding a fresh full-typed slot.
 
-This is currently carried by the declaration/result rules for the parts of the
-metatheory that still reason through target-list typings.  The refactored
-borrow type carries a pointee annotation separately, so these obligations should
-become candidates for removal as those proofs are simplified.
+This is deliberately carried by the declaration/result rules rather than
+derived from `WellFormedTy`: a declared borrow type must be lvalue-coherent,
+meaning its target list is jointly typeable.
 -/
 structure FreshUpdateCoherenceObligations
     (env : Env) (x : Name) (ty : Ty) (lifetime : Lifetime) : Prop where
   old_root_transport
-    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty}
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
     {borrowLifetime : Lifetime} :
     LVal.base lv ≠ x →
     LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
-      lv (.ty (.borrow mutable targets pointee)) borrowLifetime →
+      lv (.ty (.borrow mutable targets)) borrowLifetime →
     ∃ oldBorrowLifetime,
-      LValTyping env lv (.ty (.borrow mutable targets pointee)) oldBorrowLifetime
+      LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime
   fresh_root_coherent
-    {lv : LVal} {mutable : Bool} {targets : List LVal} {pointee : Ty}
+    {lv : LVal} {mutable : Bool} {targets : List LVal}
     {borrowLifetime : Lifetime} :
     LVal.base lv = x →
     LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
-      lv (.ty (.borrow mutable targets pointee)) borrowLifetime →
-    ∃ targetLifetime,
+      lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ targetTy targetLifetime,
       LValTargetsTyping
         (env.update x { ty := .ty ty, lifetime := lifetime })
-        targets (.ty pointee) targetLifetime
+        targets (.ty targetTy) targetLifetime
 
 /--
 Rank and RHS-fan-out safety obligation for assignment writes.
@@ -996,41 +980,40 @@ be within one root.  This is the explicit rule-side replacement for assuming
 that all environment writes preserve linearizability and borrow safety.
 -/
 def EnvWriteRhsBorrowTargetsBelow (φ : Name → Nat) (result : Env) (rhsTy : Ty) : Prop :=
-  (∀ x slot mutable targets pointee target,
+  (∀ x slot mutable targets target,
       result.slotAt x = some slot →
-      PartialTyContains slot.ty (.borrow mutable targets pointee) →
+      PartialTyContains slot.ty (.borrow mutable targets) →
       target ∈ targets →
-      (∃ rhsMutable rhsTargets rhsPointee,
-        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets rhsPointee) ∧
+      (∃ rhsMutable rhsTargets,
+        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
           target ∈ rhsTargets) →
       φ (LVal.base target) < φ x) ∧
-  (∀ x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
-      targetMutable targetOther,
-      result ⊢ x ↝ (.borrow true targetsMutable pointeeMutable) →
-      result ⊢ y ↝ (.borrow mutable targetsOther pointeeOther) →
+  (∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
+      result ⊢ x ↝ (.borrow true targetsMutable) →
+      result ⊢ y ↝ (.borrow mutable targetsOther) →
       targetMutable ∈ targetsMutable →
       targetOther ∈ targetsOther →
       targetMutable ⋈ targetOther →
-      (∃ rhsMutable rhsTargets rhsPointee,
-        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets rhsPointee) ∧
+      (∃ rhsMutable rhsTargets,
+        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
           targetMutable ∈ rhsTargets) →
-      (∃ rhsMutable rhsTargets rhsPointee,
-        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets rhsPointee) ∧
+      (∃ rhsMutable rhsTargets,
+        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
           targetOther ∈ rhsTargets) →
       x = y)
 
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
-  ∃ x targets pointee target,
-    env ⊢ x ↝ (.borrow true targets pointee) ∧
+  ∃ x targets target,
+    env ⊢ x ↝ (.borrow true targets) ∧
     target ∈ targets ∧
     target ⋈ lv
 
 /-- Definition 3.17, `writeProhibited(Γ, w)`. -/
 def WriteProhibited (env : Env) (lv : LVal) : Prop :=
   ReadProhibited env lv ∨
-  ∃ x targets pointee target,
-    env ⊢ x ↝ (.borrow false targets pointee) ∧
+  ∃ x targets target,
+    env ⊢ x ↝ (.borrow false targets) ∧
     target ∈ targets ∧
     target ⋈ lv
 
@@ -1063,9 +1046,8 @@ inductive Mutable : Env → LVal → Prop where
       LValTyping env lv (.box inner) lifetime →
       Mutable env lv →
       Mutable env (.deref lv)
-  | borrow {env : Env} {lv : LVal} {targets : List LVal} {pointee : Ty}
-      {lifetime : Lifetime} :
-      LValTyping env lv (.ty (.borrow true targets pointee)) lifetime →
+  | borrow {env : Env} {lv : LVal} {targets : List LVal} {lifetime : Lifetime} :
+      LValTyping env lv (.ty (.borrow true targets)) lifetime →
       (∀ target, target ∈ targets → Mutable env target) →
       Mutable env (.deref lv)
 
@@ -1104,18 +1086,18 @@ All borrow targets are well formed for the requested lifetime.
 
 This is the borrow invariant of Definition 4.8(i), stated faithfully **per
 target**: each individual target lval `w` is typable (`Γ ⊢ w : T^m`) with its
-own pointee type `T` and lifetime `m ≼ l`, plus the mechanisation's slot-survival
+own target type `T` and lifetime `m ≼ l`, plus the mechanisation's slot-survival
 component used by drop/update preservation.
 
 Note the deliberate separation from Definition 3.21 (`WellFormedTy`, the
 well-formed *type* judgement): the paper's `L-Borrow` premise `Γ ⊢ u : ⟨T⟩^m`
-types the whole target set *jointly* (one shared pointee type `T`).  That joint
+types the whole target set *jointly* (one shared target type `T`).  That joint
 typing is what the typing rules establish when a borrow is **created** (T-LvBor
 produces an `LValTargetsTyping`).  The well-formedness invariant that must be
 **preserved** through execution, however, is only the per-target statement of
 Definition 4.8(i).  Conflating the two — carrying the joint typing as the runtime
 invariant — is unsound at environment joins: rule W-Bor merges the target lists
-of two borrows (`&u₁ ⊔ &u₂ = &(u₁ ⊔ u₂)`) without requiring their pointee types
+of two borrows (`&u₁ ⊔ &u₂ = &(u₁ ⊔ u₂)`) without requiring their target types
 to join, so the merged list has no joint typing in general, yet each target
 retains its own per-target typing.  Keeping this predicate per-target is exactly
 what makes borrow invariance provable across joins. -/
@@ -1143,8 +1125,8 @@ def BorrowTargetsWellFormedInSlot
 /-- Slot-local borrow invariant for a partial type. -/
 def PartialTyBorrowsWellFormedInSlot
     (env : Env) (slotLifetime : Lifetime) (partialTy : PartialTy) : Prop :=
-  ∀ {mutable targets pointee},
-    PartialTyContains partialTy (.borrow mutable targets pointee) →
+  ∀ {mutable targets},
+    PartialTyContains partialTy (.borrow mutable targets) →
     BorrowTargetsWellFormedInSlot env slotLifetime targets
 
 /--
@@ -1154,7 +1136,7 @@ This is the strictly-weaker replacement for carrying the broad
 `ContainedBorrowsWellFormed` of the write result on `T-Assign`: only the borrow
 edges *installed from the RHS type* must be well formed against the slot they are
 injected into.  Each RHS-origin borrow target appearing in a result slot must
-outlive *that slot* (its pointee typeable with a lifetime `≤` the slot lifetime,
+outlive *that slot* (its target typeable with a lifetime `≤` the slot lifetime,
 plus the base-slot survival of Definition 4.8(i)).
 
 This is exactly what the broad result CBWF demands of the RHS-origin borrows; the
@@ -1168,12 +1150,12 @@ lifetime — see the deviation note in the README and the `example` below the ru
 This mirrors `EnvWriteRhsBorrowTargetsBelow`'s first conjunct, with a lifetime
 conclusion in place of the rank one. -/
 def EnvWriteRhsTargetsWellFormed (result : Env) (rhsTy : Ty) : Prop :=
-  ∀ x slot mutable targets pointee target,
+  ∀ x slot mutable targets target,
     result.slotAt x = some slot →
-    PartialTyContains slot.ty (.borrow mutable targets pointee) →
+    PartialTyContains slot.ty (.borrow mutable targets) →
     target ∈ targets →
-    (∃ rhsMutable rhsTargets rhsPointee,
-      PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets rhsPointee) ∧
+    (∃ rhsMutable rhsTargets,
+      PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
         target ∈ rhsTargets) →
     ∃ targetTy targetLifetime,
       LValTyping result target (.ty targetTy) targetLifetime ∧
@@ -1182,9 +1164,9 @@ def EnvWriteRhsTargetsWellFormed (result : Env) (rhsTy : Ty) : Prop :=
 
 /-- Every borrow contained in every environment slot has well-formed targets. -/
 def ContainedBorrowsWellFormed (env : Env) : Prop :=
-  ∀ x slot mutable targets pointee,
+  ∀ x slot mutable targets,
     env.slotAt x = some slot →
-    env ⊢ x ↝ (Ty.borrow mutable targets pointee) →
+    env ⊢ x ↝ (Ty.borrow mutable targets) →
     BorrowTargetsWellFormedInSlot env slot.lifetime targets
 
 /-- The minimal RHS-target obligation is (much) weaker than the broad result
@@ -1194,8 +1176,8 @@ the stronger fact. -/
 theorem EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
     {result : Env} {rhsTy : Ty} :
     ContainedBorrowsWellFormed result → EnvWriteRhsTargetsWellFormed result rhsTy := by
-  intro hcbwf x slot mutable targets pointee target hslot hcontains htarget _hrhs
-  exact (hcbwf x slot mutable targets pointee hslot ⟨slot, hslot, hcontains⟩) target htarget
+  intro hcbwf x slot mutable targets target hslot hcontains htarget _hrhs
+  exact (hcbwf x slot mutable targets hslot ⟨slot, hslot, hcontains⟩) target htarget
 
 /-- Definition 4.8(ii). Every environment slot lives at least as long as `lifetime`. -/
 def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=
@@ -1208,9 +1190,9 @@ Coherence of contained borrows: every borrow-typed lvalue has jointly typeable
 targets, which is what `T-LvBor` needs for reborrows.
 -/
 def Coherent (env : Env) : Prop :=
-  ∀ lv mutable targets pointee borrowLifetime,
-    LValTyping env lv (.ty (.borrow mutable targets pointee)) borrowLifetime →
-    ∃ lifetime, LValTargetsTyping env targets (.ty pointee) lifetime
+  ∀ lv mutable targets borrowLifetime,
+    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
 
 theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
     LinearizedBy φ env → Linearizable env := by
@@ -1234,10 +1216,9 @@ control-flow extension's `T-If` rule carries it as an obligation for the
 joined result environment; see `TermTyping.ite`.
 -/
 def BorrowSafeEnv (env : Env) : Prop :=
-  ∀ x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
-      targetMutable targetOther,
-    env ⊢ x ↝ (.borrow true targetsMutable pointeeMutable) →
-    env ⊢ y ↝ (Ty.borrow mutable targetsOther pointeeOther) →
+  ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
+    env ⊢ x ↝ (.borrow true targetsMutable) →
+    env ⊢ y ↝ (Ty.borrow mutable targetsOther) →
     targetMutable ∈ targetsMutable →
     targetOther ∈ targetsOther →
     targetMutable ⋈ targetOther →
@@ -1246,18 +1227,16 @@ def BorrowSafeEnv (env : Env) : Prop :=
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/
 def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
-  (∀ targetsMutable mutable targetsOther pointeeMutable pointeeOther x
-      targetMutable targetOther,
-    PartialTyContains (.ty ty) (.borrow true targetsMutable pointeeMutable) →
-    env ⊢ x ↝ Ty.borrow mutable targetsOther pointeeOther →
+  (∀ targetsMutable mutable targetsOther x targetMutable targetOther,
+    PartialTyContains (.ty ty) (.borrow true targetsMutable) →
+    env ⊢ x ↝ Ty.borrow mutable targetsOther →
     targetMutable ∈ targetsMutable →
     targetOther ∈ targetsOther →
     targetMutable ⋈ targetOther →
     False) ∧
-  (∀ x targetsMutable mutable targetsOther pointeeMutable pointeeOther
-      targetMutable targetOther,
-    env ⊢ x ↝ Ty.borrow true targetsMutable pointeeMutable →
-    PartialTyContains (.ty ty) (.borrow mutable targetsOther pointeeOther) →
+  (∀ x targetsMutable mutable targetsOther targetMutable targetOther,
+    env ⊢ x ↝ Ty.borrow true targetsMutable →
+    PartialTyContains (.ty ty) (.borrow mutable targetsOther) →
     targetMutable ∈ targetsMutable →
     targetOther ∈ targetsOther →
     targetMutable ⋈ targetOther →
@@ -1265,47 +1244,18 @@ def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
 
 /-- A type that contains no borrow type anywhere. -/
 def TyBorrowFree (ty : Ty) : Prop :=
-  ∀ mutable targets pointee,
-    ¬ PartialTyContains (.ty ty) (.borrow mutable targets pointee)
+  ∀ mutable targets, ¬ PartialTyContains (.ty ty) (.borrow mutable targets)
 
 def PartialTyBorrowFree (ty : PartialTy) : Prop :=
-  ∀ mutable targets pointee,
-    ¬ PartialTyContains ty (.borrow mutable targets pointee)
+  ∀ mutable targets, ¬ PartialTyContains ty (.borrow mutable targets)
 
-/-- A type whose contained borrows claim no variable names anywhere in their
-target annotations.  Carried by `T-Missing`: a placeholder typed at `&mut[int]
-[]` claims no loan on any existing place, while `&mut[&[int] [x]] []` is not
-loan-free because the unreachable annotation would still mention `x`. -/
+/-- A type whose contained borrows claim no loans.  With empty target lists
+disallowed, this is exactly borrow-freedom. -/
 def TyLoanFree (ty : Ty) : Prop :=
-  Ty.allVars ty = []
+  TyBorrowFree ty
 
 def PartialTyLoanFree (ty : PartialTy) : Prop :=
-  PartialTy.allVars ty = []
-
-theorem PartialTyLoanFree.empty_targets {partialTy : PartialTy}
-    {mutable : Bool} {targets : List LVal} {pointee : Ty} :
-    PartialTyLoanFree partialTy →
-    PartialTyContains partialTy (.borrow mutable targets pointee) →
-    targets = [] := by
-  intro hfree hcontains
-  cases targets with
-  | nil => rfl
-  | cons target rest =>
-      have hmem : LVal.base target ∈ PartialTy.allVars partialTy :=
-        PartialTyContains.borrow_target_mem_allVars hcontains (by simp)
-      rw [hfree] at hmem
-      cases hmem
-
-theorem TyLoanFree.empty_targets {ty : Ty}
-    {mutable : Bool} {targets : List LVal} {pointee : Ty} :
-    TyLoanFree ty →
-    PartialTyContains (.ty ty) (.borrow mutable targets pointee) →
-    targets = [] := by
-  intro hfree hcontains
-  exact PartialTyLoanFree.empty_targets
-    (partialTy := .ty ty)
-    (by simpa [TyLoanFree, PartialTyLoanFree, PartialTy.allVars] using hfree)
-    hcontains
+  PartialTyBorrowFree ty
 
 def EnvJoinSameShape (branch join : Env) : Prop :=
   ∀ x branchSlot joinSlot,
@@ -1400,9 +1350,9 @@ inductive WellFormedTy : Env → Ty → Lifetime → Prop where
       WellFormedTy env .bool lifetime
   /-- L-Borrow. -/
   | borrow {env : Env} {mutable : Bool} {targets : List LVal}
-      {pointee : Ty} {lifetime : Lifetime} :
+      {lifetime : Lifetime} :
       BorrowTargetsWellFormed env targets lifetime →
-      WellFormedTy env (.borrow mutable targets pointee) lifetime
+      WellFormedTy env (.borrow mutable targets) lifetime
   /-- L-Box. -/
   | box {env : Env} {ty : Ty} {lifetime : Lifetime} :
       WellFormedTy env ty lifetime →
@@ -1427,21 +1377,17 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
   | box {env : Env} {left right : PartialTy} :
       ShapeCompatible env left right →
       ShapeCompatible env (.box left) (.box right)
-  /-- S-Bor.
-
-  Definition 3.22 requires the borrow *pointee* types to be shape compatible,
-  not merely that each target is individually typeable.  Concretely all left
-  targets share a pointee type `leftTy`, all right targets share `rightTy`, and
-  `leftTy ≈ rightTy`.  Dropping the `ShapeCompatible env (.ty leftTy) (.ty
-  rightTy)` premise (as an earlier version did) makes `T-Assign` accept e.g.
-  `&mut &c ≈ &mut int`, after which a write-through-borrow weak update can build
-  the ill-formed type `&mut[a,b]` with non-joinable pointees — breaking
-  Borrow Invariance (Lemma 4.9). -/
+  /-- S-Bor.  Borrow shapes are compatible when their target-list output types
+  are shape-compatible in the current environment. -/
   | borrow {env : Env} {mutable : Bool} {leftTargets rightTargets : List LVal}
-      {leftPointee rightPointee : Ty} :
-      ShapeCompatible env (.ty leftPointee) (.ty rightPointee) →
-      ShapeCompatible env (.ty (.borrow mutable leftTargets leftPointee))
-        (.ty (.borrow mutable rightTargets rightPointee))
+      {leftTy rightTy : Ty} :
+      (∀ leftTarget, leftTarget ∈ leftTargets →
+        ∃ leftLifetime, LValTyping env leftTarget (.ty leftTy) leftLifetime) →
+      (∀ rightTarget, rightTarget ∈ rightTargets →
+        ∃ rightLifetime, LValTyping env rightTarget (.ty rightTy) rightLifetime) →
+      ShapeCompatible env (.ty leftTy) (.ty rightTy) →
+      ShapeCompatible env (.ty (.borrow mutable leftTargets))
+        (.ty (.borrow mutable rightTargets))
   /-- S-UndefL. -/
   | undefLeft {env : Env} {left : Ty} {right : PartialTy} :
       ShapeCompatible env (.ty left) right →
@@ -1455,32 +1401,6 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
 def prependPath : List Unit → LVal → LVal
   | [], lv => lv
   | _ :: path, lv => .deref (prependPath path lv)
-
-/--
-Pure type-level counterpart of `UpdateAtPath` for the pointee annotation stored
-inside a mutable borrow.
-
-`WriteBorrowTargets` performs the real environment fan-out.  This relation
-mirrors the same path update on the borrow's carried pointee type so rebuilt
-reborrows continue to describe the type of their targets after the fan-out.
--/
-inductive PointeeUpdateAtPath : Nat → Env → List Unit → Ty → Ty → Ty → Prop where
-  | strong {env : Env} {old ty : Ty} :
-      PointeeUpdateAtPath 0 env [] old ty ty
-  | weak {env : Env} {rank : Nat} {old joined ty : Ty} :
-      ShapeCompatible env (.ty old) (.ty ty) →
-      PartialTyJoin (.ty old) (.ty ty) (.ty joined) →
-      PointeeUpdateAtPath (rank + 1) env [] old ty joined
-  | box {env : Env} {rank : Nat} {path : List Unit}
-      {inner updatedInner ty : Ty} :
-      PointeeUpdateAtPath rank env path inner ty updatedInner →
-      PointeeUpdateAtPath rank env (() :: path) (.box inner) ty (.box updatedInner)
-  | mutBorrow {env : Env} {rank : Nat} {path : List Unit}
-      {targets : List LVal} {oldPointee updatedPointee ty : Ty} :
-      PointeeUpdateAtPath (rank + 1) env path oldPointee ty updatedPointee →
-      PointeeUpdateAtPath rank env (() :: path)
-        (.borrow true targets oldPointee) ty
-        (.borrow true targets updatedPointee)
 
 mutual
   /-- Definition 3.23, `update_k(Γ, π | T̃, T)`. -/
@@ -1496,11 +1416,10 @@ mutual
         UpdateAtPath rank env₁ path inner ty env₂ updatedInner →
         UpdateAtPath rank env₁ (() :: path) (.box inner) ty env₂ (.box updatedInner)
     | mutBorrow {env₁ env₂ : Env} {rank : Nat} {path : List Unit}
-        {targets : List LVal} {oldPointee updatedPointee ty : Ty} :
-        PointeeUpdateAtPath (rank + 1) env₁ path oldPointee ty updatedPointee →
+        {targets : List LVal} {ty : Ty} :
         WriteBorrowTargets (rank + 1) env₁ path targets ty env₂ →
-        UpdateAtPath rank env₁ (() :: path) (.ty (.borrow true targets oldPointee)) ty
-          env₂ (.ty (.borrow true targets updatedPointee))
+        UpdateAtPath rank env₁ (() :: path) (.ty (.borrow true targets)) ty
+          env₂ (.ty (.borrow true targets))
 
   /-- The joined environment from updating each possible target of a borrow.
 
@@ -1557,8 +1476,7 @@ theorem EnvWrite.finiteSupport {rank : Nat} {env result : Env}
     (fun {env rank old joined ty} _hshape _hjoin hfinite => hfinite)
     (fun {env₁ env₂ rank path inner updatedInner ty} _hupdate ih hfinite =>
       ih hfinite)
-    (fun {env₁ env₂ rank path targets oldPointee updatedPointee ty}
-        _hpointee _htargets ih hfinite =>
+    (fun {env₁ env₂ rank path targets ty} _htargets ih hfinite =>
       ih hfinite)
     (fun {rank env path ty} hfinite => hfinite)
     (fun {rank env updated path target ty} _hwrite _hleafTyping ih hfinite =>
@@ -1606,8 +1524,7 @@ mutual
         TermTyping env typing lifetime (.val value) ty env
     /-- T-Missing: synthetic extractor placeholder.  The loan-freedom premise
     keeps the placeholder from claiming a borrow of an existing place, which
-    would break borrow safety of the result environment;
-    borrow shapes themselves are allowed via empty target lists. -/
+    would break borrow safety of the result environment. -/
     | missing {env : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {ty : Ty} :
         WellFormedTy env ty lifetime →
@@ -1633,13 +1550,13 @@ mutual
         LValTyping env lv (.ty ty) valueLifetime →
         Mutable env lv →
         ¬ WriteProhibited env lv →
-        TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv] ty) env
+        TermTyping env typing lifetime (.borrow true lv) (.borrow true [lv]) env
     /-- T-ImmBorrow. -/
     | immBorrow {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
         LValTyping env lv (.ty ty) valueLifetime →
         ¬ ReadProhibited env lv →
-        TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv] ty) env
+        TermTyping env typing lifetime (.borrow false lv) (.borrow false [lv]) env
     /-- T-Box. -/
     | box {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {term : Term} {ty : Ty} :
@@ -1940,22 +1857,21 @@ theorem TermTyping.eq_finite {env₁ env₂ env₃ : Env}
 theorem BorrowSafeEnv.erase {env : Env} {ghost : Name} :
     BorrowSafeEnv env →
     BorrowSafeEnv (env.erase ghost) := by
-  intro hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
-    targetMutable targetOther hx hy htargetMutable htargetOther hconflict
+  intro hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
+    hx hy htargetMutable htargetOther hconflict
   rcases hx with ⟨xSlot, hxSlot, hxContains⟩
   rcases hy with ⟨ySlot, hySlot, hyContains⟩
-  have hxOrig : env ⊢ x ↝ (.borrow true targetsMutable pointeeMutable) := by
+  have hxOrig : env ⊢ x ↝ (.borrow true targetsMutable) := by
     by_cases hxGhost : x = ghost
     · subst hxGhost
       simp [Env.erase] at hxSlot
     · exact ⟨xSlot, by simpa [Env.erase, hxGhost] using hxSlot, hxContains⟩
-  have hyOrig : env ⊢ y ↝ (Ty.borrow mutable targetsOther pointeeOther) := by
+  have hyOrig : env ⊢ y ↝ (Ty.borrow mutable targetsOther) := by
     by_cases hyGhost : y = ghost
     · subst hyGhost
       simp [Env.erase] at hySlot
     · exact ⟨ySlot, by simpa [Env.erase, hyGhost] using hySlot, hyContains⟩
-  exact hsafe x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
-    targetMutable targetOther
+  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
     hxOrig hyOrig htargetMutable htargetOther hconflict
 
 end Paper

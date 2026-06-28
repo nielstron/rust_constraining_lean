@@ -42,7 +42,7 @@ mutual
   inductive Ty where
     | unit
     | int
-    | borrow (mutable : Bool) (targets : List LVal) (pointee : Ty)
+    | borrow (mutable : Bool) (targets : List LVal)
     | box (element : Ty)
     /-- Section 6.1 control-flow extension (Figure 5): Boolean type. -/
     | bool

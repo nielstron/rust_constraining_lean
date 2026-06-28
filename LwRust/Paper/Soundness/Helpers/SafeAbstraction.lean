@@ -31,12 +31,12 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
       ValidPartialValue store .undef (.undef ty)
   /-- V-Borrow. -/
   | borrow {store : ProgramStore} {location : Location} {mutable : Bool}
-      {targets : List LVal} {pointee : Ty} {target : LVal} :
+      {targets : List LVal} {target : LVal} :
       target ∈ targets →
       store.loc target = some location →
       ValidPartialValue store
         (.value (.ref { location := location, owner := false }))
-        (.ty (.borrow mutable targets pointee))
+        (.ty (.borrow mutable targets))
   /-- V-Box. -/
   | box {store : ProgramStore} {location : Location} {slot : StoreSlot}
       {inner : PartialTy} :
@@ -454,7 +454,7 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
     ValidPartialValue store value ty →
     (ty = .ty .unit ∨ ty = .ty .int ∨ ty = .ty .bool ∨
       (∃ inner, ty = .undef inner) ∨
-      ∃ mutable targets pointee, ty = .ty (.borrow mutable targets pointee)) →
+      ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner value := by
   intro hvalid hshape
   cases hvalid with
@@ -475,7 +475,7 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
       · cases hbool
       · rcases hundef with ⟨_inner, hundef⟩
         cases hundef
-      · rcases hborrow with ⟨_mutable, _targets, _pointee, hborrow⟩
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | boxFull =>
       rcases hshape with hunit | hint | hbool | hundef | hborrow
@@ -484,7 +484,7 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
       · cases hbool
       · rcases hundef with ⟨_inner, hundef⟩
         cases hundef
-      · rcases hborrow with ⟨_mutable, _targets, _pointee, hborrow⟩
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
 
 theorem validValue_owningLocation_allocated {store : ProgramStore}
@@ -591,16 +591,16 @@ infix:50 " ∼ₛ " => SafeAbstraction
 
 theorem SafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
-    {pointee : Ty} {location : Location} :
+    {location : Location} :
     store ∼ₛ env →
     env.slotAt x =
-      some { ty := .ty (.borrow mutable targets pointee), lifetime := lifetime } →
+      some { ty := .ty (.borrow mutable targets), lifetime := lifetime } →
     store.slotAt (VariableProjection x) =
       some (StoreSlot.mk
         (.value (.ref { location := location, owner := false })) lifetime) →
     ∃ target, target ∈ targets ∧ store.loc target = some location := by
   intro hsafe henv hstore
-  rcases hsafe.2 x { ty := .ty (.borrow mutable targets pointee), lifetime := lifetime }
+  rcases hsafe.2 x { ty := .ty (.borrow mutable targets), lifetime := lifetime }
       henv with
     ⟨value, hstoreAbstract, hvalid⟩
   have hslotEq :
@@ -615,10 +615,10 @@ theorem SafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
 
 theorem SafeAbstraction.borrow_read_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
-    {pointee : Ty} {location : Location} :
+    {location : Location} :
     store ∼ₛ env →
     env.slotAt x =
-      some { ty := .ty (.borrow mutable targets pointee), lifetime := lifetime } →
+      some { ty := .ty (.borrow mutable targets), lifetime := lifetime } →
     store.read (.var x) =
       some (StoreSlot.mk
         (.value (.ref { location := location, owner := false })) lifetime) →
@@ -942,7 +942,7 @@ theorem safeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
     store.read (.var x) = some oldSlot →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
       (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets pointee, envSlot.ty = .ty (.borrow mutable targets pointee)) →
+      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner oldSlot.value := by
   intro hsafe henv hread hshape
   rcases hsafe.2 x envSlot henv with ⟨safeValue, hstoreSlot, hvalid⟩

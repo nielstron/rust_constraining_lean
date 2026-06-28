@@ -182,7 +182,8 @@ section TypedExtraction
 open LwRust.Paper
 
 theorem tyLoanFree_unit : TyLoanFree .unit := by
-  simp [TyLoanFree, Ty.allVars]
+  intro mutable targets hcontains
+  cases hcontains
 
 /-- Sequential statement typing: `TermListTyping` without a result type, so
 that it also covers the empty statement run.  The statement extraction of a

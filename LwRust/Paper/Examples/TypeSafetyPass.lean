@@ -153,13 +153,13 @@ def pointerIfYSlot : EnvSlot :=
   { ty := .ty .int, lifetime := Lifetime.root }
 
 def pointerIfPXSlot : EnvSlot :=
-  { ty := .ty (.borrow true [.var "x"] .int), lifetime := Lifetime.root }
+  { ty := .ty (.borrow true [.var "x"]), lifetime := Lifetime.root }
 
 def pointerIfPYSlot : EnvSlot :=
-  { ty := .ty (.borrow true [.var "y"] .int), lifetime := Lifetime.root }
+  { ty := .ty (.borrow true [.var "y"]), lifetime := Lifetime.root }
 
 def pointerIfJoinPSlot : EnvSlot :=
-  { ty := .ty (.borrow true [.var "y", .var "x"] .int), lifetime := Lifetime.root }
+  { ty := .ty (.borrow true [.var "y", .var "x"]), lifetime := Lifetime.root }
 
 def pointerIfEnv : Env :=
   ((Env.empty.update "x" pointerIfXSlot).update "y" pointerIfYSlot).update
@@ -198,7 +198,7 @@ theorem pointerIf_y_typing :
 
 theorem pointerIf_p_typing :
     LValTyping pointerIfEnv (.var "p")
-      (.ty (.borrow true [.var "x"] .int)) Lifetime.root := by
+      (.ty (.borrow true [.var "x"])) Lifetime.root := by
   exact @LValTyping.var pointerIfEnv "p" pointerIfPXSlot (by
     simp [pointerIfEnv, pointerIfPXSlot, Env.update])
 
@@ -210,12 +210,12 @@ theorem pointerIf_deref_p_typing :
 theorem pointerIf_not_readProhibited_deref_p :
     ¬ ReadProhibited pointerIfEnv (.deref (.var "p")) := by
   intro hread
-  rcases hread with ⟨root, targets, pointee, target, hcontains, htarget,
+  rcases hread with ⟨root, targets, target, hcontains, htarget,
     hconflict⟩
   rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
   by_cases hroot : root = "p"
   · subst hroot
-    have hslotTy : slot.ty = .ty (.borrow true [.var "x"] .int) := by
+    have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
       simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
     rw [hslotTy] at hcontainsTy
@@ -267,12 +267,12 @@ theorem pointerIf_not_writeProhibited_y :
     ¬ WriteProhibited pointerIfEnv (.var "y") := by
   intro hwrite
   rcases hwrite with hread | himm
-  · rcases hread with ⟨root, targets, pointee, target, hcontains, htarget,
+  · rcases hread with ⟨root, targets, target, hcontains, htarget,
       hconflict⟩
     rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
     by_cases hp : root = "p"
     · subst hp
-      have hslotTy : slot.ty = .ty (.borrow true [.var "x"] .int) := by
+      have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
         simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
           (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
       rw [hslotTy] at hcontainsTy
@@ -301,12 +301,12 @@ theorem pointerIf_not_writeProhibited_y :
               Env.update, Env.empty, hp, hy, hx]
           rw [hslot] at hnone
           cases hnone
-  · rcases himm with ⟨root, targets, pointee, target, hcontains, htarget,
+  · rcases himm with ⟨root, targets, target, hcontains, htarget,
       hconflict⟩
     rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
     by_cases hp : root = "p"
     · subst hp
-      have hslotTy : slot.ty = .ty (.borrow true [.var "x"] .int) := by
+      have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
         simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
           (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
       rw [hslotTy] at hcontainsTy
@@ -344,12 +344,12 @@ theorem pointerIfRetarget_y_typing :
 
 theorem pointerIfRetarget_p_typing :
     LValTyping pointerIfRetargetEnv (.var "p")
-      (.ty (.borrow true [.var "y"] .int)) Lifetime.root := by
+      (.ty (.borrow true [.var "y"])) Lifetime.root := by
   exact @LValTyping.var pointerIfRetargetEnv "p" pointerIfPYSlot (by
     simp [pointerIfRetargetEnv, pointerIfPYSlot, Env.update])
 
 theorem pointerIf_borrow_y_wellFormed :
-    WellFormedTy pointerIfEnv (.borrow true [.var "y"] .int) Lifetime.root := by
+    WellFormedTy pointerIfEnv (.borrow true [.var "y"]) Lifetime.root := by
   exact WellFormedTy.borrow (BorrowTargetsWellFormed.intro (by
     intro target htarget
     simp at htarget
@@ -363,15 +363,24 @@ theorem pointerIf_borrow_y_wellFormed :
 
 theorem pointerIf_shape_px_py :
     ShapeCompatible pointerIfEnv
-      (.ty (.borrow true [.var "x"] .int)) (.ty (.borrow true [.var "y"] .int)) := by
-  exact ShapeCompatible.borrow ShapeCompatible.int
+      (.ty (.borrow true [.var "x"])) (.ty (.borrow true [.var "y"])) := by
+  exact ShapeCompatible.borrow
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, pointerIf_x_typing⟩)
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, pointerIf_y_typing⟩)
+    ShapeCompatible.int
 
 theorem pointerIf_retarget_write :
-    EnvWrite 0 pointerIfEnv (.var "p") (.borrow true [.var "y"] .int)
+    EnvWrite 0 pointerIfEnv (.var "p") (.borrow true [.var "y"])
       pointerIfRetargetEnv := by
   simpa [pointerIfRetargetEnv, pointerIfPYSlot, pointerIfPXSlot, LVal.base] using
     (@EnvWrite.intro 0 pointerIfEnv pointerIfEnv (.var "p")
-      pointerIfPXSlot (.borrow true [.var "y"] .int) (.ty (.borrow true [.var "y"] .int))
+      pointerIfPXSlot (.borrow true [.var "y"]) (.ty (.borrow true [.var "y"]))
       (by
         show pointerIfEnv.slotAt "p" = some pointerIfPXSlot
         simp [pointerIfEnv, pointerIfPXSlot, Env.update])
@@ -379,13 +388,13 @@ theorem pointerIf_retarget_write :
 
 theorem pointerIf_retarget_ranked :
     ∃ φ, LinearizedBy φ pointerIfEnv ∧
-      EnvWriteRhsBorrowTargetsBelow φ pointerIfRetargetEnv (.borrow true [.var "y"] .int) := by
+      EnvWriteRhsBorrowTargetsBelow φ pointerIfRetargetEnv (.borrow true [.var "y"]) := by
   let φ : Name → Nat := fun name => if name = "p" then 1 else 0
   refine ⟨φ, ?linearized, ?below⟩
   · intro root slot hslot v hv
     by_cases hp : root = "p"
     · subst hp
-      have hslotTy : slot.ty = .ty (.borrow true [.var "x"] .int) := by
+      have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
         simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
           (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
       rw [hslotTy] at hv
@@ -413,14 +422,13 @@ theorem pointerIf_retarget_ranked :
           rw [hslot] at hnone
           cases hnone
   · constructor
-    · intro root slot mutable targets pointee target hslot hcontains htarget hrhs
-      rcases hrhs with ⟨rhsMutable, rhsTargets, rhsPointee, hrhsContains,
-        hrhsTarget⟩
+    · intro root slot mutable targets target hslot hcontains htarget hrhs
+      rcases hrhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
       cases hrhsContains with
       | here =>
           by_cases hp : root = "p"
           · subst hp
-            have hslotTy : slot.ty = .ty (.borrow true [.var "y"] .int) := by
+            have hslotTy : slot.ty = .ty (.borrow true [.var "y"]) := by
               simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfPYSlot,
                 Env.update] using
                 (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
@@ -451,8 +459,7 @@ theorem pointerIf_retarget_ranked :
                     pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty, hp, hy, hx]
                 rw [hslot] at hnone
                 cases hnone
-    · intro root other mutable targetsMutable targetsOther pointeeMutable
-        pointeeOther targetMutable targetOther
+    · intro root other mutable targetsMutable targetsOther targetMutable targetOther
         hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
         _hrhsMutable _hrhsOther
       rcases hcontainsMutable with ⟨slot, hslot, hcontainsTy⟩
@@ -514,12 +521,12 @@ theorem pointerIfRetarget_not_writeProhibited_p :
     ¬ WriteProhibited pointerIfRetargetEnv (.var "p") := by
   intro hwrite
   rcases hwrite with hread | himm
-  · rcases hread with ⟨root, targets, pointee, target, hcontains, htarget,
+  · rcases hread with ⟨root, targets, target, hcontains, htarget,
       hconflict⟩
     rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
     by_cases hp : root = "p"
     · subst hp
-      have hslotTy : slot.ty = .ty (.borrow true [.var "y"] .int) := by
+      have hslotTy : slot.ty = .ty (.borrow true [.var "y"]) := by
         simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfPYSlot, Env.update] using
           (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
       rw [hslotTy] at hcontainsTy
@@ -549,12 +556,12 @@ theorem pointerIfRetarget_not_writeProhibited_p :
               pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty, hp, hy, hx]
           rw [hslot] at hnone
           cases hnone
-  · rcases himm with ⟨root, targets, pointee, target, hcontains, htarget,
+  · rcases himm with ⟨root, targets, target, hcontains, htarget,
       hconflict⟩
     rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
     by_cases hp : root = "p"
     · subst hp
-      have hslotTy : slot.ty = .ty (.borrow true [.var "y"] .int) := by
+      have hslotTy : slot.ty = .ty (.borrow true [.var "y"]) := by
         simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfPYSlot, Env.update] using
           (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
       rw [hslotTy] at hcontainsTy
@@ -583,11 +590,11 @@ theorem pointerIfRetarget_not_writeProhibited_p :
 
 theorem pointerIfEnv_contained :
     ContainedBorrowsWellFormed pointerIfEnv := by
-  intro root slot mutable targets pointee hslot hcontains
+  intro root slot mutable targets hslot hcontains
   rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
   by_cases hp : root = "p"
   · subst hp
-    have hcontainedTy : containedSlot.ty = .ty (.borrow true [.var "x"] .int) := by
+    have hcontainedTy : containedSlot.ty = .ty (.borrow true [.var "x"]) := by
       simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
           hcontainedSlot).symm
@@ -629,7 +636,7 @@ theorem pointerIfEnv_contained :
 theorem pointerIfRetarget_slot_borrows_wellFormed :
     PartialTyBorrowsWellFormedInSlot pointerIfRetargetEnv
       pointerIfPYSlot.lifetime pointerIfPYSlot.ty := by
-  intro mutable targets pointee hcontains
+  intro mutable targets hcontains
   cases hcontains with
   | here =>
       intro target htarget
@@ -703,12 +710,12 @@ theorem pointerIfRetarget_old_root_int : ∀ {lv partialTy lifetime},
             ⟨_, hpartialTy, _⟩
           cases hpartialTy
 
-theorem pointerIfRetarget_no_y_targets_borrow {mutable targets pointee lifetime} :
+theorem pointerIfRetarget_no_y_targets_borrow {mutable targets lifetime} :
     ¬ LValTargetsTyping pointerIfRetargetEnv [.var "y"]
-      (.ty (.borrow mutable targets pointee)) lifetime := by
+      (.ty (.borrow mutable targets)) lifetime := by
   intro htyping
   generalize hpartialTy :
-      (PartialTy.ty (Ty.borrow mutable targets pointee)) = partialTy at htyping
+      (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
   cases htyping with
   | singleton htarget =>
       rcases pointerIfRetarget_old_root_int (by simp [LVal.base]) htarget with
@@ -750,11 +757,11 @@ theorem pointerIfRetarget_p_root_facts : ∀ {lv},
     LVal.base lv = "p" →
     (∀ {inner lifetime},
       ¬ LValTyping pointerIfRetargetEnv lv (.box inner) lifetime) ∧
-    (∀ {mutable targets pointee lifetime},
+    (∀ {mutable targets lifetime},
       LValTyping pointerIfRetargetEnv lv
-        (.ty (.borrow mutable targets pointee)) lifetime →
+        (.ty (.borrow mutable targets)) lifetime →
       lv = .var "p" ∧ mutable = true ∧ targets = [.var "y"] ∧
-        pointee = .int ∧ lifetime = Lifetime.root) := by
+        lifetime = Lifetime.root) := by
   intro lv
   induction lv with
   | var x =>
@@ -775,9 +782,9 @@ theorem pointerIfRetarget_p_root_facts : ∀ {lv},
               Option.some.inj (hslot.symm.trans hslotExpected)
             subst slot
             simp [pointerIfPYSlot] at hpartialTy
-      · intro mutable targets pointee lifetime htyping
+      · intro mutable targets lifetime htyping
         generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable targets pointee)) = partialTy at htyping
+            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
         cases htyping with
         | var hslot =>
             rename_i slot
@@ -791,7 +798,7 @@ theorem pointerIfRetarget_p_root_facts : ∀ {lv},
               Option.some.inj (hslot.symm.trans hslotExpected)
             subst slot
             simp [pointerIfPYSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl, rfl⟩
+            rcases hpartialTy with ⟨rfl, rfl⟩
             simp [pointerIfPYSlot]
   | deref lv ih =>
       intro hbase
@@ -801,20 +808,23 @@ theorem pointerIfRetarget_p_root_facts : ∀ {lv},
         cases htyping with
         | box hinner =>
             exact ihp.1 hinner
-      · intro mutable targets pointee lifetime htyping
+        | borrow _hinner htargets =>
+            exact LValTargetsTyping.not_box htargets
+      · intro mutable targets lifetime htyping
         cases htyping with
         | box hinner =>
             exact False.elim (ihp.1 hinner)
         | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, _, hpointee, _⟩
-            cases hpointee
+            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
+            subst hinnerTargets
+            exact False.elim (pointerIfRetarget_no_y_targets_borrow htargets)
 
 theorem pointerIfRetarget_coherent : Coherent pointerIfRetargetEnv := by
-  intro lv mutable targets pointee borrowLifetime htyping
+  intro lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIfRetarget_p_root_facts hbase).2 htyping with
-      ⟨rfl, rfl, rfl, rfl, rfl⟩
-    exact ⟨Lifetime.root,
+      ⟨rfl, rfl, rfl, rfl⟩
+    exact ⟨.int, Lifetime.root,
       LValTargetsTyping.singleton pointerIfRetarget_y_typing⟩
   · rcases pointerIfRetarget_old_root_int hbase htyping with
       ⟨_, hpartialTy, _⟩
@@ -858,38 +868,26 @@ theorem pointerIf_write_deref_p :
       LVal.path] using
     (@EnvWrite.intro 0 pointerIfEnv (pointerIfEnv.update "x" pointerIfXSlot)
       (.deref (.var "p")) pointerIfPXSlot .int
-      (.ty (.borrow true [.var "x"] .int))
+      (.ty (.borrow true [.var "x"]))
       (by
         show pointerIfEnv.slotAt "p" = some pointerIfPXSlot
         simp [pointerIfEnv, pointerIfPXSlot, Env.update])
       (@UpdateAtPath.mutBorrow pointerIfEnv
-        (pointerIfEnv.update "x" pointerIfXSlot) 0 [] [.var "x"] .int .int
-        .int
-        (PointeeUpdateAtPath.weak ShapeCompatible.int
-          (PartialTyJoin.self (.ty .int)))
+        (pointerIfEnv.update "x" pointerIfXSlot) 0 [] [.var "x"] .int
         htargets))
 
-/-- Regression for reborrow-chain writes: updating through
-`a : &mut[b] (&mut[x] int)` with RHS `&mut[c] int` rebuilds `a` as
-`&mut[b] (&mut[x,c] int)`, not as a stale `&mut[b] (&mut[x] int)`. -/
-theorem reborrowChain_updateAtPath_updates_outer_pointee {env result : Env}
-    (hshape : ShapeCompatible env
-      (.ty (.borrow true [.var "x"] .int))
-      (.ty (.borrow true [.var "c"] .int)))
-    (hjoin : PartialTyJoin
-      (.ty (.borrow true [.var "x"] .int))
-      (.ty (.borrow true [.var "c"] .int))
-      (.ty (.borrow true [.var "x", .var "c"] .int)))
+/-- Regression for reborrow-chain writes after removing borrow target annotations:
+the outer borrow target list is preserved while the write is fanned out through
+the selected target. -/
+theorem reborrowChain_updateAtPath_preserves_outer_targets {env result : Env}
     (hwrites : WriteBorrowTargets 1 env [] [.var "b"]
-      (.borrow true [.var "c"] .int) result) :
+      (.borrow true [.var "c"]) result) :
     UpdateAtPath 0 env [()]
-      (.ty (.borrow true [.var "b"] (.borrow true [.var "x"] .int)))
-      (.borrow true [.var "c"] .int)
+      (.ty (.borrow true [.var "b"]))
+      (.borrow true [.var "c"])
       result
-      (.ty (.borrow true [.var "b"] (.borrow true [.var "x", .var "c"] .int))) := by
-  exact UpdateAtPath.mutBorrow
-    (PointeeUpdateAtPath.weak hshape hjoin)
-    hwrites
+      (.ty (.borrow true [.var "b"])) := by
+  exact UpdateAtPath.mutBorrow hwrites
 
 theorem pointerIf_write_ranked :
     ∃ φ, LinearizedBy φ pointerIfEnv ∧
@@ -897,16 +895,13 @@ theorem pointerIf_write_ranked :
   refine ⟨pointerIf_retarget_ranked.choose,
     pointerIf_retarget_ranked.choose_spec.1, ?below⟩
   · constructor
-    · intro root slot mutable targets pointee target hslot hcontains _htarget hrhs
-      rcases hrhs with ⟨rhsMutable, rhsTargets, rhsPointee, hrhsContains,
-        _hrhsTarget⟩
+    · intro root slot mutable targets target hslot hcontains _htarget hrhs
+      rcases hrhs with ⟨rhsMutable, rhsTargets, hrhsContains, _hrhsTarget⟩
       cases hrhsContains
-    · intro root other mutable targetsMutable targetsOther pointeeMutable
-        pointeeOther targetMutable targetOther
+    · intro root other mutable targetsMutable targetsOther targetMutable targetOther
         hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
         hrhsMutable _hrhsOther
-      rcases hrhsMutable with ⟨rhsMutable, rhsTargets, rhsPointee, hrhsContains,
-        _hrhsTarget⟩
+      rcases hrhsMutable with ⟨rhsMutable, rhsTargets, hrhsContains, _hrhsTarget⟩
       cases hrhsContains
 
 theorem pointerIf_old_root_int : ∀ {lv partialTy lifetime},
@@ -958,12 +953,12 @@ theorem pointerIf_old_root_int : ∀ {lv partialTy lifetime},
             ⟨_, hpartialTy, _⟩
           cases hpartialTy
 
-theorem pointerIf_no_x_targets_borrow {mutable targets pointee lifetime} :
+theorem pointerIf_no_x_targets_borrow {mutable targets lifetime} :
     ¬ LValTargetsTyping pointerIfEnv [.var "x"]
-      (.ty (.borrow mutable targets pointee)) lifetime := by
+      (.ty (.borrow mutable targets)) lifetime := by
   intro htyping
   generalize hpartialTy :
-      (PartialTy.ty (Ty.borrow mutable targets pointee)) = partialTy at htyping
+      (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
   cases htyping with
   | singleton htarget =>
       rcases pointerIf_old_root_int (by simp [LVal.base]) htarget with
@@ -1003,10 +998,10 @@ theorem pointerIf_no_x_targets_box {inner lifetime} :
 theorem pointerIf_p_root_facts : ∀ {lv},
     LVal.base lv = "p" →
     (∀ {inner lifetime}, ¬ LValTyping pointerIfEnv lv (.box inner) lifetime) ∧
-    (∀ {mutable targets pointee lifetime},
-      LValTyping pointerIfEnv lv (.ty (.borrow mutable targets pointee)) lifetime →
+    (∀ {mutable targets lifetime},
+      LValTyping pointerIfEnv lv (.ty (.borrow mutable targets)) lifetime →
       lv = .var "p" ∧ mutable = true ∧ targets = [.var "x"] ∧
-        pointee = .int ∧ lifetime = Lifetime.root) := by
+        lifetime = Lifetime.root) := by
   intro lv
   induction lv with
   | var x =>
@@ -1025,9 +1020,9 @@ theorem pointerIf_p_root_facts : ∀ {lv},
               Option.some.inj (hslot.symm.trans hslotExpected)
             subst slot
             simp [pointerIfPXSlot] at hpartialTy
-      · intro mutable targets pointee lifetime htyping
+      · intro mutable targets lifetime htyping
         generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable targets pointee)) = partialTy at htyping
+            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
         cases htyping with
         | var hslot =>
             rename_i slot
@@ -1039,7 +1034,7 @@ theorem pointerIf_p_root_facts : ∀ {lv},
               Option.some.inj (hslot.symm.trans hslotExpected)
             subst slot
             simp [pointerIfPXSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl, rfl⟩
+            rcases hpartialTy with ⟨rfl, rfl⟩
             simp [pointerIfPXSlot]
   | deref lv ih =>
       intro hbase
@@ -1049,20 +1044,23 @@ theorem pointerIf_p_root_facts : ∀ {lv},
         cases htyping with
         | box hinner =>
             exact ihp.1 hinner
-      · intro mutable targets pointee lifetime htyping
+        | borrow _hinner htargets =>
+            exact LValTargetsTyping.not_box htargets
+      · intro mutable targets lifetime htyping
         cases htyping with
         | box hinner =>
             exact False.elim (ihp.1 hinner)
         | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, _, hpointee, _⟩
-            cases hpointee
+            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
+            subst hinnerTargets
+            exact False.elim (pointerIf_no_x_targets_borrow htargets)
 
 theorem pointerIf_coherent : Coherent pointerIfEnv := by
-  intro lv mutable targets pointee borrowLifetime htyping
+  intro lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIf_p_root_facts hbase).2 htyping with
-      ⟨rfl, rfl, rfl, rfl, rfl⟩
-    exact ⟨Lifetime.root, LValTargetsTyping.singleton pointerIf_x_typing⟩
+      ⟨rfl, rfl, rfl, rfl⟩
+    exact ⟨.int, Lifetime.root, LValTargetsTyping.singleton pointerIf_x_typing⟩
   · rcases pointerIf_old_root_int hbase htyping with ⟨_, hpartialTy, _⟩
     cases hpartialTy
 
@@ -1095,12 +1093,12 @@ theorem pointerIf_not_writeProhibited_deref_p :
   rcases hwrite with hread | himm
   · exact pointerIf_not_readProhibited_deref_p (by
       simpa using hread)
-  · rcases himm with ⟨root, targets, pointee, target, hcontains, htarget,
+  · rcases himm with ⟨root, targets, target, hcontains, htarget,
       hconflict⟩
     rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
     by_cases hp : root = "p"
     · subst hp
-      have hslotTy : slot.ty = .ty (.borrow true [.var "x"] .int) := by
+      have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
         simpa [pointerIfWriteEnv, pointerIfEnv, pointerIfPXSlot, Env.update] using
           (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
       rw [hslotTy] at hcontainsTy
@@ -1148,11 +1146,10 @@ the appended target list still strengthens into it.  This is the least-upper-
 bound argument for the `p` slot of the branch join. -/
 theorem partialTyStrengthens_borrow_append {mutable : Bool}
     {leftTargets rightTargets : List LVal}
-    {pointee : Ty}
     {joined : PartialTy}
-    (hleft : PartialTyStrengthens (.ty (.borrow mutable leftTargets pointee)) joined)
-    (hright : PartialTyStrengthens (.ty (.borrow mutable rightTargets pointee)) joined) :
-    PartialTyStrengthens (.ty (.borrow mutable (leftTargets ++ rightTargets) pointee))
+    (hleft : PartialTyStrengthens (.ty (.borrow mutable leftTargets)) joined)
+    (hright : PartialTyStrengthens (.ty (.borrow mutable rightTargets)) joined) :
+    PartialTyStrengthens (.ty (.borrow mutable (leftTargets ++ rightTargets)))
       joined := by
   cases hleft with
   | reflex =>
@@ -1161,17 +1158,17 @@ theorem partialTyStrengthens_borrow_append {mutable : Bool}
         intro target htarget
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hmem
-        · exact hsubRight hmem) PartialTyStrengthens.reflex
-  | borrow hsubLeft hpointeeLeft =>
+        · exact hsubRight hmem)
+  | borrow hsubLeft =>
       have hsubRight := PartialTyStrengthens.borrow_subset hright
       exact PartialTyStrengthens.borrow (by
         intro target htarget
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hsubLeft hmem
-        · exact hsubRight hmem) hpointeeLeft
+        · exact hsubRight hmem)
   | intoUndef hinner =>
       rcases PartialTyStrengthens.from_borrow_inv hinner with
-        ⟨targetTargets, targetPointee, htargetEq, hsubLeft, hpointeeLeft⟩
+        ⟨targetTargets, htargetEq, hsubLeft⟩
       cases htargetEq
       have hsubRight : rightTargets ⊆ targetTargets := by
         cases hright with
@@ -1180,7 +1177,7 @@ theorem partialTyStrengthens_borrow_append {mutable : Bool}
         intro target htarget
         rcases List.mem_append.mp htarget with hmem | hmem
         · exact hsubLeft hmem
-        · exact hsubRight hmem) hpointeeLeft)
+        · exact hsubRight hmem))
 
 theorem pointerIfJoin_x_typing :
     LValTyping pointerIfJoinEnv (.var "x") (.ty .int) Lifetime.root := by
@@ -1244,12 +1241,12 @@ theorem pointerIfJoin_old_root_int : ∀ {lv partialTy lifetime},
             ⟨_, hpartialTy, _⟩
           cases hpartialTy
 
-theorem pointerIfJoin_no_targets_borrow {mutable targets pointee lifetime} :
+theorem pointerIfJoin_no_targets_borrow {mutable targets lifetime} :
     ¬ LValTargetsTyping pointerIfJoinEnv [.var "y", .var "x"]
-      (.ty (.borrow mutable targets pointee)) lifetime := by
+      (.ty (.borrow mutable targets)) lifetime := by
   intro htyping
   generalize hpartialTy :
-      (PartialTy.ty (Ty.borrow mutable targets pointee)) = partialTy at htyping
+      (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
   cases htyping with
   | cons hhead _hrest hunion _hlifetime =>
       rcases pointerIfJoin_old_root_int (by simp [LVal.base]) hhead with
@@ -1281,11 +1278,11 @@ theorem pointerIfJoin_p_root_facts : ∀ {lv},
     LVal.base lv = "p" →
     (∀ {inner lifetime},
       ¬ LValTyping pointerIfJoinEnv lv (.box inner) lifetime) ∧
-    (∀ {mutable targets pointee lifetime},
+    (∀ {mutable targets lifetime},
       LValTyping pointerIfJoinEnv lv
-        (.ty (.borrow mutable targets pointee)) lifetime →
+        (.ty (.borrow mutable targets)) lifetime →
       lv = .var "p" ∧ mutable = true ∧ targets = [.var "y", .var "x"] ∧
-        pointee = .int ∧ lifetime = Lifetime.root) := by
+        lifetime = Lifetime.root) := by
   intro lv
   induction lv with
   | var x =>
@@ -1305,9 +1302,9 @@ theorem pointerIfJoin_p_root_facts : ∀ {lv},
               Option.some.inj (hslot.symm.trans hslotExpected)
             subst slot
             simp [pointerIfJoinPSlot] at hpartialTy
-      · intro mutable targets pointee lifetime htyping
+      · intro mutable targets lifetime htyping
         generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable targets pointee)) = partialTy at htyping
+            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
         cases htyping with
         | var hslot =>
             rename_i slot
@@ -1320,7 +1317,7 @@ theorem pointerIfJoin_p_root_facts : ∀ {lv},
               Option.some.inj (hslot.symm.trans hslotExpected)
             subst slot
             simp [pointerIfJoinPSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl, rfl⟩
+            rcases hpartialTy with ⟨rfl, rfl⟩
             simp [pointerIfJoinPSlot]
   | deref lv ih =>
       intro hbase
@@ -1330,20 +1327,23 @@ theorem pointerIfJoin_p_root_facts : ∀ {lv},
         cases htyping with
         | box hinner =>
             exact ihp.1 hinner
-      · intro mutable targets pointee lifetime htyping
+        | borrow _hinner htargets =>
+            exact LValTargetsTyping.not_box htargets
+      · intro mutable targets lifetime htyping
         cases htyping with
         | box hinner =>
             exact False.elim (ihp.1 hinner)
         | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, _, hpointee, _⟩
-            cases hpointee
+            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
+            subst hinnerTargets
+            exact False.elim (pointerIfJoin_no_targets_borrow htargets)
 
 theorem pointerIfJoin_coherent : Coherent pointerIfJoinEnv := by
-  intro lv mutable targets pointee borrowLifetime htyping
+  intro lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIfJoin_p_root_facts hbase).2 htyping with
-      ⟨rfl, rfl, rfl, rfl, rfl⟩
-    exact ⟨Lifetime.root,
+      ⟨rfl, rfl, rfl, rfl⟩
+    exact ⟨.int, Lifetime.root,
       LValTargetsTyping.cons pointerIfJoin_y_typing
         (LValTargetsTyping.singleton pointerIfJoin_x_typing)
         (PartialTyUnion.self (.ty .int))
@@ -1353,7 +1353,7 @@ theorem pointerIfJoin_coherent : Coherent pointerIfJoinEnv := by
 
 theorem pointerIfJoin_contained :
     ContainedBorrowsWellFormed pointerIfJoinEnv := by
-  intro root slot mutable targets pointee hslot hcontains
+  intro root slot mutable targets hslot hcontains
   rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
   by_cases hp : root = "p"
   · subst hp
@@ -1364,7 +1364,7 @@ theorem pointerIfJoin_contained :
       Option.some.inj (hslot.symm.trans hslotExpected)
     subst slot
     have hcontainedTy :
-        containedSlot.ty = .ty (.borrow true [.var "y", .var "x"] .int) := by
+        containedSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
       simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
           hcontainedSlot).symm
@@ -1414,7 +1414,7 @@ theorem pointerIfJoin_linearizable : Linearizable pointerIfJoinEnv := by
   intro root slot hslot v hv
   by_cases hp : root = "p"
   · subst hp
-    have hslotTy : slot.ty = .ty (.borrow true [.var "y", .var "x"] .int) := by
+    have hslotTy : slot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
       simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
     rw [hslotTy] at hv
@@ -1442,10 +1442,10 @@ theorem pointerIfJoin_linearizable : Linearizable pointerIfJoinEnv := by
         cases hnone
 
 theorem pointerIfJoin_borrowSafe : BorrowSafeEnv pointerIfJoinEnv := by
-  have hroot : ∀ root mutable targets pointee,
-      (pointerIfJoinEnv ⊢ root ↝ (Ty.borrow mutable targets pointee)) →
+  have hroot : ∀ root mutable targets,
+      (pointerIfJoinEnv ⊢ root ↝ (Ty.borrow mutable targets)) →
       root = "p" := by
-    intro root mutable targets pointee hcontains
+    intro root mutable targets hcontains
     rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
     by_cases hp : root = "p"
     · exact hp
@@ -1471,11 +1471,10 @@ theorem pointerIfJoin_borrowSafe : BorrowSafeEnv pointerIfJoinEnv := by
             simp [pointerIfJoinEnv, Env.update, Env.empty, hp, hy, hx]
           rw [hslot] at hnone
           cases hnone
-  intro x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
-    targetMutable targetOther
+  intro x y mutable targetsMutable targetsOther targetMutable targetOther
     hcontainsMutable hcontainsOther _htargetMutable _htargetOther _hconflict
-  rw [hroot x true targetsMutable pointeeMutable hcontainsMutable,
-    hroot y mutable targetsOther pointeeOther hcontainsOther]
+  rw [hroot x true targetsMutable hcontainsMutable,
+    hroot y mutable targetsOther hcontainsOther]
 
 theorem pointerIfRetarget_le_join :
     EnvStrengthens pointerIfRetargetEnv pointerIfJoinEnv := by
@@ -1491,7 +1490,7 @@ theorem pointerIfRetarget_le_join :
       simp at htarget
       subst htarget
       simp
-    exact ⟨rfl, PartialTyStrengthens.borrow hsub PartialTyStrengthens.reflex⟩
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
   · by_cases hy : name = "y"
     · subst hy
       rw [show pointerIfRetargetEnv.slotAt "y" = some pointerIfYSlot by
@@ -1532,7 +1531,7 @@ theorem pointerIfWrite_le_join :
       simp at htarget
       subst htarget
       simp
-    exact ⟨rfl, PartialTyStrengthens.borrow hsub PartialTyStrengthens.reflex⟩
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
   · by_cases hy : name = "y"
     · subst hy
       rw [show pointerIfEnv.slotAt "y" = some pointerIfYSlot by
@@ -1576,12 +1575,12 @@ theorem pointerIfJoin_least {env' : Env}
     subst hslotEq
     rw [show pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot by
         simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update], hslotX]
-    have hY : PartialTyStrengthens (.ty (.borrow true [.var "y"] .int)) slotX.ty :=
+    have hY : PartialTyStrengthens (.ty (.borrow true [.var "y"])) slotX.ty :=
       hstrY
-    have hX : PartialTyStrengthens (.ty (.borrow true [.var "x"] .int)) slotX.ty :=
+    have hX : PartialTyStrengthens (.ty (.borrow true [.var "x"])) slotX.ty :=
       hstrX
     have hYX : PartialTyStrengthens
-        (.ty (.borrow true ([.var "y"] ++ [.var "x"]) .int)) slotX.ty :=
+        (.ty (.borrow true ([.var "y"] ++ [.var "x"]))) slotX.ty :=
       partialTyStrengthens_borrow_append hY hX
     exact ⟨hlife, by simpa [pointerIfJoinPSlot] using hYX⟩
   · by_cases hy : name = "y"
@@ -1639,10 +1638,10 @@ theorem pointerIfRetarget_join_sameShape :
   intro name branchSlot joinSlot hbranch hjoin
   by_cases hp : name = "p"
   · subst hp
-    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "y"] .int) := by
+    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "y"]) := by
       simpa [pointerIfRetargetEnv, pointerIfPYSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
-    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"] .int) := by
+    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
       simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
     simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
@@ -1682,10 +1681,10 @@ theorem pointerIfWrite_join_sameShape :
   rw [pointerIfWriteEnv_eq] at hbranch
   by_cases hp : name = "p"
   · subst hp
-    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "x"] .int) := by
+    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "x"]) := by
       simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
-    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"] .int) := by
+    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
       simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
         (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
     simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]

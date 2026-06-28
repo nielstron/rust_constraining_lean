@@ -182,26 +182,38 @@ def eraseName (ghost : Name) : Ty → Ty
   | .unit => .unit
   | .int => .int
   | .bool => .bool
-  | .borrow mutable targets pointee =>
+  | .borrow mutable targets =>
       .borrow mutable (targets.filter (fun target =>
-        decide (LVal.base target ≠ ghost))) (eraseName ghost pointee)
+        decide (LVal.base target ≠ ghost)))
   | .box inner => .box (eraseName ghost inner)
+
+theorem no_allVars_of_loanFree :
+    ∀ {ty : Ty}, TyLoanFree ty → ∀ v, v ∉ Ty.allVars ty
+  | .unit, _ => by
+      intro v hv
+      simpa [Ty.allVars] using hv
+  | .int, _ => by
+      intro v hv
+      simpa [Ty.allVars] using hv
+  | .bool, _ => by
+      intro v hv
+      simpa [Ty.allVars] using hv
+  | .borrow mutable targets, hloan => by
+      intro v _hv
+      exact (hloan mutable targets PartialTyContains.here).elim
+  | .box inner, hloan => by
+      intro v hv
+      exact Ty.no_allVars_of_loanFree (ty := inner) (by
+        intro mutable targets hcontains
+        exact hloan mutable targets (PartialTyContains.tyBox hcontains))
+        v (by simpa [Ty.allVars] using hv)
 
 theorem no_vars_of_loanFree {ty : Ty} :
     TyLoanFree ty →
     ∀ v, v ∉ Ty.vars ty := by
   intro hloan v hv
-  have hvAll : v ∈ Ty.allVars ty :=
-    Ty.vars_subset_allVars (ty := ty) hv
-  rw [hloan] at hvAll
-  cases hvAll
-
-theorem no_allVars_of_loanFree {ty : Ty} :
-    TyLoanFree ty →
-    ∀ v, v ∉ Ty.allVars ty := by
-  intro hloan v hv
-  rw [hloan] at hv
-  cases hv
+  exact Ty.no_allVars_of_loanFree hloan v
+    (Ty.vars_subset_allVars (ty := ty) hv)
 
 end Ty
 
@@ -221,7 +233,7 @@ theorem Ty.eraseName_no_vars (ghost : Name) :
   | .bool => by simp [Ty.eraseName, Ty.vars]
   | .box inner => by
       simpa [Ty.eraseName, Ty.vars] using Ty.eraseName_no_vars ghost inner
-  | .borrow mutable targets pointee => by
+  | .borrow mutable targets => by
       intro hv
       simp [Ty.eraseName, Ty.vars, List.mem_map, List.mem_filter] at hv
       rcases hv with ⟨target, hmemKeep, hbase⟩
@@ -234,12 +246,11 @@ theorem Ty.eraseName_no_allVars (ghost : Name) :
   | .bool => by simp [Ty.eraseName, Ty.allVars]
   | .box inner => by
       simpa [Ty.eraseName, Ty.allVars] using Ty.eraseName_no_allVars ghost inner
-  | .borrow mutable targets pointee => by
+  | .borrow mutable targets => by
       intro hv
       simp [Ty.eraseName, Ty.allVars, List.mem_map, List.mem_filter] at hv
-      rcases hv with ⟨target, hmemKeep, hbase⟩ | hpointee
-      · exact hmemKeep.2 hbase
-      · exact Ty.eraseName_no_allVars ghost pointee hpointee
+      rcases hv with ⟨target, hmemKeep, hbase⟩
+      exact hmemKeep.2 hbase
 
 theorem Ty.eraseName_eq_of_allVars_fresh {ghost : Name} :
     ∀ ty : Ty, ghost ∉ Ty.allVars ty → Ty.eraseName ghost ty = ty
@@ -249,7 +260,7 @@ theorem Ty.eraseName_eq_of_allVars_fresh {ghost : Name} :
   | .box inner, hfresh => by
       simp [Ty.eraseName, Ty.eraseName_eq_of_allVars_fresh inner
         (by simpa [Ty.allVars] using hfresh)]
-  | .borrow mutable targets pointee, hfresh => by
+  | .borrow mutable targets, hfresh => by
       have htargets :
           targets.filter (fun target => decide (LVal.base target ≠ ghost)) =
             targets := by
@@ -259,18 +270,11 @@ theorem Ty.eraseName_eq_of_allVars_fresh {ghost : Name} :
           intro hbase
           exact hfresh (by
             simp [Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩))
-      have hpointee : Ty.eraseName ghost pointee = pointee :=
-        Ty.eraseName_eq_of_allVars_fresh pointee
-          (by
-            intro hv
-            exact hfresh (by
-              simp [Ty.allVars]
-              exact Or.inr hv))
+            exact ⟨target, hmem, hbase⟩))
       change Ty.borrow mutable
-        (targets.filter (fun target => decide (LVal.base target ≠ ghost)))
-        (Ty.eraseName ghost pointee) = Ty.borrow mutable targets pointee
-      rw [htargets, hpointee]
+        (targets.filter (fun target => decide (LVal.base target ≠ ghost))) =
+          Ty.borrow mutable targets
+      rw [htargets]
 
 theorem PartialTy.eraseName_no_allVars (ghost : Name) :
     ∀ partialTy : PartialTy, ghost ∉ PartialTy.allVars
@@ -296,7 +300,7 @@ theorem Ty.eraseName_strengthens_of_fresh {ghost : Name} :
       exact PartialTyStrengthens.tyBox
         (Ty.eraseName_strengthens_of_fresh inner
           (by simpa [Ty.allVars] using hfresh))
-  | .borrow mutable targets pointee, hfresh => by
+  | .borrow mutable targets, hfresh => by
       have hfilter :
           targets.filter (fun target => decide (LVal.base target ≠ ghost)) =
             targets := by
@@ -306,19 +310,11 @@ theorem Ty.eraseName_strengthens_of_fresh {ghost : Name} :
           intro hbase
           exact hfresh (by
             simp [Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩))
-      have hpointee : Ty.eraseName ghost pointee = pointee :=
-        Ty.eraseName_eq_of_allVars_fresh pointee
-          (by
-            intro hv
-            exact hfresh (by
-              simp [Ty.allVars]
-              exact Or.inr hv))
-      change PartialTyStrengthens (.ty (.borrow mutable targets pointee))
+            exact ⟨target, hmem, hbase⟩))
+      change PartialTyStrengthens (.ty (.borrow mutable targets))
         (.ty (.borrow mutable
-          (targets.filter (fun target => decide (LVal.base target ≠ ghost)))
-          (Ty.eraseName ghost pointee)))
-      rw [hfilter, hpointee]
+          (targets.filter (fun target => decide (LVal.base target ≠ ghost)))))
+      rw [hfilter]
 
 theorem PartialTy.eraseName_strengthens_of_fresh {ghost : Name} :
     ∀ partialTy : PartialTy,
@@ -353,13 +349,11 @@ theorem PartialTyStrengthens.allVars_mono {left right : PartialTy}
   | tyBox _hinner ih =>
       intro hv
       exact ih (by simpa [PartialTy.allVars, Ty.allVars] using hv)
-  | borrow hsubset _hpointee ihPointee =>
+  | borrow hsubset =>
       intro hv
       simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv ⊢
-      rcases hv with hvTargets | hvPointee
-      · rcases hvTargets with ⟨target, hmem, hbase⟩
-        exact Or.inl ⟨target, hsubset hmem, hbase⟩
-      · exact Or.inr (ihPointee hvPointee)
+      rcases hv with ⟨target, hmem, hbase⟩
+      exact ⟨target, hsubset hmem, hbase⟩
   | undefLeft _hinner ih =>
       intro hv
       exact ih (by simpa [PartialTy.allVars] using hv)
@@ -388,8 +382,7 @@ theorem PartialTyStrengthens.to_eraseName_of_fresh {left right : PartialTy}
       intro hfresh
       exact PartialTyStrengthens.tyBox
         (ih (by simpa [PartialTy.allVars, Ty.allVars] using hfresh))
-  | @borrow mutable leftPointee rightPointee leftTargets rightTargets hsubset
-      hpointee ihPointee =>
+  | @borrow mutable leftTargets rightTargets hsubset =>
       intro hfresh
       rw [PartialTy.eraseName, Ty.eraseName]
       exact PartialTyStrengthens.borrow (by
@@ -400,12 +393,7 @@ theorem PartialTyStrengthens.to_eraseName_of_fresh {left right : PartialTy}
         · intro hbase
           exact hfresh (by
             simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩))
-        (ihPointee (by
-          intro hv
-          exact hfresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)))
+            exact ⟨target, hmem, hbase⟩))
   | undefLeft _hinner ih =>
       intro hfresh
       exact PartialTyStrengthens.undefLeft
@@ -479,12 +467,9 @@ theorem LValTyping.typeNameFresh {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih hfresh
         simpa [PartialTy.allVars] using ih hfresh)
       (by
-        intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets hfresh
         exact ihTargets hfresh)
-      (by
-        intro ty hvars hfresh hv
-        simpa [PartialTy.allVars, hvars] using hv)
       (by
         intro _target _ty _lifetime _htarget ihTarget hfresh
         exact ihTarget hfresh)
@@ -511,12 +496,9 @@ theorem LValTyping.typeNameFresh {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih hfresh
         simpa [PartialTy.allVars] using ih hfresh)
       (by
-        intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets hfresh
         exact ihTargets hfresh)
-      (by
-        intro ty hvars hfresh hv
-        simpa [PartialTy.allVars, hvars] using hv)
       (by
         intro _target _ty _lifetime _htarget ihTarget hfresh
         exact ihTarget hfresh)
@@ -563,12 +545,12 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
         exact LValTyping.box
           (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
       (by
-        intro _lv mutable targets pointee _borrowLifetime _targetLifetime
+        intro _lv mutable targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets hfresh hnotMention
         have hborrowErased :=
           ihBorrow hfresh (by simpa [LVal.Mentions] using hnotMention)
         have hborrowFresh :
-            ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets pointee)) :=
+            ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets)) :=
           (LValTyping.typeNameFresh.1 hborrowErased hfresh)
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target := by
@@ -577,11 +559,8 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
             (LVal.mentions_iff_base (ghost := ghost) target).1 htargetMention
           exact hborrowFresh (by
             simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩)
+            exact ⟨target, hmem, hbase⟩)
         exact LValTyping.borrow hborrowErased (ihTargets hfresh htargetsNot))
-      (by
-        intro ty hvars hfresh _hnotTargets
-        exact LValTargetsTyping.empty hvars)
       (by
         intro _target _ty _lifetime _htarget ihTarget hfresh hnotTargets
         exact LValTargetsTyping.singleton
@@ -617,12 +596,12 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
         exact LValTyping.box
           (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
       (by
-        intro _lv mutable targets pointee _borrowLifetime _targetLifetime
+        intro _lv mutable targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets hfresh hnotMention
         have hborrowErased :=
           ihBorrow hfresh (by simpa [LVal.Mentions] using hnotMention)
         have hborrowFresh :
-            ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets pointee)) :=
+            ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets)) :=
           (LValTyping.typeNameFresh.1 hborrowErased hfresh)
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target := by
@@ -631,11 +610,8 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
             (LVal.mentions_iff_base (ghost := ghost) target).1 htargetMention
           exact hborrowFresh (by
             simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩)
+            exact ⟨target, hmem, hbase⟩)
         exact LValTyping.borrow hborrowErased (ihTargets hfresh htargetsNot))
-      (by
-        intro ty hvars hfresh _hnotTargets
-        exact LValTargetsTyping.empty hvars)
       (by
         intro _target _ty _lifetime _htarget ihTarget hfresh hnotTargets
         exact LValTargetsTyping.singleton
@@ -676,12 +652,9 @@ theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih
         exact LValTyping.box ih)
       (by
-        intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets
         exact LValTyping.borrow ihBorrow ihTargets)
-      (by
-        intro ty hvars
-        exact LValTargetsTyping.empty hvars)
       (by
         intro _target _ty _lifetime _htarget ihTarget
         exact LValTargetsTyping.singleton ihTarget)
@@ -706,12 +679,9 @@ theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih
         exact LValTyping.box ih)
       (by
-        intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets
         exact LValTyping.borrow ihBorrow ihTargets)
-      (by
-        intro ty hvars
-        exact LValTargetsTyping.empty hvars)
       (by
         intro _target _ty _lifetime _htarget ihTarget
         exact LValTargetsTyping.singleton ihTarget)
@@ -761,13 +731,10 @@ theorem LValTargetsTyping.not_mentions_of_fresh {env : Env} {ghost : Name}
       intro hmention
       exact ih (by simpa [LVal.Mentions] using hmention))
     (by
-      intro _lv _mutable _targets _pointee _borrowLifetime _targetLifetime
+      intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
         _hborrow _htargets ihBorrow _ihTargets
       intro hmention
       exact ihBorrow (by simpa [LVal.Mentions] using hmention))
-    (by
-      intro _ty _hvars target hmem
-      simp at hmem)
     (by
       intro target _ty _lifetime _htarget ihTarget candidate hmem
       simp at hmem
@@ -796,17 +763,17 @@ theorem EnvContains.erase_to_env {env : Env} {ghost x : Name} {ty : Ty} :
 theorem ReadProhibited.erase_to_env {env : Env} {ghost : Name} {lv : LVal} :
     ReadProhibited (env.erase ghost) lv →
     ReadProhibited env lv := by
-  rintro ⟨x, targets, pointee, target, hcontains, hmem, hconflict⟩
-  exact ⟨x, targets, pointee, target, EnvContains.erase_to_env hcontains, hmem,
+  rintro ⟨x, targets, target, hcontains, hmem, hconflict⟩
+  exact ⟨x, targets, target, EnvContains.erase_to_env hcontains, hmem,
     hconflict⟩
 
 theorem WriteProhibited.erase_to_env {env : Env} {ghost : Name} {lv : LVal} :
     WriteProhibited (env.erase ghost) lv →
     WriteProhibited env lv := by
   intro h
-  rcases h with hread | ⟨x, targets, pointee, target, hcontains, hmem, hconflict⟩
+  rcases h with hread | ⟨x, targets, target, hcontains, hmem, hconflict⟩
   · exact Or.inl (ReadProhibited.erase_to_env hread)
-  · exact Or.inr ⟨x, targets, pointee, target, EnvContains.erase_to_env hcontains,
+  · exact Or.inr ⟨x, targets, target, EnvContains.erase_to_env hcontains,
       hmem, hconflict⟩
 
 theorem LValBaseOutlives.erase_ghost {env : Env} {ghost : Name}
@@ -838,12 +805,12 @@ theorem Mutable.erase_ghost {env : Env} {ghost : Name} {lv : LVal} :
           (by simpa [LVal.Mentions] using hnotMention))
         (ih (by simpa [LVal.Mentions] using hnotMention))
   | borrow hLv htargets ih =>
-      rename_i source targets pointee lifetime
+      rename_i source targets lifetime
       have hLvErased :=
         LValTyping.erase_ghost.1 hLv hfresh
           (by simpa [LVal.Mentions] using hnotMention)
       have hborrowFresh :
-          ghost ∉ PartialTy.allVars (.ty (.borrow true targets pointee)) :=
+          ghost ∉ PartialTy.allVars (.ty (.borrow true targets)) :=
         LValTyping.typeNameFresh.1 hLvErased hfresh
       have htargetsNot :
           ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target := by
@@ -852,7 +819,7 @@ theorem Mutable.erase_ghost {env : Env} {ghost : Name} {lv : LVal} :
           (LVal.mentions_iff_base (ghost := ghost) target).1 htargetMention
         exact hborrowFresh (by
           simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-          exact Or.inl ⟨target, hmem, hbase⟩)
+          exact ⟨target, hmem, hbase⟩)
       exact Mutable.borrow hLvErased (by
         intro target hmem
         exact ih target hmem (htargetsNot target hmem))
@@ -936,7 +903,7 @@ theorem WellFormedTy.erase_ghost {env : Env} {ghost : Name}
   | box _hinner ih =>
       exact WellFormedTy.box (ih (by simpa [Ty.allVars] using htyFresh))
   | borrow htargets =>
-      rename_i mutable targets pointee lifetime
+      rename_i mutable targets lifetime
       refine WellFormedTy.borrow ?_
       cases htargets with
       | intro hmembers =>
@@ -950,38 +917,37 @@ theorem WellFormedTy.erase_ghost {env : Env} {ghost : Name}
               (LVal.mentions_iff_base (ghost := ghost) target).1 hmention
             exact htyFresh (by
               simp [Ty.allVars, List.mem_map]
-              exact Or.inl ⟨target, hmem, hbaseEq⟩)
+              exact ⟨target, hmem, hbaseEq⟩)
           exact ⟨targetTy, targetLifetime,
             LValTyping.erase_ghost.1 htargetTyping hfresh htargetNot,
             houtlives,
             LValBaseOutlives.erase_ghost htargetNot hbase⟩
 
 private theorem not_mentions_of_mem_borrow_allVars {ghost : Name}
-    {mutable : Bool} {targets : List LVal} {pointee : Ty} :
-    ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets pointee)) →
+    {mutable : Bool} {targets : List LVal} :
+    ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets)) →
     ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target := by
   intro hfresh target hmem hmention
   have hbase : LVal.base target = ghost :=
     (LVal.mentions_iff_base (ghost := ghost) target).1 hmention
   exact hfresh (by
     simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-    exact Or.inl ⟨target, hmem, hbase⟩)
+    exact ⟨target, hmem, hbase⟩)
 
 private theorem not_mentions_of_partialTy_contains_allVars {ghost : Name}
-    {partialTy : PartialTy} {mutable : Bool} {targets : List LVal}
-    {pointee : Ty} :
+    {partialTy : PartialTy} {mutable : Bool} {targets : List LVal} :
     ghost ∉ PartialTy.allVars partialTy →
-    PartialTyContains partialTy (.borrow mutable targets pointee) →
+    PartialTyContains partialTy (.borrow mutable targets) →
     ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target := by
   intro hfresh hcontains target hmem hmention
   have hbase : LVal.base target = ghost :=
     (LVal.mentions_iff_base (ghost := ghost) target).1 hmention
   have hv : ghost ∈ PartialTy.vars partialTy :=
     mem_partialTy_vars_iff.mpr
-      ⟨mutable, targets, pointee, target, hcontains, hmem, hbase⟩
+      ⟨mutable, targets, target, hcontains, hmem, hbase⟩
   exact hfresh (PartialTy.vars_subset_allVars (partialTy := partialTy) hv)
 
-private theorem fresh_pointee_of_target {env : Env} {ghost : Name}
+private theorem fresh_target_ty_of_target {env : Env} {ghost : Name}
     {target : LVal} {targetTy : Ty} {targetLifetime : Lifetime} :
     Env.TypeNameFresh (env.erase ghost) ghost →
     LValTyping (env.erase ghost) target (.ty targetTy) targetLifetime →
@@ -1078,36 +1044,122 @@ theorem ShapeCompatible.erase_ghost_pack {env : Env} {ghost : Name} :
           exact ShapeCompatible.box
             (ih.2.2 hfresh
               (by simpa [PartialTy.allVars] using hrightFresh)))⟩
-  | borrow _hinner ih =>
-      rename_i mutable leftTargets rightTargets leftTy rightTy
+  | @borrow mutable leftTargets rightTargets leftTy rightTy hleft hright _hinner ih =>
       refine ⟨?_, ?_, ?_⟩
       · intro hfresh hleftFresh hrightFresh
-        have hleftTyFresh : ghost ∉ PartialTy.allVars (.ty leftTy) := by
-          intro hv
-          exact hleftFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        have hrightTyFresh : ghost ∉ PartialTy.allVars (.ty rightTy) := by
-          intro hv
-          exact hrightFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        exact ShapeCompatible.borrow
-          (ih.1 hfresh hleftTyFresh hrightTyFresh)
+        have hleftNot :=
+          not_mentions_of_mem_borrow_allVars (ghost := ghost) hleftFresh
+        have hrightNot :=
+          not_mentions_of_mem_borrow_allVars (ghost := ghost) hrightFresh
+        have hleftErased :
+            ∀ leftTarget, leftTarget ∈ leftTargets →
+              ∃ leftLifetime,
+                LValTyping (env.erase ghost) leftTarget (.ty leftTy) leftLifetime := by
+          intro target hmem
+          rcases hleft target hmem with ⟨life, htyping⟩
+          exact ⟨life, LValTyping.erase_ghost.1 htyping hfresh
+            (hleftNot target hmem)⟩
+        have hrightErased :
+            ∀ rightTarget, rightTarget ∈ rightTargets →
+              ∃ rightLifetime,
+                LValTyping (env.erase ghost) rightTarget (.ty rightTy) rightLifetime := by
+          intro target hmem
+          rcases hright target hmem with ⟨life, htyping⟩
+          exact ⟨life, LValTyping.erase_ghost.1 htyping hfresh
+            (hrightNot target hmem)⟩
+        cases leftTargets with
+        | nil =>
+            cases rightTargets with
+            | nil =>
+                exact ShapeCompatible.borrow
+                  (leftTy := .unit) (rightTy := .unit)
+                  (by intro target hmem; cases hmem)
+                  (by intro target hmem; cases hmem)
+                  ShapeCompatible.unit
+            | cons rightHead rightTail =>
+                rcases hrightErased rightHead (by simp) with
+                  ⟨_rightLife, hrightHead⟩
+                have hrightTyFresh :
+                    ghost ∉ PartialTy.allVars (.ty rightTy) :=
+                  fresh_target_ty_of_target hfresh hrightHead
+                exact ShapeCompatible.borrow
+                  (leftTy := rightTy) (rightTy := rightTy)
+                  (by intro target hmem; cases hmem)
+                  hrightErased
+                  (ih.2.2 hfresh hrightTyFresh)
+        | cons leftHead leftTail =>
+            rcases hleftErased leftHead (by simp) with
+              ⟨_leftLife, hleftHead⟩
+            have hleftTyFresh :
+                ghost ∉ PartialTy.allVars (.ty leftTy) :=
+              fresh_target_ty_of_target hfresh hleftHead
+            cases rightTargets with
+            | nil =>
+                exact ShapeCompatible.borrow
+                  (leftTy := leftTy) (rightTy := leftTy)
+                  hleftErased
+                  (by intro target hmem; cases hmem)
+                  (ih.2.1 hfresh hleftTyFresh)
+            | cons rightHead rightTail =>
+                rcases hrightErased rightHead (by simp) with
+                  ⟨_rightLife, hrightHead⟩
+                have hrightTyFresh :
+                    ghost ∉ PartialTy.allVars (.ty rightTy) :=
+                  fresh_target_ty_of_target hfresh hrightHead
+                exact ShapeCompatible.borrow hleftErased hrightErased
+                  (ih.1 hfresh hleftTyFresh hrightTyFresh)
       · intro hfresh hleftFresh
-        have hleftTyFresh : ghost ∉ PartialTy.allVars (.ty leftTy) := by
-          intro hv
-          exact hleftFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        exact ShapeCompatible.borrow (ih.2.1 hfresh hleftTyFresh)
+        have hleftNot :=
+          not_mentions_of_mem_borrow_allVars (ghost := ghost) hleftFresh
+        have hleftErased :
+            ∀ leftTarget, leftTarget ∈ leftTargets →
+              ∃ leftLifetime,
+                LValTyping (env.erase ghost) leftTarget (.ty leftTy) leftLifetime := by
+          intro target hmem
+          rcases hleft target hmem with ⟨life, htyping⟩
+          exact ⟨life, LValTyping.erase_ghost.1 htyping hfresh
+            (hleftNot target hmem)⟩
+        cases leftTargets with
+        | nil =>
+            exact ShapeCompatible.borrow
+              (leftTy := .unit) (rightTy := .unit)
+              (by intro target hmem; cases hmem)
+              (by intro target hmem; cases hmem)
+              ShapeCompatible.unit
+        | cons leftHead leftTail =>
+            rcases hleftErased leftHead (by simp) with
+              ⟨_leftLife, hleftHead⟩
+            have hleftTyFresh :
+                ghost ∉ PartialTy.allVars (.ty leftTy) :=
+              fresh_target_ty_of_target hfresh hleftHead
+            exact ShapeCompatible.borrow hleftErased hleftErased
+              (ih.2.1 hfresh hleftTyFresh)
       · intro hfresh hrightFresh
-        have hrightTyFresh : ghost ∉ PartialTy.allVars (.ty rightTy) := by
-          intro hv
-          exact hrightFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        exact ShapeCompatible.borrow (ih.2.2 hfresh hrightTyFresh)
+        have hrightNot :=
+          not_mentions_of_mem_borrow_allVars (ghost := ghost) hrightFresh
+        have hrightErased :
+            ∀ rightTarget, rightTarget ∈ rightTargets →
+              ∃ rightLifetime,
+                LValTyping (env.erase ghost) rightTarget (.ty rightTy) rightLifetime := by
+          intro target hmem
+          rcases hright target hmem with ⟨life, htyping⟩
+          exact ⟨life, LValTyping.erase_ghost.1 htyping hfresh
+            (hrightNot target hmem)⟩
+        cases rightTargets with
+        | nil =>
+            exact ShapeCompatible.borrow
+              (leftTy := .unit) (rightTy := .unit)
+              (by intro target hmem; cases hmem)
+              (by intro target hmem; cases hmem)
+              ShapeCompatible.unit
+        | cons rightHead rightTail =>
+            rcases hrightErased rightHead (by simp) with
+              ⟨_rightLife, hrightHead⟩
+            have hrightTyFresh :
+                ghost ∉ PartialTy.allVars (.ty rightTy) :=
+              fresh_target_ty_of_target hfresh hrightHead
+            exact ShapeCompatible.borrow hrightErased hrightErased
+              (ih.2.2 hfresh hrightTyFresh)
   | @undefLeft leftTy rightPt _hinner ih =>
       refine ⟨?_, ?_, ?_⟩
       · intro hfresh hleftFresh hrightFresh
@@ -1178,7 +1230,7 @@ theorem ContainedBorrowsWellFormed.erase_ghost {env : Env} {ghost : Name} :
     ContainedBorrowsWellFormed env →
     Env.TypeNameFresh (env.erase ghost) ghost →
     ContainedBorrowsWellFormed (env.erase ghost) := by
-  intro hcontained hfresh x slot mutable targets pointee hslot hcontains
+  intro hcontained hfresh x slot mutable targets hslot hcontains
   rcases hcontains with ⟨containsSlot, hcontainsSlot, hcontainsTy⟩
   have hslotEq : slot = containsSlot := by
     rw [hslot] at hcontainsSlot
@@ -1195,7 +1247,7 @@ theorem ContainedBorrowsWellFormed.erase_ghost {env : Env} {ghost : Name} :
       ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
     not_mentions_of_partialTy_contains_allVars hslotFresh hcontainsTy
   exact BorrowTargetsWellFormedInSlot.erase_ghost
-    (hcontained x slot mutable targets pointee hslotOrig
+    (hcontained x slot mutable targets hslotOrig
       ⟨slot, hslotOrig, hcontainsTy⟩)
     hfresh htargetsNot
 
@@ -1204,7 +1256,7 @@ theorem EnvWriteRhsTargetsWellFormed.erase_ghost {result : Env} {rhsTy : Ty}
     EnvWriteRhsTargetsWellFormed result rhsTy →
     Env.TypeNameFresh (result.erase ghost) ghost →
     EnvWriteRhsTargetsWellFormed (result.erase ghost) rhsTy := by
-  intro hrhs hfresh x slot mutable targets pointee target hslot hcontains htarget hrhsOrigin
+  intro hrhs hfresh x slot mutable targets target hslot hcontains htarget hrhsOrigin
   have hslotOrig : result.slotAt x = some slot := by
     by_cases hx : x = ghost
     · subst hx; simp [Env.erase] at hslot
@@ -1212,7 +1264,7 @@ theorem EnvWriteRhsTargetsWellFormed.erase_ghost {result : Env} {rhsTy : Ty}
   have hslotFresh : ghost ∉ PartialTy.allVars slot.ty := hfresh x slot hslot
   have hnotTarget : ¬ LVal.Mentions ghost target :=
     not_mentions_of_partialTy_contains_allVars hslotFresh hcontains target htarget
-  rcases hrhs x slot mutable targets pointee target hslotOrig hcontains htarget hrhsOrigin with
+  rcases hrhs x slot mutable targets target hslotOrig hcontains htarget hrhsOrigin with
     ⟨tTy, tLf, htyp, hle, hbase⟩
   exact ⟨tTy, tLf,
     LValTyping.erase_ghost.1 htyp hfresh hnotTarget,
@@ -1223,18 +1275,18 @@ theorem Coherent.erase_ghost {env : Env} {ghost : Name} :
     Coherent env →
     Env.TypeNameFresh (env.erase ghost) ghost →
     Coherent (env.erase ghost) := by
-  intro hcoherent hfresh lv mutable targets pointee borrowLifetime htyping
-  have htypingEnv : LValTyping env lv (.ty (.borrow mutable targets pointee)) borrowLifetime :=
+  intro hcoherent hfresh lv mutable targets borrowLifetime htyping
+  have htypingEnv : LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime :=
     LValTyping.erase_to_env.1 htyping
-  rcases hcoherent lv mutable targets pointee borrowLifetime htypingEnv with
-    ⟨targetLifetime, htargets⟩
+  rcases hcoherent lv mutable targets borrowLifetime htypingEnv with
+    ⟨targetTy, targetLifetime, htargets⟩
   have hborrowFresh :
-      ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets pointee)) :=
+      ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets)) :=
     LValTyping.typeNameFresh.1 htyping hfresh
   have htargetsNot :
       ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
     not_mentions_of_mem_borrow_allVars hborrowFresh
-  exact ⟨targetLifetime, LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
+  exact ⟨targetTy, targetLifetime, LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
 
 theorem LinearizedBy.erase_ghost {φ : Name → Nat} {env : Env}
     {ghost : Name} :
@@ -1258,16 +1310,16 @@ theorem TyBorrowSafeAgainstEnv.erase_ghost {env : Env} {ghost : Name}
     TyBorrowSafeAgainstEnv (env.erase ghost) ty := by
   rintro ⟨hleft, hright⟩
   constructor
-  · intro targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+  · intro targetsMutable mutable targetsOther x
       targetMutable targetOther hcontains henv htargetMutable htargetOther
       hconflict
-    exact hleft targetsMutable mutable targetsOther pointeeMutable pointeeOther x
+    exact hleft targetsMutable mutable targetsOther x
       targetMutable targetOther hcontains (EnvContains.erase_to_env henv)
       htargetMutable htargetOther hconflict
-  · intro x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+  · intro x targetsMutable mutable targetsOther
       targetMutable targetOther henv hcontains htargetMutable htargetOther
       hconflict
-    exact hright x targetsMutable mutable targetsOther pointeeMutable pointeeOther
+    exact hright x targetsMutable mutable targetsOther
       targetMutable targetOther (EnvContains.erase_to_env henv) hcontains
       htargetMutable htargetOther hconflict
 
@@ -1381,7 +1433,7 @@ theorem FreshUpdateCoherenceObligations.erase_ghost {env : Env}
     FreshUpdateCoherenceObligations (env.erase ghost) x ty lifetime := by
   intro hoblig hfresh hxGhost htyFresh
   constructor
-  · intro lv mutable targets pointee borrowLifetime hbaseNe htyping
+  · intro lv mutable targets borrowLifetime hbaseNe htyping
     have hupdateErase :
         ((env.erase ghost).update x { ty := .ty ty, lifetime := lifetime }) =
           (env.update x { ty := .ty ty, lifetime := lifetime }).erase ghost := by
@@ -1390,11 +1442,11 @@ theorem FreshUpdateCoherenceObligations.erase_ghost {env : Env}
     have htypingErased :
         LValTyping
           ((env.update x { ty := .ty ty, lifetime := lifetime }).erase ghost)
-          lv (.ty (.borrow mutable targets pointee)) borrowLifetime := by
+          lv (.ty (.borrow mutable targets)) borrowLifetime := by
       simpa [hupdateErase] using htyping
     have htypingOrig :
-        LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
-          lv (.ty (.borrow mutable targets pointee)) borrowLifetime :=
+      LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
+        lv (.ty (.borrow mutable targets)) borrowLifetime :=
       LValTyping.erase_to_env.1 htypingErased
     rcases hoblig.old_root_transport hbaseNe htypingOrig with
       ⟨oldBorrowLifetime, holdTyping⟩
@@ -1407,7 +1459,7 @@ theorem FreshUpdateCoherenceObligations.erase_ghost {env : Env}
         hupdateFresh htyping
     exact ⟨oldBorrowLifetime,
       LValTyping.erase_ghost.1 holdTyping hfresh hnot⟩
-  · intro lv mutable targets pointee borrowLifetime hbaseEq htyping
+  · intro lv mutable targets borrowLifetime hbaseEq htyping
     have hupdateErase :
         ((env.erase ghost).update x { ty := .ty ty, lifetime := lifetime }) =
           (env.update x { ty := .ty ty, lifetime := lifetime }).erase ghost := by
@@ -1416,23 +1468,23 @@ theorem FreshUpdateCoherenceObligations.erase_ghost {env : Env}
     have htypingErased :
         LValTyping
           ((env.update x { ty := .ty ty, lifetime := lifetime }).erase ghost)
-          lv (.ty (.borrow mutable targets pointee)) borrowLifetime := by
+          lv (.ty (.borrow mutable targets)) borrowLifetime := by
       simpa [hupdateErase] using htyping
     have htypingOrig :
-        LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
-          lv (.ty (.borrow mutable targets pointee)) borrowLifetime :=
+      LValTyping (env.update x { ty := .ty ty, lifetime := lifetime })
+        lv (.ty (.borrow mutable targets)) borrowLifetime :=
       LValTyping.erase_to_env.1 htypingErased
     rcases hoblig.fresh_root_coherent hbaseEq htypingOrig with
-      ⟨targetLifetime, htargets⟩
+      ⟨targetTy, targetLifetime, htargets⟩
     have hborrowFresh :
-        ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets pointee)) :=
+        ghost ∉ PartialTy.allVars (.ty (.borrow mutable targets)) :=
       LValTyping.typeNameFresh.1 htyping (by
         exact Env.typeNameFresh_update hfresh
           (by simpa [PartialTy.allVars] using htyFresh))
     have htargetsNot :
         ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
       not_mentions_of_mem_borrow_allVars hborrowFresh
-    refine ⟨targetLifetime, ?_⟩
+    refine ⟨targetTy, targetLifetime, ?_⟩
     have htargetsErased :=
       LValTyping.erase_ghost.2 htargets
         (by
@@ -1448,18 +1500,18 @@ theorem EnvWriteRhsBorrowTargetsBelow.erase_ghost {φ : Name → Nat}
     EnvWriteRhsBorrowTargetsBelow φ (result.erase ghost) rhsTy := by
   rintro ⟨hrank, hconflicts⟩
   constructor
-  · intro x slot mutable targets pointee target hslot hcontains htarget hrhs
+  · intro x slot mutable targets target hslot hcontains htarget hrhs
     have hslotOrig : result.slotAt x = some slot := by
       by_cases hx : x = ghost
       · subst hx
         simp [Env.erase] at hslot
       · simpa [Env.erase, hx] using hslot
-    exact hrank x slot mutable targets pointee target hslotOrig hcontains htarget hrhs
-  · intro x y mutable targetsMutable targetsOther pointeeMutable pointeeOther
+    exact hrank x slot mutable targets target hslotOrig hcontains htarget hrhs
+  · intro x y mutable targetsMutable targetsOther
       targetMutable targetOther hx hy htargetMutable htargetOther hconflict
       hrhsMutable hrhsOther
-    exact hconflicts x y mutable targetsMutable targetsOther pointeeMutable
-      pointeeOther targetMutable targetOther (EnvContains.erase_to_env hx)
+    exact hconflicts x y mutable targetsMutable targetsOther
+      targetMutable targetOther (EnvContains.erase_to_env hx)
       (EnvContains.erase_to_env hy) htargetMutable htargetOther hconflict
       hrhsMutable hrhsOther
 
@@ -1473,71 +1525,6 @@ private theorem prependPath_not_mentions {path : List Unit} {target : LVal}
       (LVal.mentions_iff_base (ghost := ghost) _).1 hmention
     simpa [base_prependPath] using hprepBase
   exact hnot ((LVal.mentions_iff_base (ghost := ghost) target).2 hbase)
-
-theorem PointeeUpdateAtPath.erase_ghost {rank : Nat} {env : Env}
-    {path : List Unit} {oldTy rhsTy updatedTy : Ty} {ghost : Name} :
-    PointeeUpdateAtPath rank env path oldTy rhsTy updatedTy →
-    Env.TypeNameFresh (env.erase ghost) ghost →
-    ghost ∉ Ty.allVars oldTy →
-    ghost ∉ Ty.allVars rhsTy →
-    PointeeUpdateAtPath rank (env.erase ghost) path oldTy rhsTy updatedTy := by
-  intro hupdate hfresh holdFresh htyFresh
-  induction hupdate with
-  | strong =>
-      exact PointeeUpdateAtPath.strong
-  | weak hshape hjoin =>
-      exact PointeeUpdateAtPath.weak
-        (ShapeCompatible.erase_ghost hshape hfresh
-          (by simpa [PartialTy.allVars] using holdFresh)
-          (by simpa [PartialTy.allVars] using htyFresh))
-        hjoin
-  | box _hinner ih =>
-      exact PointeeUpdateAtPath.box (ih hfresh
-        (by simpa [Ty.allVars] using holdFresh) htyFresh)
-  | @mutBorrow env rank path targets oldPointee updatedPointee ty _hinner ih =>
-      have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-        intro hv
-        exact holdFresh (by
-          simp [Ty.allVars]
-          exact Or.inr hv)
-      exact PointeeUpdateAtPath.mutBorrow
-        (ih hfresh holdPointeeFresh htyFresh)
-
-theorem PointeeUpdateAtPath.typeNameFresh {rank : Nat} {env : Env}
-    {path : List Unit} {oldTy rhsTy updatedTy : Ty} {ghost : Name} :
-    PointeeUpdateAtPath rank env path oldTy rhsTy updatedTy →
-    Env.TypeNameFresh (env.erase ghost) ghost →
-    ghost ∉ Ty.allVars oldTy →
-    ghost ∉ Ty.allVars rhsTy →
-    ghost ∉ Ty.allVars updatedTy := by
-  intro hupdate hfresh holdFresh htyFresh
-  induction hupdate with
-  | strong =>
-      exact htyFresh
-  | weak hshape hjoin =>
-      exact (by
-        simpa [PartialTy.allVars] using
-          (PartialTyJoin.allVars_fresh_of_shapeCompatible hshape hjoin
-            (by simpa [PartialTy.allVars] using holdFresh) htyFresh))
-  | box _hinner ih =>
-      exact (by
-        simpa [Ty.allVars] using ih hfresh
-          (by simpa [Ty.allVars] using holdFresh) htyFresh)
-  | @mutBorrow env rank path targets oldPointee updatedPointee ty _hinner ih =>
-      have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-        intro hv
-        exact holdFresh (by
-          simp [Ty.allVars]
-          exact Or.inr hv)
-      have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
-        ih hfresh holdPointeeFresh htyFresh
-      intro hv
-      simp [Ty.allVars, List.mem_map] at hv
-      rcases hv with ⟨target, hmem, hbase⟩ | hpointee
-      · exact holdFresh (by
-          simp [Ty.allVars, List.mem_map]
-          exact Or.inl ⟨target, hmem, hbase⟩)
-      · exact hupdatedPointeeFresh hpointee
 
 mutual
   theorem UpdateAtPath.erase_ghost {rank : Nat} {env₁ env₂ : Env}
@@ -1584,21 +1571,11 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
-        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
-          hpointee _htargets ih
-          hfresh holdFresh htyFresh
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-          intro hv
-          exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        exact UpdateAtPath.mutBorrow
-          (PointeeUpdateAtPath.erase_ghost hpointee hfresh holdPointeeFresh
-            htyFresh)
-          (ih hfresh htargetsNot htyFresh))
+        exact UpdateAtPath.mutBorrow (ih hfresh htargetsNot htyFresh))
       (by
         intro rank env path ty hfresh hnot htyFresh
         exact WriteBorrowTargets.nil)
@@ -1690,21 +1667,11 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
-        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
-          hpointee _htargets ih
-          hfresh holdFresh htyFresh
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-          intro hv
-          exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        exact UpdateAtPath.mutBorrow
-          (PointeeUpdateAtPath.erase_ghost hpointee hfresh holdPointeeFresh
-            htyFresh)
-          (ih hfresh htargetsNot htyFresh))
+        exact UpdateAtPath.mutBorrow (ih hfresh htargetsNot htyFresh))
       (by
         intro rank env path ty hfresh hnot htyFresh
         exact WriteBorrowTargets.nil)
@@ -1795,21 +1762,11 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
-        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
-          hpointee _htargets ih
-          hfresh holdFresh htyFresh
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-          intro hv
-          exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        exact UpdateAtPath.mutBorrow
-          (PointeeUpdateAtPath.erase_ghost hpointee hfresh holdPointeeFresh
-            htyFresh)
-          (ih hfresh htargetsNot htyFresh))
+        exact UpdateAtPath.mutBorrow (ih hfresh htargetsNot htyFresh))
       (by
         intro rank env path ty hfresh hnot htyFresh
         exact WriteBorrowTargets.nil)
@@ -1902,28 +1859,17 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
-        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
-          hpointee _htargets ih
-          hfresh holdFresh htyFresh
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-          intro hv
-          exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
-          PointeeUpdateAtPath.typeNameFresh hpointee hfresh holdPointeeFresh
-            htyFresh
         refine ⟨ih hfresh htargetsNot htyFresh, ?_⟩
         intro hv
         simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv
-        rcases hv with ⟨target, hmem, hbase⟩ | hpointeeVar
-        · exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩)
-        · exact hupdatedPointeeFresh hpointeeVar)
+        rcases hv with ⟨target, hmem, hbase⟩
+        exact holdFresh (by
+          simp [PartialTy.allVars, Ty.allVars, List.mem_map]
+          exact ⟨target, hmem, hbase⟩))
       (by
         intro rank env path ty hfresh _hnot _htyFresh
         exact hfresh)
@@ -2002,28 +1948,17 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
-        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
-          hpointee _htargets ih
-          hfresh holdFresh htyFresh
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-          intro hv
-          exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
-          PointeeUpdateAtPath.typeNameFresh hpointee hfresh holdPointeeFresh
-            htyFresh
         refine ⟨ih hfresh htargetsNot htyFresh, ?_⟩
         intro hv
         simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv
-        rcases hv with ⟨target, hmem, hbase⟩ | hpointeeVar
-        · exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩)
-        · exact hupdatedPointeeFresh hpointeeVar)
+        rcases hv with ⟨target, hmem, hbase⟩
+        exact holdFresh (by
+          simp [PartialTy.allVars, Ty.allVars, List.mem_map]
+          exact ⟨target, hmem, hbase⟩))
       (by
         intro rank env path ty hfresh _hnot _htyFresh
         exact hfresh)
@@ -2101,28 +2036,17 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
-        intro env₁ env₂ rank path targets oldPointee updatedPointee ty
-          hpointee _htargets ih
-          hfresh holdFresh htyFresh
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
           not_mentions_of_mem_borrow_allVars holdFresh
-        have holdPointeeFresh : ghost ∉ Ty.allVars oldPointee := by
-          intro hv
-          exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars]
-            exact Or.inr hv)
-        have hupdatedPointeeFresh : ghost ∉ Ty.allVars updatedPointee :=
-          PointeeUpdateAtPath.typeNameFresh hpointee hfresh holdPointeeFresh
-            htyFresh
         refine ⟨ih hfresh htargetsNot htyFresh, ?_⟩
         intro hv
         simp [PartialTy.allVars, Ty.allVars, List.mem_map] at hv
-        rcases hv with ⟨target, hmem, hbase⟩ | hpointeeVar
-        · exact holdFresh (by
-            simp [PartialTy.allVars, Ty.allVars, List.mem_map]
-            exact Or.inl ⟨target, hmem, hbase⟩)
-        · exact hupdatedPointeeFresh hpointeeVar)
+        rcases hv with ⟨target, hmem, hbase⟩
+        exact holdFresh (by
+          simp [PartialTy.allVars, Ty.allVars, List.mem_map]
+          exact ⟨target, hmem, hbase⟩))
       (by
         intro rank env path ty hfresh _hnot _htyFresh
         exact hfresh)
@@ -2239,12 +2163,10 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       have htyFresh : ghost ∉ Ty.allVars ty := by
         have := LValTyping.typeNameFresh.1 hLvErased hfresh
         simpa [PartialTy.allVars] using this
-      have hresultFresh : ghost ∉ Ty.allVars (.borrow true [lv] ty) := by
+      have hresultFresh : ghost ∉ Ty.allVars (.borrow true [lv]) := by
         intro hv
         simp [Ty.allVars, List.mem_map] at hv
-        rcases hv with hbase | hpointee
-        · exact hnotLv ((LVal.mentions_iff_base (ghost := ghost) lv).2 hbase.symm)
-        · exact htyFresh hpointee
+        exact hnotLv ((LVal.mentions_iff_base (ghost := ghost) lv).2 hv.symm)
       exact ⟨TermTyping.mutBorrow hLvErased
         (Mutable.erase_ghost hmutable hfresh hnotLv)
         (by
@@ -2260,12 +2182,10 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       have htyFresh : ghost ∉ Ty.allVars ty := by
         have := LValTyping.typeNameFresh.1 hLvErased hfresh
         simpa [PartialTy.allVars] using this
-      have hresultFresh : ghost ∉ Ty.allVars (.borrow false [lv] ty) := by
+      have hresultFresh : ghost ∉ Ty.allVars (.borrow false [lv]) := by
         intro hv
         simp [Ty.allVars, List.mem_map] at hv
-        rcases hv with hbase | hpointee
-        · exact hnotLv ((LVal.mentions_iff_base (ghost := ghost) lv).2 hbase.symm)
-        · exact htyFresh hpointee
+        exact hnotLv ((LVal.mentions_iff_base (ghost := ghost) lv).2 hv.symm)
       exact ⟨TermTyping.immBorrow hLvErased
         (by
           intro hread

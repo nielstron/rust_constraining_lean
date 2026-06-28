@@ -48,7 +48,7 @@ def whileJoinIntSlot : EnvSlot :=
 
 /-- Slot for the immutable borrow `q`, parametric in the target list. -/
 def whileJoinQSlot (targets : List LVal) : EnvSlot :=
-  { ty := .ty (.borrow false targets .int), lifetime := Lifetime.root }
+  { ty := .ty (.borrow false targets), lifetime := Lifetime.root }
 
 /-- The example environments all share `x : int`, `y : int` and differ only in
 `q`'s target list. -/
@@ -316,7 +316,7 @@ theorem whileJoin_y_typing (targets : List LVal) :
 
 theorem whileJoin_q_typing (targets : List LVal) :
     LValTyping (whileJoinEnv targets) (.var "q")
-      (.ty (.borrow false targets .int)) Lifetime.root :=
+      (.ty (.borrow false targets)) Lifetime.root :=
   @LValTyping.var (whileJoinEnv targets) "q" (whileJoinQSlot targets)
     (whileJoinEnv_slotAt_q targets)
 
@@ -376,17 +376,15 @@ theorem whileJoin_old_root_int (targets : List LVal) : ∀ {lv partialTy lifetim
 borrow. -/
 theorem whileJoin_no_good_targets_borrow (targets : List LVal) {ts : List LVal}
     (hts : WhileJoinGoodTargets ts) {mutable : Bool} {bts : List LVal}
-    {pointee : Ty} {lifetime : Lifetime} :
+    {lifetime : Lifetime} :
     ts ≠ [] →
     ¬ LValTargetsTyping (whileJoinEnv targets) ts
-      (.ty (.borrow mutable bts pointee)) lifetime := by
+      (.ty (.borrow mutable bts)) lifetime := by
   intro hnonempty
   intro htyping
   generalize hpartialTy :
-      (PartialTy.ty (Ty.borrow mutable bts pointee)) = partialTy at htyping
+      (PartialTy.ty (Ty.borrow mutable bts)) = partialTy at htyping
   cases htyping with
-  | empty _ =>
-      exact hnonempty rfl
   | singleton htarget =>
       rcases hts _ List.mem_cons_self with rfl | rfl
       all_goals
@@ -413,8 +411,6 @@ theorem whileJoin_no_good_targets_box (targets : List LVal) {ts : List LVal}
   intro htyping
   generalize hpartialTy : (PartialTy.box inner) = partialTy at htyping
   cases htyping with
-  | empty _ =>
-      cases hpartialTy
   | singleton htarget =>
       rcases hts _ List.mem_cons_self with rfl | rfl
       all_goals
@@ -441,11 +437,11 @@ theorem whileJoin_q_root_facts (targets : List LVal)
     LVal.base lv = "q" →
     (∀ {inner lifetime},
       ¬ LValTyping (whileJoinEnv targets) lv (.box inner) lifetime) ∧
-    (∀ {mutable bts pointee lifetime},
+    (∀ {mutable bts lifetime},
       LValTyping (whileJoinEnv targets) lv
-        (.ty (.borrow mutable bts pointee)) lifetime →
+        (.ty (.borrow mutable bts)) lifetime →
       lv = .var "q" ∧ mutable = false ∧ bts = targets ∧
-        pointee = .int ∧ lifetime = Lifetime.root) := by
+        lifetime = Lifetime.root) := by
   intro lv
   induction lv with
   | var x =>
@@ -462,9 +458,9 @@ theorem whileJoin_q_root_facts (targets : List LVal)
               Option.some.inj (hslot.symm.trans (whileJoinEnv_slotAt_q targets))
             subst slot
             simp [whileJoinQSlot] at hpartialTy
-      · intro mutable bts pointee lifetime htyping
+      · intro mutable bts lifetime htyping
         generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable bts pointee)) = partialTy at htyping
+            (PartialTy.ty (Ty.borrow mutable bts)) = partialTy at htyping
         cases htyping with
         | var hslot =>
             rename_i slot
@@ -474,7 +470,7 @@ theorem whileJoin_q_root_facts (targets : List LVal)
               Option.some.inj (hslot.symm.trans (whileJoinEnv_slotAt_q targets))
             subst slot
             simp [whileJoinQSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl, rfl⟩
+            rcases hpartialTy with ⟨rfl, rfl⟩
             simp [whileJoinQSlot]
   | deref lv ih =>
       intro hbase
@@ -484,13 +480,22 @@ theorem whileJoin_q_root_facts (targets : List LVal)
         cases htyping with
         | box hinner =>
             exact ihp.1 hinner
-      · intro mutable bts pointee lifetime htyping
+        | borrow _hinner htargets =>
+            exact LValTargetsTyping.not_box htargets
+      · intro mutable bts lifetime htyping
+        let qtargets := targets
         cases htyping with
         | box hinner =>
             exact False.elim (ihp.1 hinner)
         | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, _, hpointee, _⟩
-            cases hpointee
+            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
+            subst hinnerTargets
+            exact False.elim (whileJoin_no_good_targets_borrow qtargets hts
+              (by
+                intro hnil
+                subst hnil
+                cases htargets)
+              htargets)
 
 /-! ### Borrow-prohibition facts
 
@@ -498,8 +503,8 @@ The example environments contain no mutable borrows at all, which makes every
 read-prohibition (and hence borrow safety) vacuous. -/
 
 theorem whileJoin_no_mut (targets : List LVal) {z : Name} {bts : List LVal}
-    {pointee : Ty} :
-    ¬ ((whileJoinEnv targets) ⊢ z ↝ (Ty.borrow true bts pointee)) := by
+    :
+    ¬ ((whileJoinEnv targets) ⊢ z ↝ (Ty.borrow true bts)) := by
   intro hcontains
   rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
   by_cases hq : z = "q"
@@ -531,21 +536,20 @@ theorem whileJoin_no_mut (targets : List LVal) {z : Name} {bts : List LVal}
 theorem whileJoin_not_readProhibited (targets : List LVal) (lv : LVal) :
     ¬ ReadProhibited (whileJoinEnv targets) lv := by
   intro hread
-  rcases hread with ⟨z, bts, pointee, target, hcontains, _htarget, _hconflict⟩
+  rcases hread with ⟨z, bts, target, hcontains, _htarget, _hconflict⟩
   exact whileJoin_no_mut targets hcontains
 
 theorem whileJoin_borrowSafe (targets : List LVal) :
     BorrowSafeEnv (whileJoinEnv targets) := by
-  intro z w mutable targetsMutable targetsOther pointeeMutable pointeeOther
-    targetMutable targetOther
+  intro z w mutable targetsMutable targetsOther targetMutable targetOther
     hcontainsMutable _hcontainsOther _htargetMutable _htargetOther _hconflict
   exact absurd hcontainsMutable (whileJoin_no_mut targets)
 
 /-- The only immutable borrow contained anywhere is `q`'s slot. -/
 theorem whileJoin_imm_contains (targets : List LVal) {z : Name}
-    {bts : List LVal} {pointee : Ty} :
-    ((whileJoinEnv targets) ⊢ z ↝ (Ty.borrow false bts pointee)) →
-      z = "q" ∧ bts = targets ∧ pointee = .int := by
+    {bts : List LVal} :
+    ((whileJoinEnv targets) ⊢ z ↝ (Ty.borrow false bts)) →
+      z = "q" ∧ bts = targets := by
   intro hcontains
   rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
   by_cases hq : z = "q"
@@ -555,7 +559,7 @@ theorem whileJoin_imm_contains (targets : List LVal) {z : Name}
     subst slot
     simp only [whileJoinQSlot] at hcontainsTy
     cases hcontainsTy with
-    | here => exact ⟨rfl, rfl, rfl⟩
+    | here => exact ⟨rfl, rfl⟩
   · exfalso
     by_cases hy : z = "y"
     · subst hy
@@ -582,8 +586,8 @@ theorem whileJoin_not_writeProhibited_q (targets : List LVal)
   intro hwrite
   rcases hwrite with hread | himm
   · exact whileJoin_not_readProhibited targets _ hread
-  · rcases himm with ⟨z, bts, pointee, target, hcontains, htarget, hconflict⟩
-    rcases whileJoin_imm_contains targets hcontains with ⟨rfl, rfl, _⟩
+  · rcases himm with ⟨z, bts, target, hcontains, htarget, hconflict⟩
+    rcases whileJoin_imm_contains targets hcontains with ⟨rfl, rfl⟩
     rcases hts target htarget with rfl | rfl <;>
       simp [PathConflicts, LVal.base] at hconflict
 
@@ -592,7 +596,7 @@ theorem whileJoin_not_writeProhibited_q (targets : List LVal)
 theorem whileJoin_contained (targets : List LVal)
     (hts : WhileJoinGoodTargets targets) :
     ContainedBorrowsWellFormed (whileJoinEnv targets) := by
-  intro root slot mutable bts pointee hslot hcontains
+  intro root slot mutable bts hslot hcontains
   rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
   by_cases hq : root = "q"
   · subst hq
@@ -675,11 +679,12 @@ theorem whileJoin_coherent (targets : List LVal)
     (hjoint : ∃ lifetime,
       LValTargetsTyping (whileJoinEnv targets) targets (.ty .int) lifetime) :
     Coherent (whileJoinEnv targets) := by
-  intro lv mutable bts pointee borrowLifetime htyping
+  intro lv mutable bts borrowLifetime htyping
   by_cases hbase : LVal.base lv = "q"
   · rcases (whileJoin_q_root_facts targets hts hbase).2 htyping with
-      ⟨rfl, rfl, rfl, rfl, rfl⟩
-    exact hjoint
+      ⟨rfl, rfl, rfl, rfl⟩
+    rcases hjoint with ⟨lifetime, htargets⟩
+    exact ⟨.int, lifetime, htargets⟩
   · rcases whileJoin_old_root_int targets hbase htyping with ⟨_, hpartialTy, _⟩
     cases hpartialTy
 
@@ -692,7 +697,7 @@ theorem whileJoinInv_targets_typing :
     (LifetimeIntersection.self Lifetime.root)
 
 theorem whileJoin_borrow_y_wellFormed (targets : List LVal) :
-    WellFormedTy (whileJoinEnv targets) (.borrow false [.var "y"] .int)
+    WellFormedTy (whileJoinEnv targets) (.borrow false [.var "y"])
       Lifetime.root := by
   exact WellFormedTy.borrow (BorrowTargetsWellFormed.intro (by
     intro target htarget
@@ -707,20 +712,27 @@ theorem whileJoin_borrow_y_wellFormed (targets : List LVal) :
 theorem whileJoin_shape (targets : List LVal)
     (hts : WhileJoinGoodTargets targets) :
     ShapeCompatible (whileJoinEnv targets)
-      (.ty (.borrow false targets .int)) (.ty (.borrow false [.var "y"] .int)) := by
-  exact ShapeCompatible.borrow ShapeCompatible.int
+      (.ty (.borrow false targets)) (.ty (.borrow false [.var "y"])) := by
+  exact ShapeCompatible.borrow
+    (fun target htarget => ⟨Lifetime.root,
+      whileJoin_target_typing targets (hts target htarget)⟩)
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, whileJoin_y_typing targets⟩)
+    ShapeCompatible.int
 
 /-! ### The body's environment write -/
 
 theorem whileJoin_retarget_write (targets : List LVal) :
-    EnvWrite 0 (whileJoinEnv targets) (.var "q") (.borrow false [.var "y"] .int)
+    EnvWrite 0 (whileJoinEnv targets) (.var "q") (.borrow false [.var "y"])
       whileJoinBackEnv := by
   have hwrite := @EnvWrite.intro 0 (whileJoinEnv targets) (whileJoinEnv targets)
-    (.var "q") (whileJoinQSlot targets) (.borrow false [.var "y"] .int)
-    (.ty (.borrow false [.var "y"] .int))
+    (.var "q") (whileJoinQSlot targets) (.borrow false [.var "y"])
+    (.ty (.borrow false [.var "y"]))
     (whileJoinEnv_slotAt_q targets) UpdateAtPath.strong
   have hslotEq :
-      ({ whileJoinQSlot targets with ty := .ty (.borrow false [.var "y"] .int) }
+      ({ whileJoinQSlot targets with ty := .ty (.borrow false [.var "y"]) }
         : EnvSlot) = whileJoinQSlot [.var "y"] := by
     simp [whileJoinQSlot]
   simp only [LVal.base] at hwrite
@@ -729,9 +741,9 @@ theorem whileJoin_retarget_write (targets : List LVal) :
 
 theorem whileJoin_retarget_below :
     EnvWriteRhsBorrowTargetsBelow (fun name => if name = "q" then 1 else 0)
-      whileJoinBackEnv (.borrow false [.var "y"] .int) := by
+      whileJoinBackEnv (.borrow false [.var "y"]) := by
   constructor
-  · intro root slot mutable bts pointee target hslot hcontains htarget _hrhs
+  · intro root slot mutable bts target hslot hcontains htarget _hrhs
     by_cases hq : root = "q"
     · subst hq
       have hslotEq : slot = whileJoinQSlot [.var "y"] :=
@@ -762,18 +774,18 @@ theorem whileJoin_retarget_below :
             whileJoinEnv_slotAt_none [.var "y"] hq hy hx
           rw [hslot] at hnone
           cases hnone
-  · intro root other mutable targetsMutable targetsOther pointeeMutable
-      pointeeOther targetMutable targetOther hcontainsMutable _hcontainsOther _htargetMutable
+  · intro root other mutable targetsMutable targetsOther
+      targetMutable targetOther hcontainsMutable _hcontainsOther _htargetMutable
       _htargetOther _hconflict _hrhsMutable _hrhsOther
     exact absurd hcontainsMutable (whileJoin_no_mut [.var "y"])
 
 theorem whileJoin_writeCoherence (_targets : List LVal) :
     Coherent whileJoinBackEnv := by
-  intro lv mutable bts pointee borrowLifetime htyping
+  intro lv mutable bts borrowLifetime htyping
   by_cases hbase : LVal.base lv = "q"
   · rcases (whileJoin_q_root_facts [.var "y"] whileJoinBack_goodTargets
-        hbase).2 htyping with ⟨rfl, rfl, rfl, rfl, rfl⟩
-    exact ⟨Lifetime.root,
+        hbase).2 htyping with ⟨rfl, rfl, rfl, rfl⟩
+    exact ⟨.int, Lifetime.root,
       LValTargetsTyping.singleton (whileJoin_y_typing [.var "y"])⟩
   · rcases whileJoin_old_root_int [.var "y"] hbase htyping with
       ⟨_, hpartialTy, _⟩
@@ -803,7 +815,7 @@ theorem whileJoinEntry_le_inv :
   by_cases hq : name = "q"
   · subst hq
     rw [whileJoinEnv_slotAt_q, whileJoinEnv_slotAt_q]
-    refine ⟨rfl, PartialTyStrengthens.borrow ?_ PartialTyStrengthens.reflex⟩
+    refine ⟨rfl, PartialTyStrengthens.borrow ?_⟩
     intro target htarget
     simp at htarget
     subst htarget
@@ -826,7 +838,7 @@ theorem whileJoinBack_le_inv :
   by_cases hq : name = "q"
   · subst hq
     rw [whileJoinEnv_slotAt_q, whileJoinEnv_slotAt_q]
-    refine ⟨rfl, PartialTyStrengthens.borrow ?_ PartialTyStrengthens.reflex⟩
+    refine ⟨rfl, PartialTyStrengthens.borrow ?_⟩
     intro target htarget
     simp at htarget
     subst htarget
@@ -858,9 +870,9 @@ theorem whileJoinInv_least {env' : Env}
       Option.some.inj (hslotX.symm.trans hslotY)
     subst hslotEq
     rw [whileJoinEnv_slotAt_q, hslotX]
-    have hX : PartialTyStrengthens (.ty (.borrow false [.var "x"] .int))
+    have hX : PartialTyStrengthens (.ty (.borrow false [.var "x"]))
         slotX.ty := hstrX
-    have hY : PartialTyStrengthens (.ty (.borrow false [.var "y"] .int))
+    have hY : PartialTyStrengthens (.ty (.borrow false [.var "y"]))
         slotX.ty := hstrY
     have hXY := partialTyStrengthens_borrow_append hX hY
     exact ⟨hlife, by simpa [whileJoinQSlot] using hXY⟩

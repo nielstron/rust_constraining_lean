@@ -192,13 +192,13 @@ theorem valuePreservation_move_step_int_post {store store' : ProgramStore}
 /-- Lemma 9.9, `R-Borrow` one-step value preservation fragment. -/
 theorem valuePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
-    {mutable : Bool} {location : Location} {ty : Ty} :
+    {mutable : Bool} {location : Location} :
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv] ty) env₂ →
+      (.borrow mutable [lv]) env₂ →
     Step store lifetime (.borrow mutable lv) store
       (.val (.ref { location := location, owner := false })) →
     ValidValue store (.ref { location := location, owner := false })
-      (.borrow mutable [lv] ty) := by
+      (.borrow mutable [lv]) := by
   intro _htyping hstep
   cases hstep with
   | borrow hloc =>
@@ -789,15 +789,15 @@ theorem storePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
 /-- Lemma 9.10, `R-Borrow` store-preservation fragment. -/
 theorem storePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
-    {mutable : Bool} {location : Location} {ty : Ty} :
+    {mutable : Bool} {location : Location} :
     store ∼ₛ env →
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv] ty) env₂ →
+      (.borrow mutable [lv]) env₂ →
     Step store lifetime (.borrow mutable lv) store
       (.val (.ref { location := location, owner := false })) →
     store ∼ₛ env₂ ∧
       ValidValue store (.ref { location := location, owner := false })
-        (.borrow mutable [lv] ty) := by
+        (.borrow mutable [lv]) := by
   intro hsafe htyping hstep
   cases htyping with
   | mutBorrow hLv hmutable hnotWrite =>
@@ -857,17 +857,17 @@ and value-preservation facts for a borrow step.
 -/
 theorem preservation_borrow_step_runtime {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
-    {mutable : Bool} {location : Location} {ty : Ty} :
+    {mutable : Bool} {location : Location} :
     store ∼ₛ env →
     ValidRuntimeState store (.borrow mutable lv) →
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv] ty) env₂ →
+      (.borrow mutable [lv]) env₂ →
     Step store lifetime (.borrow mutable lv) store
       (.val (.ref { location := location, owner := false })) →
     ValidRuntimeState store (.val (.ref { location := location, owner := false })) ∧
       store ∼ₛ env₂ ∧
       ValidValue store (.ref { location := location, owner := false })
-        (.borrow mutable [lv] ty) := by
+        (.borrow mutable [lv]) := by
   intro hsafe hvalidRuntime htyping hstep
   rcases storePreservation_borrow_step hsafe htyping hstep with
     ⟨hsafe₂, hvalidValue⟩
@@ -1238,7 +1238,7 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     EnvWrite 0 env (.var x) ty env' →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
       (∃ inner, envSlot.ty = .undef inner) ∨
-      ∃ mutable targets pointee, envSlot.ty = .ty (.borrow mutable targets pointee)) →
+      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
     store.write (.var x) (.value value) = some storeAfterWrite →
@@ -1335,14 +1335,14 @@ theorem preservation_copy_multistep_runtime {store finalStore : ProgramStore}
 /-- Lemma 4.11, multistep preservation for `R-Borrow` redexes. -/
 theorem preservation_borrow_multistep_runtime {store finalStore : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {lv : LVal} {mutable : Bool} {finalValue : Value} {ty : Ty} :
+    {lv : LVal} {mutable : Bool} {finalValue : Value} :
     store ∼ₛ env →
     ValidRuntimeState store (.borrow mutable lv) →
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv] ty) env₂ →
+      (.borrow mutable [lv]) env₂ →
     MultiStep store lifetime (.borrow mutable lv) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
-      ValidValue finalStore finalValue (.borrow mutable [lv] ty) := by
+      ValidValue finalStore finalValue (.borrow mutable [lv]) := by
   intro hsafe hvalidRuntime htyping hmulti
   exact preservation_runtime_multistep_of_step_to_value
     (by intro hterminal; simp [Terminal] at hterminal)

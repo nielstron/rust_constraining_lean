@@ -24,8 +24,8 @@ namespace CompleteDsl
 def tyUnit : Ty := .unit
 def tyInt : Ty := .int
 def tyBool : Ty := .bool
-def tyBorrow (mutable : Bool) (targets : List LVal) (pointee : Ty) : Ty :=
-  .borrow mutable targets pointee
+def tyBorrow (mutable : Bool) (targets : List LVal) : Ty :=
+  .borrow mutable targets
 def tyBox (element : Ty) : Ty := .box element
 
 def lvalVar (x : Name) : LVal := .var x
@@ -107,10 +107,10 @@ abbrev ctyBool_ctor : Ty :=
   show Ty from .bool
 
 abbrev ctyBorrowShared_ctor (targets : List LVal) : Ty :=
-  LwRust.Core.Ty.borrow Bool.false targets .unit
+  LwRust.Core.Ty.borrow Bool.false targets
 
 abbrev ctyBorrowMut_ctor (targets : List LVal) : Ty :=
-  LwRust.Core.Ty.borrow Bool.true targets .unit
+  LwRust.Core.Ty.borrow Bool.true targets
 
 abbrev ctyBox_ctor (element : Ty) : Ty :=
   show Ty from (.box element)
