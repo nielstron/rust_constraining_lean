@@ -3945,15 +3945,30 @@ theorem typingPreservesCoherent_of_ruleCarriedObligations {env₁ env₂ : Env}
   exact (typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
     term.size (Nat.le_refl _) hrefs hwellFormed htyping).1.2.2.1
 
+/-- Typing from the empty environment reaches a well-formed environment.
+
+This is the theorem shape the typing rules should ultimately expose directly:
+we do not care whether arbitrary, user-supplied input environments are coherent;
+we care that environments reachable from `Env.empty` by well-typed code carry
+the invariants.  The proof currently factors through the rule-carried
+preservation theorem below, which marks the remaining migration work. -/
+theorem typingFromEmpty_preservesWellFormed {env₂ : Env}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
+  intro htyping
+  exact typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
+    term.size (Nat.le_refl _)
+    (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
+    (wellFormedEnv_empty lifetime) htyping
+
 /-- Empty-environment typing has a coherent result environment. -/
 theorem typingFromEmpty_preservesCoherent {env₂ : Env}
     {lifetime : Lifetime} {term : Term} {ty : Ty} :
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     Coherent env₂ := by
   intro htyping
-  exact typingPreservesCoherent_of_ruleCarriedObligations
-    (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
-    (wellFormedEnv_empty lifetime) htyping
+  exact (typingFromEmpty_preservesWellFormed htyping).1.2.2.1
 
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}

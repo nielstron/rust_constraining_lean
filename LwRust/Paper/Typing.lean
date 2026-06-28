@@ -1650,9 +1650,8 @@ mutual
 
     Legacy mechanisation obligations on the joined result, following the
     repo's earlier convention of rule-carried obligations (cf. `T-Assign`).
-    This constructor is intentionally conservative and is being migrated toward
-    generated joins in `LwRust.Paper.Generated`, where the merge environment is
-    computed rather than supplied by the typing derivation:
+    The intended endpoint is that these invariants are derived for environments
+    reachable from `Env.empty`, rather than supplied by each typing derivation:
 
     * `EnvJoinSameShape` for both branches — branches must agree on each
       variable's initialisation state (see that definition for why the
@@ -1740,9 +1739,8 @@ mutual
     This is the legacy relational version of the loop rule.  Its join result
     and invariant are still supplied by the derivation, so it carries the
     shape and invariant obligations needed by the existing preservation proof.
-    The intended replacement is the generated fixed-point construction in
-    `LwRust.Paper.Generated`, where each successor is computed as the generated
-    join of the entry environment and the back-edge environment.
+    The intended endpoint is that loop invariants are accepted only when they
+    are reachable fixed points, so coherence follows from construction.
 
     The final two premises re-type the condition and body from the
     *entry-side* environments.  In real Rust this is implied: per-code
