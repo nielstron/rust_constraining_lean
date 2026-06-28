@@ -3930,6 +3930,31 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             htypingEq headResult.1)
         htyping hsize rfl hwellFormed
 
+/-- Term typing preserves coherence, provided the input environment is already
+well formed and the store typing's reference types are well formed in every
+environment.  Without the input invariant this is false: value/copy/borrow rules
+can leave an arbitrary input environment unchanged. -/
+theorem typingPreservesCoherent_of_ruleCarriedObligations {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    WellFormedEnv env₁ lifetime →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    Coherent env₂ := by
+  intro hrefs hwellFormed htyping
+  exact (typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
+    term.size (Nat.le_refl _) hrefs hwellFormed htyping).1.2.2.1
+
+/-- Empty-environment typing has a coherent result environment. -/
+theorem typingFromEmpty_preservesCoherent {env₂ : Env}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    Coherent env₂ := by
+  intro htyping
+  exact typingPreservesCoherent_of_ruleCarriedObligations
+    (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
+    (wellFormedEnv_empty lifetime) htyping
+
 theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}

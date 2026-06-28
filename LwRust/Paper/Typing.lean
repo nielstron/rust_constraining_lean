@@ -1648,8 +1648,11 @@ mutual
     post-condition environment, and the resulting type/environment are the
     joins (Definitions 3.8 and 3.10) of the branch results.
 
-    Mechanisation obligations on the joined result, following the repo
-    convention of rule-carried obligations (cf. `T-Assign`):
+    Legacy mechanisation obligations on the joined result, following the
+    repo's earlier convention of rule-carried obligations (cf. `T-Assign`).
+    This constructor is intentionally conservative and is being migrated toward
+    generated joins in `LwRust.Paper.Generated`, where the merge environment is
+    computed rather than supplied by the typing derivation:
 
     * `EnvJoinSameShape` for both branches — branches must agree on each
       variable's initialisation state (see that definition for why the
@@ -1734,11 +1737,12 @@ mutual
     that widen borrow target lists across iterations (e.g. re-pointing an
     outer `&mut` inside the body).
 
-    Obligations follow the `T-If` convention: joins merge borrow target
-    lists, so shape agreement and the well-formedness/borrow-safety kit for
-    the invariant are rule-carried.  Runtime entry/back-edge states transport
-    into the invariant via `EnvSameShapeStrengthening.safe`, exactly as in
-    the `T-If` preservation argument.
+    This is the legacy relational version of the loop rule.  Its join result
+    and invariant are still supplied by the derivation, so it carries the
+    shape and invariant obligations needed by the existing preservation proof.
+    The intended replacement is the generated fixed-point construction in
+    `LwRust.Paper.Generated`, where each successor is computed as the generated
+    join of the entry environment and the back-edge environment.
 
     The final two premises re-type the condition and body from the
     *entry-side* environments.  In real Rust this is implied: per-code
