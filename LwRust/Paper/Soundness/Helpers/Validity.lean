@@ -642,6 +642,179 @@ theorem BlockScopedSourceTerm.ite_falseBranch_typing_block_inv
   exact TermTyping.block_inv_of_isBlock
     (BlockScopedSourceTerm.ite_falseBranch_isBlock hscoped) htyping
 
+/-- Block-scoped `if` branches cannot expose their block-local declarations
+directly: both branch output environments are lifetime drops of the corresponding
+block-body environments. -/
+theorem BlockScopedSourceTerm.ite_branches_typing_block_inv
+    {env₁ envTrue envFalse : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+    {trueTy falseTy : Ty} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    TermTyping env₁ typing lifetime trueBranch trueTy envTrue →
+    TermTyping env₁ typing lifetime falseBranch falseTy envFalse →
+    ∃ trueLifetime trueTerms trueBodyEnv
+      falseLifetime falseTerms falseBodyEnv,
+      trueBranch = .block trueLifetime trueTerms ∧
+      falseBranch = .block falseLifetime falseTerms ∧
+      LifetimeChild lifetime trueLifetime ∧
+      LifetimeChild lifetime falseLifetime ∧
+      TermListTyping env₁ typing trueLifetime trueTerms trueTy trueBodyEnv ∧
+      TermListTyping env₁ typing falseLifetime falseTerms falseTy falseBodyEnv ∧
+      WellFormedTy trueBodyEnv trueTy lifetime ∧
+      WellFormedTy falseBodyEnv falseTy lifetime ∧
+      envTrue = trueBodyEnv.dropLifetime trueLifetime ∧
+      envFalse = falseBodyEnv.dropLifetime falseLifetime := by
+  intro hscoped htrue hfalse
+  rcases BlockScopedSourceTerm.ite_trueBranch_typing_block_inv hscoped htrue with
+    ⟨trueLifetime, trueTerms, trueBodyEnv, htrueEq, htrueChild,
+      htrueTerms, htrueWell, htrueDrop⟩
+  rcases BlockScopedSourceTerm.ite_falseBranch_typing_block_inv hscoped hfalse with
+    ⟨falseLifetime, falseTerms, falseBodyEnv, hfalseEq, hfalseChild,
+      hfalseTerms, hfalseWell, hfalseDrop⟩
+  exact ⟨trueLifetime, trueTerms, trueBodyEnv,
+    falseLifetime, falseTerms, falseBodyEnv,
+    htrueEq, hfalseEq, htrueChild, hfalseChild, htrueTerms, hfalseTerms,
+    htrueWell, hfalseWell, htrueDrop, hfalseDrop⟩
+
+/-- Any slot visible after typing a block-scoped `if` branch survived the branch
+block's `dropLifetime`; in particular, its lifetime is not the branch lifetime.
+This is the formal leak-prevention fact used to rule out raw conditionals whose
+branches introduce incompatible fresh variables directly into the join. -/
+theorem BlockScopedSourceTerm.ite_trueBranch_output_slot_survives_drop
+    {env₁ envTrue : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {condition trueBranch falseBranch : Term} {trueTy : Ty}
+    {x : Name} {slot : EnvSlot} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    TermTyping env₁ typing lifetime trueBranch trueTy envTrue →
+    envTrue.slotAt x = some slot →
+    ∃ branchLifetime terms bodyEnv,
+      trueBranch = .block branchLifetime terms ∧
+      LifetimeChild lifetime branchLifetime ∧
+      TermListTyping env₁ typing branchLifetime terms trueTy bodyEnv ∧
+      WellFormedTy bodyEnv trueTy lifetime ∧
+      bodyEnv.slotAt x = some slot ∧
+      slot.lifetime ≠ branchLifetime := by
+  intro hscoped htyping hslot
+  rcases BlockScopedSourceTerm.ite_trueBranch_typing_block_inv hscoped htyping with
+    ⟨branchLifetime, terms, bodyEnv, hbranchEq, hchild, hterms, hwell,
+      hdrop⟩
+  rw [hdrop] at hslot
+  unfold Env.dropLifetime at hslot
+  cases hbodySlot : bodyEnv.slotAt x with
+  | none =>
+      simp [hbodySlot] at hslot
+  | some bodySlot =>
+      by_cases hnotDropped : bodySlot.lifetime = branchLifetime
+      · simp [hbodySlot, hnotDropped] at hslot
+      · have hslotEq : bodySlot = slot := by
+          simpa [hbodySlot, hnotDropped] using hslot
+        subst hslotEq
+        exact ⟨branchLifetime, terms, bodyEnv, hbranchEq, hchild, hterms,
+          hwell, hbodySlot, hnotDropped⟩
+
+theorem BlockScopedSourceTerm.ite_falseBranch_output_slot_survives_drop
+    {env₁ envFalse : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {condition trueBranch falseBranch : Term} {falseTy : Ty}
+    {x : Name} {slot : EnvSlot} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    TermTyping env₁ typing lifetime falseBranch falseTy envFalse →
+    envFalse.slotAt x = some slot →
+    ∃ branchLifetime terms bodyEnv,
+      falseBranch = .block branchLifetime terms ∧
+      LifetimeChild lifetime branchLifetime ∧
+      TermListTyping env₁ typing branchLifetime terms falseTy bodyEnv ∧
+      WellFormedTy bodyEnv falseTy lifetime ∧
+      bodyEnv.slotAt x = some slot ∧
+      slot.lifetime ≠ branchLifetime := by
+  intro hscoped htyping hslot
+  rcases BlockScopedSourceTerm.ite_falseBranch_typing_block_inv hscoped htyping with
+    ⟨branchLifetime, terms, bodyEnv, hbranchEq, hchild, hterms, hwell,
+      hdrop⟩
+  rw [hdrop] at hslot
+  unfold Env.dropLifetime at hslot
+  cases hbodySlot : bodyEnv.slotAt x with
+  | none =>
+      simp [hbodySlot] at hslot
+  | some bodySlot =>
+      by_cases hnotDropped : bodySlot.lifetime = branchLifetime
+      · simp [hbodySlot, hnotDropped] at hslot
+      · have hslotEq : bodySlot = slot := by
+          simpa [hbodySlot, hnotDropped] using hslot
+        subst hslotEq
+        exact ⟨branchLifetime, terms, bodyEnv, hbranchEq, hchild, hterms,
+          hwell, hbodySlot, hnotDropped⟩
+
+/-- Any slot visible in a block-scoped `if` join survived both branch block
+drops.  Thus the join cannot directly observe a variable declaration whose
+lifetime is one of the branch-local lifetimes; such declarations are removed
+before `EnvJoin` runs. -/
+theorem BlockScopedSourceTerm.ite_join_output_slot_survives_branch_drops
+    {env₁ envTrue envFalse envJoin : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+    {trueTy falseTy : Ty} {x : Name} {joinSlot : EnvSlot} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    TermTyping env₁ typing lifetime trueBranch trueTy envTrue →
+    TermTyping env₁ typing lifetime falseBranch falseTy envFalse →
+    EnvJoin envTrue envFalse envJoin →
+    envJoin.slotAt x = some joinSlot →
+    ∃ trueLifetime trueTerms trueBodyEnv trueSlot
+      falseLifetime falseTerms falseBodyEnv falseSlot,
+      trueBranch = .block trueLifetime trueTerms ∧
+      falseBranch = .block falseLifetime falseTerms ∧
+      LifetimeChild lifetime trueLifetime ∧
+      LifetimeChild lifetime falseLifetime ∧
+      TermListTyping env₁ typing trueLifetime trueTerms trueTy trueBodyEnv ∧
+      TermListTyping env₁ typing falseLifetime falseTerms falseTy falseBodyEnv ∧
+      WellFormedTy trueBodyEnv trueTy lifetime ∧
+      WellFormedTy falseBodyEnv falseTy lifetime ∧
+      envTrue.slotAt x = some trueSlot ∧
+      envFalse.slotAt x = some falseSlot ∧
+      trueBodyEnv.slotAt x = some trueSlot ∧
+      falseBodyEnv.slotAt x = some falseSlot ∧
+      trueSlot.lifetime ≠ trueLifetime ∧
+      falseSlot.lifetime ≠ falseLifetime ∧
+      trueSlot.lifetime = joinSlot.lifetime ∧
+      falseSlot.lifetime = joinSlot.lifetime := by
+  intro hscoped htrue hfalse hjoin hjoinSlot
+  have hleftStrength := EnvJoin.left_le hjoin x
+  have hrightStrength := EnvJoin.right_le hjoin x
+  cases htrueSlotOpt : envTrue.slotAt x with
+  | none =>
+      simp [htrueSlotOpt, hjoinSlot] at hleftStrength
+  | some trueSlot =>
+      cases hfalseSlotOpt : envFalse.slotAt x with
+      | none =>
+          simp [hfalseSlotOpt, hjoinSlot] at hrightStrength
+      | some falseSlot =>
+          have htrueSlot : envTrue.slotAt x = some trueSlot := htrueSlotOpt
+          have hfalseSlot : envFalse.slotAt x = some falseSlot := hfalseSlotOpt
+          have htrueStrength :
+              trueSlot.lifetime = joinSlot.lifetime ∧
+                PartialTyStrengthens trueSlot.ty joinSlot.ty := by
+            simpa [htrueSlotOpt, hjoinSlot] using hleftStrength
+          have hfalseStrength :
+              falseSlot.lifetime = joinSlot.lifetime ∧
+                PartialTyStrengthens falseSlot.ty joinSlot.ty := by
+            simpa [hfalseSlotOpt, hjoinSlot] using hrightStrength
+          have htrueLife : trueSlot.lifetime = joinSlot.lifetime := by
+            exact htrueStrength.1
+          have hfalseLife : falseSlot.lifetime = joinSlot.lifetime := by
+            exact hfalseStrength.1
+          rcases BlockScopedSourceTerm.ite_trueBranch_output_slot_survives_drop
+              hscoped htrue htrueSlot with
+            ⟨trueLifetime, trueTerms, trueBodyEnv, htrueEq, htrueChild,
+              htrueTerms, htrueWell, htrueBodySlot, htrueNotLocal⟩
+          rcases BlockScopedSourceTerm.ite_falseBranch_output_slot_survives_drop
+              hscoped hfalse hfalseSlot with
+            ⟨falseLifetime, falseTerms, falseBodyEnv, hfalseEq, hfalseChild,
+              hfalseTerms, hfalseWell, hfalseBodySlot, hfalseNotLocal⟩
+          exact ⟨trueLifetime, trueTerms, trueBodyEnv, trueSlot,
+            falseLifetime, falseTerms, falseBodyEnv, falseSlot,
+            htrueEq, hfalseEq, htrueChild, hfalseChild, htrueTerms, hfalseTerms,
+            htrueWell, hfalseWell, rfl, rfl, htrueBodySlot,
+            hfalseBodySlot, htrueNotLocal, hfalseNotLocal, htrueLife,
+            hfalseLife⟩
+
 theorem BlockScopedSourceTerm.while_condition {bodyLifetime : Lifetime}
     {condition body : Term} :
     BlockScopedSourceTerm (.whileLoop bodyLifetime condition body) →

@@ -45,11 +45,23 @@ def EmptyInitialBlockScopedTermTypingOutputsCoherent : Prop :=
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     Coherent env₂
 
+def EmptyInitialBlockScopedTermTypingOutputsExposedOutputCoherent : Prop :=
+  ∀ {term ty env₂ lifetime},
+    BlockScopedSourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    LValTypingExposedOutputCoherent env₂
+
 def EmptyInitialBlockScopedTermListTypingOutputsCoherent : Prop :=
   ∀ {terms ty env₂ lifetime},
     BlockScopedSourceTermList terms →
     TermListTyping Env.empty StoreTyping.empty lifetime terms ty env₂ →
     Coherent env₂
+
+def EmptyInitialBlockScopedTermListTypingOutputsExposedOutputCoherent : Prop :=
+  ∀ {terms ty env₂ lifetime},
+    BlockScopedSourceTermList terms →
+    TermListTyping Env.empty StoreTyping.empty lifetime terms ty env₂ →
+    LValTypingExposedOutputCoherent env₂
 
 inductive BlockScopedReachableEnv
     (typing : StoreTyping) (lifetime : Lifetime) : Env → Prop where
@@ -102,6 +114,20 @@ def BlockScopedReachableTermTypingOutputsPartialLValCoherent : Prop :=
     TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
     LValTypingPartialOutputsCoherent env₂
 
+def BlockScopedReachableTermTypingOutputsExposedCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedReachableEnv StoreTyping.empty lifetime env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingExposedOutputsCoherent env₂
+
+def BlockScopedReachableTermTypingOutputsExposedOutputCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedReachableEnv StoreTyping.empty lifetime env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingExposedOutputCoherent env₂
+
 def BlockScopedGeneratedTermTypingOutputsCoherent : Prop :=
   ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
     BlockScopedGeneratedEnv StoreTyping.empty env₁ →
@@ -115,6 +141,20 @@ def BlockScopedGeneratedTermTypingOutputsPartialLValCoherent : Prop :=
     BlockScopedSourceTerm term →
     TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
     LValTypingPartialOutputsCoherent env₂
+
+def BlockScopedGeneratedTermTypingOutputsExposedCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingExposedOutputsCoherent env₂
+
+def BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingExposedOutputCoherent env₂
 
 theorem BlockScopedReachableTermTypingOutputsLValCoherent.coherent :
     BlockScopedReachableTermTypingOutputsLValCoherent →
@@ -135,15 +175,85 @@ theorem BlockScopedReachableTermTypingOutputsPartialLValCoherent.coherent :
   exact BlockScopedReachableTermTypingOutputsLValCoherent.coherent
     (BlockScopedReachableTermTypingOutputsPartialLValCoherent.outputs hpartial)
 
+theorem BlockScopedReachableTermTypingOutputsExposedCoherent.coherent :
+    BlockScopedReachableTermTypingOutputsExposedCoherent →
+    BlockScopedReachableTermTypingOutputsCoherent := by
+  intro hexposed env₁ env₂ lifetime term ty hreach hsource htyping
+  exact LValTypingExposedOutputsCoherent.coherent
+    (hexposed hreach hsource htyping)
+
+theorem BlockScopedReachableTermTypingOutputsExposedOutputCoherent.exposed :
+    BlockScopedReachableTermTypingOutputsExposedOutputCoherent →
+    BlockScopedReachableTermTypingOutputsExposedCoherent := by
+  intro houtputs env₁ env₂ lifetime term ty hreach hsource htyping
+  exact LValTypingExposedOutputCoherent.exposed
+    (houtputs hreach hsource htyping)
+
+theorem BlockScopedReachableTermTypingOutputsExposedOutputCoherent.coherent :
+    BlockScopedReachableTermTypingOutputsExposedOutputCoherent →
+    BlockScopedReachableTermTypingOutputsCoherent := by
+  intro houtputs
+  exact BlockScopedReachableTermTypingOutputsExposedCoherent.coherent
+    (BlockScopedReachableTermTypingOutputsExposedOutputCoherent.exposed
+      houtputs)
+
+theorem BlockScopedReachableTermTypingOutputsCoherent.exposed :
+    BlockScopedReachableTermTypingOutputsCoherent →
+    BlockScopedReachableTermTypingOutputsExposedCoherent := by
+  intro hcoherent env₁ env₂ lifetime term ty hreach hsource htyping
+  exact Coherent.lvalTypingExposedOutputs
+    (hcoherent hreach hsource htyping)
+
 theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.coherent :
     BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
     BlockScopedGeneratedTermTypingOutputsCoherent := by
   intro hpartial env₁ env₂ lifetime term ty hgenerated hsource htyping
   exact (hpartial hgenerated hsource htyping).coherent
 
+theorem BlockScopedGeneratedTermTypingOutputsExposedCoherent.coherent :
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent →
+    BlockScopedGeneratedTermTypingOutputsCoherent := by
+  intro hexposed env₁ env₂ lifetime term ty hgenerated hsource htyping
+  exact LValTypingExposedOutputsCoherent.coherent
+    (hexposed hgenerated hsource htyping)
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.exposed :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent := by
+  intro houtputs env₁ env₂ lifetime term ty hgenerated hsource htyping
+  exact LValTypingExposedOutputCoherent.exposed
+    (houtputs hgenerated hsource htyping)
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.coherent :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    BlockScopedGeneratedTermTypingOutputsCoherent := by
+  intro houtputs
+  exact BlockScopedGeneratedTermTypingOutputsExposedCoherent.coherent
+    (BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.exposed
+      houtputs)
+
+theorem BlockScopedGeneratedTermTypingOutputsCoherent.exposed :
+    BlockScopedGeneratedTermTypingOutputsCoherent →
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent := by
+  intro hcoherent env₁ env₂ lifetime term ty hgenerated hsource htyping
+  exact Coherent.lvalTypingExposedOutputs
+    (hcoherent hgenerated hsource htyping)
+
 theorem BlockScopedGeneratedTermTypingOutputsCoherent.reachable :
     BlockScopedGeneratedTermTypingOutputsCoherent →
     BlockScopedReachableTermTypingOutputsCoherent := by
+  intro hgenerated env₁ env₂ lifetime term ty hreach hsource htyping
+  exact hgenerated hreach.to_generated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedCoherent.reachable :
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent →
+    BlockScopedReachableTermTypingOutputsExposedCoherent := by
+  intro hgenerated env₁ env₂ lifetime term ty hreach hsource htyping
+  exact hgenerated hreach.to_generated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.reachable :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    BlockScopedReachableTermTypingOutputsExposedOutputCoherent := by
   intro hgenerated env₁ env₂ lifetime term ty hreach hsource htyping
   exact hgenerated hreach.to_generated hsource htyping
 
@@ -166,6 +276,19 @@ theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.emptyInitialBlo
   exact BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialBlockScopedTerm
     (BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.coherent
       hgenerated)
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedCoherent.emptyInitialBlockScopedTerm :
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent →
+    EmptyInitialBlockScopedTermTypingOutputsCoherent := by
+  intro hgenerated
+  exact BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialBlockScopedTerm
+    (BlockScopedGeneratedTermTypingOutputsExposedCoherent.coherent hgenerated)
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.emptyInitialBlockScopedTerm :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    EmptyInitialBlockScopedTermTypingOutputsExposedOutputCoherent := by
+  intro hgenerated term ty env₂ lifetime hsource htyping
+  exact hgenerated BlockScopedGeneratedEnv.empty hsource htyping
 
 theorem TermTypingOutputsCoherent.emptyInitialBlockScopedTerm :
     TermTypingOutputsCoherent →
@@ -329,6 +452,32 @@ theorem BlockScopedReachableTermTypingOutputsPartialLValCoherent.reachableEnv :
   | step hreach hsource htyping _ih =>
       exact houtputs hreach hsource htyping
 
+theorem BlockScopedReachableTermTypingOutputsExposedCoherent.reachableEnv :
+    BlockScopedReachableTermTypingOutputsExposedCoherent →
+    ∀ {env : Env} {lifetime : Lifetime},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env →
+      LValTypingExposedOutputsCoherent env := by
+  intro houtputs env lifetime hreach
+  induction hreach with
+  | empty =>
+      exact Coherent.lvalTypingExposedOutputs Coherent.empty
+  | step hreach hsource htyping _ih =>
+      exact houtputs hreach hsource htyping
+
+theorem BlockScopedReachableTermTypingOutputsExposedOutputCoherent.reachableEnv :
+    BlockScopedReachableTermTypingOutputsExposedOutputCoherent →
+    ∀ {env : Env} {lifetime : Lifetime},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env →
+      LValTypingExposedOutputCoherent env := by
+  intro houtputs env lifetime hreach
+  induction hreach with
+  | empty =>
+      intro lv partialTy lifetime htyping
+      rcases LValTyping.base_slot_exists htyping with ⟨slot, hslot⟩
+      simp [Env.empty] at hslot
+  | step hreach hsource htyping _ih =>
+      exact houtputs hreach hsource htyping
+
 theorem BlockScopedGeneratedTermTypingOutputsCoherent.generatedEnv :
     BlockScopedGeneratedTermTypingOutputsCoherent →
     ∀ {env : Env},
@@ -350,6 +499,32 @@ theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.generatedEnv :
   induction hgenerated with
   | empty =>
       exact LValTypingPartialOutputsCoherent.empty
+  | step hgenerated hsource htyping _ih =>
+      exact houtputs hgenerated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedCoherent.generatedEnv :
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent →
+    ∀ {env : Env},
+      BlockScopedGeneratedEnv StoreTyping.empty env →
+      LValTypingExposedOutputsCoherent env := by
+  intro houtputs env hgenerated
+  induction hgenerated with
+  | empty =>
+      exact Coherent.lvalTypingExposedOutputs Coherent.empty
+  | step hgenerated hsource htyping _ih =>
+      exact houtputs hgenerated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.generatedEnv :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    ∀ {env : Env},
+      BlockScopedGeneratedEnv StoreTyping.empty env →
+      LValTypingExposedOutputCoherent env := by
+  intro houtputs env hgenerated
+  induction hgenerated with
+  | empty =>
+      intro lv partialTy lifetime htyping
+      rcases LValTyping.base_slot_exists htyping with ⟨slot, hslot⟩
+      simp [Env.empty] at hslot
   | step hgenerated hsource htyping _ih =>
       exact houtputs hgenerated hsource htyping
 
@@ -399,6 +574,52 @@ theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.termList_from :
               (BlockScopedSourceTermList.head hsource) hterm
           exact ih hheadGenerated (BlockScopedSourceTermList.tail hsource) hrest
 
+theorem BlockScopedGeneratedTermTypingOutputsExposedCoherent.termList_from :
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent →
+    ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {terms : List Term} {ty : Ty},
+      BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+      BlockScopedSourceTermList terms →
+      TermListTyping env₁ StoreTyping.empty lifetime terms ty env₂ →
+      LValTypingExposedOutputsCoherent env₂ := by
+  intro houtputs env₁ env₂ lifetime terms ty hgenerated hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact houtputs hgenerated
+            (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadGenerated :
+              BlockScopedGeneratedEnv StoreTyping.empty _ :=
+            BlockScopedGeneratedEnv.step hgenerated
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadGenerated (BlockScopedSourceTermList.tail hsource) hrest
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.termList_from :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {terms : List Term} {ty : Ty},
+      BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+      BlockScopedSourceTermList terms →
+      TermListTyping env₁ StoreTyping.empty lifetime terms ty env₂ →
+      LValTypingExposedOutputCoherent env₂ := by
+  intro houtputs env₁ env₂ lifetime terms ty hgenerated hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact houtputs hgenerated
+            (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadGenerated :
+              BlockScopedGeneratedEnv StoreTyping.empty _ :=
+            BlockScopedGeneratedEnv.step hgenerated
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadGenerated (BlockScopedSourceTermList.tail hsource) hrest
+
 theorem BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialTermList :
     BlockScopedGeneratedTermTypingOutputsCoherent →
     EmptyInitialBlockScopedTermListTypingOutputsCoherent := by
@@ -412,6 +633,20 @@ theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.emptyInitialTer
   intro hpartial
   exact BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialTermList
     (BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.coherent hpartial)
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedCoherent.emptyInitialTermList :
+    BlockScopedGeneratedTermTypingOutputsExposedCoherent →
+    EmptyInitialBlockScopedTermListTypingOutputsCoherent := by
+  intro hexposed
+  exact BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialTermList
+    (BlockScopedGeneratedTermTypingOutputsExposedCoherent.coherent hexposed)
+
+theorem BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent.emptyInitialTermList :
+    BlockScopedGeneratedTermTypingOutputsExposedOutputCoherent →
+    EmptyInitialBlockScopedTermListTypingOutputsExposedOutputCoherent := by
+  intro houtputs terms ty env₂ lifetime hsource htyping
+  exact houtputs.termList_from
+    BlockScopedGeneratedEnv.empty hsource htyping
 
 /-- Reachable environments inherit the syntactic non-empty borrow-target
 invariant from the generated typing rules.  This is one of the invariants needed
