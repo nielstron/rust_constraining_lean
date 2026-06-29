@@ -597,6 +597,30 @@ theorem WriteBorrowTargets.selected_branch_to_result_exists
           (EnvJoin.right_sameShapeStrengthening hjoin hbranchShape)⟩
   case intro => intros; trivial
 
+/--
+A through-borrow update is not an arbitrary environment weakening.  Once
+`UpdateAtPath` crosses a borrow node, the constructor is `mutBorrow`; each
+selected target branch is a concrete positive-rank `EnvWrite`, and the
+same-shape map is only transport from that selected branch into the joined
+fan-out result.
+-/
+theorem UpdateAtPath.mutBorrow_selected_branch_to_result_exists {rank : Nat}
+    {env result : Env} {path : List Unit} {targets : List LVal}
+    {rhsTy : Ty} {updatedTy : PartialTy} {selectedTarget : LVal} :
+    UpdateAtPath rank env (() :: path) (.ty (.borrow true targets)) rhsTy
+      result updatedTy →
+    selectedTarget ∈ targets →
+    ∃ branchResult,
+      EnvWrite (rank + 1) env (prependPath path selectedTarget) rhsTy
+        branchResult ∧
+        EnvSameShapeStrengthening branchResult result := by
+  intro hupdate hmem
+  rcases UpdateAtPath.borrow_cons_inv hupdate with
+    ⟨_hmutable, _hupdated, hwrites⟩
+  exact WriteBorrowTargets.selected_branch_to_result_exists
+    (Nat.succ_pos rank) hwrites
+    (WriteBorrowTargets.initialized_leaves_of_typed hwrites) hmem
+
 @[simp] theorem prependPath_deref (path : List Unit) (lv : LVal) :
     prependPath path (.deref lv) = prependPath (() :: path) lv := by
   induction path with
@@ -610,10 +634,12 @@ mutual
   Proof-side selector invariant for writes through a typed lvalue path.
 
   `PathSelected env pt path selectedName selectedSlot selectedTy` says that
-  following `path` from partial type `pt` eventually dereferences a mutable
-  borrow branch whose selected target is the variable `selectedName`.  The
-  invariant is derived from `LValTyping`/`LValTargetsTyping`; it is not an
-  additional typing-rule premise.
+  following `path` from partial type `pt` eventually dereferences a borrow branch
+  whose selected target is the variable `selectedName`.  The predicate is
+  derived from `LValTyping`/`LValTargetsTyping`, so by itself it is not write
+  permission and may describe an immutable borrow.  Mutability is forced only
+  when this selector is paired with an actual `UpdateAtPath`/`EnvWrite`
+  derivation.
   -/
   inductive PathSelected (env : Env) :
       PartialTy → List Unit → Name → EnvSlot → Ty → Prop where
@@ -796,6 +822,62 @@ theorem TargetsPathSelected.of_lvalTargetsTyping {env : Env}
         | target hmem htargetTyping hpath =>
             exact TargetsPathSelected.target (List.mem_cons_of_mem _ hmem)
               htargetTyping hpath
+
+/--
+Lift a proof-side selected path through an already typed lvalue back to the
+base slot that stores the lvalue.  This is the static counterpart of the runtime
+selector-prepending lemma in preservation: it only composes selector evidence.
+Write authority still comes later from the actual `UpdateAtPath` derivation,
+which is what rules out immutable-borrow traversal.
+-/
+theorem PathSelected.prepend_of_lvalTyping {env : Env} {lv : LVal}
+    {pt : PartialTy} {lifetime : Lifetime} :
+    LValTyping env lv pt lifetime →
+    ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+    ∀ {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+      {selectedTy : Ty},
+      PathSelected env pt path selectedName selectedSlot selectedTy →
+      PathSelected env slot.ty (LVal.path lv ++ path) selectedName selectedSlot
+        selectedTy := by
+  intro htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lifetime _ =>
+      ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+      ∀ {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+        {selectedTy : Ty},
+        PathSelected env pt path selectedName selectedSlot selectedTy →
+        PathSelected env slot.ty (LVal.path lv ++ path) selectedName
+          selectedSlot selectedTy)
+    (motive_2 := fun _targets _pt _lifetime _ => True)
+    ?var ?box ?borrow ?singleton ?cons htyping
+  case var =>
+    intro x slot hslot slot' hslot' path selectedName selectedSlot selectedTy
+      hselected
+    simp only [LVal.base] at hslot'
+    have hslotEq : slot = slot' := by
+      rw [hslot] at hslot'
+      exact Option.some.inj hslot'
+    subst hslotEq
+    simpa [LVal.path] using hselected
+  case box =>
+    intro source inner sourceLifetime _htyping ih slot hslot path selectedName
+      selectedSlot selectedTy hselected
+    rw [LVal.path, List.append_assoc]
+    exact ih hslot (PathSelected.box hselected)
+  case borrow =>
+    intro source mutable targets borrowLifetime targetLifetime targetTy _hsource
+      htargets ihSource _ihTargets slot hslot path selectedName selectedSlot
+      selectedTy hselected
+    rw [LVal.path, List.append_assoc]
+    exact ihSource hslot
+      (PathSelected.borrowStep
+        (TargetsPathSelected.of_lvalTargetsTyping htargets hselected))
+  case singleton =>
+    intros
+    trivial
+  case cons =>
+    intros
+    trivial
 
 theorem PathSelected.updateAtPath_map {env writeEnv : Env}
     {oldTy updatedTy : PartialTy} {path : List Unit} {rank : Nat}
@@ -1478,6 +1560,74 @@ theorem copyTy_result_wellFormed {env : Env} {lv : LVal}
         exact copyBorrowTargetsWellFormed hwellFormed hLv
       exact WellFormedTy.borrow htargets
 
+theorem copyTy_result_coherent {env : Env} {lv : LVal}
+    {ty : Ty} {valueLifetime : Lifetime} :
+    Coherent env →
+    LValTyping env lv (.ty ty) valueLifetime →
+    CopyTy ty →
+    TyCoherent env ty := by
+  intro hcoherent hLv hcopy mutable targets hcontains
+  cases hcopy with
+  | unit | int | bool =>
+      cases hcontains
+  | immBorrow =>
+      cases hcontains with
+      | here =>
+          exact hcoherent lv false targets valueLifetime hLv
+
+theorem borrow_result_coherent {env : Env} {lv : LVal}
+    {ty : Ty} {valueLifetime : Lifetime} {mutable : Bool} :
+    LValTyping env lv (.ty ty) valueLifetime →
+    TyCoherent env (.borrow mutable [lv]) := by
+  intro hLv needleMutable targets hcontains
+  cases hcontains with
+  | here =>
+      exact ⟨ty, valueLifetime, LValTargetsTyping.singleton hLv⟩
+
+/--
+Containment along paths that lvalue typing can actually expose.  This
+deliberately omits `PartialTyContains.tyBox`: full `Ty.box` is an owned value
+type, while `T-LvBox` dereferences the partial `.box` form.
+-/
+inductive LValExposedContains : PartialTy → Ty → Prop where
+  | here {ty : Ty} :
+      LValExposedContains (.ty ty) ty
+  | box {inner : PartialTy} {needle : Ty} :
+      LValExposedContains inner needle →
+      LValExposedContains (.box inner) needle
+
+theorem LValExposedContains.to_partialTyContains {partialTy : PartialTy}
+    {needle : Ty} :
+    LValExposedContains partialTy needle →
+    PartialTyContains partialTy needle := by
+  intro hcontains
+  induction hcontains with
+  | here =>
+      exact PartialTyContains.here
+  | box _hinner ih =>
+      exact PartialTyContains.box ih
+
+/--
+A borrow contained along an lvalue-exposed path can be exposed by dereferencing
+through the corresponding partial boxes.
+-/
+theorem LValTyping.expose_lvalContains {env : Env} {lv : LVal}
+    {partialTy : PartialTy} {needle : Ty} {lifetime : Lifetime} :
+    LValTyping env lv partialTy lifetime →
+    LValExposedContains partialTy needle →
+    ∃ exposed lifetime',
+      LVal.base exposed = LVal.base lv ∧
+        LValTyping env exposed (.ty needle) lifetime' := by
+  intro htyping hcontains
+  induction hcontains generalizing lv lifetime with
+  | here =>
+      exact ⟨lv, lifetime, rfl, htyping⟩
+  | box _hinner ih =>
+      rcases ih (LValTyping.box htyping) with
+        ⟨exposed, exposedLifetime, hbase, hexposed⟩
+      exact ⟨exposed, exposedLifetime, by simpa [LVal.base] using hbase,
+        hexposed⟩
+
 theorem PartialTyContains.of_strike {path : Path} {source struck : PartialTy}
     {needle : Ty} :
     Strike path source struck →
@@ -1889,6 +2039,277 @@ theorem LValTyping.update_of_not_pathConflicts {env : Env} {x : Name}
           hunion hintersection)
       htyping
 
+theorem LValTyping.of_update_of_not_pathConflicts {env : Env} {x : Name}
+    {slot : EnvSlot} :
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    (∀ {lv partialTy lifetime},
+      LValTyping (env.update x slot) lv partialTy lifetime →
+      ¬ lv ⋈ (.var x) →
+      LValTyping env lv partialTy lifetime) ∧
+    (∀ {targets partialTy lifetime},
+      LValTargetsTyping (env.update x slot) targets partialTy lifetime →
+      (∀ target, target ∈ targets → ¬ target ⋈ (.var x)) →
+      LValTargetsTyping env targets partialTy lifetime) := by
+  intro hnotWrite
+  constructor
+  · intro lv partialTy lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun lv partialTy lifetime _ =>
+        ¬ lv ⋈ (.var x) →
+        LValTyping env lv partialTy lifetime)
+      (motive_2 := fun targets partialTy lifetime _ =>
+        (∀ target, target ∈ targets → ¬ target ⋈ (.var x)) →
+        LValTargetsTyping env targets partialTy lifetime)
+      (by
+        intro y envSlot hslot hnotConflict
+        have hy : y ≠ x := by
+          intro hy
+          exact hnotConflict hy
+        exact LValTyping.var (by simpa [Env.update, hy] using hslot))
+      (by
+        intro lv inner lifetime _htyping ih hnotConflict
+        exact LValTyping.box
+          (ih (by simpa [PathConflicts, LVal.base] using hnotConflict)))
+      (by
+        intro lv mutable targets borrowLifetime targetLifetime targetTy
+          hborrow _htargets ihBorrow ihTargets hnotConflict
+        have hnotBorrow : ¬ lv ⋈ (.var x) := by
+          simpa [PathConflicts, LVal.base] using hnotConflict
+        have htargetsNoConflict :
+            ∀ target, target ∈ targets → ¬ target ⋈ (.var x) := by
+          intro target htarget
+          exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+            hborrow PartialTyContains.here target htarget
+        exact LValTyping.borrow (ihBorrow hnotBorrow)
+          (ihTargets htargetsNoConflict))
+      (by
+        intro target ty lifetime _htarget ihTarget hnotTargets
+        exact LValTargetsTyping.singleton
+          (ihTarget (hnotTargets target (by simp))))
+      (by
+        intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+          _hhead _hrest hunion hintersection ihHead ihRest hnotTargets
+        exact LValTargetsTyping.cons
+          (ihHead (hnotTargets target (by simp)))
+          (ihRest (by
+            intro selected hselected
+            exact hnotTargets selected (by simp [hselected])))
+          hunion hintersection)
+      htyping
+  · intro targets partialTy lifetime htyping
+    exact LValTargetsTyping.rec
+      (motive_1 := fun lv partialTy lifetime _ =>
+        ¬ lv ⋈ (.var x) →
+        LValTyping env lv partialTy lifetime)
+      (motive_2 := fun targets partialTy lifetime _ =>
+        (∀ target, target ∈ targets → ¬ target ⋈ (.var x)) →
+        LValTargetsTyping env targets partialTy lifetime)
+      (by
+        intro y envSlot hslot hnotConflict
+        have hy : y ≠ x := by
+          intro hy
+          exact hnotConflict hy
+        exact LValTyping.var (by simpa [Env.update, hy] using hslot))
+      (by
+        intro lv inner lifetime _htyping ih hnotConflict
+        exact LValTyping.box
+          (ih (by simpa [PathConflicts, LVal.base] using hnotConflict)))
+      (by
+        intro lv mutable targets borrowLifetime targetLifetime targetTy
+          hborrow _htargets ihBorrow ihTargets hnotConflict
+        have hnotBorrow : ¬ lv ⋈ (.var x) := by
+          simpa [PathConflicts, LVal.base] using hnotConflict
+        have htargetsNoConflict :
+            ∀ target, target ∈ targets → ¬ target ⋈ (.var x) := by
+          intro target htarget
+          exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+            hborrow PartialTyContains.here target htarget
+        exact LValTyping.borrow (ihBorrow hnotBorrow)
+          (ihTargets htargetsNoConflict))
+      (by
+        intro target ty lifetime _htarget ihTarget hnotTargets
+        exact LValTargetsTyping.singleton
+          (ihTarget (hnotTargets target (by simp))))
+      (by
+        intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+          _hhead _hrest hunion hintersection ihHead ihRest hnotTargets
+        exact LValTargetsTyping.cons
+          (ihHead (hnotTargets target (by simp)))
+          (ihRest (by
+            intro selected hselected
+            exact hnotTargets selected (by simp [hselected])))
+          hunion hintersection)
+      htyping
+
+theorem PartialTyCoherent.update_of_not_pathConflicts {env : Env}
+    {x : Name} {slot : EnvSlot} {partialTy : PartialTy} :
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    PartialTyCoherent env partialTy →
+    (∀ mutable targets target,
+      PartialTyContains partialTy (.borrow mutable targets) →
+      target ∈ targets →
+      ¬ target ⋈ (.var x)) →
+    PartialTyCoherent (env.update x slot) partialTy := by
+  intro hnotWrite hcoherent hnotConflicts mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargets⟩
+  exact ⟨targetTy, targetLifetime,
+    (LValTyping.update_of_not_pathConflicts (slot := slot) hnotWrite).2
+      htargets
+      (by
+        intro target htarget
+        exact hnotConflicts mutable targets target hcontains htarget)⟩
+
+/-- Coherence of a boxed full type exposes coherence of the boxed payload. -/
+theorem TyCoherent.box_inv {env : Env} {inner : Ty} :
+    TyCoherent env (.box inner) →
+    TyCoherent env inner := by
+  intro hcoherent mutable targets hcontains
+  exact hcoherent mutable targets (PartialTyContains.tyBox hcontains)
+
+/-- Transport coherence for an observed lvalue type across a single-root write.
+
+The observed typing in the result environment lets `¬ WriteProhibited` rule out
+conflicts for every target mentioned by a borrow contained in that observed
+type.  This is the transport half used by assignment coherence; the source of
+the original coherence is still assignment compatibility or the old generated
+environment, not same-shape. -/
+theorem PartialTyCoherent.update_of_not_writeProhibited_lvalTyping
+    {env : Env} {x : Name} {slot : EnvSlot} {lv : LVal}
+    {partialTy : PartialTy} {lifetime : Lifetime} :
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    LValTyping (env.update x slot) lv partialTy lifetime →
+    PartialTyCoherent env partialTy →
+    PartialTyCoherent (env.update x slot) partialTy := by
+  intro hnotWrite htyping hcoherent
+  exact PartialTyCoherent.update_of_not_pathConflicts
+    (slot := slot) hnotWrite hcoherent
+    (by
+      intro mutable targets target hcontains htarget
+      exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+        htyping hcontains target htarget)
+
+/-- Full-type wrapper for
+`PartialTyCoherent.update_of_not_writeProhibited_lvalTyping`. -/
+theorem TyCoherent.update_of_not_writeProhibited_lvalTyping
+    {env : Env} {x : Name} {slot : EnvSlot} {lv : LVal}
+    {ty : Ty} {lifetime : Lifetime} :
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    LValTyping (env.update x slot) lv (.ty ty) lifetime →
+    TyCoherent env ty →
+    TyCoherent (env.update x slot) ty := by
+  intro hnotWrite htyping hcoherent
+  exact PartialTyCoherent.update_of_not_writeProhibited_lvalTyping
+    hnotWrite htyping hcoherent
+
+/-- The lvalue-output invariant includes slot-local environment coherence. -/
+theorem LValTypingPartialOutputsCoherent.envTypesCoherent {env : Env} :
+    LValTypingPartialOutputsCoherent env →
+    EnvTypesCoherent env := by
+  intro houtputs x slot hslot
+  exact houtputs (.var x) slot.ty slot.lifetime (LValTyping.var hslot)
+
+theorem LValTypingPartialOutputsCoherent.update_slot_of_written_root
+    {env : Env} {x : Name} {slot : EnvSlot} :
+    LValTypingPartialOutputsCoherent env →
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    (∀ lv partialTy lifetime,
+      LVal.base lv = x →
+      LValTyping (env.update x slot) lv partialTy lifetime →
+      PartialTyCoherent (env.update x slot) partialTy) →
+    LValTypingPartialOutputsCoherent (env.update x slot) := by
+  intro houtputs hnotWrite hwritten lv partialTy lifetime htyping
+  by_cases hbase : LVal.base lv = x
+  · exact hwritten lv partialTy lifetime hbase htyping
+  · have hnotConflict : ¬ lv ⋈ (.var x) := by
+      intro hconflict
+      exact hbase (by simpa [PathConflicts, LVal.base] using hconflict)
+    have htypingOld :
+        LValTyping env lv partialTy lifetime :=
+      (LValTyping.of_update_of_not_pathConflicts hnotWrite).1
+        htyping hnotConflict
+    exact PartialTyCoherent.update_of_not_pathConflicts
+      hnotWrite (houtputs lv partialTy lifetime htypingOld)
+      (by
+        intro mutable targets target hcontains htarget
+        exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+          htyping hcontains target htarget)
+
+/-- Coherence restricted to lvalues rooted at one environment variable. -/
+def RootCoherent (env : Env) (x : Name) : Prop :=
+  ∀ lv mutable targets borrowLifetime,
+    LVal.base lv = x →
+    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime
+
+theorem Coherent.root {env : Env} {x : Name} :
+    Coherent env →
+    RootCoherent env x := by
+  intro hcoh lv mutable targets borrowLifetime _hbase htyping
+  exact hcoh lv mutable targets borrowLifetime htyping
+
+theorem Coherent.of_roots {env : Env} :
+    (∀ x, RootCoherent env x) →
+    Coherent env := by
+  intro hroots lv mutable targets borrowLifetime htyping
+  exact hroots (LVal.base lv) lv mutable targets borrowLifetime rfl htyping
+
+theorem RootCoherent.update_of_old_root {env : Env} {x y : Name}
+    {slot : EnvSlot} :
+    Coherent env →
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    y ≠ x →
+    RootCoherent (env.update x slot) y := by
+  intro hcoh hnotWrite hy lv mutable targets borrowLifetime hbase htyping
+  have hnotConflict : ¬ lv ⋈ (.var x) := by
+    intro hconflict
+    exact hy (by simpa [PathConflicts, LVal.base] using
+      hbase.symm.trans hconflict)
+  have htypingOld :
+      LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime :=
+    (LValTyping.of_update_of_not_pathConflicts hnotWrite).1 htyping
+      hnotConflict
+  rcases hcoh lv mutable targets borrowLifetime htypingOld with
+    ⟨targetTy, targetLifetime, htargetsOld⟩
+  have htargetsNoConflict :
+      ∀ target, target ∈ targets → ¬ target ⋈ (.var x) := by
+    intro target htarget
+    exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+      htyping PartialTyContains.here target htarget
+  exact ⟨targetTy, targetLifetime,
+    (LValTyping.update_of_not_pathConflicts hnotWrite).2
+      htargetsOld htargetsNoConflict⟩
+
+theorem Coherent.update_slot_of_rootCoherent {env : Env} {x : Name}
+    {slot : EnvSlot} :
+    Coherent env →
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    RootCoherent (env.update x slot) x →
+    Coherent (env.update x slot) := by
+  intro hcoh hnotWrite hroot
+  refine Coherent.of_roots ?_
+  intro y
+  by_cases hy : y = x
+  · subst hy
+    exact hroot
+  · exact RootCoherent.update_of_old_root hcoh hnotWrite hy
+
+theorem Coherent.update_slot_of_written_root {env : Env} {x : Name}
+    {slot : EnvSlot} :
+    Coherent env →
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    (∀ lv mutable targets borrowLifetime,
+      LVal.base lv = x →
+      LValTyping (env.update x slot) lv (.ty (.borrow mutable targets))
+        borrowLifetime →
+      ∃ targetTy targetLifetime,
+        LValTargetsTyping (env.update x slot) targets (.ty targetTy)
+          targetLifetime) →
+    Coherent (env.update x slot) := by
+  intro hcoh hnotWrite hwritten
+  exact Coherent.update_slot_of_rootCoherent hcoh hnotWrite hwritten
+
 theorem BorrowTargetsWellFormedInSlot.update_of_not_pathConflicts {env : Env}
     {x : Name} {slot : EnvSlot} {slotLifetime : Lifetime}
     {targets : List LVal} :
@@ -2073,6 +2494,82 @@ theorem WellFormedTy.move_result {env env' : Env} {lv : LVal}
       exact (LValTyping.no_writeProhibited_targets hnotWrite).1
         hLv hcontains target htarget)
 
+/-- Type coherence transports across a move when every target mentioned by the
+type is disjoint from the moved place.
+
+This is the type-level analogue of `WellFormedTy.move_of_no_pathConflicts`.
+It is needed for the reachable coherence proof because `move` returns the moved
+full type; for boxed values, coherence of that full type is not implied by
+plain environment `Coherent`.
+-/
+theorem TyCoherent.move_of_no_pathConflicts {env env' : Env}
+    {moved : LVal} {ty : Ty} :
+    EnvMove env moved env' →
+    ¬ WriteProhibited env moved →
+    TyCoherent env ty →
+    (∀ mutable targets target,
+      PartialTyContains (.ty ty) (.borrow mutable targets) →
+      target ∈ targets →
+      ¬ target ⋈ moved) →
+    TyCoherent env' ty := by
+  intro hmove hnotWrite hcoherent hnotConflicts mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargets⟩
+  exact ⟨targetTy, targetLifetime,
+    (LValTyping.move_of_not_pathConflicts hmove hnotWrite).2 htargets
+      (by
+        intro target htarget
+        exact hnotConflicts mutable targets target hcontains htarget)⟩
+
+theorem PartialTyCoherent.move_of_no_pathConflicts {env env' : Env}
+    {moved : LVal} {partialTy : PartialTy} :
+    EnvMove env moved env' →
+    ¬ WriteProhibited env moved →
+    PartialTyCoherent env partialTy →
+    (∀ mutable targets target,
+      PartialTyContains partialTy (.borrow mutable targets) →
+      target ∈ targets →
+      ¬ target ⋈ moved) →
+    PartialTyCoherent env' partialTy := by
+  intro hmove hnotWrite hcoherent hnotConflicts mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargets⟩
+  exact ⟨targetTy, targetLifetime,
+    (LValTyping.move_of_not_pathConflicts hmove hnotWrite).2 htargets
+      (by
+        intro target htarget
+        exact hnotConflicts mutable targets target hcontains htarget)⟩
+
+theorem LValTypingOutputsCoherent.move_result_type {env env' : Env}
+    {lv : LVal} {ty : Ty} {valueLifetime : Lifetime} :
+    LValTypingOutputsCoherent env →
+    LValTyping env lv (.ty ty) valueLifetime →
+    ¬ WriteProhibited env lv →
+    EnvMove env lv env' →
+    TyCoherent env' ty := by
+  intro houtputs hLv hnotWrite hmove
+  exact TyCoherent.move_of_no_pathConflicts hmove hnotWrite
+    (houtputs lv ty valueLifetime hLv)
+    (by
+      intro mutable targets target hcontains htarget
+      exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+        hLv hcontains target htarget)
+
+theorem LValTypingPartialOutputsCoherent.move_result_partial {env env' : Env}
+    {lv : LVal} {partialTy : PartialTy} {valueLifetime : Lifetime} :
+    LValTypingPartialOutputsCoherent env →
+    LValTyping env lv partialTy valueLifetime →
+    ¬ WriteProhibited env lv →
+    EnvMove env lv env' →
+    PartialTyCoherent env' partialTy := by
+  intro houtputs hLv hnotWrite hmove
+  exact PartialTyCoherent.move_of_no_pathConflicts hmove hnotWrite
+    (houtputs lv partialTy valueLifetime hLv)
+    (by
+      intro mutable targets target hcontains htarget
+      exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+        hLv hcontains target htarget)
+
 /-- `Strike` only removes variables (it replaces a sub-value by `undef`). -/
 theorem Strike.vars_subset :
     ∀ {path : Path} {ty struck : PartialTy}, Strike path ty struck →
@@ -2128,6 +2625,22 @@ def IsBoxUndef : PartialTy → Prop
   | .box inner => IsBoxUndef inner
   | .undef _ => True
 
+theorem IsBoxUndef.no_contains {partialTy : PartialTy} {needle : Ty} :
+    IsBoxUndef partialTy → PartialTyContains partialTy needle → False := by
+  intro hboxUndef hcontains
+  induction hcontains with
+  | here =>
+      simpa [IsBoxUndef] using hboxUndef
+  | tyBox _hinner =>
+      simpa [IsBoxUndef] using hboxUndef
+  | box _hinner ih =>
+      exact ih (by simpa [IsBoxUndef] using hboxUndef)
+
+theorem IsBoxUndef.partialTyCoherent {env : Env} {partialTy : PartialTy} :
+    IsBoxUndef partialTy → PartialTyCoherent env partialTy := by
+  intro hboxUndef mutable targets hcontains
+  exact False.elim (IsBoxUndef.no_contains hboxUndef hcontains)
+
 theorem Strike.isBoxUndef :
     ∀ {path : Path} {ty struck : PartialTy}, Strike path ty struck → IsBoxUndef struck := by
   intro path
@@ -2180,6 +2693,58 @@ theorem LValTyping.isBoxUndef_of_base_moved {env : Env} {lv : LVal}
     simp [IsBoxUndef] at this
   · intro _ _ _ _ _; trivial
   · intro _ _ _ _ _ _ _ _ _ _ _ _ _; trivial
+
+theorem LValTypingPartialOutputsCoherent.move {env env' : Env} {lv : LVal} :
+    LValTypingPartialOutputsCoherent env →
+    ¬ WriteProhibited env lv →
+    EnvMove env lv env' →
+    LValTypingPartialOutputsCoherent env' := by
+  intro houtputs hnotWrite hmove
+  rcases hmove with ⟨slot, struck, hslot, hstrike, henv'⟩
+  subst henv'
+  intro lv' partialTy lifetime htyping'
+  by_cases hbase : LVal.base lv' = LVal.base lv
+  · exact IsBoxUndef.partialTyCoherent
+      (LValTyping.isBoxUndef_of_base_moved hslot hstrike htyping' hbase)
+  · have hrestore :
+        (env.update (LVal.base lv) { slot with ty := struck }).update
+            (LVal.base lv) slot = env := by
+      obtain ⟨g⟩ := env
+      simp only [Env.update]
+      congr 1
+      funext y
+      by_cases hy : y = LVal.base lv
+      · subst hy
+        simpa using hslot.symm
+      · simp [hy]
+    have hnotWriteVarEnv : ¬ WriteProhibited env (.var (LVal.base lv)) :=
+      not_writeProhibited_var_base hnotWrite
+    have hnotWriteVar :
+        ¬ WriteProhibited
+          ((env.update (LVal.base lv) { slot with ty := struck }).update
+            (LVal.base lv) slot)
+          (.var (LVal.base lv)) := by
+      rw [hrestore]
+      exact hnotWriteVarEnv
+    have hnotConflict : ¬ lv' ⋈ (.var (LVal.base lv)) := by
+      intro hconflict
+      exact hbase (by simpa [PathConflicts, LVal.base] using hconflict)
+    have htypingRestore :
+        LValTyping
+          ((env.update (LVal.base lv) { slot with ty := struck }).update
+            (LVal.base lv) slot)
+          lv' partialTy lifetime :=
+      (LValTyping.update_of_not_pathConflicts hnotWriteVar).1 htyping'
+        hnotConflict
+    have htypingEnv : LValTyping env lv' partialTy lifetime := by
+      rwa [hrestore] at htypingRestore
+    exact PartialTyCoherent.move_of_no_pathConflicts
+      (by exact ⟨slot, struck, hslot, hstrike, rfl⟩) hnotWrite
+      (houtputs lv' partialTy lifetime htypingEnv)
+      (by
+        intro mutable targets target hcontains htarget
+        exact (LValTyping.no_writeProhibited_targets hnotWrite).1
+          htypingEnv hcontains target htarget)
 
 /-- `Coherent` is preserved by a move.  A defined borrow `lv':&T` in the moved
 environment cannot be rooted at the (undef'd) moved variable
@@ -2236,6 +2801,17 @@ theorem Coherent.move {env env' : Env} {lv : LVal} {lifetime : Lifetime}
   -- forward transport of the joint typing across the move
   exact ⟨ty, lt,
     (LValTyping.move_of_not_pathConflicts hmove hnotWrite).2 htgtsEnv hnotTargets⟩
+
+theorem Coherent.move_of_core {env env' : Env} {lv : LVal}
+    {lifetime : Lifetime} :
+    WellFormedEnvCore env lifetime →
+    Coherent env →
+    ¬ WriteProhibited env lv →
+    EnvMove env lv env' →
+    Coherent env' := by
+  intro hcore hcoh hnotWrite hmove
+  exact Coherent.move (WellFormedEnv.of_core_coherent hcore hcoh)
+    hnotWrite hmove hcoh
 
 /--
 Move Preservation for well-formed environments, used in Lemma 4.9.
@@ -2682,6 +3258,102 @@ theorem Coherent.dropLifetime_child {env : Env} {parent child : Lifetime}
   exact ⟨ty, lt, LValTargetsTyping.dropLifetime_child_of_wellFormedTargets
     hchild hwellBody hwellT htgtsEnv hltParent⟩
 
+theorem TyCoherent.dropLifetime_child {env : Env} {parent child : Lifetime}
+    {ty : Ty} :
+    LifetimeChild parent child →
+    WellFormedEnv env child →
+    WellFormedTy env ty parent →
+    TyCoherent env ty →
+    TyCoherent (env.dropLifetime child) ty := by
+  intro hchild hwellBody hwellTy hcoherent mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargetsEnv⟩
+  have hwellT : BorrowTargetsWellFormed env targets parent :=
+    BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed
+      (borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontains)
+      (LifetimeOutlives.refl parent)
+  have htargetLifetimeParent : targetLifetime ≤ parent :=
+    (LValTyping.lifetime_outlives_of_base_outlives hwellBody.1).2
+      htargetsEnv
+      (by
+        intro target htarget
+        rcases BorrowTargetsWellFormed.member hwellT target htarget with
+          ⟨_targetTy, _targetLifetime, _htargetTyping, _houtlives, hbase⟩
+        exact hbase)
+  exact ⟨targetTy, targetLifetime,
+    LValTargetsTyping.dropLifetime_child_of_wellFormedTargets
+      hchild hwellBody hwellT htargetsEnv htargetLifetimeParent⟩
+
+theorem PartialTyCoherent.dropLifetime_child {env : Env}
+    {parent child : Lifetime} {partialTy : PartialTy} :
+    LifetimeChild parent child →
+    WellFormedEnv env child →
+    PartialTyBorrowsWellFormedInSlot env parent partialTy →
+    PartialTyCoherent env partialTy →
+    PartialTyCoherent (env.dropLifetime child) partialTy := by
+  intro hchild hwellBody hwellPartial hcoherent mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargetsEnv⟩
+  have hwellTargets : BorrowTargetsWellFormed env targets parent :=
+    BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed
+      (hwellPartial hcontains) (LifetimeOutlives.refl parent)
+  have htargetLifetimeParent : targetLifetime ≤ parent :=
+    (LValTyping.lifetime_outlives_of_base_outlives hwellBody.1).2
+      htargetsEnv
+      (by
+        intro target htarget
+        rcases BorrowTargetsWellFormed.member hwellTargets target htarget with
+          ⟨_targetTy, _targetLifetime, _htargetTyping, _houtlives, hbase⟩
+        exact hbase)
+  exact ⟨targetTy, targetLifetime,
+    LValTargetsTyping.dropLifetime_child_of_wellFormedTargets
+      hchild hwellBody hwellTargets htargetsEnv htargetLifetimeParent⟩
+
+/-- Lvalue-output coherence is preserved by dropping a child lifetime. -/
+theorem LValTypingPartialOutputsCoherent.dropLifetime_child {env : Env}
+    {parent child : Lifetime} :
+    LifetimeChild parent child →
+    WellFormedEnv env child →
+    LValTypingPartialOutputsCoherent env →
+    LValTypingPartialOutputsCoherent (env.dropLifetime child) := by
+  intro hchild hwellBody houtputs lv partialTy valueLifetime htypingDropped
+  have htypingEnv : LValTyping env lv partialTy valueLifetime :=
+    LValTyping.of_dropLifetime htypingDropped
+  have hbaseParent : LValBaseOutlives env lv parent := by
+    rcases LValTyping.base_slot_exists htypingDropped with
+      ⟨droppedSlot, hdroppedSlot⟩
+    rcases Env.dropLifetime_slotAt_eq_some.mp hdroppedSlot with
+      ⟨henvSlot, hnotDropped⟩
+    rcases LValTyping.base_outlives_one hwellBody htypingEnv with
+      ⟨bodySlot, hbodySlot, hbodyOutlives⟩
+    have hslotEq : droppedSlot = bodySlot :=
+      Option.some.inj (henvSlot.symm.trans hbodySlot)
+    exact ⟨bodySlot, hbodySlot,
+      LifetimeChild.parent_of_outlives_child_ne hchild hbodyOutlives
+        (hslotEq ▸ hnotDropped)⟩
+  have hvalueLifetimeParent : valueLifetime ≤ parent :=
+    LValTyping.lifetime_outlives_of_base_outlives_one hwellBody.1 htypingEnv
+      hbaseParent
+  have hwellPartial : PartialTyBorrowsWellFormedInSlot env parent partialTy := by
+    intro mutable targets hcontains
+    exact BorrowTargetsWellFormed.inSlot
+      (BorrowTargetsWellFormed.weaken
+        (LValTyping.containedBorrowTargetsWellFormed_at_lifetime
+          hwellBody.1 htypingEnv hcontains)
+        hvalueLifetimeParent)
+  exact PartialTyCoherent.dropLifetime_child hchild hwellBody hwellPartial
+    (houtputs lv partialTy valueLifetime htypingEnv)
+
+theorem Coherent.dropLifetime_child_of_core {env : Env}
+    {parent child : Lifetime} :
+    LifetimeChild parent child →
+    WellFormedEnvCore env child →
+    Coherent env →
+    Coherent (env.dropLifetime child) := by
+  intro hchild hcore hcoh
+  exact Coherent.dropLifetime_child hchild
+    (WellFormedEnv.of_core_coherent hcore hcoh) hcoh
+
 /--
 Block drop preservation for well-formed environments, used in the `T-Block`
 case of Lemma 4.9.
@@ -2723,12 +3395,51 @@ theorem block_preserves_wellFormed {env₁ env₂ env₃ : Env}
   intro hchild hwellBody _hterms hwellTy hdrop
   exact Env.dropLifetime_preserves_wellFormed_child hchild hwellBody hwellTy hdrop
 
+theorem block_preserves_tyCoherent {env₂ env₃ : Env}
+    {lifetime blockLifetime : Lifetime} {ty : Ty} :
+    LifetimeChild lifetime blockLifetime →
+    WellFormedEnv env₂ blockLifetime →
+    WellFormedTy env₂ ty lifetime →
+    TyCoherent env₂ ty →
+    env₃ = env₂.dropLifetime blockLifetime →
+    TyCoherent env₃ ty := by
+  intro hchild hwellBody hwellTy hcoherent hdrop
+  subst hdrop
+  exact TyCoherent.dropLifetime_child hchild hwellBody hwellTy hcoherent
+
+theorem block_preserves_partialTyCoherent {env₂ env₃ : Env}
+    {lifetime blockLifetime : Lifetime} {partialTy : PartialTy} :
+    LifetimeChild lifetime blockLifetime →
+    WellFormedEnv env₂ blockLifetime →
+    PartialTyBorrowsWellFormedInSlot env₂ lifetime partialTy →
+    PartialTyCoherent env₂ partialTy →
+    env₃ = env₂.dropLifetime blockLifetime →
+    PartialTyCoherent env₃ partialTy := by
+  intro hchild hwellBody hwellPartial hcoherent hdrop
+  subst hdrop
+  exact PartialTyCoherent.dropLifetime_child hchild hwellBody hwellPartial
+    hcoherent
+
+theorem block_preserves_lvalTypingPartialOutputsCoherent {env₂ env₃ : Env}
+    {lifetime blockLifetime : Lifetime} :
+    LifetimeChild lifetime blockLifetime →
+    WellFormedEnv env₂ blockLifetime →
+    LValTypingPartialOutputsCoherent env₂ →
+    env₃ = env₂.dropLifetime blockLifetime →
+    LValTypingPartialOutputsCoherent env₃ := by
+  intro hchild hwellBody houtputs hdrop
+  subst hdrop
+  exact LValTypingPartialOutputsCoherent.dropLifetime_child hchild hwellBody
+    houtputs
+
 /-! ### CBWF-derivation keystone: single-lval typing determinism (up to `eqv`)
 and target-union monotonicity.
 
-These lemmas let us *derive* `ContainedBorrowsWellFormed` of a join/write result
-from the kept premises (`Coherent`, `Linearizable`, `EnvJoinSameShape`, …),
-replacing the rule-carried obligation in `T-Assign`/`T-If`. -/
+These lemmas let us *derive* `ContainedBorrowsWellFormed` once the generated
+write/join proof has established coherence of the result.  Same-shape evidence
+is used only to transport existing target typings through shape-preserving
+growth; assignment-created borrow-list growth gets its joint target typing from
+the write rule's `ShapeCompatible` premises. -/
 
 /-- `eqv` of full types is at least as strong as the strengthening preorder. -/
 theorem ty_eqv_imp_strengthens : ∀ {a b : Ty},
@@ -2835,6 +3546,1536 @@ theorem lvalTargetsTyping_union_mono {env : Env} {W' : List LVal} {b : Ty}
         · exact hrestLe))
     h1
 
+/-- Shape compatibility of two borrow types exposes the target typing witnesses
+carried by `S-Bor`.
+
+This is assignment-relevant evidence: when a write is allowed to change a borrow
+leaf, compatibility is what says the newly written borrow targets have the same
+static shape as the old leaf's targets. -/
+theorem ShapeCompatible.borrow_target_typings {env : Env}
+    {mutable : Bool} {leftTargets rightTargets : List LVal}
+    :
+    ShapeCompatible env (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets)) →
+    ∃ leftTy rightTy,
+      (∀ leftTarget, leftTarget ∈ leftTargets →
+        ∃ leftLifetime,
+          LValTyping env leftTarget (.ty leftTy) leftLifetime) ∧
+      (∀ rightTarget, rightTarget ∈ rightTargets →
+        ∃ rightLifetime,
+          LValTyping env rightTarget (.ty rightTy) rightLifetime) ∧
+      ShapeCompatible env (.ty leftTy) (.ty rightTy) := by
+  intro hshape
+  cases hshape with
+  | borrow hleft hright hcompatible =>
+      exact ⟨_, _, hleft, hright, hcompatible⟩
+
+/-- Borrow-leaf compatibility is kind-specific.
+
+This is the assignment-side fact behind borrow target-list growth: the
+compatible leaves must have the same mutability, and `S-Bor` supplies typings
+for both target lists whose output types are themselves compatible.  No
+environment-join same-shape evidence is involved. -/
+theorem ShapeCompatible.borrow_target_typings_any_mut {env : Env}
+    {leftMutable rightMutable : Bool} {leftTargets rightTargets : List LVal} :
+    ShapeCompatible env (.ty (.borrow leftMutable leftTargets))
+      (.ty (.borrow rightMutable rightTargets)) →
+    leftMutable = rightMutable ∧
+      ∃ leftTy rightTy,
+        (∀ leftTarget, leftTarget ∈ leftTargets →
+          ∃ leftLifetime,
+            LValTyping env leftTarget (.ty leftTy) leftLifetime) ∧
+        (∀ rightTarget, rightTarget ∈ rightTargets →
+          ∃ rightLifetime,
+            LValTyping env rightTarget (.ty rightTy) rightLifetime) ∧
+        ShapeCompatible env (.ty leftTy) (.ty rightTy) := by
+  intro hshape
+  cases hshape with
+  | borrow hleft hright hcompatible =>
+      exact ⟨rfl, ⟨_, _, hleft, hright, hcompatible⟩⟩
+
+/-- Two same-typed lvalues have a joint target-list typing when their lifetimes
+are comparable.  Normal environments generated by block-structured source code
+should provide this comparability; arbitrary input environments need not. -/
+theorem LValTargetsTyping.pair_of_comparable {env : Env}
+    {left right : LVal} {ty : Ty}
+    {leftLifetime rightLifetime : Lifetime} :
+    LValTyping env left (.ty ty) leftLifetime →
+    LValTyping env right (.ty ty) rightLifetime →
+    (leftLifetime ≤ rightLifetime ∨ rightLifetime ≤ leftLifetime) →
+    ∃ targetLifetime,
+      LValTargetsTyping env [left, right] (.ty ty) targetLifetime := by
+  intro hleft hright hcomparable
+  rcases hcomparable with hle | hle
+  · exact ⟨rightLifetime,
+      LValTargetsTyping.cons hleft
+        (LValTargetsTyping.singleton hright)
+        (PartialTyUnion.self (.ty ty))
+        (LifetimeIntersection.left hle)⟩
+  · exact ⟨leftLifetime,
+      LValTargetsTyping.cons hleft
+        (LValTargetsTyping.singleton hright)
+        (PartialTyUnion.self (.ty ty))
+        (LifetimeIntersection.right hle)⟩
+
+theorem LifetimeOutlives.total_of_common_inner
+    {left right current : Lifetime} :
+    left ≤ current →
+    right ≤ current →
+    left ≤ right ∨ right ≤ left := by
+  intro hleft hright
+  have hleftPrefix : left.path <+: current.path := by
+    simpa [LifetimeOutlives, Core.Lifetime.contains] using hleft
+  have hrightPrefix : right.path <+: current.path := by
+    simpa [LifetimeOutlives, Core.Lifetime.contains] using hright
+  rcases Nat.le_total left.path.length right.path.length with hlen | hlen
+  · left
+    have hp : left.path <+: right.path :=
+      List.prefix_of_prefix_length_le hleftPrefix hrightPrefix hlen
+    simpa [LifetimeOutlives, Core.Lifetime.contains] using hp
+  · right
+    have hp : right.path <+: left.path :=
+      List.prefix_of_prefix_length_le hrightPrefix hleftPrefix hlen
+    simpa [LifetimeOutlives, Core.Lifetime.contains] using hp
+
+/-- A non-empty list of lvalues that all have the same full type can be typed
+jointly whenever their lifetimes are all live under one current lifetime. -/
+theorem LValTargetsTyping.of_all_same_type_outlives {env : Env}
+    {targets : List LVal} {ty : Ty} {current : Lifetime} :
+    targets ≠ [] →
+    (∀ target, target ∈ targets →
+      ∃ targetLifetime,
+        LValTyping env target (.ty ty) targetLifetime ∧
+          targetLifetime ≤ current) →
+    ∃ targetLifetime,
+      LValTargetsTyping env targets (.ty ty) targetLifetime ∧
+        targetLifetime ≤ current := by
+  intro hnonempty hall
+  induction targets with
+  | nil =>
+      exact False.elim (hnonempty rfl)
+  | cons head rest ih =>
+      rcases hall head (by simp) with ⟨headLifetime, hhead, hheadLe⟩
+      cases rest with
+      | nil =>
+          exact ⟨headLifetime, LValTargetsTyping.singleton hhead, hheadLe⟩
+      | cons restHead restTail =>
+          have hrestNonempty : restHead :: restTail ≠ [] := by simp
+          have hallRest :
+              ∀ target, target ∈ restHead :: restTail →
+                ∃ targetLifetime,
+                  LValTyping env target (.ty ty) targetLifetime ∧
+                    targetLifetime ≤ current := by
+            intro target htarget
+            exact hall target (by simp [htarget])
+          rcases ih hrestNonempty hallRest with
+            ⟨restLifetime, hrest, hrestLe⟩
+          rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+            hle | hle
+          · exact ⟨restLifetime,
+              LValTargetsTyping.cons hhead hrest
+                (PartialTyUnion.self (.ty ty))
+                (LifetimeIntersection.left hle),
+              hrestLe⟩
+          · exact ⟨headLifetime,
+              LValTargetsTyping.cons hhead hrest
+                (PartialTyUnion.self (.ty ty))
+                (LifetimeIntersection.right hle),
+              hheadLe⟩
+
+/-- Assignment RHS borrow coherence.
+
+If a write is allowed by `ShapeCompatible` and the written full type is a
+borrow, `S-Bor` (possibly under `S-UndefL`) gives enough evidence to type the
+written borrow target list jointly.  This is the strong-write analogue of the
+LUB lemma below; it is not a consequence of environment join shape. -/
+theorem ShapeCompatible.right_borrow_targets_typing {env : Env}
+    {current : Lifetime} {old : PartialTy} {mutable : Bool}
+    {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    targets ≠ [] →
+    ShapeCompatible env old (.ty (.borrow mutable targets)) →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hnonempty hshape
+  generalize hrightEq : (.ty (.borrow mutable targets) : PartialTy) = right at hshape
+  induction hshape generalizing mutable targets with
+  | unit =>
+      cases hrightEq
+  | int =>
+      cases hrightEq
+  | bool =>
+      cases hrightEq
+  | tyBox _hinner _ih =>
+      cases hrightEq
+  | box _hinner _ih =>
+      cases hrightEq
+  | borrow hleft hright _hinner =>
+      cases hrightEq
+      rcases LValTargetsTyping.of_all_same_type_outlives
+          (env := env) (current := current) hnonempty
+          (by
+            intro target htarget
+            rcases hright target htarget with ⟨targetLifetime, htyping⟩
+            exact ⟨targetLifetime, htyping,
+              LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩) with
+        ⟨targetLifetime, htargets, _hle⟩
+      exact ⟨_, targetLifetime, htargets⟩
+  | undefLeft _hinner ih =>
+      exact ih hnonempty hrightEq
+  | undefRight _hinner _ih =>
+      cases hrightEq
+
+theorem LValTargetsTyping.nil_false {env : Env} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    ¬ LValTargetsTyping env [] partialTy lifetime := by
+  intro htargets
+  cases htargets
+
+theorem PartialTyUnion.absorb_left {left right : PartialTy} :
+    PartialTyStrengthens left right →
+    PartialTyUnion left right right := by
+  intro hstrength
+  constructor
+  · intro candidate hcandidate
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
+    rcases hcandidate with rfl | rfl
+    · exact hstrength
+    · exact PartialTyStrengthens.reflex
+  · intro upper hupper
+    exact hupper right (by simp)
+
+theorem LValTargetsTyping.prepend_same_type_union {env : Env}
+    {leftTargets rightTargets : List LVal}
+    {leftTy rightTy unionTy : Ty}
+    {rightLifetime current : Lifetime} :
+    leftTargets ≠ [] →
+    (∀ target, target ∈ leftTargets →
+      ∃ targetLifetime,
+        LValTyping env target (.ty leftTy) targetLifetime ∧
+          targetLifetime ≤ current) →
+    LValTargetsTyping env rightTargets (.ty rightTy) rightLifetime →
+    rightLifetime ≤ current →
+    PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) →
+    ∃ targetLifetime,
+      LValTargetsTyping env (leftTargets ++ rightTargets)
+        (.ty unionTy) targetLifetime ∧
+        targetLifetime ≤ current := by
+  intro hleftNonempty hallLeft hright hrightLe hunion
+  induction leftTargets with
+  | nil =>
+      exact False.elim (hleftNonempty rfl)
+  | cons head tail ih =>
+      rcases hallLeft head (by simp) with
+        ⟨headLifetime, hhead, hheadLe⟩
+      cases tail with
+      | nil =>
+          rcases LifetimeOutlives.total_of_common_inner hheadLe hrightLe with
+            hle | hle
+          · exact ⟨rightLifetime,
+              by
+                simpa using
+                  LValTargetsTyping.cons hhead hright hunion
+                    (LifetimeIntersection.left hle),
+              hrightLe⟩
+          · exact ⟨headLifetime,
+              by
+                simpa using
+                  LValTargetsTyping.cons hhead hright hunion
+                    (LifetimeIntersection.right hle),
+              hheadLe⟩
+      | cons tailHead tailRest =>
+          have htailNonempty : tailHead :: tailRest ≠ [] := by simp
+          have hallTail :
+              ∀ target, target ∈ tailHead :: tailRest →
+                ∃ targetLifetime,
+                  LValTyping env target (.ty leftTy) targetLifetime ∧
+                    targetLifetime ≤ current := by
+            intro target htarget
+            exact hallLeft target (by simp [htarget])
+          rcases ih htailNonempty hallTail with
+            ⟨restLifetime, hrest, hrestLe⟩
+          have habsorb :
+              PartialTyUnion (.ty leftTy) (.ty unionTy) (.ty unionTy) :=
+            PartialTyUnion.absorb_left (PartialTyUnion.left_strengthens hunion)
+          rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+            hle | hle
+          · exact ⟨restLifetime,
+              by
+                simpa [List.cons_append] using
+                  LValTargetsTyping.cons hhead hrest habsorb
+                    (LifetimeIntersection.left hle),
+              hrestLe⟩
+          · exact ⟨headLifetime,
+              by
+                simpa [List.cons_append] using
+                  LValTargetsTyping.cons hhead hrest habsorb
+                    (LifetimeIntersection.right hle),
+              hheadLe⟩
+
+theorem LValTargetsTyping.of_each_two_compatible {env : Env}
+    {targets : List LVal} {leftTy rightTy unionTy : Ty}
+    {current : Lifetime} :
+    targets ≠ [] →
+    ShapeCompatible env (.ty leftTy) (.ty rightTy) →
+    PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) →
+    (∀ target, target ∈ targets →
+      (∃ targetLifetime,
+        LValTyping env target (.ty leftTy) targetLifetime ∧
+          targetLifetime ≤ current) ∨
+      (∃ targetLifetime,
+        LValTyping env target (.ty rightTy) targetLifetime ∧
+          targetLifetime ≤ current)) →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime ∧
+        (targetTy = leftTy ∨ targetTy = rightTy ∨ targetTy = unionTy) ∧
+        targetLifetime ≤ current := by
+  intro hnonempty hshape hunion hall
+  induction targets with
+  | nil =>
+      exact False.elim (hnonempty rfl)
+  | cons head rest ih =>
+      have hheadInfo := hall head (by simp)
+      cases rest with
+      | nil =>
+          rcases hheadInfo with
+            ⟨headLifetime, hhead, hheadLe⟩ | ⟨headLifetime, hhead, hheadLe⟩
+          · exact ⟨leftTy, headLifetime, LValTargetsTyping.singleton hhead,
+              Or.inl rfl, hheadLe⟩
+          · exact ⟨rightTy, headLifetime, LValTargetsTyping.singleton hhead,
+              Or.inr (Or.inl rfl), hheadLe⟩
+      | cons restHead restTail =>
+          have hrestNonempty : restHead :: restTail ≠ [] := by simp
+          have hallRest :
+              ∀ target, target ∈ restHead :: restTail →
+                (∃ targetLifetime,
+                  LValTyping env target (.ty leftTy) targetLifetime ∧
+                    targetLifetime ≤ current) ∨
+                (∃ targetLifetime,
+                  LValTyping env target (.ty rightTy) targetLifetime ∧
+                    targetLifetime ≤ current) := by
+            intro target htarget
+            exact hall target (by simp [htarget])
+          rcases ih hrestNonempty hallRest with
+            ⟨restTy, restLifetime, hrest, hrestCases, hrestLe⟩
+          rcases hheadInfo with
+            ⟨headLifetime, hhead, hheadLe⟩ | ⟨headLifetime, hhead, hheadLe⟩
+          · rcases hrestCases with hrestLeft | hrestCases
+            · have hrestLeftTyping :
+                  LValTargetsTyping env (restHead :: restTail) (.ty leftTy)
+                    restLifetime := by
+                simpa [hrestLeft] using hrest
+              rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+                hle | hle
+              · exact ⟨leftTy, restLifetime,
+                  LValTargetsTyping.cons hhead hrestLeftTyping
+                    (PartialTyUnion.self (.ty leftTy))
+                    (LifetimeIntersection.left hle),
+                  Or.inl rfl, hrestLe⟩
+              · exact ⟨leftTy, headLifetime,
+                  LValTargetsTyping.cons hhead hrestLeftTyping
+                    (PartialTyUnion.self (.ty leftTy))
+                    (LifetimeIntersection.right hle),
+                  Or.inl rfl, hheadLe⟩
+            · rcases hrestCases with hrestRight | hrestUnion
+              · have hrestRightTyping :
+                    LValTargetsTyping env (restHead :: restTail) (.ty rightTy)
+                      restLifetime := by
+                  simpa [hrestRight] using hrest
+                rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+                  hle | hle
+                · exact ⟨unionTy, restLifetime,
+                    LValTargetsTyping.cons hhead hrestRightTyping hunion
+                      (LifetimeIntersection.left hle),
+                    Or.inr (Or.inr rfl), hrestLe⟩
+                · exact ⟨unionTy, headLifetime,
+                    LValTargetsTyping.cons hhead hrestRightTyping hunion
+                      (LifetimeIntersection.right hle),
+                    Or.inr (Or.inr rfl), hheadLe⟩
+              · have habsorb :
+                    PartialTyUnion (.ty leftTy) (.ty unionTy) (.ty unionTy) :=
+                  PartialTyUnion.absorb_left
+                    (PartialTyUnion.left_strengthens hunion)
+                have hrestUnionTyping :
+                    LValTargetsTyping env (restHead :: restTail) (.ty unionTy)
+                      restLifetime := by
+                  simpa [hrestUnion] using hrest
+                rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+                  hle | hle
+                · exact ⟨unionTy, restLifetime,
+                    LValTargetsTyping.cons hhead hrestUnionTyping habsorb
+                      (LifetimeIntersection.left hle),
+                    Or.inr (Or.inr rfl), hrestLe⟩
+                · exact ⟨unionTy, headLifetime,
+                    LValTargetsTyping.cons hhead hrestUnionTyping habsorb
+                      (LifetimeIntersection.right hle),
+                    Or.inr (Or.inr rfl), hheadLe⟩
+          · rcases hrestCases with hrestLeft | hrestCases
+            · have hrestLeftTyping :
+                  LValTargetsTyping env (restHead :: restTail) (.ty leftTy)
+                    restLifetime := by
+                simpa [hrestLeft] using hrest
+              rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+                hle | hle
+              · exact ⟨unionTy, restLifetime,
+                  LValTargetsTyping.cons hhead hrestLeftTyping
+                    (PartialTyUnion.symm hunion)
+                    (LifetimeIntersection.left hle),
+                  Or.inr (Or.inr rfl), hrestLe⟩
+              · exact ⟨unionTy, headLifetime,
+                  LValTargetsTyping.cons hhead hrestLeftTyping
+                    (PartialTyUnion.symm hunion)
+                    (LifetimeIntersection.right hle),
+                  Or.inr (Or.inr rfl), hheadLe⟩
+            · rcases hrestCases with hrestRight | hrestUnion
+              · have hrestRightTyping :
+                    LValTargetsTyping env (restHead :: restTail) (.ty rightTy)
+                      restLifetime := by
+                  simpa [hrestRight] using hrest
+                rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+                  hle | hle
+                · exact ⟨rightTy, restLifetime,
+                    LValTargetsTyping.cons hhead hrestRightTyping
+                      (PartialTyUnion.self (.ty rightTy))
+                      (LifetimeIntersection.left hle),
+                    Or.inr (Or.inl rfl), hrestLe⟩
+                · exact ⟨rightTy, headLifetime,
+                    LValTargetsTyping.cons hhead hrestRightTyping
+                      (PartialTyUnion.self (.ty rightTy))
+                      (LifetimeIntersection.right hle),
+                    Or.inr (Or.inl rfl), hheadLe⟩
+              · have habsorb :
+                    PartialTyUnion (.ty rightTy) (.ty unionTy) (.ty unionTy) :=
+                  PartialTyUnion.absorb_left
+                    (PartialTyUnion.right_strengthens hunion)
+                have hrestUnionTyping :
+                    LValTargetsTyping env (restHead :: restTail) (.ty unionTy)
+                      restLifetime := by
+                  simpa [hrestUnion] using hrest
+                rcases LifetimeOutlives.total_of_common_inner hheadLe hrestLe with
+                  hle | hle
+                · exact ⟨unionTy, restLifetime,
+                    LValTargetsTyping.cons hhead hrestUnionTyping habsorb
+                      (LifetimeIntersection.left hle),
+                    Or.inr (Or.inr rfl), hrestLe⟩
+                · exact ⟨unionTy, headLifetime,
+                    LValTargetsTyping.cons hhead hrestUnionTyping habsorb
+                      (LifetimeIntersection.right hle),
+                    Or.inr (Or.inr rfl), hheadLe⟩
+
+theorem ShapeCompatible.borrow_target_joint_typings_of_slots {env : Env}
+    {current : Lifetime} {mutable : Bool}
+    {leftTargets rightTargets : List LVal} :
+    EnvSlotsOutlive env current →
+    leftTargets ≠ [] →
+    rightTargets ≠ [] →
+    ShapeCompatible env (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets)) →
+    ∃ leftTy leftLifetime rightTy rightLifetime,
+      LValTargetsTyping env leftTargets (.ty leftTy) leftLifetime ∧
+      LValTargetsTyping env rightTargets (.ty rightTy) rightLifetime ∧
+      ShapeCompatible env (.ty leftTy) (.ty rightTy) := by
+  intro houtlives hleftNonempty hrightNonempty hshape
+  rcases ShapeCompatible.borrow_target_typings hshape with
+    ⟨leftTy, rightTy, hleft, hright, hinnerShape⟩
+  rcases LValTargetsTyping.of_all_same_type_outlives
+      (env := env) (targets := leftTargets) (ty := leftTy)
+      (current := current) hleftNonempty
+      (by
+        intro target htarget
+        rcases hleft target htarget with ⟨targetLifetime, htyping⟩
+        exact ⟨targetLifetime, htyping,
+          LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩) with
+    ⟨leftLifetime, hleftTargets, _hleftLifetime⟩
+  rcases LValTargetsTyping.of_all_same_type_outlives
+      (env := env) (targets := rightTargets) (ty := rightTy)
+      (current := current) hrightNonempty
+      (by
+        intro target htarget
+        rcases hright target htarget with ⟨targetLifetime, htyping⟩
+        exact ⟨targetLifetime, htyping,
+          LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩) with
+    ⟨rightLifetime, hrightTargets, _hrightLifetime⟩
+  exact ⟨leftTy, leftLifetime, rightTy, rightLifetime,
+    hleftTargets, hrightTargets, hinnerShape⟩
+
+theorem PartialTyUnion.borrow_append {mutable : Bool}
+    {leftTargets rightTargets : List LVal} :
+    PartialTyUnion (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets))
+      (.ty (.borrow mutable (leftTargets ++ rightTargets))) := by
+  constructor
+  · intro candidate hcandidate
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
+    rcases hcandidate with rfl | rfl
+    · exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        exact List.mem_append_left _ htarget)
+    · exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        exact List.mem_append_right _ htarget)
+  · intro upper hupper
+    have hleftUpper :
+        PartialTyStrengthens (.ty (.borrow mutable leftTargets)) upper :=
+      hupper (.ty (.borrow mutable leftTargets)) (by simp)
+    have hrightUpper :
+        PartialTyStrengthens (.ty (.borrow mutable rightTargets)) upper :=
+      hupper (.ty (.borrow mutable rightTargets)) (by simp)
+    cases upper with
+    | ty upperTy =>
+        rcases PartialTyStrengthens.from_borrow_inv hleftUpper with
+          ⟨upperTargets, hupperTyEq, hleftSubset⟩
+        subst hupperTyEq
+        rcases PartialTyStrengthens.from_borrow_inv hrightUpper with
+          ⟨rightUpperTargets, hrightUpperTyEq, hrightSubset⟩
+        injection hrightUpperTyEq with _hmutableEq htargetsEq
+        subst htargetsEq
+        exact PartialTyStrengthens.borrow (by
+          intro target htarget
+          rcases List.mem_append.mp htarget with hleft | hright
+          · exact hleftSubset hleft
+          · exact hrightSubset hright)
+    | undef upperTy =>
+        have hleftUpperTy :
+            PartialTyStrengthens (.ty (.borrow mutable leftTargets))
+              (.ty upperTy) :=
+          PartialTyStrengthens.ty_to_undef_inv hleftUpper
+        have hrightUpperTy :
+            PartialTyStrengthens (.ty (.borrow mutable rightTargets))
+              (.ty upperTy) :=
+          PartialTyStrengthens.ty_to_undef_inv hrightUpper
+        rcases PartialTyStrengthens.from_borrow_inv hleftUpperTy with
+          ⟨upperTargets, hupperTyEq, hleftSubset⟩
+        subst hupperTyEq
+        rcases PartialTyStrengthens.from_borrow_inv hrightUpperTy with
+          ⟨rightUpperTargets, hrightUpperTyEq, hrightSubset⟩
+        injection hrightUpperTyEq with _hmutableEq htargetsEq
+        subst htargetsEq
+        exact PartialTyStrengthens.intoUndef
+          (PartialTyStrengthens.borrow (by
+            intro target htarget
+            rcases List.mem_append.mp htarget with hleft | hright
+            · exact hleftSubset hleft
+            · exact hrightSubset hright))
+    | box _ =>
+        exact False.elim (PartialTyStrengthens.not_ty_to_box hleftUpper)
+
+theorem ShapeCompatible.full_union {env : Env} {left right : Ty} :
+    ShapeCompatible env (.ty left) (.ty right) →
+    ∃ union, PartialTyUnion (.ty left) (.ty right) (.ty union) := by
+  intro hshape
+  generalize hleftEq : (.ty left : PartialTy) = leftP at hshape
+  generalize hrightEq : (.ty right : PartialTy) = rightP at hshape
+  induction hshape generalizing left right with
+  | unit =>
+      cases hleftEq
+      cases hrightEq
+      exact ⟨.unit, PartialTyUnion.self (.ty .unit)⟩
+  | int =>
+      cases hleftEq
+      cases hrightEq
+      exact ⟨.int, PartialTyUnion.self (.ty .int)⟩
+  | bool =>
+      cases hleftEq
+      cases hrightEq
+      exact ⟨.bool, PartialTyUnion.self (.ty .bool)⟩
+  | tyBox _hinner ih =>
+      cases hleftEq
+      cases hrightEq
+      rcases ih rfl rfl with ⟨innerUnion, hinnerUnion⟩
+      exact ⟨.box innerUnion, PartialTyUnion.tyBox hinnerUnion⟩
+  | box _hinner _ih =>
+      cases hleftEq
+  | borrow _hleft _hright _hinner =>
+      cases hleftEq
+      cases hrightEq
+      exact ⟨.borrow _ (_ ++ _), PartialTyUnion.borrow_append⟩
+  | undefLeft _hinner _ih =>
+      cases hleftEq
+  | undefRight _hinner _ih =>
+      cases hrightEq
+
+theorem ShapeCompatible.borrow_target_joint_typings_and_union {env : Env}
+    {current : Lifetime} {mutable : Bool}
+    {leftTargets rightTargets : List LVal} :
+    EnvSlotsOutlive env current →
+    leftTargets ≠ [] →
+    rightTargets ≠ [] →
+    ShapeCompatible env (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets)) →
+    ∃ leftTy leftLifetime rightTy rightLifetime unionTy,
+      LValTargetsTyping env leftTargets (.ty leftTy) leftLifetime ∧
+      LValTargetsTyping env rightTargets (.ty rightTy) rightLifetime ∧
+      PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) := by
+  intro houtlives hleftNonempty hrightNonempty hshape
+  rcases ShapeCompatible.borrow_target_joint_typings_of_slots
+      houtlives hleftNonempty hrightNonempty hshape with
+    ⟨leftTy, leftLifetime, rightTy, rightLifetime,
+      hleftTargets, hrightTargets, hinnerShape⟩
+  rcases ShapeCompatible.full_union hinnerShape with
+    ⟨unionTy, hunion⟩
+  exact ⟨leftTy, leftLifetime, rightTy, rightLifetime, unionTy,
+    hleftTargets, hrightTargets, hunion⟩
+
+theorem ShapeCompatible.borrow_targets_append_typing {env : Env}
+    {current : Lifetime} {mutable : Bool}
+    {leftTargets rightTargets : List LVal} :
+    EnvSlotsOutlive env current →
+    leftTargets ≠ [] →
+    rightTargets ≠ [] →
+    ShapeCompatible env (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets)) →
+    ∃ unionTy targetLifetime,
+      LValTargetsTyping env (leftTargets ++ rightTargets)
+        (.ty unionTy) targetLifetime := by
+  intro houtlives hleftNonempty hrightNonempty hshape
+  rcases ShapeCompatible.borrow_target_typings hshape with
+    ⟨leftTy, rightTy, hleft, hright, hinnerShape⟩
+  rcases LValTargetsTyping.of_all_same_type_outlives
+      (env := env) (targets := rightTargets) (ty := rightTy)
+      (current := current) hrightNonempty
+      (by
+        intro target htarget
+        rcases hright target htarget with ⟨targetLifetime, htyping⟩
+        exact ⟨targetLifetime, htyping,
+          LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩) with
+    ⟨rightLifetime, hrightTargets, hrightLe⟩
+  rcases ShapeCompatible.full_union hinnerShape with
+    ⟨unionTy, hunion⟩
+  rcases LValTargetsTyping.prepend_same_type_union
+      (env := env) (leftTargets := leftTargets) (rightTargets := rightTargets)
+      (leftTy := leftTy) (rightTy := rightTy) (unionTy := unionTy)
+      hleftNonempty
+      (by
+        intro target htarget
+        rcases hleft target htarget with ⟨targetLifetime, htyping⟩
+        exact ⟨targetLifetime, htyping,
+          LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩)
+      hrightTargets hrightLe hunion with
+    ⟨targetLifetime, htargets, _htargetLe⟩
+  exact ⟨unionTy, targetLifetime, htargets⟩
+
+/-- Assignment-relevant borrow LUB coherence.
+
+If a leaf update is allowed to join two borrow leaves, `S-Bor` gives a typing for
+every target on each side with compatible inner types.  The LUB membership lemma
+then says every target in the joined borrow list came from one of those two
+sides, so the joined target list is jointly typeable.  This is the useful
+coherence fact for assignment writes; `EnvJoinSameShape` is not involved. -/
+theorem ShapeCompatible.borrow_targets_union_typing {env : Env}
+    {current : Lifetime} {mutable : Bool}
+    {leftTargets rightTargets unionTargets : List LVal} :
+    EnvSlotsOutlive env current →
+    unionTargets ≠ [] →
+    ShapeCompatible env (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets)) →
+    PartialTyUnion (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets))
+      (.ty (.borrow mutable unionTargets)) →
+    ∃ unionTy targetLifetime,
+      LValTargetsTyping env unionTargets (.ty unionTy) targetLifetime := by
+  intro houtlives hunionNonempty hshape hunion
+  rcases ShapeCompatible.borrow_target_typings hshape with
+    ⟨leftTy, rightTy, hleft, hright, hinnerShape⟩
+  rcases ShapeCompatible.full_union hinnerShape with
+    ⟨innerUnionTy, hinnerUnion⟩
+  rcases LValTargetsTyping.of_each_two_compatible
+      (env := env) (targets := unionTargets)
+      (leftTy := leftTy) (rightTy := rightTy) (unionTy := innerUnionTy)
+      (current := current) hunionNonempty hinnerShape hinnerUnion
+      (by
+        intro target htarget
+        rcases PartialTyUnion.borrow_member hunion htarget with
+          htargetLeft | htargetRight
+        · left
+          rcases hleft target htargetLeft with ⟨targetLifetime, htyping⟩
+          exact ⟨targetLifetime, htyping,
+            LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩
+        · right
+          rcases hright target htargetRight with ⟨targetLifetime, htyping⟩
+          exact ⟨targetLifetime, htyping,
+            LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩) with
+    ⟨targetTy, targetLifetime, htargets, _htargetCases, _htargetLe⟩
+  exact ⟨targetTy, targetLifetime, htargets⟩
+
+/-- Any borrow introduced by the LUB of two compatible full types has a jointly
+typeable target list.
+
+This is the full-type assignment leaf fact: weak writes compute a
+`PartialTyUnion` of the old leaf and the RHS type.  The proof follows the
+structure of `ShapeCompatible`; the only target-list widening case is `S-Bor`,
+where `ShapeCompatible.borrow_targets_union_typing` supplies the list typing.
+No environment-join shape premise is used. -/
+theorem ShapeCompatible.full_union_borrow_targets_typing {env : Env}
+    {current : Lifetime} {left right union : Ty}
+    {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    ShapeCompatible env (.ty left) (.ty right) →
+    PartialTyUnion (.ty left) (.ty right) (.ty union) →
+    PartialTyContains (.ty union) (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hshape
+  generalize hleftEq : (.ty left : PartialTy) = leftP at hshape
+  generalize hrightEq : (.ty right : PartialTy) = rightP at hshape
+  induction hshape generalizing left right union mutable targets with
+  | unit =>
+      cases hleftEq
+      cases hrightEq
+      intro hunion hcontains _hnonempty
+      have hsame : Ty.sameShape union .unit :=
+        partialTyUnion_ty_left_sameShape hunion
+      cases hcontains with
+      | here =>
+          simp [Ty.sameShape] at hsame
+      | tyBox hinner =>
+          simp [Ty.sameShape] at hsame
+  | int =>
+      cases hleftEq
+      cases hrightEq
+      intro hunion hcontains _hnonempty
+      have hsame : Ty.sameShape union .int :=
+        partialTyUnion_ty_left_sameShape hunion
+      cases hcontains with
+      | here =>
+          simp [Ty.sameShape] at hsame
+      | tyBox hinner =>
+          simp [Ty.sameShape] at hsame
+  | bool =>
+      cases hleftEq
+      cases hrightEq
+      intro hunion hcontains _hnonempty
+      have hsame : Ty.sameShape union .bool :=
+        partialTyUnion_ty_left_sameShape hunion
+      cases hcontains with
+      | here =>
+          simp [Ty.sameShape] at hsame
+      | tyBox hinner =>
+          simp [Ty.sameShape] at hsame
+  | tyBox _hinner ih =>
+      cases hleftEq
+      cases hrightEq
+      intro hunion hcontains hnonempty
+      cases hcontains with
+      | here =>
+          have hsame := partialTyUnion_ty_left_sameShape hunion
+          simp [Ty.sameShape] at hsame
+      | tyBox hinnerContains =>
+          exact ih rfl rfl (PartialTyUnion.tyBox_inv hunion)
+            hinnerContains hnonempty
+  | box _hinner _ih =>
+      cases hleftEq
+  | borrow hleft hright hinner =>
+      cases hleftEq
+      cases hrightEq
+      intro hunion hcontains hnonempty
+      cases hcontains with
+      | here =>
+          have hsame := partialTyUnion_ty_left_sameShape hunion
+          simp [Ty.sameShape] at hsame
+          cases hsame
+          exact ShapeCompatible.borrow_targets_union_typing
+            houtlives hnonempty (ShapeCompatible.borrow hleft hright hinner)
+            hunion
+      | tyBox hinnerContains =>
+          have hsame := partialTyUnion_ty_left_sameShape hunion
+          simp [Ty.sameShape] at hsame
+  | undefLeft _hinner _ih =>
+      cases hleftEq
+  | undefRight _hinner _ih =>
+      cases hrightEq
+
+/-- Full-type assignment LUB coherence.
+
+When a weak assignment leaf joins two full types, every borrow exposed by the
+joined full type is jointly typeable because the write supplied
+`ShapeCompatible` for exactly the old/RHS pair.  The non-empty assumptions are
+only syntactic side conditions inherited from generated environments; the
+target-list typing itself comes from `ShapeCompatible`, not from same-shape join
+transport. -/
+theorem ShapeCompatible.full_union_tyCoherent {env : Env}
+    {current : Lifetime} {left right union : Ty} :
+    EnvSlotsOutlive env current →
+    TyBorrowTargetsNonempty left →
+    TyBorrowTargetsNonempty right →
+    ShapeCompatible env (.ty left) (.ty right) →
+    PartialTyUnion (.ty left) (.ty right) (.ty union) →
+    TyCoherent env union := by
+  intro houtlives hleftNonempty hrightNonempty hshape hunion mutable targets
+    hcontains
+  have hnonempty : targets ≠ [] :=
+    PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+      hleftNonempty hrightNonempty hunion hcontains
+  exact ShapeCompatible.full_union_borrow_targets_typing
+    houtlives hshape hunion hcontains hnonempty
+
+/-- Recursive output coherence for an assignment borrow-leaf LUB.
+
+`S-Bor` gives joint typings for the old and RHS target lists, plus
+`ShapeCompatible` evidence for the two output types.  Therefore the output LUB
+type of those target lists is coherent by the full-type assignment LUB lemma
+above.  This captures the recursive part of assignment coherence: it is again
+driven by assignment compatibility, not by `EnvJoinSameShape`.
+-/
+theorem ShapeCompatible.borrow_target_output_union_tyCoherent {env : Env}
+    {current : Lifetime} {mutable : Bool}
+    {leftTargets rightTargets : List LVal} :
+    EnvSlotsOutlive env current →
+    EnvTypesBorrowTargetsNonempty env →
+    leftTargets ≠ [] →
+    rightTargets ≠ [] →
+    ShapeCompatible env (.ty (.borrow mutable leftTargets))
+      (.ty (.borrow mutable rightTargets)) →
+    ∃ leftTy leftLifetime rightTy rightLifetime unionTy,
+      LValTargetsTyping env leftTargets (.ty leftTy) leftLifetime ∧
+      LValTargetsTyping env rightTargets (.ty rightTy) rightLifetime ∧
+      PartialTyUnion (.ty leftTy) (.ty rightTy) (.ty unionTy) ∧
+      TyCoherent env unionTy := by
+  intro houtlives henvNonempty hleftNonempty hrightNonempty hshape
+  rcases ShapeCompatible.borrow_target_joint_typings_of_slots
+      houtlives hleftNonempty hrightNonempty hshape with
+    ⟨leftTy, leftLifetime, rightTy, rightLifetime,
+      hleftTargets, hrightTargets, hinnerShape⟩
+  rcases ShapeCompatible.full_union hinnerShape with ⟨unionTy, hunion⟩
+  have hleftTyNonempty : TyBorrowTargetsNonempty leftTy :=
+    LValTargetsTyping.tyBorrowTargetsNonempty henvNonempty hleftTargets
+  have hrightTyNonempty : TyBorrowTargetsNonempty rightTy :=
+    LValTargetsTyping.tyBorrowTargetsNonempty henvNonempty hrightTargets
+  exact ⟨leftTy, leftLifetime, rightTy, rightLifetime, unionTy,
+    hleftTargets, hrightTargets, hunion,
+    ShapeCompatible.full_union_tyCoherent
+      houtlives hleftTyNonempty hrightTyNonempty hinnerShape hunion⟩
+
+/-- RHS-side borrow coherence for assignment leaves.
+
+If the RHS full type contains a borrow, the `ShapeCompatible` derivation carries
+the target typings needed by `T-LvBor`.  This is used by rank-0 strong writes and
+by weak writes whose joined borrow comes solely from the RHS side. -/
+theorem ShapeCompatible.right_contains_borrow_targets_typing {env : Env}
+    {current : Lifetime} {old : PartialTy} {right : Ty}
+    {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    ShapeCompatible env old (.ty right) →
+    PartialTyContains (.ty right) (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hshape
+  generalize hrightEq : (.ty right : PartialTy) = rightP at hshape
+  induction hshape generalizing right mutable targets with
+  | unit =>
+      cases hrightEq
+      intro hcontains _hnonempty
+      cases hcontains
+  | int =>
+      cases hrightEq
+      intro hcontains _hnonempty
+      cases hcontains
+  | bool =>
+      cases hrightEq
+      intro hcontains _hnonempty
+      cases hcontains
+  | tyBox _hinner ih =>
+      cases hrightEq
+      intro hcontains hnonempty
+      cases hcontains with
+      | tyBox hinnerContains =>
+          exact ih rfl hinnerContains hnonempty
+  | box _hinner _ih =>
+      cases hrightEq
+  | borrow hleft hright hinner =>
+      cases hrightEq
+      intro hcontains hnonempty
+      cases hcontains with
+      | here =>
+          rcases LValTargetsTyping.of_all_same_type_outlives
+              (env := env) (current := current) hnonempty
+              (by
+                intro target htarget
+                rcases hright target htarget with ⟨targetLifetime, htyping⟩
+                exact ⟨targetLifetime, htyping,
+                  LValTyping.lifetime_outlives_one_of_slots houtlives htyping⟩) with
+            ⟨targetLifetime, htargets, _hle⟩
+          exact ⟨_, targetLifetime, htargets⟩
+  | undefLeft _hinner ih =>
+      exact ih hrightEq
+  | undefRight _hinner _ih =>
+      cases hrightEq
+
+/-- RHS-side type coherence supplied by assignment compatibility.
+
+For a strong assignment leaf, the written type is the RHS type.  Any borrow
+contained in that RHS obtains its joint target-list typing from the
+`ShapeCompatible` derivation, not from a later environment shape/transport
+argument.  The non-empty premise only rules out the syntactic `[]` case. -/
+theorem ShapeCompatible.right_tyCoherent {env : Env}
+    {current : Lifetime} {old : PartialTy} {right : Ty} :
+    EnvSlotsOutlive env current →
+    TyBorrowTargetsNonempty right →
+    ShapeCompatible env old (.ty right) →
+    TyCoherent env right := by
+  intro houtlives hrightNonempty hshape mutable targets hcontains
+  exact ShapeCompatible.right_contains_borrow_targets_typing
+    houtlives hshape hcontains (hrightNonempty mutable targets hcontains)
+
+/-- Assignment weak-leaf LUB coherence.
+
+For a weak write leaf, the updated partial type is the LUB of the old leaf and
+the RHS.  Any borrow that appears in that LUB has jointly typeable targets
+because the assignment rule supplied `ShapeCompatible` for exactly that old/RHS
+pair.  This is the assignment-specific coherence source; it does not use
+`EnvJoinSameShape`. -/
+theorem ShapeCompatible.join_contains_borrow_targets_typing {env : Env}
+    {current : Lifetime} {old joined : PartialTy} {right : Ty}
+    {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    ShapeCompatible env old (.ty right) →
+    PartialTyUnion old (.ty right) joined →
+    PartialTyContains joined (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hshape
+  generalize hrightEq : (.ty right : PartialTy) = rightP at hshape
+  induction hshape generalizing right joined mutable targets with
+  | unit =>
+      cases hrightEq
+      intro hjoin hcontains hnonempty
+      cases targets with
+      | nil => exact False.elim (hnonempty rfl)
+      | cons target rest =>
+          rcases PartialTyUnion.contained_borrow_member hjoin hcontains
+              (target := target) (by simp) with
+            ⟨leftTargets, hleftContains, _hleftMem⟩ |
+            ⟨rightTargets, hrightContains, _hrightMem⟩
+          · cases hleftContains
+          · cases hrightContains
+  | int =>
+      cases hrightEq
+      intro hjoin hcontains hnonempty
+      cases targets with
+      | nil => exact False.elim (hnonempty rfl)
+      | cons target rest =>
+          rcases PartialTyUnion.contained_borrow_member hjoin hcontains
+              (target := target) (by simp) with
+            ⟨leftTargets, hleftContains, _hleftMem⟩ |
+            ⟨rightTargets, hrightContains, _hrightMem⟩
+          · cases hleftContains
+          · cases hrightContains
+  | bool =>
+      cases hrightEq
+      intro hjoin hcontains hnonempty
+      cases targets with
+      | nil => exact False.elim (hnonempty rfl)
+      | cons target rest =>
+          rcases PartialTyUnion.contained_borrow_member hjoin hcontains
+              (target := target) (by simp) with
+            ⟨leftTargets, hleftContains, _hleftMem⟩ |
+            ⟨rightTargets, hrightContains, _hrightMem⟩
+          · cases hleftContains
+          · cases hrightContains
+  | tyBox _hinner ih =>
+      cases hrightEq
+      intro hjoin hcontains hnonempty
+      rcases PartialTyUnion.ty_ty_full hjoin with ⟨joinedFull, hjoinedEq⟩
+      subst hjoinedEq
+      rcases PartialTyStrengthens.from_box_ty_inv
+          (PartialTyUnion.left_strengthens hjoin) with
+        ⟨joinedInner, hjoinedFullEq, _hinnerStrength⟩
+      subst hjoinedFullEq
+      cases hcontains with
+      | tyBox hinnerContains =>
+          exact ih rfl (PartialTyUnion.tyBox_inv hjoin)
+            hinnerContains hnonempty
+  | box _hinner _ih =>
+      cases hrightEq
+  | borrow hleft hright hinner =>
+      cases hrightEq
+      intro hjoin hcontains hnonempty
+      rcases PartialTyUnion.ty_ty_full hjoin with ⟨joinedFull, hjoinedEq⟩
+      subst hjoinedEq
+      rcases PartialTyStrengthens.from_borrow_inv
+          (PartialTyUnion.left_strengthens hjoin) with
+        ⟨joinedTargets, hjoinedFullEq, _hleftSubset⟩
+      subst hjoinedFullEq
+      cases hcontains with
+      | here =>
+          exact ShapeCompatible.borrow_targets_union_typing
+            houtlives hnonempty
+            (ShapeCompatible.borrow hleft hright hinner)
+            hjoin
+  | undefLeft _hinner _ih =>
+      intro hjoin hcontains _hnonempty
+      have hleftStrength := PartialTyUnion.left_strengthens hjoin
+      cases hleftStrength with
+      | reflex =>
+          cases hcontains
+      | undefLeft _hinnerStrength =>
+          cases hcontains
+  | undefRight _hinner _ih =>
+      cases hrightEq
+
+/-- Assignment weak-leaf LUB coherence.
+
+When a write weakens a leaf by computing `old ⊔ rhs`, the coherence of borrows
+contained in the joined leaf is supplied by the assignment compatibility
+derivation for that exact `old`/`rhs` pair.  The only role of the old/RHS
+coherence premises here is to rule out the syntactic empty-target case; the
+joint target-list typing comes from `ShapeCompatible.join_contains...`, not from
+any environment-join same-shape fact. -/
+theorem ShapeCompatible.join_partialTyCoherent {env : Env}
+    {current : Lifetime} {old joined : PartialTy} {right : Ty} :
+    EnvSlotsOutlive env current →
+    PartialTyBorrowTargetsNonempty old →
+    TyBorrowTargetsNonempty right →
+    ShapeCompatible env old (.ty right) →
+    PartialTyUnion old (.ty right) joined →
+    PartialTyCoherent env joined := by
+  intro houtlives holdNonempty hrightNonempty hshape hjoin mutable targets hcontains
+  have hnonempty : targets ≠ [] :=
+    PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+      holdNonempty hrightNonempty hjoin hcontains
+  exact ShapeCompatible.join_contains_borrow_targets_typing
+    houtlives hshape hjoin hcontains hnonempty
+
+/-- Positive-rank leaf writes are exactly weak LUB updates guarded by
+`ShapeCompatible`.  Thus a borrow target list that appears at such a leaf is
+jointly typed by the assignment/write rule itself, not by any environment-join
+shape fact. -/
+theorem UpdateAtPath.positive_leaf_contains_borrow_targets_typing {rank : Nat}
+    {env result : Env} {old updated : PartialTy} {rhsTy : Ty}
+    {current : Lifetime} {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    UpdateAtPath (rank + 1) env [] old rhsTy result updated →
+    PartialTyContains updated (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hupdate hcontains hnonempty
+  cases hupdate with
+  | weak hshape hjoin =>
+      exact ShapeCompatible.join_contains_borrow_targets_typing
+        houtlives hshape hjoin hcontains hnonempty
+
+/-- Leaf writes get borrow-target coherence from assignment compatibility.
+
+At rank zero this is a strong replacement by the RHS, so the target-list typing
+comes from the RHS side of `ShapeCompatible`.  At positive rank this is the weak
+LUB case above. -/
+theorem UpdateAtPath.leaf_contains_borrow_targets_typing {rank : Nat}
+    {env result : Env} {old updated : PartialTy} {rhsTy : Ty}
+    {current : Lifetime} {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    ShapeCompatible env old (.ty rhsTy) →
+    UpdateAtPath rank env [] old rhsTy result updated →
+    PartialTyContains updated (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hshape hupdate hcontains hnonempty
+  cases hupdate with
+  | strong =>
+      exact ShapeCompatible.right_contains_borrow_targets_typing
+        houtlives hshape hcontains hnonempty
+  | weak hleafShape hjoin =>
+      exact ShapeCompatible.join_contains_borrow_targets_typing
+        houtlives hleafShape hjoin hcontains hnonempty
+
+/-- Leaf writes get partial-type coherence from assignment compatibility.
+
+This is the local assignment fact: a strong leaf uses the RHS side of
+`ShapeCompatible`, and a weak leaf uses the assignment LUB guarded by
+`ShapeCompatible`.  No environment-join or `EnvJoinSameShape` evidence is
+involved. -/
+theorem UpdateAtPath.leaf_partialTyCoherent {rank : Nat}
+    {env result : Env} {old updated : PartialTy} {rhsTy : Ty}
+    {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    PartialTyBorrowTargetsNonempty old →
+    TyBorrowTargetsNonempty rhsTy →
+    ShapeCompatible env old (.ty rhsTy) →
+    UpdateAtPath rank env [] old rhsTy result updated →
+    PartialTyCoherent env updated := by
+  intro houtlives holdNonempty hrhsNonempty hshape hupdate
+    mutable targets hcontains
+  have hnonempty : targets ≠ [] := by
+    cases hupdate with
+    | strong =>
+        exact hrhsNonempty mutable targets hcontains
+    | weak _hleafShape hjoin =>
+        exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+          holdNonempty hrhsNonempty hjoin hcontains
+  exact UpdateAtPath.leaf_contains_borrow_targets_typing
+    houtlives hshape hupdate hcontains hnonempty
+
+/-- Leaf updates only compute the updated partial type; they do not change the
+side environment. -/
+theorem UpdateAtPath.leaf_env_eq {rank : Nat}
+    {env result : Env} {old updated : PartialTy} {rhsTy : Ty} :
+    UpdateAtPath rank env [] old rhsTy result updated →
+    result = env := by
+  intro hupdate
+  cases hupdate <;> rfl
+
+/--
+Positive-rank leaf writes are exactly weak assignment leaves, so they carry the
+local `ShapeCompatible old rhs` evidence that justifies any target-list growth.
+This is the assignment-specific premise used later for coherence; no
+same-shape environment join is involved.
+-/
+theorem UpdateAtPath.positive_leaf_shapeCompatible {rank : Nat}
+    {env result : Env} {old updated : PartialTy} {rhsTy : Ty} :
+    UpdateAtPath (rank + 1) env [] old rhsTy result updated →
+    ShapeCompatible env old (.ty rhsTy) := by
+  intro hupdate
+  cases hupdate with
+  | weak hshape _hjoin =>
+      exact hshape
+
+/-- Variable form of `UpdateAtPath.positive_leaf_contains_borrow_targets_typing`
+for positive-rank writes.  The target-list typing is obtained from the weak
+write leaf in the source environment; no environment-join shape premise is used. -/
+theorem EnvWrite.positive_var_contains_borrow_targets_typing {rank : Nat}
+    {env result : Env} {x : Name} {slot resultSlot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} {mutable : Bool}
+    {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    env.slotAt x = some slot →
+    EnvWrite (rank + 1) env (.var x) rhsTy result →
+    result.slotAt x = some resultSlot →
+    PartialTyContains resultSlot.ty (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hslot hwrite hresultSlot hcontains hnonempty
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      have hwriteEnvEq : writeEnv = env := UpdateAtPath.leaf_env_eq hupdate
+      subst writeEnv
+      have hresultSlotEq : resultSlot = { slot with ty := updatedTy } := by
+        simpa [Env.update, LVal.base] using hresultSlot.symm
+      subst hresultSlotEq
+      exact UpdateAtPath.positive_leaf_contains_borrow_targets_typing
+        houtlives hupdate hcontains hnonempty
+
+/--
+Variable positive-rank writes expose the weak-leaf compatibility premise at the
+written slot.  This is the concrete assignment restriction that rules out
+heterogeneous target-list growth such as joining `&[x] int` with `&[y] bool`.
+-/
+theorem EnvWrite.positive_var_leaf_shapeCompatible {rank : Nat}
+    {env result : Env} {x : Name} {slot : EnvSlot} {rhsTy : Ty} :
+    env.slotAt x = some slot →
+    EnvWrite (rank + 1) env (.var x) rhsTy result →
+    ShapeCompatible env slot.ty (.ty rhsTy) := by
+  intro hslot hwrite
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      have hwriteEnvEq : writeEnv = env := UpdateAtPath.leaf_env_eq hupdate
+      subst writeEnv
+      exact UpdateAtPath.positive_leaf_shapeCompatible hupdate
+
+/--
+At a selected variable leaf of a mutable-borrow fan-out, the concrete
+positive-rank branch write itself carries the `ShapeCompatible` premise.  This is
+the local assignment fact that rules out heterogeneous growth; the same-shape map
+from the branch into the fan-out join is only transport after the branch has
+already been accepted.
+-/
+theorem UpdateAtPath.mutBorrow_selected_var_leaf_shapeCompatible {rank : Nat}
+    {env result : Env} {targets : List LVal} {rhsTy : Ty}
+    {updatedTy : PartialTy} {x : Name} {slot : EnvSlot} :
+    UpdateAtPath rank env [()] (.ty (.borrow true targets)) rhsTy result
+      updatedTy →
+    (.var x) ∈ targets →
+    env.slotAt x = some slot →
+    ShapeCompatible env slot.ty (.ty rhsTy) := by
+  intro hupdate hmem hslot
+  rcases UpdateAtPath.mutBorrow_selected_branch_to_result_exists
+      (path := []) hupdate hmem with
+    ⟨branchResult, hbranchWrite, _hbranchMap⟩
+  exact EnvWrite.positive_var_leaf_shapeCompatible
+    (rank := rank) (env := env) (result := branchResult)
+    (x := x) (slot := slot) (rhsTy := rhsTy) hslot
+    (by simpa [prependPath] using hbranchWrite)
+
+/-- Variable leaf form for both strong and weak writes. -/
+theorem EnvWrite.var_leaf_contains_borrow_targets_typing {rank : Nat}
+    {env result : Env} {x : Name} {slot resultSlot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} {mutable : Bool}
+    {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    result.slotAt x = some resultSlot →
+    PartialTyContains resultSlot.ty (.borrow mutable targets) →
+    targets ≠ [] →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime := by
+  intro houtlives hshape hslot hwrite hresultSlot hcontains hnonempty
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      have hwriteEnvEq : writeEnv = env := UpdateAtPath.leaf_env_eq hupdate
+      subst hwriteEnvEq
+      have hresultSlotEq : resultSlot = { slot with ty := updatedTy } := by
+        simpa [Env.update, LVal.base] using hresultSlot.symm
+      subst hresultSlotEq
+      exact UpdateAtPath.leaf_contains_borrow_targets_typing
+        houtlives hshape hupdate hcontains hnonempty
+
+/-- Transport a jointly typed borrow target list across the single-slot update
+performed by assignment.
+
+The no-write-prohibited premise rules out every target of the borrow contained
+in the updated slot from conflicting with the written root, which is exactly the
+side condition required by `LValTyping.update_of_not_pathConflicts`. -/
+theorem LValTargetsTyping.update_of_not_writeProhibited_contains {env : Env}
+    {x : Name} {slot : EnvSlot} {mutable : Bool} {targets : List LVal}
+    {targetTy : Ty} {targetLifetime : Lifetime} :
+    ¬ WriteProhibited (env.update x slot) (.var x) →
+    PartialTyContains slot.ty (.borrow mutable targets) →
+    LValTargetsTyping env targets (.ty targetTy) targetLifetime →
+    LValTargetsTyping (env.update x slot) targets (.ty targetTy)
+      targetLifetime := by
+  intro hnotWrite hcontains htargets
+  exact (LValTyping.update_of_not_pathConflicts hnotWrite).2 htargets
+    (by
+      intro target htarget
+      exact not_pathConflicts_of_not_writeProhibited_contains hnotWrite
+        (EnvContains.update_same (env := env) (x := x) (slot := slot)
+          hcontains)
+        htarget)
+
+/-- Result-environment form of `EnvWrite.var_leaf_contains_borrow_targets_typing`.
+
+For direct variable writes, assignment compatibility constructs the target-list
+typing in the source env, and `¬WriteProhibited` transports it across the
+single-slot update into the result env. -/
+theorem EnvWrite.var_leaf_contains_borrow_targets_typing_result {rank : Nat}
+    {env result : Env} {x : Name} {slot resultSlot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} {mutable : Bool}
+    {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    result.slotAt x = some resultSlot →
+    PartialTyContains resultSlot.ty (.borrow mutable targets) →
+    targets ≠ [] →
+    ¬ WriteProhibited result (.var x) →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping result targets (.ty targetTy) targetLifetime := by
+  intro houtlives hshape hslot hwrite hresultSlot hcontains hnonempty
+    hnotWrite
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      cases hupdate with
+      | strong =>
+          have hresultSlotEq : resultSlot = { slot with ty := .ty rhsTy } := by
+            simpa [Env.update, LVal.base] using hresultSlot.symm
+          subst hresultSlotEq
+          rcases ShapeCompatible.right_contains_borrow_targets_typing
+              houtlives hshape hcontains hnonempty with
+            ⟨targetTy, targetLifetime, htargets⟩
+          exact ⟨targetTy, targetLifetime,
+            LValTargetsTyping.update_of_not_writeProhibited_contains
+              hnotWrite hcontains htargets⟩
+      | weak hleafShape hjoin =>
+          have hresultSlotEq : resultSlot = { slot with ty := updatedTy } := by
+            simpa [Env.update, LVal.base] using hresultSlot.symm
+          subst hresultSlotEq
+          rcases ShapeCompatible.join_contains_borrow_targets_typing
+              houtlives hleafShape hjoin hcontains hnonempty with
+            ⟨targetTy, targetLifetime, htargets⟩
+          exact ⟨targetTy, targetLifetime,
+            LValTargetsTyping.update_of_not_writeProhibited_contains
+              hnotWrite hcontains htargets⟩
+
+/-- Coherence of the result slot for a variable-leaf assignment write.
+
+Strong writes inherit RHS coherence.  Weak writes use the assignment LUB
+`old ⊔ rhs`, where the no-empty side condition follows from the syntactic
+non-empty invariant on the old leaf and RHS; the target-list typing itself is
+supplied by
+`ShapeCompatible.join_contains_borrow_targets_typing`. -/
+theorem EnvWrite.var_leaf_result_slot_coherent {rank : Nat}
+    {env result : Env} {x : Name} {slot resultSlot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    PartialTyBorrowTargetsNonempty slot.ty →
+    TyBorrowTargetsNonempty rhsTy →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    result.slotAt x = some resultSlot →
+    ¬ WriteProhibited result (.var x) →
+    PartialTyCoherent result resultSlot.ty := by
+  intro houtlives hslotNonempty hrhsNonempty hshape hslot hwrite hresultSlot hnotWrite
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      have hwriteEnvEq : writeEnv = env := UpdateAtPath.leaf_env_eq hupdate
+      subst writeEnv
+      have hresultSlotEq : resultSlot = { slot with ty := updatedTy } := by
+        simpa [Env.update, LVal.base] using hresultSlot.symm
+      subst hresultSlotEq
+      intro mutable targets hcontains
+      have hsourceCoherent : PartialTyCoherent env updatedTy :=
+        UpdateAtPath.leaf_partialTyCoherent
+          houtlives hslotNonempty hrhsNonempty hshape hupdate
+      rcases hsourceCoherent mutable targets hcontains with
+        ⟨targetTy, targetLifetime, htargets⟩
+      exact ⟨targetTy, targetLifetime,
+        LValTargetsTyping.update_of_not_writeProhibited_contains
+          hnotWrite hcontains htargets⟩
+
+/-- Environment-invariant wrapper for assignment leaf coherence.
+
+The non-empty side condition on the old leaf is a generated-environment
+invariant.  The actual joint target-list typing for new/grown borrows still
+comes from the write leaf's `ShapeCompatible` evidence. -/
+theorem EnvWrite.var_leaf_result_slot_coherent_of_envTypes {rank : Nat}
+    {env result : Env} {x : Name} {slot resultSlot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    result.slotAt x = some resultSlot →
+    ¬ WriteProhibited result (.var x) →
+    PartialTyCoherent result resultSlot.ty := by
+  intro houtlives henvNonempty hrhsNonempty hshape hslot hwrite hresultSlot
+    hnotWrite
+  exact EnvWrite.var_leaf_result_slot_coherent
+    houtlives (henvNonempty x slot hslot) hrhsNonempty hshape hslot hwrite
+    hresultSlot hnotWrite
+
+/--
+Positive-rank variable writes preserve result-slot coherence without an external
+compatibility argument: the weak leaf of the write already carries the
+`ShapeCompatible` premise.  This is the package needed for mutable-borrow
+fan-out branches.
+-/
+theorem EnvWrite.positive_var_leaf_result_slot_coherent_of_envTypes
+    {rank : Nat} {env result : Env} {x : Name} {slot resultSlot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    env.slotAt x = some slot →
+    EnvWrite (rank + 1) env (.var x) rhsTy result →
+    result.slotAt x = some resultSlot →
+    ¬ WriteProhibited result (.var x) →
+    PartialTyCoherent result resultSlot.ty := by
+  intro houtlives henvNonempty hrhsNonempty hslot hwrite hresultSlot hnotWrite
+  exact EnvWrite.var_leaf_result_slot_coherent_of_envTypes
+    houtlives henvNonempty hrhsNonempty
+    (EnvWrite.positive_var_leaf_shapeCompatible hslot hwrite)
+    hslot hwrite hresultSlot hnotWrite
+
+/-- Variable-leaf assignment preserves slot-level environment coherence.
+
+The written slot is coherent because the assignment leaf is guarded by
+`ShapeCompatible`: strong leaves use RHS target typings, weak leaves use the
+assignment LUB target typings.  Every other slot is transported across the
+single-root update using `¬ WriteProhibited`, which says no surviving borrow
+target conflicts with the written root.  This is deliberately assignment-local;
+no `EnvJoinSameShape` fact is used. -/
+theorem EnvWrite.var_leaf_preserves_envTypesCoherent {rank : Nat}
+    {env result : Env} {x : Name} {slot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    EnvTypesCoherent env →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    ¬ WriteProhibited result (.var x) →
+    EnvTypesCoherent result := by
+  intro houtlives henvCoherent henvNonempty hrhsNonempty hshape hslot hwrite
+    hnotWrite y resultSlot hresultSlot
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      have hwriteEnvEq : writeEnv = env := UpdateAtPath.leaf_env_eq hupdate
+      subst writeEnv
+      by_cases hy : y = x
+      · subst hy
+        exact EnvWrite.var_leaf_result_slot_coherent_of_envTypes
+          houtlives henvNonempty hrhsNonempty hshape hslot
+          (EnvWrite.intro hslot hupdate) hresultSlot hnotWrite
+      · have hresultSlotOld : env.slotAt y = some resultSlot := by
+          simpa [Env.update, LVal.base, hy] using hresultSlot
+        exact PartialTyCoherent.update_of_not_pathConflicts
+          (slot := { slot with ty := updatedTy }) hnotWrite
+          (henvCoherent y resultSlot hresultSlotOld)
+          (by
+            intro mutable targets target hcontains htarget
+            exact not_pathConflicts_of_not_writeProhibited_contains
+              hnotWrite ⟨resultSlot, hresultSlot, hcontains⟩ htarget)
+
+/-- Variable-leaf assignment preserves slot-local coherence from the stronger
+lvalue-output invariant maintained for generated environments. -/
+theorem EnvWrite.var_leaf_preserves_envTypesCoherent_of_lvalOutputs
+    {rank : Nat} {env result : Env} {x : Name} {slot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    LValTypingPartialOutputsCoherent env →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    ¬ WriteProhibited result (.var x) →
+    EnvTypesCoherent result := by
+  intro houtlives houtputs henvNonempty hrhsNonempty hshape hslot hwrite
+    hnotWrite
+  exact EnvWrite.var_leaf_preserves_envTypesCoherent
+    houtlives houtputs.envTypesCoherent henvNonempty hrhsNonempty hshape
+    hslot hwrite hnotWrite
+
+theorem EnvWrite.positive_var_leaf_preserves_envTypesCoherent
+    {rank : Nat} {env result : Env} {x : Name} {slot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    EnvTypesCoherent env →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    env.slotAt x = some slot →
+    EnvWrite (rank + 1) env (.var x) rhsTy result →
+    ¬ WriteProhibited result (.var x) →
+    EnvTypesCoherent result := by
+  intro houtlives henvCoherent henvNonempty hrhsNonempty hslot hwrite
+    hnotWrite
+  exact EnvWrite.var_leaf_preserves_envTypesCoherent
+    houtlives henvCoherent henvNonempty hrhsNonempty
+    (EnvWrite.positive_var_leaf_shapeCompatible hslot hwrite)
+    hslot hwrite hnotWrite
+
+/-- Positive-rank variable writes preserve slot-local coherence from the
+generated-environment lvalue-output invariant. -/
+theorem EnvWrite.positive_var_leaf_preserves_envTypesCoherent_of_lvalOutputs
+    {rank : Nat} {env result : Env} {x : Name} {slot : EnvSlot}
+    {rhsTy : Ty} {current : Lifetime} :
+    EnvSlotsOutlive env current →
+    LValTypingPartialOutputsCoherent env →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    env.slotAt x = some slot →
+    EnvWrite (rank + 1) env (.var x) rhsTy result →
+    ¬ WriteProhibited result (.var x) →
+    EnvTypesCoherent result := by
+  intro houtlives houtputs henvNonempty hrhsNonempty hslot hwrite hnotWrite
+  exact EnvWrite.positive_var_leaf_preserves_envTypesCoherent
+    houtlives houtputs.envTypesCoherent henvNonempty hrhsNonempty hslot hwrite
+    hnotWrite
+
+/-- Root-variable coherence obligation for a variable-leaf assignment.
+
+This discharges the `Coherent` query whose lvalue is exactly the written root.
+The proof is assignment-specific: the result slot's borrow-target coherence is
+the leaf result theorem above, whose borrow lists are typed from
+`ShapeCompatible` and then transported through `¬ WriteProhibited`. -/
+theorem EnvWrite.var_leaf_result_root_coherent_query {rank : Nat}
+    {env result : Env} {x : Name} {slot : EnvSlot}
+    {rhsTy : Ty} {current borrowLifetime : Lifetime}
+    {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    ShapeCompatible env slot.ty (.ty rhsTy) →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    LValTyping result (.var x) (.ty (.borrow mutable targets))
+      borrowLifetime →
+    ¬ WriteProhibited result (.var x) →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping result targets (.ty targetTy) targetLifetime := by
+  intro houtlives henvNonempty hrhsNonempty hshape hslot hwrite htyping
+    hnotWrite
+  rcases LValTyping.var_inv htyping with
+    ⟨resultSlot, hresultSlot, hslotTy, _hlifetime⟩
+  have hslotCoherent : PartialTyCoherent result resultSlot.ty :=
+    EnvWrite.var_leaf_result_slot_coherent_of_envTypes
+      houtlives henvNonempty hrhsNonempty hshape hslot hwrite hresultSlot
+      hnotWrite
+  rw [hslotTy] at hslotCoherent
+  exact hslotCoherent mutable targets PartialTyContains.here
+
+theorem EnvWrite.positive_var_leaf_result_root_coherent_query_of_envTypes
+    {rank : Nat} {env result : Env} {x : Name} {slot : EnvSlot}
+    {rhsTy : Ty} {current borrowLifetime : Lifetime}
+    {mutable : Bool} {targets : List LVal} :
+    EnvSlotsOutlive env current →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    env.slotAt x = some slot →
+    EnvWrite (rank + 1) env (.var x) rhsTy result →
+    LValTyping result (.var x) (.ty (.borrow mutable targets))
+      borrowLifetime →
+    ¬ WriteProhibited result (.var x) →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping result targets (.ty targetTy) targetLifetime := by
+  intro houtlives henvNonempty hrhsNonempty hslot hwrite htyping hnotWrite
+  exact EnvWrite.var_leaf_result_root_coherent_query
+    houtlives henvNonempty hrhsNonempty
+    (EnvWrite.positive_var_leaf_shapeCompatible hslot hwrite)
+    hslot hwrite htyping hnotWrite
+
+/-- Coherence after a variable-leaf assignment reduces to the written root.
+
+The write derivation pins the result to a single-slot update of `x`.  Therefore
+all lvalue-coherence queries rooted away from `x` transport from the old
+coherent environment using `¬ WriteProhibited`; the only remaining assignment
+specific work is `RootCoherent result x`, i.e. the lvalues reachable through the
+new value of the written root. -/
+theorem EnvWrite.var_leaf_result_coherent_of_root {rank : Nat}
+    {env result : Env} {x : Name} {slot : EnvSlot} {rhsTy : Ty} :
+    Coherent env →
+    env.slotAt x = some slot →
+    EnvWrite rank env (.var x) rhsTy result →
+    ¬ WriteProhibited result (.var x) →
+    RootCoherent result x →
+    Coherent result := by
+  intro hcoh hslot hwrite hnotWrite hroot
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (by simpa [LVal.base] using hwriteSlot.symm.trans hslot)
+      subst writeSlot
+      have hwriteEnvEq : writeEnv = env := UpdateAtPath.leaf_env_eq hupdate
+      subst writeEnv
+      simpa [LVal.base] using
+        (Coherent.update_slot_of_rootCoherent hcoh hnotWrite hroot)
+
 /-- **Single-lval typing determinism (up to `eqv`).**  In a linearizable
 environment two typings of the same lvalue assign `eqv`-equivalent output types.
 Proved by strong induction on the linearization rank of the lvalue's base (with a
@@ -2915,6 +5156,37 @@ theorem lvalTyping_eqv_of_linearizedBy {env : Env} {φ : Name → Nat}
                   exact ty_eqv_of_le_le hac hca
   intro lv p1 l1 p2 l2 h1 h2
   exact key (φ (LVal.base lv)) lv (le_refl _) h1 h2
+
+/-- Target-list typing is deterministic up to `eqv` in a linearized
+environment.
+
+This is the list-level wrapper around `lvalTyping_eqv_of_linearizedBy`; it is
+used when assignment evidence gives a target-list typing independently of an
+existing one and the two outputs must be compared without appealing to
+environment-join shape. -/
+theorem lvalTargetsTyping_eqv_of_linearizedBy {env : Env} {φ : Name → Nat}
+    (hφ : LinearizedBy φ env) :
+    ∀ {targets p1 l1 p2 l2},
+      LValTargetsTyping env targets p1 l1 →
+      LValTargetsTyping env targets p2 l2 →
+      PartialTy.eqv p1 p2 := by
+  intro targets p1 l1 p2 l2 h1 h2
+  rcases LValTargetsTyping.output_full h1 with ⟨a, ha⟩
+  rcases LValTargetsTyping.output_full h2 with ⟨b, hb⟩
+  subst ha
+  subst hb
+  have hdet : ∀ t, t ∈ targets → ∀ {q1 m1 q2 m2},
+      LValTyping env t q1 m1 →
+      LValTyping env t q2 m2 →
+      PartialTy.eqv q1 q2 := by
+    intro t _ q1 m1 q2 m2 hq1 hq2
+    exact lvalTyping_eqv_of_linearizedBy hφ hq1 hq2
+  have hab : PartialTyStrengthens (.ty a) (.ty b) :=
+    lvalTargetsTyping_union_mono h2 hdet h1 (fun _ h => h) a rfl
+  have hba : PartialTyStrengthens (.ty b) (.ty a) :=
+    lvalTargetsTyping_union_mono h1 hdet h2 (fun _ h => h) b rfl
+  exact by
+    simpa [PartialTy.eqv] using ty_eqv_of_le_le hab hba
 
 /-- **Base-slot lifetime bound.**  Given that every borrow contained in a slot of
 `result` has its targets' bases outliving that slot (the base-outlives half of
@@ -3177,8 +5449,12 @@ theorem borrowTargetsWellFormedInSlot_transport {source result : Env}
   intro T hT
   exact borrowTargetWellFormed_transport hmap hcoh hlin hdecomp hlifeEq (hsrc T hT)
 
-/-- **CBWF of an environment join**, derived from the branch invariants and the
-kept `T-If` premises (`EnvJoinSameShape`, `Coherent`, `Linearizable`). -/
+/-- **CBWF of an environment join**, derived from the branch invariants plus
+result coherence/linearizability.
+
+The `EnvJoinSameShape` arguments build transport maps from the branches into the
+join.  They do not imply `Coherent join`; coherent branch environments with
+same-shaped joins can still merge incompatible borrow target lists. -/
 theorem containedBorrowsWellFormed_join {left right join : Env}
     (hjoin : EnvJoin left right join)
     (hssLeft : EnvJoinSameShape left join) (hssRight : EnvJoinSameShape right join)
@@ -3272,6 +5548,28 @@ theorem EnvWrite.sameShapeStrengthening_init {rank : Nat}
       exact ⟨resultSlot, rfl, hshape, hstrength.2⟩
 
 /--
+Positive-rank writes over a fully typed lvalue have the initialized-leaf
+evidence needed for same-shape transport.
+
+This is still only transport evidence.  It is not a coherence source: the
+joint typing for any borrow target list introduced or enlarged by the write
+comes from the corresponding `ShapeCompatible` leaf premise.
+-/
+theorem EnvWrite.sameShapeStrengthening_init_of_full_lvalTyping {rank : Nat}
+    {env result : Env} {lv : LVal} {leafTy rhsTy : Ty}
+    {leafLifetime : Lifetime} :
+    0 < rank →
+    LValTyping env lv (.ty leafTy) leafLifetime →
+    EnvWrite rank env lv rhsTy result →
+    EnvSameShapeStrengthening env result := by
+  intro hrank htyping hwrite
+  exact EnvWrite.sameShapeStrengthening_init hrank hwrite
+    (fun slot hslot => by
+      have hleaf :=
+        writeLeafTy_of_lvalTyping htyping hslot [] rhsTy WriteLeafTy.leaf
+      simpa using hleaf)
+
+/--
 Fan-out writes over initialized leaves transport the original environment to the
 joined fan-out result by same-shape strengthening.
 -/
@@ -3333,14 +5631,33 @@ theorem WriteBorrowTargets.sameShapeStrengthening_init {rank : Nat}
   case intro => intros; trivial
 
 /--
-A write path that crosses a (mutable) borrow node of the walked type before the
-path is exhausted.
+Fan-out writes carry the initialized-leaf evidence in the write constructor
+itself.  This packages that generated evidence before producing the same-shape
+transport map.
 
-Writes along such paths never strong-replace a leaf of the walked slot: at the
-borrow node the update fans out at positive rank (`W-MutBor`), where every leaf
-update is a weak join.  This is the discriminant separating the deref-of-borrow
-assignment from the rank-0 deref-of-box assignment (whose leaf is strongly
-replaced).
+As above, this map is not what proves coherence of grown borrow lists; the
+positive-rank leaves are weak assignment joins guarded by `ShapeCompatible`.
+-/
+theorem WriteBorrowTargets.sameShapeStrengthening_init_of_typed {rank : Nat}
+    {env result : Env} {path : List Unit} {targets : List LVal}
+    {rhsTy : Ty} :
+    0 < rank →
+    WriteBorrowTargets rank env path targets rhsTy result →
+    EnvSameShapeStrengthening env result := by
+  intro hrank hwrites
+  exact WriteBorrowTargets.sameShapeStrengthening_init hrank hwrites
+    (WriteBorrowTargets.initialized_leaves_of_typed hwrites)
+
+/--
+A write path that crosses a borrow node of the walked type before the path is
+exhausted.
+
+Only mutable borrow nodes can actually perform such an update: the
+`UpdateAtPath` constructor is `mutBorrow`, and it fans out at positive rank over
+the target list.  Every leaf reached by that fan-out is then a weak join guarded
+by `ShapeCompatible`.  This is the assignment-specific discriminant separating a
+deref-of-borrow assignment from a rank-0 deref-of-box assignment, whose leaf is
+strongly replaced.
 -/
 inductive PathThroughBorrow : PartialTy → List Unit → Prop where
   | borrowHere {mutable : Bool} {targets : List LVal} {path : List Unit} :
@@ -3348,6 +5665,213 @@ inductive PathThroughBorrow : PartialTy → List Unit → Prop where
   | box {inner : PartialTy} {path : List Unit} :
       PathThroughBorrow inner path →
       PathThroughBorrow (.box inner) (() :: path)
+
+/--
+A path whose update steps through a mutable borrow node before reaching its
+leaf.
+
+This is the assignment-specific shape fact we need: `UpdateAtPath` can change
+the side environment only by using the `mutBorrow` constructor, which fans the
+rest of the write out over the borrow's targets at positive rank.  Direct leaf
+writes only compute a new partial type for the written root.
+-/
+inductive PathThroughMutBorrow : PartialTy → List Unit → Prop where
+  | borrowHere {targets : List LVal} {path : List Unit} :
+      PathThroughMutBorrow (.ty (.borrow true targets)) (() :: path)
+  | box {inner : PartialTy} {path : List Unit} :
+      PathThroughMutBorrow inner path →
+      PathThroughMutBorrow (.box inner) (() :: path)
+
+theorem PathThroughMutBorrow.toPathThroughBorrow {partialTy : PartialTy}
+    {path : List Unit} :
+    PathThroughMutBorrow partialTy path →
+    PathThroughBorrow partialTy path := by
+  intro hthrough
+  induction hthrough with
+  | borrowHere =>
+      exact PathThroughBorrow.borrowHere
+  | box _hinner ih =>
+      exact PathThroughBorrow.box ih
+
+/--
+The assignment compatibility relation itself is mutable-only at borrow
+crossings.  This is the local reason a write may grow target lists only through
+mutable borrows; same-shape facts are transport evidence after such a write has
+already been accepted.
+-/
+theorem WriteShapeCompat.pathThroughBorrow_implies_pathThroughMutBorrow
+    {env : Env} {partialTy : PartialTy} {path : List Unit} {rhsTy : Ty} :
+    PathThroughBorrow partialTy path →
+    WriteShapeCompat env path partialTy rhsTy →
+    PathThroughMutBorrow partialTy path := by
+  intro hthrough
+  induction hthrough generalizing rhsTy with
+  | borrowHere =>
+      intro hcompat
+      cases hcompat with
+      | borrow _ =>
+          exact PathThroughMutBorrow.borrowHere
+  | box _hinner ih =>
+      intro hcompat
+      cases hcompat with
+      | box hinner =>
+          exact PathThroughMutBorrow.box (ih hinner)
+
+/--
+If a write update is typed along a path that crosses a borrow node, that borrow
+node is necessarily mutable.  This is the assignment-side restriction that
+rules out incoherent growth through immutable or otherwise incompatible borrow
+shapes; same-shape transport is only a consequence used after the generated
+write has already been accepted.
+-/
+theorem UpdateAtPath.pathThroughBorrow_implies_pathThroughMutBorrow {rank : Nat}
+    {env env' : Env} {path : List Unit} {oldTy updatedTy : PartialTy}
+    {rhsTy : Ty} :
+    PathThroughBorrow oldTy path →
+    UpdateAtPath rank env path oldTy rhsTy env' updatedTy →
+    PathThroughMutBorrow oldTy path := by
+  intro hthrough
+  induction hthrough generalizing rank env env' updatedTy with
+  | borrowHere =>
+      intro hupdate
+      rcases UpdateAtPath.borrow_cons_inv hupdate with
+        ⟨hmutable, _hupdatedEq, _hwrites⟩
+      cases hmutable
+      exact PathThroughMutBorrow.borrowHere
+  | box _hinner ih =>
+      intro hupdate
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with
+          ⟨inner, updatedInner, holdEq, hupdatedEq, hinnerUpdate⟩
+        cases holdEq
+        cases hupdatedEq
+        exact PathThroughMutBorrow.box (ih hinnerUpdate)
+      · rcases hborrow with ⟨_targets, holdEq, _hupdatedEq, _hwrites⟩
+        cases holdEq
+
+theorem UpdateAtPath.sideEnv_ne_implies_pathThroughMutBorrow {rank : Nat}
+    {env env' : Env} {path : List Unit} {oldTy updatedTy : PartialTy}
+    {rhsTy : Ty} :
+    UpdateAtPath rank env path oldTy rhsTy env' updatedTy →
+    env' ≠ env →
+    PathThroughMutBorrow oldTy path := by
+  intro hupdate
+  refine UpdateAtPath.rec
+    (motive_1 := fun _rank env path oldTy _rhsTy env' updatedTy _ =>
+      env' ≠ env →
+      PathThroughMutBorrow oldTy path)
+    (motive_2 := fun _rank _env _path _targets _rhsTy _result _ => True)
+    (motive_3 := fun _rank _env _lv _rhsTy _result _ => True)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro
+    hupdate
+  case strong =>
+    intro env old ty hne
+    exact False.elim (hne rfl)
+  case weak =>
+    intro env rank old joined ty _hshape _hjoin hne
+    exact False.elim (hne rfl)
+  case box =>
+    intro env₁ env₂ rank path inner updatedInner ty _hinner ih hne
+    exact PathThroughMutBorrow.box (ih hne)
+  case mutBorrow =>
+    intro env₁ env₂ rank path targets ty _hwrites _ih _hne
+    exact PathThroughMutBorrow.borrowHere
+  case nil =>
+    intros
+    trivial
+  case singleton =>
+    intros
+    trivial
+  case cons =>
+    intros
+    trivial
+  case intro =>
+    intros
+    trivial
+
+theorem UpdateAtPath.sideEnv_eq_of_not_pathThroughMutBorrow {rank : Nat}
+    {env env' : Env} {path : List Unit} {oldTy updatedTy : PartialTy}
+    {rhsTy : Ty} :
+    ¬ PathThroughMutBorrow oldTy path →
+    UpdateAtPath rank env path oldTy rhsTy env' updatedTy →
+    env' = env := by
+  intro hnotThrough hupdate
+  by_contra hne
+  exact hnotThrough
+    (UpdateAtPath.sideEnv_ne_implies_pathThroughMutBorrow hupdate hne)
+
+/--
+Environment-write form of
+`UpdateAtPath.pathThroughBorrow_implies_pathThroughMutBorrow`: any accepted
+assignment whose left-hand path crosses a borrow in the base slot crosses a
+mutable borrow.
+-/
+theorem EnvWrite.pathThroughBorrow_implies_pathThroughMutBorrow {rank : Nat}
+    {env result : Env} {lhs : LVal} {rhsTy : Ty} {slot : EnvSlot} :
+    env.slotAt (LVal.base lhs) = some slot →
+    PathThroughBorrow slot.ty (LVal.path lhs) →
+    EnvWrite rank env lhs rhsTy result →
+    PathThroughMutBorrow slot.ty (LVal.path lhs) := by
+  intro hslot hthrough hwrite
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i intermediate writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (hwriteSlot.symm.trans hslot)
+      subst hslotEq
+      exact UpdateAtPath.pathThroughBorrow_implies_pathThroughMutBorrow
+        hthrough hupdate
+
+/--
+When an assignment update crosses a mutable borrow node, the walked type is
+rebuilt unchanged.  The only change is the generated side environment obtained
+by writing the RHS through the borrow target list.
+-/
+theorem UpdateAtPath.updatedTy_eq_of_pathThroughMutBorrow {rank : Nat}
+    {env env' : Env} {path : List Unit} {oldTy updatedTy : PartialTy}
+    {rhsTy : Ty} :
+    PathThroughMutBorrow oldTy path →
+    UpdateAtPath rank env path oldTy rhsTy env' updatedTy →
+    updatedTy = oldTy := by
+  intro hthrough
+  induction hthrough generalizing rank env env' updatedTy with
+  | borrowHere =>
+      intro hupdate
+      rcases UpdateAtPath.borrow_cons_inv hupdate with
+        ⟨hmutable, hupdatedEq, _hwrites⟩
+      cases hmutable
+      cases hupdatedEq
+      rfl
+  | box _hinner ih =>
+      intro hupdate
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with
+          ⟨inner, updatedInner, htyEq, hupdatedEq, hinnerUpdate⟩
+        cases htyEq
+        cases hupdatedEq
+        rw [ih hinnerUpdate]
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+
+theorem EnvWrite.pathThroughMutBorrow_or_singleSlot {rank : Nat}
+    {env result : Env} {lhs : LVal} {rhsTy : Ty} :
+    EnvWrite rank env lhs rhsTy result →
+    (∃ slot,
+      env.slotAt (LVal.base lhs) = some slot ∧
+        PathThroughMutBorrow slot.ty (LVal.path lhs)) ∨
+    (∃ slot updatedTy,
+      env.slotAt (LVal.base lhs) = some slot ∧
+        result = env.update (LVal.base lhs) { slot with ty := updatedTy }) := by
+  intro hwrite
+  cases hwrite with
+  | intro hslot hupdate =>
+      rename_i intermediate slot updatedTy
+      by_cases hthrough : PathThroughMutBorrow slot.ty (LVal.path lhs)
+      · exact Or.inl ⟨slot, hslot, hthrough⟩
+      · have hintermediate :
+            intermediate = env :=
+          UpdateAtPath.sideEnv_eq_of_not_pathThroughMutBorrow hthrough hupdate
+        exact Or.inr ⟨slot, updatedTy, hslot, by rw [hintermediate]⟩
 
 theorem List.Unit_append_cons (l s : List Unit) :
     l ++ () :: s = () :: (l ++ s) := by
@@ -3377,16 +5901,13 @@ theorem UpdateAtPath.sameShapeStrengthening_of_throughBorrow {rank : Nat}
   intro hthrough hupdate
   induction hthrough generalizing rank writeEnv updatedTy with
   | borrowHere =>
-      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
-      · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
-        cases htyEq
-      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
-        cases htyEq
-        cases hupdatedEq
-        refine ⟨?_, PartialTyStrengthens.reflex, PartialTy.sameShape_refl _⟩
-        exact WriteBorrowTargets.sameShapeStrengthening_init
-          (Nat.succ_pos _) hwrites
-          (WriteBorrowTargets.initialized_leaves_of_typed hwrites)
+      rcases UpdateAtPath.borrow_cons_inv hupdate with
+        ⟨hmutable, hupdatedEq, hwrites⟩
+      cases hmutable
+      cases hupdatedEq
+      refine ⟨?_, PartialTyStrengthens.reflex, PartialTy.sameShape_refl _⟩
+      exact WriteBorrowTargets.sameShapeStrengthening_init_of_typed
+        (Nat.succ_pos _) hwrites
   | box _hinner ih =>
       rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
       · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq, hinnerUpdate⟩
@@ -3397,6 +5918,91 @@ theorem UpdateAtPath.sameShapeStrengthening_of_throughBorrow {rank : Nat}
           by simpa [PartialTy.sameShape] using hshape⟩
       · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
+
+theorem EnvWrite.sameShapeStrengthening_of_pathThroughMutBorrow {rank : Nat}
+    {env result : Env} {lhs : LVal} {rhsTy : Ty} {slot : EnvSlot} :
+    env.slotAt (LVal.base lhs) = some slot →
+    PathThroughMutBorrow slot.ty (LVal.path lhs) →
+    EnvWrite rank env lhs rhsTy result →
+    EnvSameShapeStrengthening env result := by
+  intro hslot hthrough hwrite
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i intermediate writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (hwriteSlot.symm.trans hslot)
+      subst hslotEq
+      rcases UpdateAtPath.sameShapeStrengthening_of_throughBorrow
+          (PathThroughMutBorrow.toPathThroughBorrow hthrough) hupdate with
+        ⟨hmap, hstrength, hshape⟩
+      exact EnvSameShapeStrengthening.update_result_strengthening
+        hmap hslot rfl hstrength hshape
+
+theorem EnvWrite.throughMutBorrow_or_singleSlot {rank : Nat}
+    {env result : Env} {lhs : LVal} {rhsTy : Ty} :
+    EnvWrite rank env lhs rhsTy result →
+    (∃ slot,
+      env.slotAt (LVal.base lhs) = some slot ∧
+        PathThroughMutBorrow slot.ty (LVal.path lhs) ∧
+        EnvSameShapeStrengthening env result) ∨
+    (∃ slot updatedTy,
+      env.slotAt (LVal.base lhs) = some slot ∧
+        result = env.update (LVal.base lhs) { slot with ty := updatedTy }) := by
+  intro hwrite
+  rcases EnvWrite.pathThroughMutBorrow_or_singleSlot hwrite with
+    ⟨slot, hslot, hthrough⟩ | hsingle
+  · exact Or.inl ⟨slot, hslot, hthrough,
+      EnvWrite.sameShapeStrengthening_of_pathThroughMutBorrow
+        hslot hthrough hwrite⟩
+  · exact Or.inr hsingle
+
+/--
+If an accepted assignment write is not merely the direct update of the written
+root slot, then its path crossed a mutable borrow.  This is the assignment-local
+case split needed by coherence: side-environment growth comes only from
+`UpdateAtPath.mutBorrow` fan-out, not from `EnvJoinSameShape`.
+-/
+theorem EnvWrite.nonSingleSlot_implies_pathThroughMutBorrow {rank : Nat}
+    {env result : Env} {lhs : LVal} {rhsTy : Ty} :
+    EnvWrite rank env lhs rhsTy result →
+    (∀ slot updatedTy,
+      env.slotAt (LVal.base lhs) = some slot →
+      result ≠ env.update (LVal.base lhs) { slot with ty := updatedTy }) →
+    ∃ slot,
+      env.slotAt (LVal.base lhs) = some slot ∧
+        PathThroughMutBorrow slot.ty (LVal.path lhs) ∧
+        EnvSameShapeStrengthening env result := by
+  intro hwrite hnotSingle
+  rcases EnvWrite.throughMutBorrow_or_singleSlot hwrite with hfanout | hsingle
+  · exact hfanout
+  · rcases hsingle with ⟨slot, updatedTy, hslot, hresult⟩
+    exact False.elim (hnotSingle slot updatedTy hslot hresult)
+
+/--
+If an accepted write changes any slot other than the syntactic root of the
+left-hand lvalue, the write must have crossed a mutable borrow and performed a
+fan-out update.  This is the assignment-local source of non-root environment
+growth; it is not derived from `EnvJoinSameShape`.
+-/
+theorem EnvWrite.nonRootSlotChange_implies_pathThroughMutBorrow {rank : Nat}
+    {env result : Env} {lhs : LVal} {rhsTy : Ty} :
+    EnvWrite rank env lhs rhsTy result →
+    (∃ y resultSlot,
+      y ≠ LVal.base lhs ∧
+        result.slotAt y = some resultSlot ∧ env.slotAt y ≠ some resultSlot) →
+    ∃ slot,
+      env.slotAt (LVal.base lhs) = some slot ∧
+        PathThroughMutBorrow slot.ty (LVal.path lhs) ∧
+        EnvSameShapeStrengthening env result := by
+  intro hwrite hchanged
+  rcases EnvWrite.throughMutBorrow_or_singleSlot hwrite with hfanout | hsingle
+  · exact hfanout
+  · rcases hsingle with ⟨slot, updatedTy, _hslot, hresult⟩
+    rcases hchanged with ⟨y, resultSlot, hy, hresultSlot, hchanged⟩
+    have henvSlot : env.slotAt y = some resultSlot := by
+      rw [hresult] at hresultSlot
+      simpa [Env.update, hy] using hresultSlot
+    exact False.elim (hchanged henvSlot)
 
 /--
 The slot type at the base of a borrow-typed lvalue crosses a borrow node along
@@ -3445,10 +6051,15 @@ theorem LValTyping.pathThroughBorrow_append {env : Env} {lv : LVal}
     intros
     trivial
 
-/-- **Through-borrow dichotomy.**  A type-level update either crosses a borrow
-node (then it transports the whole environment by same-shape strengthening and
-leaves the walked type unchanged) or it terminates at a strong/weak leaf without
-changing the environment. -/
+/-- **Through-borrow dichotomy.**  A type-level update either crosses a mutable
+borrow node (then the write is a positive-rank fan-out and leaves the walked type
+unchanged) or it terminates at a strong/weak leaf without changing the
+environment.
+
+The same-shape strengthening produced in the fan-out case is transport evidence
+for already-generated branch writes.  It is not the reason new borrow target
+lists are coherent; those lists are typed by the `ShapeCompatible` premises on
+the weak leaf writes. -/
 theorem UpdateAtPath.throughBorrow_dichotomy {rank : Nat} {env env' : Env}
     {path : List Unit} {oldTy updatedTy : PartialTy} {ty : Ty}
     (hupdate : UpdateAtPath rank env path oldTy ty env' updatedTy) :
@@ -3468,36 +6079,41 @@ theorem UpdateAtPath.throughBorrow_dichotomy {rank : Nat} {env env' : Env}
     · exact Or.inr henv
   case mutBorrow =>
     intro env₁ env₂ rank path targets ty hwrites _ih
-    exact Or.inl ⟨WriteBorrowTargets.sameShapeStrengthening_init (Nat.succ_pos _)
-      hwrites (WriteBorrowTargets.initialized_leaves_of_typed hwrites), rfl⟩
+    exact Or.inl ⟨WriteBorrowTargets.sameShapeStrengthening_init_of_typed
+      (Nat.succ_pos _) hwrites, rfl⟩
   case nil => intro _ _ _ _; trivial
   case singleton => intro _ _ _ _ _ _ _ _; trivial
   case cons => intro _ _ _ _ _ _ _ _ _ _ _ _ _ _; trivial
   case intro => intro _ _ _ _ _ _ _ _ _ _; trivial
 
-/-- An assignment write (rank 0) is either a whole-environment same-shape
-strengthening (it crossed a borrow → positive-rank fan-out, leaving the base
-slot's type unchanged) or a single-slot strong/weak update of the base slot. -/
+/-- An assignment write (rank 0) is either a mutable-borrow fan-out or a direct
+single-slot update of the base slot.
+
+The fan-out branch is recorded as a same-shape strengthening only because later
+proofs need to transport facts from the selected generated branch into the joined
+fan-out result.  Assignment coherence itself must come from the restricted write
+shape: direct leaves use `ShapeCompatible` at the updated leaf, and fan-out leaves
+are positive-rank weak writes through mutable borrow targets. -/
 theorem EnvWrite.sameShapeStrengthening_or_singleSlot {env result : Env}
     {lhs : LVal} {rhsTy : Ty} (hwrite : EnvWrite 0 env lhs rhsTy result) :
     EnvSameShapeStrengthening env result ∨
       (∃ slot updatedTy, env.slotAt (LVal.base lhs) = some slot ∧
         result = env.update (LVal.base lhs) { slot with ty := updatedTy }) := by
-  cases hwrite with
-  | intro hslot hupdate =>
-    rename_i intermediate slot updatedTy
-    rcases UpdateAtPath.throughBorrow_dichotomy hupdate with ⟨hess0, hupdEq⟩ | hinterEq
-    · refine Or.inl (EnvSameShapeStrengthening.update_result_strengthening hess0 hslot rfl ?_ ?_)
-      · rw [hupdEq]
-      · rw [hupdEq]
-    · exact Or.inr ⟨slot, updatedTy, hslot, by rw [hinterEq]⟩
+  rcases EnvWrite.throughMutBorrow_or_singleSlot hwrite with
+    ⟨_slot, _hslot, _hthrough, hess⟩ | hsingle
+  · exact Or.inl hess
+  · exact Or.inr hsingle
 
 /-- **CBWF of an assignment write result**, derived from `ContainedBorrowsWellFormed`
-of the pre-write environment, the kept `T-Assign` premises (`Coherent`,
-`Linearizable` of the result, `¬WriteProhibited`), and the *minimal* RHS-target
-obligation `EnvWriteRhsTargetsWellFormed`.  The old-origin borrows transport via
-the borrow-invariance keystone; the RHS-origin borrows are supplied by the
-minimal obligation. -/
+of the pre-write environment, result coherence/linearizability,
+`¬WriteProhibited`, and the *minimal* RHS-target obligation
+`EnvWriteRhsTargetsWellFormed`.
+
+For CBWF we only need per-target preservation: old-origin targets transport via
+the borrow-invariance keystone, while RHS-origin targets are supplied by the
+minimal obligation.  The stronger joint target-list coherence for writes is
+assignment-specific and comes from the write's `ShapeCompatible` evidence, not
+from the same-shape map used in the fan-out branch below. -/
 theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
     {lhs : LVal} {rhsTy : Ty}
     (hcbwf₂ : ContainedBorrowsWellFormed env₂)
@@ -3507,8 +6123,12 @@ theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
     (hnotWrite : ¬ WriteProhibited env₃ lhs) :
     ContainedBorrowsWellFormed env₃ := by
   have hlifePres := EnvWrite.lifetimesPreserved hwrite
-  rcases EnvWrite.sameShapeStrengthening_or_singleSlot hwrite with hess | ⟨wslot, updatedTy, hwslot, henv₃⟩
-  · -- fan-out: env₃ is a same-shape strengthening of env₂
+  rcases EnvWrite.throughMutBorrow_or_singleSlot hwrite with
+    ⟨_fanSlot, _hfanSlot, _hthrough, hess⟩ |
+    ⟨wslot, updatedTy, hwslot, henv₃⟩
+  · -- mutable-borrow fan-out: same-shape only transports old-origin targets.
+    -- RHS-origin targets are discharged below by `hrhsWF`; joint coherence for
+    -- accepted write leaves comes from the `ShapeCompatible` leaf premises.
     have hdecomp : ∀ z zslot m W, env₃.slotAt z = some zslot →
         PartialTyContains zslot.ty (.borrow m W) →
         ∀ w, w ∈ W → ∃ wbs, env₃.slotAt (LVal.base w) = some wbs ∧
@@ -3579,15 +6199,30 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
     {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
     term.size ≤ fuel →
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     WellFormedEnv env₁ lifetime →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
   induction fuel generalizing env₁ env₂ typing lifetime term ty with
   | zero =>
-      intro hsize _hrefs _hwellFormed _htyping
+      intro hsize _hrefs _hcoherentTyping _hcoherentWhileInvariant
+        _hwellFormed _htyping
       cases term <;> simp [Term.size] at hsize
   | succ fuel ihFuel =>
-      intro hsize hrefs hwellFormed htyping
+      intro hsize hrefs hcoherentTyping hcoherentWhileInvariant
+        hwellFormed htyping
       refine TermTyping.rec
         (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
           term.size ≤ fuel.succ →
@@ -3661,15 +6296,20 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             hRhs _hLhsPost hshape hwellRhs hwrite hranked hrhsWF
             hnotWrite ih hsize htypingEq hwellFormed =>
           by
+            subst htypingEq
             let result := ih
               (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-              htypingEq hwellFormed
+              rfl hwellFormed
             rcases hranked with
               ⟨φ, hlinBy, hbelow⟩
             have hlin3By :=
               EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
                 hwrite hlinBy hbelow
-            have hcoh3 := hrhsWF
+            have hassignTyping : TermTyping _env₁ _typing _lifetime
+                (.assign _lhs _rhs) .unit _env₃ :=
+              TermTyping.assign hRhs _hLhsPost hshape hwellRhs hwrite
+                ⟨φ, hlinBy, hbelow⟩ hrhsWF hnotWrite
+            have hcoh3 := hcoherentTyping hwellFormed hassignTyping
             have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
               (Linearizable.of_linearizedBy hlin3By) hrhsWF hwrite hnotWrite
             exact ⟨⟨hcbwf3,
@@ -3706,7 +6346,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
                 (term := _rhs)
                 (ty := _rhsTy)
                 (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-                hrefs leftResult.1 hRhsErased
+                hrefs hcoherentTyping hcoherentWhileInvariant leftResult.1
+                hRhsErased
             exact ⟨by simpa [henvEq] using rightResult.1, WellFormedTy.bool⟩)
         (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
               _trueBranch _falseBranch _trueTy _falseTy _joinTy}
@@ -3722,7 +6363,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           let falseResult := ihFalse
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq conditionResult.1
-          let hcoherent := trueResult.1.2.2.1
+          let hiteTyping : TermTyping _env₁ _typing _lifetime
+              (.ite _condition _trueBranch _falseBranch) _joinTy _env₅ :=
+            TermTyping.ite _hcondition _htrue _hfalse _hjoin _henvJoin
+              _hsameLeft _hsameRight hwellJoin hlinear _hborrowSafe
+              _hresultSafe
+          let hcoherent := hcoherentTyping hwellFormed hiteTyping
           ⟨⟨containedBorrowsWellFormed_join _henvJoin _hsameLeft _hsameRight
               trueResult.1.1 falseResult.1.1 hcoherent hlinear, by
               exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
@@ -3753,7 +6399,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             _hbodyEntry _ihGenerated ihCondInv _ihBodyInv _ihCondEntry
             _ihBodyEntry hsize htypingEq
             hwellFormed =>
-          let hcoh := hwellFormed.2.2.1
+          let hcoh := hcoherentWhileInvariant hwellFormed _hgenerated hjoin
           let invWellFormed : WellFormedEnv _envInv _lifetime :=
             ⟨hcbwf,
               EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
@@ -3789,13 +6435,27 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     {typing : StoreTyping} {lifetime : LwRust.Core.Lifetime}
     {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     ValidState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
-  intro hrefs _hvalidState _hvalidStoreTyping hwellFormed _hsafe htyping
+  intro hrefs hcoherentTyping hcoherentWhileInvariant
+    _hvalidState _hvalidStoreTyping hwellFormed _hsafe htyping
   exact TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
       currentTyping = typing →
@@ -3858,13 +6518,18 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         hRhs _hLhsPost hshape hwellRhs hwrite hranked hrhsWF hnotWrite ih
         htypingEq hwellFormed =>
       by
-        let result := ih htypingEq hwellFormed
+        subst htypingEq
+        let result := ih rfl hwellFormed
         rcases hranked with
           ⟨φ, hlinBy, hbelow⟩
         have hlin3By :=
           EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
             hwrite hlinBy hbelow
-        have hcoh3 := hrhsWF
+        have hassignTyping : TermTyping _env₁ _typing _lifetime
+            (.assign _lhs _rhs) .unit _env₃ :=
+          TermTyping.assign hRhs _hLhsPost hshape hwellRhs hwrite
+            ⟨φ, hlinBy, hbelow⟩ hrhsWF hnotWrite
+        have hcoh3 := hcoherentTyping hwellFormed hassignTyping
         have hcbwf3 := containedBorrowsWellFormed_assign result.1.1 hcoh3
           (Linearizable.of_linearizedBy hlin3By) hrhsWF hwrite hnotWrite
         exact ⟨⟨hcbwf3,
@@ -3891,7 +6556,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
           hstoreFresh hnotMention hghostRhs
         have rightResult :=
           typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
-            _rhs.size (Nat.le_refl _) hrefs leftResult.1 hRhsErased
+            _rhs.size (Nat.le_refl _) hrefs hcoherentTyping
+            hcoherentWhileInvariant leftResult.1 hRhsErased
         exact ⟨by simpa [henvEq] using rightResult.1, WellFormedTy.bool⟩)
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
           _falseBranch _trueTy _falseTy _joinTy}
@@ -3901,7 +6567,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1
       let falseResult := ihFalse htypingEq conditionResult.1
-      let hcoherent := trueResult.1.2.2.1
+      let hiteTyping : TermTyping _env₁ _typing _lifetime
+          (.ite _condition _trueBranch _falseBranch) _joinTy _env₅ :=
+        TermTyping.ite _hcondition _htrue _hfalse _hjoin _henvJoin
+          _hsameLeft _hsameRight hwellJoin hlinear _hborrowSafe
+          _hresultSafe
+      let hcoherent := hcoherentTyping hwellFormed hiteTyping
       ⟨⟨containedBorrowsWellFormed_join _henvJoin _hsameLeft _hsameRight
           trueResult.1.1 falseResult.1.1 hcoherent hlinear, by
           exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
@@ -3925,7 +6596,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry
         _hbodyEntry _ihGenerated ihCondInv _ihBodyInv _ihCondEntry _ihBodyEntry
         htypingEq hwellFormed =>
-      let hcoh := hwellFormed.2.2.1
+      let hcoh := hcoherentWhileInvariant hwellFormed _hgenerated hjoin
       let invWellFormed : WellFormedEnv _envInv _lifetime :=
         ⟨hcbwf,
           EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
@@ -3953,39 +6624,70 @@ theorem borrowInvariance_emptyStoreTyping {store : ProgramStore}
     {ty : Ty} :
     ValidState store term →
     ValidStoreTyping store term StoreTyping.empty →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+  intro hvalidState hvalidStoreTyping hcoherentTyping hcoherentWhileInvariant
+    hwellFormed hsafe htyping
   rcases typingPreservesWellFormed_of_ruleCarriedObligations
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
-    hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
+    hcoherentTyping hcoherentWhileInvariant hvalidState hvalidStoreTyping
+    hwellFormed hsafe htyping with
   ⟨hwellFormedOutput, hwellFormedTy⟩
   exact hwellFormedOutput
 
 /--
 Borrow invariance through the rule-carried route.
 
-Assignment rank/write-coherence and declaration fresh-slot coherence are part of
-the strengthened typing derivation.
+Assignment rank/RHS-target obligations and declaration fresh-slot coherence are
+part of the strengthened typing derivation.  Full result coherence is no longer
+a typing premise; it must be derived for generated writes/joins.
 -/
 theorem borrowInvariance_of_ruleCarriedObligations
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     ValidState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+  intro hrefs hcoherentTyping hcoherentWhileInvariant hvalidState
+    hvalidStoreTyping hwellFormed hsafe htyping
   rcases typingPreservesWellFormed_of_ruleCarriedObligations
-      hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping with
+      hrefs hcoherentTyping hcoherentWhileInvariant hvalidState
+      hvalidStoreTyping hwellFormed hsafe htyping with
     ⟨hwellFormedOutput, hwellFormedTy⟩
   exact hwellFormedOutput
 
@@ -4018,15 +6720,30 @@ theorem typingPreservesWellFormed_of_sourceTerm
     {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
     SourceTerm term →
     ValidState store term →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime ∧ WellFormedTy env₂ ty lifetime := by
-  intro hsource hvalidState hwellFormed hsafe htyping
+  intro hsource hvalidState hcoherentTyping hcoherentWhileInvariant
+    hwellFormed hsafe htyping
   exact typingPreservesWellFormed_of_ruleCarriedObligations
     (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
-    hvalidState (sourceTerm_validStoreTyping_empty_any hsource) hwellFormed
-    hsafe (TermTyping.retype_of_sourceTerm
+    hcoherentTyping hcoherentWhileInvariant hvalidState
+    (sourceTerm_validStoreTyping_empty_any hsource) hwellFormed hsafe
+    (TermTyping.retype_of_sourceTerm
       (fun ghost => StoreTyping.empty_typeNameFresh ghost) hsource htyping)
 
 /-- Lemma 4.9, Borrow Invariance, for source terms (no store-typing premise). -/
@@ -4036,13 +6753,27 @@ theorem borrowInvariance_of_sourceTerm
     {term : LwRust.Core.Term} {ty : LwRust.Core.Ty} :
     SourceTerm term →
     ValidState store term →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hsource hvalidState hwellFormed hsafe htyping
+  intro hsource hvalidState hcoherentTyping hcoherentWhileInvariant
+    hwellFormed hsafe htyping
   exact (typingPreservesWellFormed_of_sourceTerm hsource hvalidState
-    hwellFormed hsafe htyping).1
+    hcoherentTyping hcoherentWhileInvariant hwellFormed hsafe htyping).1
 
 theorem writeProhibited_of_lvalTyping_var_in_type {env : Env}
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
@@ -9347,6 +12078,21 @@ theorem lemma_4_9_borrowInvariance
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hrefs : ∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime)
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv)
     (hvalid : ValidState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
@@ -9354,6 +12100,7 @@ theorem lemma_4_9_borrowInvariance
     (htyping : TermTyping env₁ typing lifetime term ty env₂) :
     WellFormedEnv env₂ lifetime :=
   borrowInvariance_of_ruleCarriedObligations
-    hrefs hvalid hstoreTyping hwellFormed hsafe htyping
+    hrefs hcoherentTyping hcoherentWhileInvariant hvalid hstoreTyping
+    hwellFormed hsafe htyping
 
 end LwRust.Paper.Soundness

@@ -3368,7 +3368,22 @@ invariant needed by our concrete store model.
 -/
 theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-    {ty : Ty} {finalValue : Value} :
+    {ty : Ty} {finalValue : Value}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     term.size ≤ fuel →
     SourceTerm term →
     ValidRuntimeState store term →
@@ -3531,18 +3546,18 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       TermTyping.box hterm
     have hterminal : TerminalStateSafe finalStore finalValue _env₂ (.box _ty) :=
       preservation_box_context_terminal_multistep_runtime
-      (by
-        intro midStore value hvalidInner hvalidStoreTypingInner hsafeInner
-          _hinnerTyping hmultiInner
-        exact (ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl (SourceTerm.box_inner hsource)
-          store midStore value hvalidInner hvalidStoreTypingInner
-          hwellFormed hborrowSafe hsafeInner hmultiInner).2)
-      hvalidRuntime hvalidStoreTyping hsafe htermTyping hmulti
+        (by
+          intro midStore value hvalidInner hvalidStoreTypingInner hsafeInner
+            _hinnerTyping hmultiInner
+          exact (ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            rfl (SourceTerm.box_inner hsource)
+            store midStore value hvalidInner hvalidStoreTypingInner
+            hwellFormed hborrowSafe hsafeInner hmultiInner).2)
+        hvalidRuntime hvalidStoreTyping hsafe htermTyping hmulti
     have hwellOut : WellFormedEnv _env₂ _lifetime :=
       (typingPreservesWellFormed_of_sourceTerm hsource
         (ValidRuntimeState.validState hvalidRuntime)
-        hwellFormed hsafe htermTyping).1
+        hcoherentTyping hcoherentWhileInvariant hwellFormed hsafe htermTyping).1
     exact And.intro hwellOut hterminal
   -- T-Block
   case block =>
@@ -3557,7 +3572,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     have hwellOut : WellFormedEnv _env₃ _lifetime :=
       (typingPreservesWellFormed_of_sourceTerm hsource
         (ValidRuntimeState.validState hvalidRuntime)
-        hwellFormed hsafe htermTyping).1
+        hcoherentTyping hcoherentWhileInvariant hwellFormed hsafe htermTyping).1
     have hterminal : TerminalStateSafe finalStore finalValue _env₃ _ty :=
       by
         subst hdrop
@@ -3589,7 +3604,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
         have hwellOut :=
           (typingPreservesWellFormed_of_sourceTerm hsource
             (ValidRuntimeState.validState hvalidRuntime)
-            hwellFormed hsafe htermTyping).1
+            hcoherentTyping hcoherentWhileInvariant hwellFormed hsafe htermTyping).1
         have hpreserved :=
           preservation_declare_redex_runtime_of_validValue hsafeInner
             hfreshOut
@@ -3603,8 +3618,8 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
   -- T-Assign
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hcoh hcontained
-      hnotWrite _ih hsize htypingEq hsource store finalStore finalValue
+      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hrhsWF hnotWrite
+      _ih hsize htypingEq hsource store finalStore finalValue
       hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
     cases htypingEq
     rcases multistep_assign_to_value_inv hmulti with
@@ -3619,11 +3634,11 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       ⟨hvalidInner, hsafeInner, hvalidValue⟩
     have htermTyping :=
       TermTyping.assign hRhs hLhsPost hshape hwellTy hwrite
-        hranked hcoh hcontained hnotWrite
+        hranked hrhsWF hnotWrite
     have hwellOut :=
       (typingPreservesWellFormed_of_sourceTerm hsource
         (ValidRuntimeState.validState hvalidRuntime)
-        hwellFormed hsafe htermTyping).1
+        hcoherentTyping hcoherentWhileInvariant hwellFormed hsafe htermTyping).1
     have hborrowSafeInner : BorrowSafeEnv _env₂ :=
       (typingPreservesBorrowSafeCore
         (SourceTerm.assign_inner hsource) hborrowSafe hRhs).1
@@ -3677,11 +3692,11 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           TerminalStateSafe rightStore rightValue (_envGhost.erase _ghost) _rhsTy := by
       exact ⟨(typingPreservesWellFormed_of_sourceTerm hsourceRight
           (ValidRuntimeState.validState hvalidRight)
-          hwellLeft hterminalLeft.2.1 hRhs).1,
+          hcoherentTyping hcoherentWhileInvariant hwellLeft hterminalLeft.2.1 hRhs).1,
         ihFuel
-          (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          hsourceRight hvalidRight hstoreTypingRight hwellLeft
-          hborrowSafeLeft hterminalLeft.2.1 hRhs hrightMulti⟩
+        (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        hsourceRight hvalidRight hstoreTypingRight hwellLeft
+        hborrowSafeLeft hterminalLeft.2.1 hRhs hrightMulti⟩
     rcases hrightResult with
       ⟨hwellRight, hterminalRight⟩
     cases hredex with
@@ -3703,7 +3718,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin
-      hcoherent hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
+      hlinear hborrowSafeJoin _hresultSafe ihCondition ihTrue
       ihFalse hsize htypingEq hsource store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
     cases htypingEq
@@ -3720,6 +3735,13 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
       (typingPreservesBorrowSafeCore hsourceCondition hborrowSafe
         _hcondition).1
+    have hiteTyping :
+        TermTyping _env₁ typing _lifetime
+          (.ite _condition _trueBranch _falseBranch) _joinTy _env₅ :=
+      TermTyping.ite _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight
+        _hwellJoin hlinear hborrowSafeJoin _hresultSafe
+    have hcohJoin : Coherent _env₅ :=
+      hcoherentTyping hwellFormed hiteTyping
     rcases hchosen with htrueChosen | hfalseChosen
     · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
       rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
@@ -3744,10 +3766,11 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           hterminalCondition.1
       have hwellFalse4 :=
         (typingPreservesWellFormed_of_sourceTerm (SourceTerm.ite_falseBranch hsource)
-          hvalidFalse4.1 hwellCondition hterminalCondition.2.1 _hfalse).1
+          hvalidFalse4.1 hcoherentTyping hcoherentWhileInvariant
+          hwellCondition hterminalCondition.2.1 _hfalse).1
       have hcontained := containedBorrowsWellFormed_join henvJoin hsameLeft hsameRight
-        hwellTrue.1 hwellFalse4.1 hcoherent hlinear
-      exact TerminalStateSafe.strengthen_join hcontained hcoherent hlinear
+        hwellTrue.1 hwellFalse4.1 hcohJoin hlinear
+      exact TerminalStateSafe.strengthen_join hcontained hcohJoin hlinear
         (EnvJoin.lifetimesPreserved_left henvJoin)
         (EnvJoin.left_sameShapeStrengthening henvJoin hbranchShape)
         (PartialTyUnion.left_strengthens hjoin) hwellTrue hterminalTrue
@@ -3774,10 +3797,11 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
           hterminalCondition.1
       have hwellTrue3 :=
         (typingPreservesWellFormed_of_sourceTerm (SourceTerm.ite_trueBranch hsource)
-          hvalidTrue3.1 hwellCondition hterminalCondition.2.1 _htrue).1
+          hvalidTrue3.1 hcoherentTyping hcoherentWhileInvariant
+          hwellCondition hterminalCondition.2.1 _htrue).1
       have hcontained := containedBorrowsWellFormed_join henvJoin hsameLeft hsameRight
-        hwellTrue3.1 hwellFalse.1 hcoherent hlinear
-      exact TerminalStateSafe.strengthen_join hcontained hcoherent hlinear
+        hwellTrue3.1 hwellFalse.1 hcohJoin hlinear
+      exact TerminalStateSafe.strengthen_join hcontained hcohJoin hlinear
         (EnvJoin.lifetimesPreserved_right henvJoin)
         (EnvJoin.right_sameShapeStrengthening henvJoin hbranchShape)
         (PartialTyUnion.right_strengthens hjoin) hwellFalse hterminalFalse
@@ -3855,7 +3879,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh
+      _hgenerated hjoin hss1 hss2 hcbwf hlin hbse _hnameFresh
       _hcondInv _hbodyInv _hwellTyBody hdropEq _hcondEntry _hbodyEntry
       _ihGenerated ihCondInv ihBodyInv _ihCondEntry
       _ihBodyEntry hsize htypingEq hsource store finalStore finalValue hvalidRuntime
@@ -3871,11 +3895,13 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
       EnvJoin.left_sameShapeStrengthening hjoin hbranchShape
     have hbackMap : EnvSameShapeStrengthening _envBack _envInv :=
       EnvJoin.right_sameShapeStrengthening hjoin hbranchShape
+    have hcohInv : Coherent _envInv :=
+      hcoherentWhileInvariant hwellFormed _hgenerated hjoin
     have hwfInv : WellFormedEnv _envInv _lifetime :=
       ⟨hcbwf,
         EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2.1
           (EnvJoin.lifetimesPreserved_left hjoin),
-        hcoh, hlin⟩
+        hcohInv, hlin⟩
     have hbseCondition : BorrowSafeEnv _env₂ :=
       (typingPreservesBorrowSafeCore hsourceCondition hbse
         _hcondInv).1
@@ -3999,7 +4025,22 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
 
 theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-    {ty : Ty} {finalValue : Value} :
+    {ty : Ty} {finalValue : Value}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
@@ -4009,10 +4050,11 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
-    htyping hmulti
-  exact preservation_bounded term.size (Nat.le_refl _) hsource hvalidRuntime
-    hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
+    intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
+      htyping hmulti
+    exact preservation_bounded term.size hcoherentTyping hcoherentWhileInvariant
+      (Nat.le_refl _) hsource hvalidRuntime
+      hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
 
 end Paper
 end LwRust
@@ -4027,14 +4069,29 @@ theorem lemma_4_11_preservation
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
     (hsource : SourceTerm term)
     (hvalid : ValidRuntimeState store term)
-    (hstoreTyping : ValidStoreTyping store term typing)
-    (hwellFormed : WellFormedEnv env₁ lifetime)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hcoherentTyping :
+        ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+          {term : Term} {ty : Ty},
+          WellFormedEnv env₁ lifetime →
+          TermTyping env₁ typing lifetime term ty env₂ →
+          Coherent env₂)
+      (hcoherentWhileInvariant :
+        ∀ {envEntry envBack envInv envCond envBody : Env}
+          {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+          {condition body : Term} {bodyTy : Ty},
+          WellFormedEnv envEntry lifetime →
+          WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+            envEntry envInv envCond envBody envBack bodyTy →
+          EnvJoin envEntry envBack envInv →
+          Coherent envInv)
+      (hwellFormed : WellFormedEnv env₁ lifetime)
     (hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     TerminalStateSafe finalStore finalValue env₂ ty :=
-  preservation hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
-    htyping hmulti
+    preservation hcoherentTyping hcoherentWhileInvariant hsource hvalid
+      hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
 
 end LwRust.Paper.Soundness

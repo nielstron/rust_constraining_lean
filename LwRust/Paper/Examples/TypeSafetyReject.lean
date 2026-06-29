@@ -1,5 +1,6 @@
 import LwRust.Paper.Examples.Operational
-import LwRust.Paper.Soundness.InitialStates
+import LwRust.Paper.Soundness.Helpers.RuntimeFacts
+import LwRust.Paper.Soundness.Lemma_4_10_Progress
 
 /-!
 Build-checked rejected examples.
@@ -101,7 +102,7 @@ theorem invalidBorrowExample_rejected :
                                   rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
                                   | assign _hRhs _hLhsPost _hshape _hwell
-                                      hwrite _hranked _hcoh _hcontained hnotWrite =>
+                                      hwrite _hranked _hrhsWF hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue
@@ -179,9 +180,9 @@ theorem paperRejectedIfElse_join_rejected :
 
 /-! ### Raw `T-If` without block-scoped branches can leak declarations.
 
-If the core `.ite` form is allowed to take arbitrary branch terms, removing the
-coherence premise lets it join two coherent branch outputs into an incoherent
-environment:
+If the core `.ite` form is allowed to take arbitrary branch terms, then
+same-shape join evidence is not enough to recover coherence.  The rule can join
+two coherent branch outputs into an incoherent environment:
 
 ```
 if true let mut b = &x else let mut b = &y
@@ -232,6 +233,12 @@ def incoherentIfTerm : Term :=
 theorem incoherentIfTerm_not_controlBodiesAreBlocks :
     ¬ incoherentIfTerm.controlBodiesAreBlocks := by
   simp [incoherentIfTerm, Term.controlBodiesAreBlocks, Term.isBlock]
+
+theorem incoherentIfTerm_sourceTerm : SourceTerm incoherentIfTerm := by
+  intro value hmem
+  simp [incoherentIfTerm, termValues] at hmem
+  subst value
+  simp [SourceValue]
 
 theorem incoherentIfTerm_not_blockScopedSourceTerm :
     ¬ BlockScopedSourceTerm incoherentIfTerm := by
@@ -639,6 +646,27 @@ theorem incoherentIfYBranch_borrow_facts {lv : LVal} {mutable : Bool}
           rcases ih hinner with ⟨_, _, htargetsEq, _⟩
           subst htargetsEq
           exact False.elim (incoherentIfYBranch_y_targets_not_borrow htargets)
+
+theorem incoherentIfXY_coherent : Coherent incoherentIfXYEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases incoherentIfXYEnv_lval_facts htyping with
+    ⟨_, hpartial, _⟩ | ⟨_, hpartial, _⟩
+  · cases hpartial
+  · cases hpartial
+
+theorem incoherentIfXBranch_coherent : Coherent incoherentIfXBranchEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases incoherentIfXBranch_borrow_facts htyping with
+    ⟨rfl, rfl, rfl, _⟩
+  exact ⟨.int, Lifetime.root,
+    LValTargetsTyping.singleton incoherentIfXBranch_x_typing⟩
+
+theorem incoherentIfYBranch_coherent : Coherent incoherentIfYBranchEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases incoherentIfYBranch_borrow_facts htyping with
+    ⟨rfl, rfl, rfl, _⟩
+  exact ⟨.bool, Lifetime.root,
+    LValTargetsTyping.singleton incoherentIfYBranch_y_typing⟩
 
 theorem incoherentIf_freshBorrowX_obligations :
     FreshUpdateCoherenceObligations incoherentIfXYEnv "b"
@@ -1154,6 +1182,37 @@ theorem incoherentIfJoin_borrowSafe : BorrowSafeEnv incoherentIfJoinEnv := by
     hcontainsMutable _hcontainsOther _htargetMutable _htargetOther _hconflict
   exact False.elim (incoherentIfJoin_no_mutable_contains hcontainsMutable)
 
+theorem tyBorrowSafeAgainstEnv_unit {env : Env} :
+    TyBorrowSafeAgainstEnv env .unit := by
+  constructor
+  · intro targetsMutable mutable targetsOther x targetMutable targetOther
+      hcontains _hcontainsOther _htargetMutable _htargetOther _hconflict
+    cases hcontains
+  · intro x targetsMutable mutable targetsOther targetMutable targetOther
+      _hcontainsMutable hcontains _htargetMutable _htargetOther _hconflict
+    cases hcontains
+
+theorem incoherentIf_join_of_coherent_sameShape_counterexample :
+    Coherent incoherentIfXYEnv ∧
+      Coherent incoherentIfXBranchEnv ∧
+      Coherent incoherentIfYBranchEnv ∧
+      EnvJoin incoherentIfXBranchEnv incoherentIfYBranchEnv
+        incoherentIfJoinEnv ∧
+      EnvJoinSameShape incoherentIfXBranchEnv incoherentIfJoinEnv ∧
+      EnvJoinSameShape incoherentIfYBranchEnv incoherentIfJoinEnv ∧
+      Linearizable incoherentIfJoinEnv ∧
+      BorrowSafeEnv incoherentIfJoinEnv ∧
+      ¬ Coherent incoherentIfJoinEnv :=
+  ⟨incoherentIfXY_coherent,
+    incoherentIfXBranch_coherent,
+    incoherentIfYBranch_coherent,
+    incoherentIf_envJoin,
+    incoherentIfXBranch_join_sameShape,
+    incoherentIfYBranch_join_sameShape,
+    incoherentIfJoin_linearizable,
+    incoherentIfJoin_borrowSafe,
+    incoherentIfJoin_not_coherent⟩
+
 theorem incoherentIf_without_coherent_premise :
     IfTypingPremisesWithoutCoherent
       incoherentIfXYEnv incoherentIfXYEnv
@@ -1174,8 +1233,24 @@ theorem incoherentIf_without_coherent_premise :
     resultWellFormed := WellFormedTy.unit
     linearizable := incoherentIfJoin_linearizable
     borrowSafe := incoherentIfJoin_borrowSafe
-    resultBorrowSafe := tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit
+    resultBorrowSafe := tyBorrowSafeAgainstEnv_unit
   }
+
+theorem incoherentIf_term_typing_without_coherent_premise :
+    TermTyping incoherentIfXYEnv StoreTyping.empty Lifetime.root
+      incoherentIfTerm .unit incoherentIfJoinEnv := by
+  exact TermTyping.ite
+    (TermTyping.const ValueTyping.bool)
+    incoherentIf_xBranch_typing
+    incoherentIf_yBranch_typing
+    (PartialTyJoin.self (.ty .unit))
+    incoherentIf_envJoin
+    incoherentIfXBranch_join_sameShape
+    incoherentIfYBranch_join_sameShape
+    WellFormedTy.unit
+    incoherentIfJoin_linearizable
+    incoherentIfJoin_borrowSafe
+    tyBorrowSafeAgainstEnv_unit
 
 theorem rawIncoherentIf_unscoped_reachable_counterexample :
     TermListTyping Env.empty StoreTyping.empty Lifetime.root
@@ -1191,6 +1266,44 @@ theorem rawIncoherentIf_unscoped_reachable_counterexample :
       ¬ Coherent incoherentIfJoinEnv :=
   ⟨incoherentIfPrefix_typing, incoherentIf_without_coherent_premise,
     incoherentIfJoin_not_coherent⟩
+
+theorem rawIncoherentIf_unscoped_reachable_termTyping_counterexample :
+    SourceTerm incoherentIfTerm ∧
+      ¬ BlockScopedSourceTerm incoherentIfTerm ∧
+      TermListTyping Env.empty StoreTyping.empty Lifetime.root
+        incoherentIfPrefix .unit incoherentIfXYEnv ∧
+      TermTyping incoherentIfXYEnv StoreTyping.empty Lifetime.root
+        incoherentIfTerm .unit incoherentIfJoinEnv ∧
+      ¬ Coherent incoherentIfJoinEnv :=
+  ⟨incoherentIfTerm_sourceTerm, incoherentIfTerm_not_blockScopedSourceTerm,
+    incoherentIfPrefix_typing, incoherentIf_term_typing_without_coherent_premise,
+    incoherentIfJoin_not_coherent⟩
+
+def rawIncoherentIfProgram : List Term :=
+  incoherentIfPrefix ++ [incoherentIfTerm]
+
+theorem rawIncoherentIf_unscoped_reachable_termListTyping_counterexample :
+    TermListTyping Env.empty StoreTyping.empty Lifetime.root
+        rawIncoherentIfProgram .unit incoherentIfJoinEnv ∧
+      ¬ BlockScopedSourceTerm incoherentIfTerm ∧
+      ¬ Coherent incoherentIfJoinEnv := by
+  constructor
+  · unfold rawIncoherentIfProgram incoherentIfPrefix
+    exact TermListTyping.cons incoherentIf_declareX_typing
+      (TermListTyping.cons incoherentIf_declareY_typing
+        (TermListTyping.singleton
+          incoherentIf_term_typing_without_coherent_premise))
+  · exact ⟨incoherentIfTerm_not_blockScopedSourceTerm,
+      incoherentIfJoin_not_coherent⟩
+
+theorem not_all_empty_initial_termList_typings_coherent :
+    ¬ (∀ {terms ty env},
+      TermListTyping Env.empty StoreTyping.empty Lifetime.root terms ty env →
+      Coherent env) := by
+  intro hallCoherent
+  rcases rawIncoherentIf_unscoped_reachable_termListTyping_counterexample with
+    ⟨htyping, _hunscoped, hnotCoherent⟩
+  exact hnotCoherent (hallCoherent htyping)
 
 /-! ### The minimal RHS-target obligation rejects the multi-target fan-out
 counterexample.

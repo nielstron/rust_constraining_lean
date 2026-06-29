@@ -1036,7 +1036,6 @@ theorem whileJoinBody_typing (targets : List LVal)
     (whileJoin_retarget_write targets)
     ⟨fun name => if name = "q" then 1 else 0,
       whileJoin_linearizedBy targets hts, whileJoin_retarget_below⟩
-    (whileJoin_writeCoherence targets)
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
       (whileJoin_contained [.var "y"] whileJoinBack_goodTargets))
     (whileJoin_not_writeProhibited_q [.var "y"] whileJoinBack_goodTargets)
@@ -1090,8 +1089,6 @@ theorem whileRetargetLoop_typing :
     whileJoinEntry_join_sameShape
     whileJoinBack_join_sameShape
     (whileJoin_contained [.var "x", .var "y"] whileJoinInv_goodTargets)
-    (whileJoin_coherent [.var "x", .var "y"] whileJoinInv_goodTargets
-      ⟨Lifetime.root, whileJoinInv_targets_typing⟩)
     ⟨fun name => if name = "q" then 1 else 0,
       whileJoin_linearizedBy [.var "x", .var "y"] whileJoinInv_goodTargets⟩
     (whileJoin_borrowSafe [.var "x", .var "y"])

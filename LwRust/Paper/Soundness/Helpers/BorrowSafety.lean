@@ -1181,15 +1181,30 @@ theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
+    (∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+      {term : Term} {ty : Ty},
+      WellFormedEnv env₁ lifetime →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      Coherent env₂) →
+    (∀ {envEntry envBack envInv envCond envBody : Env}
+      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} {bodyTy : Ty},
+      WellFormedEnv envEntry lifetime →
+      WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+        envEntry envInv envCond envBody envBack bodyTy →
+      EnvJoin envEntry envBack envInv →
+      Coherent envInv) →
     ValidState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+  intro hrefs hcoherentTyping hcoherentWhileInvariant hvalidState
+    hvalidStoreTyping hwellFormed hsafe htyping
   exact borrowInvariance_of_ruleCarriedObligations
-    hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
+    hrefs hcoherentTyping hcoherentWhileInvariant hvalidState
+    hvalidStoreTyping hwellFormed hsafe htyping
 
 /--
 Main source-scoped borrow-safety induction.
@@ -1306,8 +1321,8 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
     exact ⟨hdeclaredSafe, tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit⟩
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hcoh
-      _hcontained hnotWrite _ih hsource hborrowSafe
+      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked _hrhsWF
+      hnotWrite _ih hsource hborrowSafe
     have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe
     have hwriteSafe :
         BorrowSafeEnv _env₃ :=
@@ -1330,7 +1345,7 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin
-      _hcoherent _hlinear hborrowSafeJoin hresultSafe ihCondition ihTrue
+      _hlinear hborrowSafeJoin hresultSafe ihCondition ihTrue
       ihFalse hsource hborrowSafe
     have hconditionSafe := ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
     have _htrueSafe := ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
@@ -1352,7 +1367,7 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy _hchild
-      _hgenerated _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin hbse _hnameFresh
+      _hgenerated _hjoin _hss1 _hss2 _hcbwf _hlin hbse _hnameFresh
       _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
       _ihGenerated ihCondInv _ihBodyInv _ihCondEntry
       _ihBodyEntry hsource _hborrowSafe

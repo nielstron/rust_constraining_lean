@@ -13,68 +13,526 @@ open Core
 
 /-! ### Runtime-invariant preservation facts
 
-These package the two runtime invariants (`Linearizable`, `Coherent`) that
-`lvalTyping_strengthen_transport` consumes, as preserved by the two state
-operations that the Appendix 9.6 borrow-invariance argument performs: a single
-`EnvWrite` and an `EnvJoin` (the write fan-out's branch merge).
+These package runtime invariants used by the Appendix 9.6
+borrow-invariance argument.
 
 `Linearizable` preservation is the `lw_rust_followup` contribution (Definition
 11 plus its preservation proposition): a common rank function survives a write
 under the rule-carried RHS-rank side condition, and survives branch joins when
 both branches use the same rank function.
 
-`Coherent` preservation is Section-4 content proved from explicit
-root-transport/coherence side conditions carried by the strengthened write and
-declaration rules. -/
+The assignment-coherence proof is organized around the write/update
+construction itself.  Generic environment-join shape facts are not enough: a
+joined borrow target list may be assembled from both branches, so the required
+joint target typing has to come from the assignment-specific `ShapeCompatible`
+evidence that permits the mutable-borrow update. -/
 
-structure EnvJoinCoherenceObligations (left right join : Env) : Prop where
-  borrow_transport
-    {lv : LVal} {mutable : Bool} {targets : List LVal}
-    {borrowLifetime : Lifetime} :
-    LValTyping join lv (.ty (.borrow mutable targets)) borrowLifetime →
-      (∃ leftBorrowLifetime,
-        LValTyping left lv (.ty (.borrow mutable targets)) leftBorrowLifetime ∧
-          ∀ targetTy targetLifetime,
-            LValTargetsTyping left targets (.ty targetTy) targetLifetime →
-              ∃ joinTargetTy joinTargetLifetime,
-                LValTargetsTyping join targets (.ty joinTargetTy) joinTargetLifetime)
-      ∨
-      (∃ rightBorrowLifetime,
-        LValTyping right lv (.ty (.borrow mutable targets)) rightBorrowLifetime ∧
-          ∀ targetTy targetLifetime,
-            LValTargetsTyping right targets (.ty targetTy) targetLifetime →
-              ∃ joinTargetTy joinTargetLifetime,
-                LValTargetsTyping join targets (.ty joinTargetTy) joinTargetLifetime)
+theorem PartialTyCoherent.targets_ne_nil {env : Env} {partialTy : PartialTy}
+    {mutable : Bool} {targets : List LVal} :
+    PartialTyCoherent env partialTy →
+    PartialTyContains partialTy (.borrow mutable targets) →
+    targets ≠ [] := by
+  intro hcoherent hcontains hnil
+  rcases hcoherent mutable targets hcontains with
+    ⟨_targetTy, _targetLifetime, htargets⟩
+  exact LValTargetsTyping.targets_ne_nil htargets hnil
 
-theorem EnvJoin.preserves_coherent_of_obligations {left right join : Env} :
-    Coherent left →
-    Coherent right →
-    EnvJoinCoherenceObligations left right join →
-    Coherent join := by
-  intro hleftCoh hrightCoh hobligations lv mutable targets borrowLifetime htyping
-  rcases hobligations.borrow_transport htyping with
-    ⟨leftBorrowLifetime, hleftTyping, htargetsTransport⟩ |
-    ⟨rightBorrowLifetime, hrightTyping, htargetsTransport⟩
-  · rcases hleftCoh lv mutable targets leftBorrowLifetime hleftTyping with
-      ⟨targetTy, targetLifetime, htargetsLeft⟩
-    exact htargetsTransport targetTy targetLifetime htargetsLeft
-  · rcases hrightCoh lv mutable targets rightBorrowLifetime hrightTyping with
-      ⟨targetTy, targetLifetime, htargetsRight⟩
-    exact htargetsTransport targetTy targetLifetime htargetsRight
+theorem TyCoherent.targets_ne_nil {env : Env} {ty : Ty}
+    {mutable : Bool} {targets : List LVal} :
+    TyCoherent env ty →
+    PartialTyContains (.ty ty) (.borrow mutable targets) →
+    targets ≠ [] :=
+  PartialTyCoherent.targets_ne_nil
 
-theorem EnvWrite.preserves_coherent_of_obligations {env result : Env}
-    {writeBase : Name} :
-    Coherent env →
-    EnvWriteCoherenceObligations env result writeBase →
-    Coherent result := by
-  intro hcoh hobligations lv mutable targets borrowLifetime htyping
-  by_cases hbase : LVal.base lv = writeBase
-  · exact hobligations.written_root_coherent hbase htyping
-  · rcases hobligations.old_root_transport hbase htyping with
-      ⟨⟨oldBorrowLifetime, htypingOld⟩, htargetsTransport⟩
-    rcases hcoh lv mutable targets oldBorrowLifetime htypingOld with
-      ⟨targetTy, targetLifetime, htargetsOld⟩
-    exact htargetsTransport targetTy targetLifetime htargetsOld
+/-- Coherence implies the syntactic non-empty borrow-target invariant. -/
+theorem PartialTyCoherent.borrowTargetsNonempty {env : Env}
+    {partialTy : PartialTy} :
+    PartialTyCoherent env partialTy →
+    PartialTyBorrowTargetsNonempty partialTy := by
+  intro hcoherent mutable targets hcontains
+  exact PartialTyCoherent.targets_ne_nil hcoherent hcontains
+
+theorem TyCoherent.borrowTargetsNonempty {env : Env} {ty : Ty} :
+    TyCoherent env ty →
+    TyBorrowTargetsNonempty ty := by
+  intro hcoherent
+  exact PartialTyCoherent.borrowTargetsNonempty hcoherent
+
+/-- A LUB of partial types whose contained borrows are non-empty cannot
+introduce an empty borrow target list.  Assignment uses this only to discharge
+the syntactic `[]` case; target-list typing comes from `ShapeCompatible`. -/
+theorem PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+    {left right union : PartialTy} {mutable : Bool} {targets : List LVal} :
+    PartialTyBorrowTargetsNonempty left →
+    PartialTyBorrowTargetsNonempty right →
+    PartialTyUnion left right union →
+    PartialTyContains union (.borrow mutable targets) →
+    targets ≠ [] := by
+  intro hleftNonempty hrightNonempty hunion hcontains
+  suffices hgeneral :
+      ∀ {union : PartialTy} {needle : Ty},
+        PartialTyContains union needle →
+        ∀ {left right : PartialTy} {mutable : Bool} {targets : List LVal},
+          needle = .borrow mutable targets →
+          PartialTyBorrowTargetsNonempty left →
+          PartialTyBorrowTargetsNonempty right →
+          PartialTyUnion left right union →
+          targets ≠ [] by
+    exact hgeneral hcontains rfl hleftNonempty hrightNonempty hunion
+  intro union needle hcontains
+  induction hcontains with
+  | here =>
+      intro left right m targets hneedle hleftNonempty _hrightNonempty hunion
+      subst hneedle
+      intro hnil
+      rcases PartialTyStrengthens.to_borrow_right
+          (PartialTyUnion.left_strengthens hunion) with
+        ⟨leftTargets, hleftEq, hleftSubset⟩
+      subst hleftEq
+      have hleftNil : leftTargets = [] := by
+        cases leftTargets with
+        | nil => rfl
+        | cons head tail =>
+            have hmemTargets : head ∈ targets :=
+              hleftSubset (by simp)
+            have hmem : head ∈ ([] : List LVal) := by
+              simp [hnil] at hmemTargets
+            simp at hmem
+      subst hleftNil
+      exact hleftNonempty m [] (PartialTyContains.here (ty := .borrow m [])) rfl
+  | tyBox hinner ih =>
+      intro left right m targets hneedle hleftNonempty hrightNonempty hunion
+      rcases PartialTyStrengthens.to_ty_right
+          (PartialTyUnion.left_strengthens hunion) with
+        ⟨leftTy, hleftEq⟩
+      subst hleftEq
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.left_strengthens hunion) with
+        ⟨leftInner, hleftInnerEq, _hleftInnerLe⟩
+      subst hleftInnerEq
+      rcases PartialTyStrengthens.to_ty_right
+          (PartialTyUnion.right_strengthens hunion) with
+        ⟨rightTy, hrightEq⟩
+      subst hrightEq
+      rcases PartialTyStrengthens.to_box_ty_inv
+          (PartialTyUnion.right_strengthens hunion) with
+        ⟨rightInner, hrightInnerEq, _hrightInnerLe⟩
+      subst hrightInnerEq
+      have hleftInnerNonempty :
+          PartialTyBorrowTargetsNonempty (.ty leftInner) := by
+        intro m T hcontainsInner
+        exact hleftNonempty m T (PartialTyContains.tyBox hcontainsInner)
+      have hrightInnerNonempty :
+          PartialTyBorrowTargetsNonempty (.ty rightInner) := by
+        intro m' T hcontainsInner
+        exact hrightNonempty m' T (PartialTyContains.tyBox hcontainsInner)
+      exact ih hneedle hleftInnerNonempty hrightInnerNonempty
+        (PartialTyUnion.tyBox_inv hunion)
+  | box hinner ih =>
+      intro left right m targets hneedle hleftNonempty hrightNonempty hunion
+      have hleftStrength := PartialTyUnion.left_strengthens hunion
+      cases hleftStrength with
+      | reflex =>
+          have hcontainsBorrow := by
+            subst hneedle
+            exact PartialTyContains.box hinner
+          exact hleftNonempty m targets hcontainsBorrow
+      | box hleftInner =>
+          have hrightStrength := PartialTyUnion.right_strengthens hunion
+          cases hrightStrength with
+          | reflex =>
+              have hcontainsBorrow := by
+                subst hneedle
+                exact PartialTyContains.box hinner
+              exact hrightNonempty m targets hcontainsBorrow
+          | box hrightInner =>
+              exact ih hneedle
+                (by
+                  intro m' T hcontainsInner
+                  exact hleftNonempty m' T
+                    (PartialTyContains.box hcontainsInner))
+                (by
+                  intro m' T hcontainsInner
+                  exact hrightNonempty m' T
+                    (PartialTyContains.box hcontainsInner))
+                (PartialTyUnion.box_inv hunion)
+
+/-- Coherent partial types satisfy the non-empty LUB lemma as a corollary. -/
+theorem PartialTyUnion.contains_borrow_targets_ne_nil_of_coherent {env : Env}
+    {left right union : PartialTy} {mutable : Bool} {targets : List LVal} :
+    PartialTyCoherent env left →
+    PartialTyCoherent env right →
+    PartialTyUnion left right union →
+    PartialTyContains union (.borrow mutable targets) →
+    targets ≠ [] := by
+  intro hleftCoh hrightCoh
+  exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+    (PartialTyCoherent.borrowTargetsNonempty hleftCoh)
+    (PartialTyCoherent.borrowTargetsNonempty hrightCoh)
+
+theorem EnvTypesCoherent.empty : EnvTypesCoherent Env.empty := by
+  intro x slot hslot
+  simp [Env.empty] at hslot
+
+theorem LValTypingOutputsCoherent.empty :
+    LValTypingOutputsCoherent Env.empty := by
+  intro lv ty lifetime htyping
+  rcases LValTyping.base_slot_exists htyping with ⟨slot, hslot⟩
+  simp [Env.empty] at hslot
+
+theorem LValTypingPartialOutputsCoherent.empty :
+    LValTypingPartialOutputsCoherent Env.empty := by
+  intro lv partialTy lifetime htyping
+  rcases LValTyping.base_slot_exists htyping with ⟨slot, hslot⟩
+  simp [Env.empty] at hslot
+
+theorem Coherent.empty : Coherent Env.empty := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases LValTyping.base_slot_exists htyping with ⟨slot, hslot⟩
+  simp [Env.empty] at hslot
+
+theorem PartialTyCoherent.box {env : Env} {partialTy : PartialTy} :
+    PartialTyCoherent env partialTy →
+    PartialTyCoherent env (.box partialTy) := by
+  intro hcoherent mutable targets hcontains
+  cases hcontains with
+  | box hinner =>
+      exact hcoherent mutable targets hinner
+
+theorem PartialTyCoherent.box_inv {env : Env} {partialTy : PartialTy} :
+    PartialTyCoherent env (.box partialTy) →
+    PartialTyCoherent env partialTy := by
+  intro hcoherent mutable targets hcontains
+  exact hcoherent mutable targets (PartialTyContains.box hcontains)
+
+theorem PartialTyCoherent.update_fresh {env : Env} {x : Name}
+    {slot : EnvSlot} {partialTy : PartialTy} :
+    env.fresh x →
+    PartialTyCoherent env partialTy →
+    PartialTyCoherent (env.update x slot) partialTy := by
+  intro hfresh hcoherent mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargets⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTargetsTyping.update_fresh (slot := slot) hfresh htargets⟩
+
+theorem TyCoherent.update_fresh {env : Env} {x : Name}
+    {slot : EnvSlot} {ty : Ty} :
+    env.fresh x →
+    TyCoherent env ty →
+    TyCoherent (env.update x slot) ty := by
+  intro hfresh hcoherent
+  exact PartialTyCoherent.update_fresh (slot := slot) hfresh hcoherent
+
+theorem LValTypingPartialOutputsCoherent.update_fresh_of_old
+    {env : Env} {x : Name} {slot : EnvSlot} :
+    env.fresh x →
+    LValTypingPartialOutputsCoherent env →
+    ∀ {lv partialTy lifetime},
+      LValTyping env lv partialTy lifetime →
+      PartialTyCoherent (env.update x slot) partialTy := by
+  intro hfresh houtputs lv partialTy lifetime htyping
+  exact PartialTyCoherent.update_fresh (slot := slot) hfresh
+    (houtputs lv partialTy lifetime htyping)
+
+theorem TyCoherent.box {env : Env} {ty : Ty} :
+    TyCoherent env ty →
+    TyCoherent env (.box ty) := by
+  intro hcoherent mutable targets hcontains
+  cases hcontains with
+  | tyBox hinner =>
+      exact hcoherent mutable targets hinner
+
+theorem TyCoherent.unit {env : Env} :
+    TyCoherent env .unit := by
+  intro mutable targets hcontains
+  cases hcontains
+
+theorem TyCoherent.int {env : Env} :
+    TyCoherent env .int := by
+  intro mutable targets hcontains
+  cases hcontains
+
+theorem TyCoherent.bool {env : Env} :
+    TyCoherent env .bool := by
+  intro mutable targets hcontains
+  cases hcontains
+
+theorem TyCoherent.loanFree {env : Env} {ty : Ty} :
+    TyLoanFree ty →
+    TyCoherent env ty := by
+  intro hloanFree mutable targets hcontains
+  exact False.elim (hloanFree mutable targets hcontains)
+
+theorem EnvTypesCoherent.borrowTargetsNonempty {env : Env} :
+    EnvTypesCoherent env →
+    EnvTypesBorrowTargetsNonempty env := by
+  intro hcoherent x slot hslot
+  exact PartialTyCoherent.borrowTargetsNonempty (hcoherent x slot hslot)
+
+theorem EnvTypesBorrowTargetsNonempty.empty :
+    EnvTypesBorrowTargetsNonempty Env.empty := by
+  intro x slot hslot
+  simp [Env.empty] at hslot
+
+theorem PartialTyBorrowTargetsNonempty.box {partialTy : PartialTy} :
+    PartialTyBorrowTargetsNonempty partialTy →
+    PartialTyBorrowTargetsNonempty (.box partialTy) := by
+  intro hpartial mutable targets hcontains
+  cases hcontains with
+  | box hinner =>
+      exact hpartial mutable targets hinner
+
+theorem PartialTyBorrowTargetsNonempty.box_inv {partialTy : PartialTy} :
+    PartialTyBorrowTargetsNonempty (.box partialTy) →
+    PartialTyBorrowTargetsNonempty partialTy := by
+  intro hpartial mutable targets hcontains
+  exact hpartial mutable targets (PartialTyContains.box hcontains)
+
+theorem EnvTypesBorrowTargetsNonempty.update {env : Env} {x : Name}
+    {slot : EnvSlot} :
+    EnvTypesBorrowTargetsNonempty env →
+    PartialTyBorrowTargetsNonempty slot.ty →
+    EnvTypesBorrowTargetsNonempty (env.update x slot) := by
+  intro henv hslotTy y resultSlot hresultSlot
+  by_cases hy : y = x
+  · subst hy
+    have hslotEq : resultSlot = slot := by
+      simpa [Env.update] using hresultSlot.symm
+    subst hslotEq
+    exact hslotTy
+  · have horig : env.slotAt y = some resultSlot := by
+      simpa [Env.update, hy] using hresultSlot
+    exact henv y resultSlot horig
+
+theorem EnvTypesBorrowTargetsNonempty.erase {env : Env} {x : Name} :
+    EnvTypesBorrowTargetsNonempty env →
+    EnvTypesBorrowTargetsNonempty (env.erase x) := by
+  intro henv y slot hslot
+  by_cases hy : y = x
+  · subst hy
+    simp [Env.erase] at hslot
+  · exact henv y slot (by simpa [Env.erase, hy] using hslot)
+
+theorem EnvTypesBorrowTargetsNonempty.dropLifetime {env : Env}
+    {lifetime : Lifetime} :
+    EnvTypesBorrowTargetsNonempty env →
+    EnvTypesBorrowTargetsNonempty (env.dropLifetime lifetime) := by
+  intro henv x slot hslot
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨horig, _hne⟩
+  exact henv x slot horig
+
+theorem Strike.borrowTargetsNonempty {path : Path} {source struck : PartialTy} :
+    Strike path source struck →
+    PartialTyBorrowTargetsNonempty source →
+    PartialTyBorrowTargetsNonempty struck := by
+  intro hstrike
+  induction path generalizing source struck with
+  | nil =>
+      intro hsourceNonempty
+      cases source <;> cases struck <;> simp [Strike] at hstrike
+      intro mutable targets hcontains
+      cases hcontains
+  | cons _ path ih =>
+      intro hsourceNonempty
+      cases source <;> cases struck <;> simp [Strike] at hstrike
+      exact PartialTyBorrowTargetsNonempty.box
+        (ih hstrike (PartialTyBorrowTargetsNonempty.box_inv hsourceNonempty))
+
+theorem EnvMove.preserves_envTypesBorrowTargetsNonempty {env moved : Env}
+    {lv : LVal} :
+    EnvMove env lv moved →
+    EnvTypesBorrowTargetsNonempty env →
+    EnvTypesBorrowTargetsNonempty moved := by
+  rintro ⟨slot, struck, hslot, hstrike, hmoved⟩ henv
+  subst hmoved
+  exact EnvTypesBorrowTargetsNonempty.update henv
+    (Strike.borrowTargetsNonempty hstrike (henv (LVal.base lv) slot hslot))
+
+theorem LValTyping.partialTyBorrowTargetsNonempty_of_envTypes {env : Env}
+    (henv : EnvTypesBorrowTargetsNonempty env) :
+    (∀ {lv partialTy lifetime},
+      LValTyping env lv partialTy lifetime →
+      PartialTyBorrowTargetsNonempty partialTy) ∧
+    (∀ {targets partialTy lifetime},
+      LValTargetsTyping env targets partialTy lifetime →
+      PartialTyBorrowTargetsNonempty partialTy) := by
+  constructor
+  · intro lv partialTy lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun _lv partialTy _lifetime _ =>
+        PartialTyBorrowTargetsNonempty partialTy)
+      (motive_2 := fun _targets partialTy _lifetime _ =>
+        PartialTyBorrowTargetsNonempty partialTy)
+      (by
+        intro x slot hslot
+        exact henv x slot hslot)
+      (by
+        intro _lv _inner _lifetime _htyping ih mutable targets hcontains
+        exact ih mutable targets (PartialTyContains.box hcontains))
+      (by
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+          _htyping _htargets _ihTyping ihTargets
+        exact ihTargets)
+      (by
+        intro _target _ty _targetLifetime _htyping ih
+        exact ih)
+      (by
+        intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
+          _unionTy hhead hrest hunion _hintersection ihHead ihRest
+          mutable targets hcontains
+        exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+          ihHead ihRest hunion hcontains)
+      htyping
+  · intro targets partialTy lifetime htargets
+    exact LValTargetsTyping.rec
+      (motive_1 := fun _lv partialTy _lifetime _ =>
+        PartialTyBorrowTargetsNonempty partialTy)
+      (motive_2 := fun _targets partialTy _lifetime _ =>
+        PartialTyBorrowTargetsNonempty partialTy)
+      (by
+        intro x slot hslot
+        exact henv x slot hslot)
+      (by
+        intro _lv _inner _lifetime _htyping ih mutable targets hcontains
+        exact ih mutable targets (PartialTyContains.box hcontains))
+      (by
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+          _htyping _htargets _ihTyping ihTargets
+        exact ihTargets)
+      (by
+        intro _target _ty _targetLifetime _htyping ih
+        exact ih)
+      (by
+        intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
+          _unionTy hhead hrest hunion _hintersection ihHead ihRest
+          mutable targets hcontains
+        exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+          ihHead ihRest hunion hcontains)
+      htargets
+
+theorem LValTyping.partialTyBorrowTargetsNonempty {env : Env}
+    {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
+    EnvTypesBorrowTargetsNonempty env →
+    LValTyping env lv partialTy lifetime →
+    PartialTyBorrowTargetsNonempty partialTy := by
+  intro henv htyping
+  exact (LValTyping.partialTyBorrowTargetsNonempty_of_envTypes henv).1 htyping
+
+theorem LValTargetsTyping.partialTyBorrowTargetsNonempty {env : Env}
+    {targets : List LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
+    EnvTypesBorrowTargetsNonempty env →
+    LValTargetsTyping env targets partialTy lifetime →
+    PartialTyBorrowTargetsNonempty partialTy := by
+  intro henv htyping
+  exact (LValTyping.partialTyBorrowTargetsNonempty_of_envTypes henv).2 htyping
+
+theorem LValTyping.tyBorrowTargetsNonempty {env : Env}
+    {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
+    EnvTypesBorrowTargetsNonempty env →
+    LValTyping env lv (.ty ty) lifetime →
+    TyBorrowTargetsNonempty ty := by
+  intro henv htyping
+  exact LValTyping.partialTyBorrowTargetsNonempty henv htyping
+
+theorem LValTargetsTyping.tyBorrowTargetsNonempty {env : Env}
+    {targets : List LVal} {ty : Ty} {lifetime : Lifetime} :
+    EnvTypesBorrowTargetsNonempty env →
+    LValTargetsTyping env targets (.ty ty) lifetime →
+    TyBorrowTargetsNonempty ty := by
+  intro henv htyping
+  exact LValTargetsTyping.partialTyBorrowTargetsNonempty henv htyping
+
+theorem TyBorrowTargetsNonempty.unit : TyBorrowTargetsNonempty .unit := by
+  intro mutable targets hcontains
+  cases hcontains
+
+theorem TyBorrowTargetsNonempty.int : TyBorrowTargetsNonempty .int := by
+  intro mutable targets hcontains
+  cases hcontains
+
+theorem TyBorrowTargetsNonempty.bool : TyBorrowTargetsNonempty .bool := by
+  intro mutable targets hcontains
+  cases hcontains
+
+theorem TyBorrowTargetsNonempty.borrow {mutable : Bool} {targets : List LVal} :
+    targets ≠ [] →
+    TyBorrowTargetsNonempty (.borrow mutable targets) := by
+  intro htargets needleMutable needleTargets hcontains
+  cases hcontains with
+  | here =>
+      exact htargets
+
+theorem TyBorrowTargetsNonempty.borrow_singleton {mutable : Bool} {target : LVal} :
+    TyBorrowTargetsNonempty (.borrow mutable [target]) :=
+  TyBorrowTargetsNonempty.borrow (by simp)
+
+theorem TyBorrowTargetsNonempty.box {ty : Ty} :
+    TyBorrowTargetsNonempty ty →
+    TyBorrowTargetsNonempty (.box ty) := by
+  intro hty mutable targets hcontains
+  cases hcontains with
+  | tyBox hinner =>
+      exact hty mutable targets hinner
+
+theorem TyBorrowFree.borrowTargetsNonempty {ty : Ty} :
+    TyBorrowFree ty →
+    TyBorrowTargetsNonempty ty := by
+  intro hfree mutable targets hcontains
+  exact False.elim (hfree mutable targets hcontains)
+
+def StoreTypingTypesBorrowTargetsNonempty (typing : StoreTyping) : Prop :=
+  ∀ location ty,
+    typing.tyOf location = some ty →
+    TyBorrowTargetsNonempty ty
+
+def StoreTypingTypesCoherent (env : Env) (typing : StoreTyping) : Prop :=
+  ∀ location ty,
+    typing.tyOf location = some ty →
+    TyCoherent env ty
+
+theorem StoreTypingTypesBorrowTargetsNonempty.empty :
+    StoreTypingTypesBorrowTargetsNonempty StoreTyping.empty := by
+  intro location ty hlookup
+  simp [StoreTyping.empty] at hlookup
+
+theorem StoreTypingTypesCoherent.empty {env : Env} :
+    StoreTypingTypesCoherent env StoreTyping.empty := by
+  intro location ty hlookup
+  simp [StoreTyping.empty] at hlookup
+
+theorem StoreTypingTypesCoherent.update_fresh {env : Env} {typing : StoreTyping}
+    {x : Name} {slot : EnvSlot} :
+    env.fresh x →
+    StoreTypingTypesCoherent env typing →
+    StoreTypingTypesCoherent (env.update x slot) typing := by
+  intro hfresh hstore location ty hlookup
+  exact TyCoherent.update_fresh (slot := slot) hfresh
+    (hstore location ty hlookup)
+
+theorem ValueTyping.tyBorrowTargetsNonempty {typing : StoreTyping}
+    {value : Value} {ty : Ty} :
+    StoreTypingTypesBorrowTargetsNonempty typing →
+    ValueTyping typing value ty →
+    TyBorrowTargetsNonempty ty := by
+  intro hstore hvalue
+  cases hvalue with
+  | unit => exact TyBorrowTargetsNonempty.unit
+  | int => exact TyBorrowTargetsNonempty.int
+  | bool => exact TyBorrowTargetsNonempty.bool
+  | ref hlookup => exact hstore _ _ hlookup
+
+theorem ValueTyping.tyCoherent {env : Env} {typing : StoreTyping}
+    {value : Value} {ty : Ty} :
+    StoreTypingTypesCoherent env typing →
+    ValueTyping typing value ty →
+    TyCoherent env ty := by
+  intro hstore hvalue
+  cases hvalue with
+  | unit => exact TyCoherent.unit
+  | int => exact TyCoherent.int
+  | bool => exact TyCoherent.bool
+  | ref hlookup => exact hstore _ _ hlookup
 
 /-- Under a *shape-preserving* strengthening the occurring variables only grow:
 `a ⊑ b` and `a ≈shape b` give `vars a ⊆ vars b`.  (`sameShape` rules out the
@@ -150,6 +608,235 @@ theorem EnvJoin.slot_union {left right join : Env} {x : Name}
     have hjoinStrength := hjoin.2 hupper x
     simp [candidateEnv, Env.update, hjoinSlot] at hjoinStrength
     exact hjoinStrength
+
+theorem EnvJoin.preserves_envTypesBorrowTargetsNonempty
+    {left right join : Env} :
+    EnvJoin left right join →
+    EnvTypesBorrowTargetsNonempty left →
+    EnvTypesBorrowTargetsNonempty right →
+    EnvTypesBorrowTargetsNonempty join := by
+  intro hjoin hleftNonempty hrightNonempty x joinSlot hjoinSlot
+  rcases EnvJoin.lifetimesPreserved_left hjoin x joinSlot hjoinSlot with
+    ⟨leftSlot, hleftSlot, _hleftLife⟩
+  rcases EnvJoin.lifetimesPreserved_right hjoin x joinSlot hjoinSlot with
+    ⟨rightSlot, hrightSlot, _hrightLife⟩
+  rcases EnvJoin.slot_union hjoin hleftSlot hrightSlot hjoinSlot with
+    ⟨_hleftLifeEq, _hrightLifeEq, hunion⟩
+  intro mutable targets hcontains
+  exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+    (hleftNonempty x leftSlot hleftSlot)
+    (hrightNonempty x rightSlot hrightSlot)
+    hunion hcontains
+
+theorem EnvWrite.preserves_envTypesBorrowTargetsNonempty {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} :
+    EnvWrite rank env lv rhsTy result →
+    EnvTypesBorrowTargetsNonempty env →
+    TyBorrowTargetsNonempty rhsTy →
+    EnvTypesBorrowTargetsNonempty result := by
+  intro hwrite
+  refine EnvWrite.rec
+    (motive_1 := fun _rank env₁ _path oldTy rhsTy env₂ updatedTy _ =>
+      EnvTypesBorrowTargetsNonempty env₁ →
+      PartialTyBorrowTargetsNonempty oldTy →
+      TyBorrowTargetsNonempty rhsTy →
+      EnvTypesBorrowTargetsNonempty env₂ ∧
+        PartialTyBorrowTargetsNonempty updatedTy)
+    (motive_2 := fun _rank env _path _targets rhsTy result _ =>
+      EnvTypesBorrowTargetsNonempty env →
+      TyBorrowTargetsNonempty rhsTy →
+      EnvTypesBorrowTargetsNonempty result)
+    (motive_3 := fun _rank env _lv rhsTy result _ =>
+      EnvTypesBorrowTargetsNonempty env →
+      TyBorrowTargetsNonempty rhsTy →
+      EnvTypesBorrowTargetsNonempty result)
+    ?strong ?weak ?box ?mutBorrow ?nil ?singleton ?cons ?intro hwrite
+  case strong =>
+    intro env old rhsTy henv _hold hrhs
+    exact ⟨henv, hrhs⟩
+  case weak =>
+    intro env rank old joined rhsTy _hshape hjoin henv hold hrhs
+    refine ⟨henv, ?_⟩
+    intro mutable targets hcontains
+    exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+      hold hrhs hjoin hcontains
+  case box =>
+    intro env₁ env₂ rank path inner updatedInner rhsTy _hupdate ih henv hold hrhs
+    rcases ih henv (PartialTyBorrowTargetsNonempty.box_inv hold) hrhs with
+      ⟨henv₂, hupdatedInner⟩
+    exact ⟨henv₂, PartialTyBorrowTargetsNonempty.box hupdatedInner⟩
+  case mutBorrow =>
+    intro env₁ env₂ rank path targets rhsTy _hwrites ih henv hold hrhs
+    have htargets : targets ≠ [] :=
+      hold true targets (PartialTyContains.here (ty := .borrow true targets))
+    exact ⟨ih henv hrhs, TyBorrowTargetsNonempty.borrow htargets⟩
+  case nil =>
+    intro rank env path rhsTy henv _hrhs
+    exact henv
+  case singleton =>
+    intro rank env updated path target rhsTy _hwrite _htyped ih henv hrhs
+    exact ih henv hrhs
+  case cons =>
+    intro rank env updated restEnv result path target rest rhsTy
+      _hwrite _htyped _hwrites hjoin ihWrite ihWrites henv hrhs
+    exact EnvJoin.preserves_envTypesBorrowTargetsNonempty hjoin
+      (ihWrite henv hrhs) (ihWrites henv hrhs)
+  case intro =>
+    intro rank env₁ env₂ lv slot rhsTy updatedTy hslot _hupdate ih henv hrhs
+    rcases ih henv (henv (LVal.base lv) slot hslot) hrhs with
+      ⟨henv₂, hupdatedTy⟩
+    intro x resultSlot hresultSlot
+    by_cases hx : x = LVal.base lv
+    · subst hx
+      have hslotEq : resultSlot = { slot with ty := updatedTy } := by
+        simpa [Env.update] using hresultSlot.symm
+      subst hslotEq
+      exact hupdatedTy
+    · have hslot₂ : env₂.slotAt x = some resultSlot := by
+        simpa [Env.update, hx] using hresultSlot
+      exact henv₂ x resultSlot hslot₂
+
+theorem TermTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    StoreTypingTypesBorrowTargetsNonempty typing →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    EnvTypesBorrowTargetsNonempty env₁ →
+    TyBorrowTargetsNonempty ty ∧ EnvTypesBorrowTargetsNonempty env₂ := by
+  intro hstore htyping
+  refine TermTyping.rec
+    (motive_1 := fun env currentTyping _lifetime _term ty result _ =>
+      StoreTypingTypesBorrowTargetsNonempty currentTyping →
+      EnvTypesBorrowTargetsNonempty env →
+      TyBorrowTargetsNonempty ty ∧ EnvTypesBorrowTargetsNonempty result)
+    (motive_2 := fun env currentTyping _lifetime _terms ty result _ =>
+      StoreTypingTypesBorrowTargetsNonempty currentTyping →
+      EnvTypesBorrowTargetsNonempty env →
+      TyBorrowTargetsNonempty ty ∧ EnvTypesBorrowTargetsNonempty result)
+    (motive_3 := fun envEntry currentTyping _lifetime _bodyLifetime _condition
+        _body current envInv _envCond _envBody _envBack _bodyTy _ =>
+      StoreTypingTypesBorrowTargetsNonempty currentTyping →
+      EnvTypesBorrowTargetsNonempty envEntry →
+      EnvTypesBorrowTargetsNonempty current →
+      EnvTypesBorrowTargetsNonempty envInv)
+    (fun hvalue hstore henv =>
+      ⟨ValueTyping.tyBorrowTargetsNonempty hstore hvalue, henv⟩)
+    (fun _hwellTy hloanFree _hstore henv =>
+      ⟨TyBorrowFree.borrowTargetsNonempty hloanFree, henv⟩)
+    (fun hLv _hcopy _hnotRead _hstore henv =>
+      ⟨LValTyping.tyBorrowTargetsNonempty henv hLv, henv⟩)
+    (fun hLv _hnotWrite hmove _hstore henv =>
+      ⟨LValTyping.tyBorrowTargetsNonempty henv hLv,
+        EnvMove.preserves_envTypesBorrowTargetsNonempty hmove henv⟩)
+    (fun _hLv _hmutable _hnotWrite _hstore henv =>
+      ⟨TyBorrowTargetsNonempty.borrow_singleton, henv⟩)
+    (fun _hLv _hnotRead _hstore henv =>
+      ⟨TyBorrowTargetsNonempty.borrow_singleton, henv⟩)
+    (fun _hterm ih hstore henv =>
+      let result := ih hstore henv
+      ⟨TyBorrowTargetsNonempty.box result.1, result.2⟩)
+    (fun _hchild _hterms _hwellTy hdrop ih hstore henv =>
+      let result := ih hstore henv
+      ⟨result.1, by
+        rw [hdrop]
+        exact EnvTypesBorrowTargetsNonempty.dropLifetime result.2⟩)
+    (fun _hfresh _hterm _hfreshOut _hcohObligations henv₃ ih hstore henv =>
+      let result := ih hstore henv
+      ⟨TyBorrowTargetsNonempty.unit, by
+        rw [henv₃]
+        exact EnvTypesBorrowTargetsNonempty.update result.2 result.1⟩)
+    (fun hRhs _hLhsPost _hshape _hwellRhs hwrite _hranked _hrhsWF
+        _hnotWrite ih hstore henv =>
+      let result := ih hstore henv
+      ⟨TyBorrowTargetsNonempty.unit,
+        EnvWrite.preserves_envTypesBorrowTargetsNonempty
+          hwrite result.2 result.1⟩)
+    (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+          _lhsTy _rhsTy}
+        _hLhs hfresh _htypeFresh _htyFresh _hstoreFresh _hRhs _hnotMention
+        henv₃ _hcopyL _hcopyR _hshape ihL ihR hstore henv =>
+      let leftResult := ihL hstore henv
+      have hghostEnv :
+          EnvTypesBorrowTargetsNonempty
+            (_env₂.update _ghost { ty := .ty _lhsTy, lifetime := _lifetime }) := by
+        exact EnvTypesBorrowTargetsNonempty.update
+          (x := _ghost)
+          (slot := { ty := .ty _lhsTy, lifetime := _lifetime })
+          leftResult.2 leftResult.1
+      let rightResult := ihR hstore hghostEnv
+      ⟨TyBorrowTargetsNonempty.bool, by
+        rw [henv₃]
+        exact EnvTypesBorrowTargetsNonempty.erase rightResult.2⟩)
+    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+          _trueBranch _falseBranch _trueTy _falseTy _joinTy}
+        _hcondition _htrue _hfalse hjoin henvJoin _hsameLeft _hsameRight
+        _hwellJoin _hlinear _hborrowSafe _hresultSafe ihCondition ihTrue
+        ihFalse hstore henv =>
+      let conditionResult := ihCondition hstore henv
+      let trueResult := ihTrue hstore conditionResult.2
+      let falseResult := ihFalse hstore conditionResult.2
+      have hjoinTy : TyBorrowTargetsNonempty _joinTy := by
+        intro mutable targets hcontains
+        exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
+          trueResult.1 falseResult.1 hjoin hcontains
+      ⟨hjoinTy, EnvJoin.preserves_envTypesBorrowTargetsNonempty henvJoin
+        trueResult.2 falseResult.2⟩)
+    (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
+        _ihFalse hstore henv =>
+      let conditionResult := ihCondition hstore henv
+      ihTrue hstore conditionResult.2)
+    (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hstore henv =>
+      let conditionResult := ihCondition hstore henv
+      ⟨TyBorrowTargetsNonempty.unit, conditionResult.2⟩)
+    (fun _hchild _hgenerated _hjoin _hsameEntry _hsameBack _hcontained
+        _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
+        _hwellTy _hback _hentryCondition _hentryBody ihGenerated ihCondition
+        _ihBody _ihEntryCondition _ihEntryBody hstore henv =>
+      have hinv := ihGenerated hstore henv henv
+      let conditionResult := ihCondition hstore hinv
+      ⟨TyBorrowTargetsNonempty.unit, conditionResult.2⟩)
+    (fun _hterm ih hstore henv => ih hstore henv)
+    (fun _hterm _hrest ihTerm ihRest hstore henv =>
+      let termResult := ihTerm hstore henv
+      ihRest hstore termResult.2)
+    (fun _hcondition _hbody _hwellTy _hback _hjoin _hsameEntry _hsameBack
+        _ihCondition _ihBody _hstore _henvEntry hcurrent =>
+      hcurrent)
+    (fun {_envEntry _current _next _envInv _envCond _envBody _envBack _typing
+          _lifetime _bodyLifetime _condition _body _bodyTy _stepCond _stepBody
+          _stepBack _stepTy}
+        _hcondition _hbody _hwellTy hback hjoin _hsameEntry _hsameBack
+        _hiteration ihCondition ihBody ihIteration hstore henvEntry hcurrent =>
+      let conditionResult := ihCondition hstore hcurrent
+      let bodyResult := ihBody hstore conditionResult.2
+      have hstepBack : EnvTypesBorrowTargetsNonempty _stepBack := by
+        rw [← hback]
+        exact EnvTypesBorrowTargetsNonempty.dropLifetime bodyResult.2
+      have hnext : EnvTypesBorrowTargetsNonempty _next :=
+        EnvJoin.preserves_envTypesBorrowTargetsNonempty hjoin henvEntry hstepBack
+      ihIteration hstore henvEntry hnext)
+    htyping hstore
+
+theorem TermListTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {terms : List Term}
+    {ty : Ty} :
+    StoreTypingTypesBorrowTargetsNonempty typing →
+    TermListTyping env₁ typing lifetime terms ty env₂ →
+    EnvTypesBorrowTargetsNonempty env₁ →
+    TyBorrowTargetsNonempty ty ∧ EnvTypesBorrowTargetsNonempty env₂ := by
+  intro hstore htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          intro henv
+          exact TermTyping.borrowTargetsNonempty_of_envTypes hstore hterm henv
+      | cons hterm hrest =>
+          intro henv
+          have htermResult :=
+            TermTyping.borrowTargetsNonempty_of_envTypes hstore hterm henv
+          exact ih hrest htermResult.2
 
 theorem EnvWrite.shapePreserved {rank : Nat} {env result : Env} {lv : LVal}
     {ty : Ty} :
@@ -306,11 +993,14 @@ theorem WriteBorrowTargets.shapePreserved {rank : Nat} {env result : Env}
     exact EnvShapePreserved.update_from_source_slot hpres hslot hshape
 
 /-- Structural witness that a Definition 3.23 write descends to *initialised*
-(`.ty`, never `.undef`) leaves.  Mirrors `WriteShapeCompat` but its leaf premise
-is merely "the old leaf type is defined" — no `ShapeCompatible` (hence no
-recursive target-typing construction).  This is exactly the discriminant of the
-shape-breaking case: a positive-rank `W-Weak` preserves shape iff its leaf is not
-`.undef` (re-initialisation `.undef ⊔ ty = ty` is the sole shape change). -/
+(`.ty`, never `.undef`) leaves.  Unlike `WriteShapeCompat`, this is not write
+authority: it may follow a typed immutable borrow because it only records that
+the reached leaf is initialized.  The actual write derivation still determines
+which paths may be changed, and `WriteShapeCompat` is the permission-sensitive
+mutable-only relation used for assignment compatibility.  This predicate is
+only the discriminant of the shape-breaking case: a positive-rank `W-Weak`
+preserves shape iff its leaf is not `.undef` (re-initialisation `.undef ⊔ ty =
+ty` is the sole shape change). -/
 inductive WriteLeafTy (env : Env) : List Unit → PartialTy → Ty → Prop where
   | leaf {oldTy ty : Ty} :
       WriteLeafTy env [] (.ty oldTy) ty
@@ -514,6 +1204,139 @@ theorem writeLeafTy_mono {env : Env} {q : List Unit} {a : PartialTy} {rhsTy : Ty
           | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+
+theorem ShapeCompatible.left_strengthen_sameShape_full {env : Env}
+    {target source : PartialTy} {rhsTy : Ty} :
+    ShapeCompatible env target (.ty rhsTy) →
+    PartialTyStrengthens source target →
+    PartialTy.sameShape source target →
+    ShapeCompatible env source (.ty rhsTy) := by
+  intro hcompat hstrength hshape
+  generalize hrightEq : (PartialTy.ty rhsTy : PartialTy) = rhs at hcompat
+  induction hcompat generalizing source rhsTy with
+  | unit =>
+      cases hrightEq
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy with
+          | unit => exact ShapeCompatible.unit
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | borrow _ _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | int =>
+      cases hrightEq
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy with
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => exact ShapeCompatible.int
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | borrow _ _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | bool =>
+      cases hrightEq
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy with
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => exact ShapeCompatible.bool
+          | borrow _ _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | box _hinner _ih =>
+      cases hrightEq
+  | tyBox _hinner ih =>
+      cases hrightEq
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy with
+          | box _sourceInner =>
+              rcases PartialTyStrengthens.from_box_ty_inv hstrength with
+                ⟨_targetInner, htargetEq, hinnerStrength⟩
+              cases htargetEq
+              exact ShapeCompatible.tyBox
+                (ih hinnerStrength
+                  (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape)
+                  rfl)
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | borrow _ _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | borrow hleft hright hinner =>
+      cases hrightEq
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy with
+          | borrow _ sourceTargets =>
+              rcases PartialTyStrengthens.from_borrow_inv hstrength with
+                ⟨_targetTargets, htargetEq, hsubset⟩
+              cases htargetEq
+              exact ShapeCompatible.borrow
+                (fun target htarget => hleft target (hsubset htarget))
+                hright hinner
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | undefLeft hinner ih =>
+      cases hrightEq
+      cases source with
+      | undef _ =>
+          cases hstrength with
+          | reflex => exact ShapeCompatible.undefLeft hinner
+          | undefLeft hinnerStrength =>
+              exact ShapeCompatible.undefLeft
+                (ih hinnerStrength (by simpa [PartialTy.sameShape] using hshape) rfl)
+      | ty _ => simp [PartialTy.sameShape] at hshape
+      | box _ => simp [PartialTy.sameShape] at hshape
+  | undefRight _hinner _ih =>
+      cases hrightEq
+
+theorem writeShapeCompat_mono {env : Env} {q : List Unit} {a : PartialTy}
+    {rhsTy : Ty} (h : WriteShapeCompat env q a rhsTy) :
+    ∀ {b : PartialTy}, PartialTyStrengthens b a → PartialTy.sameShape b a →
+      WriteShapeCompat env q b rhsTy := by
+  induction h with
+  | leaf hcompat =>
+      intro b hstr hshape
+      exact WriteShapeCompat.leaf
+        (ShapeCompatible.left_strengthen_sameShape_full hcompat hstr hshape)
+  | box _hInner ih =>
+      intro b hstr hshape
+      cases b with
+      | box innerB =>
+          exact WriteShapeCompat.box (ih (PartialTyStrengthens.box_inv hstr)
+            (by simpa [PartialTy.sameShape] using hshape))
+      | ty _ => simp [PartialTy.sameShape] at hshape
+      | undef _ => simp [PartialTy.sameShape] at hshape
+  | borrow hTargets _ih =>
+      intro b hstr hshape
+      cases b with
+      | ty bt =>
+          cases bt with
+          | borrow _ targetsB =>
+              rcases PartialTyStrengthens.from_borrow_inv hstr with
+                ⟨_, heq, hsubset⟩
+              cases heq
+              exact WriteShapeCompat.borrow (fun t ht tslot htslot =>
+                hTargets t (hsubset ht) tslot htslot)
+          | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
+          | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
       | box _ => simp [PartialTy.sameShape] at hshape
       | undef _ => simp [PartialTy.sameShape] at hshape
 

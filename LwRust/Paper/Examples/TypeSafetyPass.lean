@@ -49,8 +49,17 @@ theorem scalarCopyComparison_typeSafety :
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .bool :=
-  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
-    scalarCopyComparison_terminates
+by
+  unfold scalarCopyComparison
+  exact ⟨ProgramStore.empty, .bool true,
+    MultiStep.trans Step.eqTrue MultiStep.refl,
+    sourceInitialRuntimeState_valid (by
+      intro candidate hmem
+      simp [termValues] at hmem
+      subst hmem
+      trivial),
+    safeAbstraction_empty,
+    ValidPartialValue.bool⟩
 
 /--
 Accepted `if/else` example for the control-flow extension: both branches return
@@ -70,7 +79,6 @@ theorem ifThenElseInt_typing :
     (PartialTyJoin.self (.ty .int))
     ?join ?leftShape ?rightShape
     WellFormedTy.int
-    coherent_empty
     linearizable_empty
     borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
@@ -91,8 +99,17 @@ theorem ifThenElseInt_typeSafety :
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
-    ifThenElseInt_terminates
+by
+  unfold ifThenElseInt
+  exact ⟨ProgramStore.empty, .int 1,
+    MultiStep.trans Step.iteTrue MultiStep.refl,
+    sourceInitialRuntimeState_valid (by
+      intro candidate hmem
+      simp [termValues] at hmem
+      subst hmem
+      trivial),
+    safeAbstraction_empty,
+    ValidPartialValue.int⟩
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
@@ -112,7 +129,6 @@ theorem ifEqThenElseInt_typing :
     (PartialTyJoin.self (.ty .int))
     ?join ?leftShape ?rightShape
     WellFormedTy.int
-    coherent_empty
     linearizable_empty
     borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
@@ -134,8 +150,18 @@ theorem ifEqThenElseInt_typeSafety :
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
-    ifEqThenElseInt_terminates
+by
+  unfold ifEqThenElseInt scalarCopyComparison
+  exact ⟨ProgramStore.empty, .int 1,
+    MultiStep.trans (Step.subIte Step.eqTrue)
+      (MultiStep.trans Step.iteTrue MultiStep.refl),
+    sourceInitialRuntimeState_valid (by
+      intro candidate hmem
+      simp [termValues] at hmem
+      subst hmem
+      trivial),
+    safeAbstraction_empty,
+    ValidPartialValue.int⟩
 
 /--
 Accepted `if/else` with nontrivial pointer effects in the branches.
@@ -842,7 +868,6 @@ theorem pointerRetargetBranch_typing :
     pointerIf_borrow_y_wellFormed
     pointerIf_retarget_write
     pointerIf_retarget_ranked
-    pointerIfRetarget_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed pointerIfRetarget_contained)
     pointerIfRetarget_not_writeProhibited_p
 
@@ -888,6 +913,227 @@ theorem reborrowChain_updateAtPath_preserves_outer_targets {env result : Env}
       result
       (.ty (.borrow true [.var "b"])) := by
   exact UpdateAtPath.mutBorrow hwrites
+
+/-- Concrete form of the reborrow-chain regression:
+`x : int, c : int, b : &mut x, a : &mut b`, then `*a = &mut c`
+weakens `b` to `&mut [x, c]` while `a` remains `&mut [b]`.
+
+The important point is that the type of `*a` after the write is recomputed from
+`b`; there is no stale pointee annotation on `a` to become incoherent. -/
+def reborrowChainXSlot : EnvSlot :=
+  { ty := .ty .int, lifetime := Lifetime.root }
+
+def reborrowChainCSlot : EnvSlot :=
+  { ty := .ty .int, lifetime := Lifetime.root }
+
+def reborrowChainBSlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "x"]), lifetime := Lifetime.root }
+
+def reborrowChainBJoinedSlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "x", .var "c"]),
+    lifetime := Lifetime.root }
+
+def reborrowChainASlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "b"]), lifetime := Lifetime.root }
+
+def reborrowChainEnv : Env :=
+  (((Env.empty.update "x" reborrowChainXSlot).update "c"
+    reborrowChainCSlot).update "b" reborrowChainBSlot).update "a"
+    reborrowChainASlot
+
+def reborrowChainAfterEnv : Env :=
+  (reborrowChainEnv.update "b" reborrowChainBJoinedSlot).update "a"
+    reborrowChainASlot
+
+theorem reborrowChain_x_typing :
+    LValTyping reborrowChainEnv (.var "x") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var reborrowChainEnv "x" reborrowChainXSlot (by
+    simp [reborrowChainEnv, reborrowChainXSlot, reborrowChainCSlot,
+      reborrowChainBSlot, reborrowChainASlot, Env.update])
+
+theorem reborrowChain_c_typing :
+    LValTyping reborrowChainEnv (.var "c") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var reborrowChainEnv "c" reborrowChainCSlot (by
+    simp [reborrowChainEnv, reborrowChainXSlot, reborrowChainCSlot,
+      reborrowChainBSlot, reborrowChainASlot, Env.update])
+
+theorem reborrowChain_b_typing :
+    LValTyping reborrowChainEnv (.var "b")
+      (.ty (.borrow true [.var "x"])) Lifetime.root := by
+  exact @LValTyping.var reborrowChainEnv "b" reborrowChainBSlot (by
+    simp [reborrowChainEnv, reborrowChainBSlot, reborrowChainASlot,
+      Env.update])
+
+theorem reborrowChain_a_typing :
+    LValTyping reborrowChainEnv (.var "a")
+      (.ty (.borrow true [.var "b"])) Lifetime.root := by
+  exact @LValTyping.var reborrowChainEnv "a" reborrowChainASlot (by
+    simp [reborrowChainEnv, reborrowChainASlot, Env.update])
+
+theorem reborrowChain_borrow_x_c_join :
+    PartialTyJoin (.ty (.borrow true [.var "x"]))
+      (.ty (.borrow true [.var "c"]))
+      (.ty (.borrow true [.var "x", .var "c"])) := by
+  constructor
+  · intro candidate hcandidate
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
+    rcases hcandidate with rfl | rfl
+    · exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        simp at htarget
+        subst htarget
+        simp)
+    · exact PartialTyStrengthens.borrow (by
+        intro target htarget
+        simp at htarget
+        subst htarget
+        simp)
+  · intro upper hupper
+    have hx :
+        PartialTyStrengthens (.ty (.borrow true [.var "x"])) upper :=
+      hupper (.ty (.borrow true [.var "x"])) (by simp)
+    have hc :
+        PartialTyStrengthens (.ty (.borrow true [.var "c"])) upper :=
+      hupper (.ty (.borrow true [.var "c"])) (by simp)
+    cases upper with
+    | ty upperTy =>
+        rcases PartialTyStrengthens.from_borrow_inv hx with
+          ⟨upperTargets, hupperEq, hxSubset⟩
+        subst hupperEq
+        rcases PartialTyStrengthens.from_borrow_inv hc with
+          ⟨rightTargets, hrightEq, hcSubset⟩
+        injection hrightEq with _hmut htargets
+        subst htargets
+        exact PartialTyStrengthens.borrow (by
+          intro target htarget
+          simp at htarget
+          rcases htarget with rfl | htarget
+          · exact hxSubset (by simp)
+          · subst htarget
+            exact hcSubset (by simp))
+    | undef upperTy =>
+        have hxTy :
+            PartialTyStrengthens (.ty (.borrow true [.var "x"]))
+              (.ty upperTy) :=
+          PartialTyStrengthens.ty_to_undef_inv hx
+        have hcTy :
+            PartialTyStrengthens (.ty (.borrow true [.var "c"]))
+              (.ty upperTy) :=
+          PartialTyStrengthens.ty_to_undef_inv hc
+        rcases PartialTyStrengthens.from_borrow_inv hxTy with
+          ⟨upperTargets, hupperEq, hxSubset⟩
+        subst hupperEq
+        rcases PartialTyStrengthens.from_borrow_inv hcTy with
+          ⟨rightTargets, hrightEq, hcSubset⟩
+        injection hrightEq with _hmut htargets
+        subst htargets
+        exact PartialTyStrengthens.intoUndef
+          (PartialTyStrengthens.borrow (by
+            intro target htarget
+            simp at htarget
+            rcases htarget with rfl | htarget
+            · exact hxSubset (by simp)
+            · subst htarget
+              exact hcSubset (by simp)))
+    | box _ =>
+        exact False.elim (PartialTyStrengthens.not_ty_to_box hx)
+
+theorem reborrowChain_shape_borrow_x_c :
+    ShapeCompatible reborrowChainEnv
+      (.ty (.borrow true [.var "x"]))
+      (.ty (.borrow true [.var "c"])) := by
+  exact ShapeCompatible.borrow
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, reborrowChain_x_typing⟩)
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, reborrowChain_c_typing⟩)
+    ShapeCompatible.int
+
+theorem reborrowChain_write_b :
+    EnvWrite 1 reborrowChainEnv (.var "b")
+      (.borrow true [.var "c"])
+      (reborrowChainEnv.update "b" reborrowChainBJoinedSlot) := by
+  simpa [reborrowChainBSlot, reborrowChainBJoinedSlot, LVal.base] using
+    (@EnvWrite.intro 1 reborrowChainEnv reborrowChainEnv (.var "b")
+      reborrowChainBSlot (.borrow true [.var "c"])
+      (.ty (.borrow true [.var "x", .var "c"]))
+      (by
+        show reborrowChainEnv.slotAt "b" = some reborrowChainBSlot
+        simp [reborrowChainEnv, reborrowChainBSlot, reborrowChainASlot,
+          Env.update])
+      (UpdateAtPath.weak reborrowChain_shape_borrow_x_c
+        reborrowChain_borrow_x_c_join))
+
+theorem reborrowChain_write_targets :
+    WriteBorrowTargets 1 reborrowChainEnv [] [.var "b"]
+      (.borrow true [.var "c"])
+      (reborrowChainEnv.update "b" reborrowChainBJoinedSlot) := by
+  exact WriteBorrowTargets.singleton reborrowChain_write_b
+    ⟨.borrow true [.var "x"], Lifetime.root, reborrowChain_b_typing⟩
+
+theorem reborrowChain_assign_through_a_write :
+    EnvWrite 0 reborrowChainEnv (.deref (.var "a"))
+      (.borrow true [.var "c"]) reborrowChainAfterEnv := by
+  simpa [reborrowChainAfterEnv, reborrowChainASlot, LVal.base, LVal.path] using
+    (@EnvWrite.intro 0 reborrowChainEnv
+      (reborrowChainEnv.update "b" reborrowChainBJoinedSlot)
+      (.deref (.var "a")) reborrowChainASlot
+      (.borrow true [.var "c"]) (.ty (.borrow true [.var "b"]))
+      (by
+        show reborrowChainEnv.slotAt "a" = some reborrowChainASlot
+        simp [reborrowChainEnv, reborrowChainASlot, Env.update])
+      (UpdateAtPath.mutBorrow reborrowChain_write_targets))
+
+theorem reborrowChainAfter_a_typing :
+    LValTyping reborrowChainAfterEnv (.var "a")
+      (.ty (.borrow true [.var "b"])) Lifetime.root := by
+  exact @LValTyping.var reborrowChainAfterEnv "a" reborrowChainASlot (by
+    simp [reborrowChainAfterEnv, reborrowChainASlot, Env.update])
+
+theorem reborrowChainAfter_b_typing :
+    LValTyping reborrowChainAfterEnv (.var "b")
+      (.ty (.borrow true [.var "x", .var "c"])) Lifetime.root := by
+  exact @LValTyping.var reborrowChainAfterEnv "b" reborrowChainBJoinedSlot (by
+    simp [reborrowChainAfterEnv, reborrowChainBJoinedSlot, reborrowChainASlot,
+      Env.update])
+
+theorem reborrowChainAfter_deref_a_typing :
+    LValTyping reborrowChainAfterEnv (.deref (.var "a"))
+      (.ty (.borrow true [.var "x", .var "c"])) Lifetime.root := by
+  exact LValTyping.borrow reborrowChainAfter_a_typing
+    (LValTargetsTyping.singleton reborrowChainAfter_b_typing)
+
+theorem reborrowChainAfter_x_typing :
+    LValTyping reborrowChainAfterEnv (.var "x") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var reborrowChainAfterEnv "x" reborrowChainXSlot (by
+    simp [reborrowChainAfterEnv, reborrowChainEnv, reborrowChainXSlot,
+      reborrowChainCSlot, reborrowChainBJoinedSlot, reborrowChainASlot,
+      Env.update])
+
+theorem reborrowChainAfter_c_typing :
+    LValTyping reborrowChainAfterEnv (.var "c") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var reborrowChainAfterEnv "c" reborrowChainCSlot (by
+    simp [reborrowChainAfterEnv, reborrowChainEnv, reborrowChainXSlot,
+      reborrowChainCSlot, reborrowChainBJoinedSlot, reborrowChainASlot,
+      Env.update])
+
+theorem reborrowChainAfter_x_c_targets_typing :
+    LValTargetsTyping reborrowChainAfterEnv [.var "x", .var "c"]
+      (.ty .int) Lifetime.root := by
+  exact LValTargetsTyping.cons reborrowChainAfter_x_typing
+    (LValTargetsTyping.singleton reborrowChainAfter_c_typing)
+    (PartialTyUnion.self (.ty .int))
+    (LifetimeIntersection.self Lifetime.root)
+
+theorem reborrowChainAfter_deref_a_targets_coherent :
+    ∃ ty lifetime,
+      LValTargetsTyping reborrowChainAfterEnv [.var "x", .var "c"]
+        (.ty ty) lifetime := by
+  exact ⟨.int, Lifetime.root, reborrowChainAfter_x_c_targets_typing⟩
 
 theorem pointerIf_write_ranked :
     ∃ φ, LinearizedBy φ pointerIfEnv ∧
@@ -1136,7 +1382,6 @@ theorem pointerWriteBranch_typing :
     WellFormedTy.int
     pointerIf_write_deref_p
     pointerIf_write_ranked
-    pointerIf_write_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
       (by simpa [pointerIfWriteEnv_eq] using pointerIfEnv_contained))
     pointerIf_not_writeProhibited_deref_p
@@ -1742,7 +1987,6 @@ theorem ifPointerAssignment_typing :
     ifPointerAssignment_join_obligations.2.1
     ifPointerAssignment_join_obligations.2.2.1
     WellFormedTy.unit
-    ifPointerAssignment_join_obligations.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.2
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit)

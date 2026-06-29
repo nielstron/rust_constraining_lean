@@ -1109,8 +1109,9 @@ theorem EnvShapePreserved.update_from_source_slot {source middle : Env}
 through `path` into `oldTy`.  Stated as an inductive (so the borrow fan-out case
 may reference the relation at a *longer* path — through `prependPath` — without a
 structural-termination obstruction).  At the leaf the old type must be shape
-compatible with the written type; `box` peels one layer; `borrow` requires each
-target's onward write to be leaf-compatible. -/
+compatible with the written type; `box` peels one layer; `borrow` records the
+target's onward write-compatibility.  The borrow case is mutable-only, matching
+the actual `EnvWrite`/`UpdateAtPath` fan-out rule. -/
 inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop where
   | leaf {oldTy : PartialTy} {ty : Ty} :
       ShapeCompatible env oldTy (.ty ty) →
@@ -1123,6 +1124,12 @@ inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop
         env.slotAt (LVal.base (prependPath path t)) = some tslot →
         WriteShapeCompat env (LVal.path (prependPath path t)) tslot.ty ty) →
       WriteShapeCompat env (() :: path) (.ty (.borrow true targets)) ty
+
+theorem WriteShapeCompat.immBorrow_cons_false {env : Env} {path : List Unit}
+    {targets : List LVal} {ty : Ty} :
+    ¬ WriteShapeCompat env (() :: path) (.ty (.borrow false targets)) ty := by
+  intro h
+  cases h
 
 @[refl] theorem Ty.eqv_refl (t : Ty) : Ty.eqv t t := by
   refine Ty.rec (motive_1 := fun t => Ty.eqv t t)

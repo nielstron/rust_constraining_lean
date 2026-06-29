@@ -190,6 +190,46 @@ def BlockScopedControlTerm (term : Term) : Prop :=
 def BlockScopedSourceTerm (term : Term) : Prop :=
   SourceTerm term ∧ BlockScopedControlTerm term
 
+theorem Term.exists_block_of_isBlock {term : Term} :
+    term.isBlock →
+    ∃ lifetime terms, term = .block lifetime terms := by
+  cases term <;> intro hblock <;> simp [Term.isBlock] at hblock
+  rename_i lifetime terms
+  exact ⟨lifetime, terms, rfl⟩
+
+theorem TermTyping.block_inv {env₁ env₃ : Env}
+    {typing : StoreTyping} {lifetime blockLifetime : Lifetime}
+    {terms : List Term} {ty : Ty} :
+    TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃ →
+    ∃ env₂,
+      LifetimeChild lifetime blockLifetime ∧
+      TermListTyping env₁ typing blockLifetime terms ty env₂ ∧
+      WellFormedTy env₂ ty lifetime ∧
+      env₃ = env₂.dropLifetime blockLifetime := by
+  intro htyping
+  cases htyping with
+  | block hchild hterms hwellTy hdrop =>
+      exact ⟨_, hchild, hterms, hwellTy, hdrop⟩
+
+theorem TermTyping.block_inv_of_isBlock {env₁ env₃ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    term.isBlock →
+    TermTyping env₁ typing lifetime term ty env₃ →
+    ∃ blockLifetime terms env₂,
+      term = .block blockLifetime terms ∧
+      LifetimeChild lifetime blockLifetime ∧
+      TermListTyping env₁ typing blockLifetime terms ty env₂ ∧
+      WellFormedTy env₂ ty lifetime ∧
+      env₃ = env₂.dropLifetime blockLifetime := by
+  intro hblock htyping
+  rcases Term.exists_block_of_isBlock hblock with
+    ⟨blockLifetime, terms, hterm⟩
+  subst hterm
+  rcases TermTyping.block_inv htyping with
+    ⟨env₂, hchild, hterms, hwellTy, hdrop⟩
+  exact ⟨blockLifetime, terms, env₂, rfl, hchild, hterms, hwellTy, hdrop⟩
+
 theorem BlockScopedSourceTerm.sourceTerm {term : Term} :
     BlockScopedSourceTerm term →
     SourceTerm term :=
@@ -199,6 +239,155 @@ theorem BlockScopedSourceTerm.controlTerm {term : Term} :
     BlockScopedSourceTerm term →
     BlockScopedControlTerm term :=
   And.right
+
+theorem BlockScopedControlTerm.block_head {lifetime : Lifetime}
+    {term : Term} {rest : List Term} :
+    BlockScopedControlTerm (.block lifetime (term :: rest)) →
+    BlockScopedControlTerm term := by
+  intro hscoped
+  have h :
+      term.controlBodiesAreBlocks ∧ Term.controlBodiesAreBlocksList rest := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks,
+      Term.controlBodiesAreBlocksList] using hscoped
+  exact h.1
+
+theorem BlockScopedControlTerm.block_tail {lifetime : Lifetime}
+    {term : Term} {rest : List Term} :
+    BlockScopedControlTerm (.block lifetime (term :: rest)) →
+    BlockScopedControlTerm (.block lifetime rest) := by
+  intro hscoped
+  have h :
+      term.controlBodiesAreBlocks ∧ Term.controlBodiesAreBlocksList rest := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks,
+      Term.controlBodiesAreBlocksList] using hscoped
+  simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using h.2
+
+theorem BlockScopedControlTerm.declare_inner {x : Name} {term : Term} :
+    BlockScopedControlTerm (.letMut x term) →
+    BlockScopedControlTerm term := by
+  intro hscoped
+  simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+
+theorem BlockScopedControlTerm.assign_inner {lhs : LVal} {rhs : Term} :
+    BlockScopedControlTerm (.assign lhs rhs) →
+    BlockScopedControlTerm rhs := by
+  intro hscoped
+  simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+
+theorem BlockScopedControlTerm.box_inner {term : Term} :
+    BlockScopedControlTerm (.box term) →
+    BlockScopedControlTerm term := by
+  intro hscoped
+  simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+
+theorem BlockScopedControlTerm.eq_lhs {lhs rhs : Term} :
+    BlockScopedControlTerm (.eq lhs rhs) →
+    BlockScopedControlTerm lhs := by
+  intro hscoped
+  have h : lhs.controlBodiesAreBlocks ∧ rhs.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.1
+
+theorem BlockScopedControlTerm.eq_rhs {lhs rhs : Term} :
+    BlockScopedControlTerm (.eq lhs rhs) →
+    BlockScopedControlTerm rhs := by
+  intro hscoped
+  have h : lhs.controlBodiesAreBlocks ∧ rhs.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2
+
+theorem BlockScopedControlTerm.ite_condition
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedControlTerm (.ite condition trueBranch falseBranch) →
+    BlockScopedControlTerm condition := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        trueBranch.isBlock ∧ trueBranch.controlBodiesAreBlocks ∧
+        falseBranch.isBlock ∧ falseBranch.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.1
+
+theorem BlockScopedControlTerm.ite_trueBranch
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedControlTerm (.ite condition trueBranch falseBranch) →
+    BlockScopedControlTerm trueBranch := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        trueBranch.isBlock ∧ trueBranch.controlBodiesAreBlocks ∧
+        falseBranch.isBlock ∧ falseBranch.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2.2.1
+
+theorem BlockScopedControlTerm.ite_falseBranch
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedControlTerm (.ite condition trueBranch falseBranch) →
+    BlockScopedControlTerm falseBranch := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        trueBranch.isBlock ∧ trueBranch.controlBodiesAreBlocks ∧
+        falseBranch.isBlock ∧ falseBranch.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2.2.2.2
+
+theorem BlockScopedControlTerm.ite_trueBranch_isBlock
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedControlTerm (.ite condition trueBranch falseBranch) →
+    trueBranch.isBlock := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        trueBranch.isBlock ∧ trueBranch.controlBodiesAreBlocks ∧
+        falseBranch.isBlock ∧ falseBranch.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2.1
+
+theorem BlockScopedControlTerm.ite_falseBranch_isBlock
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedControlTerm (.ite condition trueBranch falseBranch) →
+    falseBranch.isBlock := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        trueBranch.isBlock ∧ trueBranch.controlBodiesAreBlocks ∧
+        falseBranch.isBlock ∧ falseBranch.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2.2.2.1
+
+theorem BlockScopedControlTerm.while_condition {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    BlockScopedControlTerm (.whileLoop bodyLifetime condition body) →
+    BlockScopedControlTerm condition := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        body.isBlock ∧ body.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.1
+
+theorem BlockScopedControlTerm.while_body {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    BlockScopedControlTerm (.whileLoop bodyLifetime condition body) →
+    BlockScopedControlTerm body := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        body.isBlock ∧ body.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2.2
+
+theorem BlockScopedControlTerm.while_body_isBlock {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    BlockScopedControlTerm (.whileLoop bodyLifetime condition body) →
+    body.isBlock := by
+  intro hscoped
+  have h :
+      condition.controlBodiesAreBlocks ∧
+        body.isBlock ∧ body.controlBodiesAreBlocks := by
+    simpa [BlockScopedControlTerm, Term.controlBodiesAreBlocks] using hscoped
+  exact h.2.1
 
 theorem sourceValue_no_owningLocations {value : Value} :
     SourceValue value →
@@ -333,6 +522,163 @@ theorem SourceTerm.while_body {bodyLifetime : Lifetime}
   exact hsource value (by
     simp [termValues] at hmem ⊢
     exact Or.inr hmem)
+
+theorem BlockScopedSourceTerm.block_head {lifetime : Lifetime}
+    {term : Term} {rest : List Term} :
+    BlockScopedSourceTerm (.block lifetime (term :: rest)) →
+    BlockScopedSourceTerm term := by
+  intro hscoped
+  exact ⟨SourceTerm.block_head hscoped.1,
+    BlockScopedControlTerm.block_head hscoped.2⟩
+
+theorem BlockScopedSourceTerm.block_tail {lifetime : Lifetime}
+    {term : Term} {rest : List Term} :
+    BlockScopedSourceTerm (.block lifetime (term :: rest)) →
+    BlockScopedSourceTerm (.block lifetime rest) := by
+  intro hscoped
+  exact ⟨SourceTerm.block_tail hscoped.1,
+    BlockScopedControlTerm.block_tail hscoped.2⟩
+
+theorem BlockScopedSourceTerm.box_inner {term : Term} :
+    BlockScopedSourceTerm (.box term) →
+    BlockScopedSourceTerm term := by
+  intro hscoped
+  exact ⟨SourceTerm.box_inner hscoped.1,
+    BlockScopedControlTerm.box_inner hscoped.2⟩
+
+theorem BlockScopedSourceTerm.declare_inner {x : Name} {term : Term} :
+    BlockScopedSourceTerm (.letMut x term) →
+    BlockScopedSourceTerm term := by
+  intro hscoped
+  exact ⟨SourceTerm.declare_inner hscoped.1,
+    BlockScopedControlTerm.declare_inner hscoped.2⟩
+
+theorem BlockScopedSourceTerm.assign_inner {lhs : LVal} {rhs : Term} :
+    BlockScopedSourceTerm (.assign lhs rhs) →
+    BlockScopedSourceTerm rhs := by
+  intro hscoped
+  exact ⟨SourceTerm.assign_inner hscoped.1,
+    BlockScopedControlTerm.assign_inner hscoped.2⟩
+
+theorem BlockScopedSourceTerm.eq_lhs {lhs rhs : Term} :
+    BlockScopedSourceTerm (.eq lhs rhs) →
+    BlockScopedSourceTerm lhs := by
+  intro hscoped
+  exact ⟨SourceTerm.eq_lhs hscoped.1,
+    BlockScopedControlTerm.eq_lhs hscoped.2⟩
+
+theorem BlockScopedSourceTerm.eq_rhs {lhs rhs : Term} :
+    BlockScopedSourceTerm (.eq lhs rhs) →
+    BlockScopedSourceTerm rhs := by
+  intro hscoped
+  exact ⟨SourceTerm.eq_rhs hscoped.1,
+    BlockScopedControlTerm.eq_rhs hscoped.2⟩
+
+theorem BlockScopedSourceTerm.ite_condition
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    BlockScopedSourceTerm condition := by
+  intro hscoped
+  exact ⟨SourceTerm.ite_condition hscoped.1,
+    BlockScopedControlTerm.ite_condition hscoped.2⟩
+
+theorem BlockScopedSourceTerm.ite_trueBranch
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    BlockScopedSourceTerm trueBranch := by
+  intro hscoped
+  exact ⟨SourceTerm.ite_trueBranch hscoped.1,
+    BlockScopedControlTerm.ite_trueBranch hscoped.2⟩
+
+theorem BlockScopedSourceTerm.ite_falseBranch
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    BlockScopedSourceTerm falseBranch := by
+  intro hscoped
+  exact ⟨SourceTerm.ite_falseBranch hscoped.1,
+    BlockScopedControlTerm.ite_falseBranch hscoped.2⟩
+
+theorem BlockScopedSourceTerm.ite_trueBranch_isBlock
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    trueBranch.isBlock := by
+  intro hscoped
+  exact BlockScopedControlTerm.ite_trueBranch_isBlock hscoped.2
+
+theorem BlockScopedSourceTerm.ite_falseBranch_isBlock
+    {condition trueBranch falseBranch : Term} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    falseBranch.isBlock := by
+  intro hscoped
+  exact BlockScopedControlTerm.ite_falseBranch_isBlock hscoped.2
+
+theorem BlockScopedSourceTerm.ite_trueBranch_typing_block_inv
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {condition trueBranch falseBranch : Term} {ty : Ty} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    TermTyping env₁ typing lifetime trueBranch ty env₂ →
+    ∃ blockLifetime terms bodyEnv,
+      trueBranch = .block blockLifetime terms ∧
+      LifetimeChild lifetime blockLifetime ∧
+      TermListTyping env₁ typing blockLifetime terms ty bodyEnv ∧
+      WellFormedTy bodyEnv ty lifetime ∧
+      env₂ = bodyEnv.dropLifetime blockLifetime := by
+  intro hscoped htyping
+  exact TermTyping.block_inv_of_isBlock
+    (BlockScopedSourceTerm.ite_trueBranch_isBlock hscoped) htyping
+
+theorem BlockScopedSourceTerm.ite_falseBranch_typing_block_inv
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {condition trueBranch falseBranch : Term} {ty : Ty} :
+    BlockScopedSourceTerm (.ite condition trueBranch falseBranch) →
+    TermTyping env₁ typing lifetime falseBranch ty env₂ →
+    ∃ blockLifetime terms bodyEnv,
+      falseBranch = .block blockLifetime terms ∧
+      LifetimeChild lifetime blockLifetime ∧
+      TermListTyping env₁ typing blockLifetime terms ty bodyEnv ∧
+      WellFormedTy bodyEnv ty lifetime ∧
+      env₂ = bodyEnv.dropLifetime blockLifetime := by
+  intro hscoped htyping
+  exact TermTyping.block_inv_of_isBlock
+    (BlockScopedSourceTerm.ite_falseBranch_isBlock hscoped) htyping
+
+theorem BlockScopedSourceTerm.while_condition {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    BlockScopedSourceTerm (.whileLoop bodyLifetime condition body) →
+    BlockScopedSourceTerm condition := by
+  intro hscoped
+  exact ⟨SourceTerm.while_condition hscoped.1,
+    BlockScopedControlTerm.while_condition hscoped.2⟩
+
+theorem BlockScopedSourceTerm.while_body {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    BlockScopedSourceTerm (.whileLoop bodyLifetime condition body) →
+    BlockScopedSourceTerm body := by
+  intro hscoped
+  exact ⟨SourceTerm.while_body hscoped.1,
+    BlockScopedControlTerm.while_body hscoped.2⟩
+
+theorem BlockScopedSourceTerm.while_body_isBlock {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    BlockScopedSourceTerm (.whileLoop bodyLifetime condition body) →
+    body.isBlock := by
+  intro hscoped
+  exact BlockScopedControlTerm.while_body_isBlock hscoped.2
+
+theorem BlockScopedSourceTerm.while_body_typing_block_inv
+    {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime bodyLifetime : Lifetime} {condition body : Term} {ty : Ty} :
+    BlockScopedSourceTerm (.whileLoop bodyLifetime condition body) →
+    TermTyping env₁ typing lifetime body ty env₂ →
+    ∃ blockLifetime terms bodyEnv,
+      body = .block blockLifetime terms ∧
+      LifetimeChild lifetime blockLifetime ∧
+      TermListTyping env₁ typing blockLifetime terms ty bodyEnv ∧
+      WellFormedTy bodyEnv ty lifetime ∧
+      env₂ = bodyEnv.dropLifetime blockLifetime := by
+  intro hscoped htyping
+  exact TermTyping.block_inv_of_isBlock
+    (BlockScopedSourceTerm.while_body_isBlock hscoped) htyping
 
 theorem sourceTerm_unit_value : SourceTerm (.val .unit) := by
   intro value hmem

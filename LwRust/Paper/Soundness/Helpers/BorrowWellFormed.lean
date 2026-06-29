@@ -291,6 +291,13 @@ theorem WellFormedEnv.weaken {env : Env} {outer inner : Lifetime} :
   intro hwell houterInner
   exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2.1 houterInner, hwell.2.2.1, hwell.2.2.2⟩
 
+theorem WellFormedEnvCore.weaken {env : Env} {outer inner : Lifetime} :
+    WellFormedEnvCore env outer →
+    outer ≤ inner →
+    WellFormedEnvCore env inner := by
+  intro hwell houterInner
+  exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2.1 houterInner, hwell.2.2⟩
+
 theorem BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed {env : Env}
     {targets : List LVal} {slotLifetime lifetime : Lifetime} :
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
@@ -736,6 +743,87 @@ theorem WellFormedEnv.update_fresh_ty_of_coherenceObligations {env : Env} {x : N
       simp only [if_neg hy, if_neg hvx]
       exact hφ y slot hslotOld v hv
 
+theorem WellFormedEnvCore.update_fresh_ty {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnvCore env lifetime →
+    WellFormedTy env ty lifetime →
+    env.fresh x →
+    WellFormedEnvCore
+      (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
+  intro hwellEnv hwellTy hfresh
+  refine ⟨?_, ?_, ?_⟩
+  · intro y envSlot mutable targets hslot hcontains
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq :
+          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+      have hcontainedEq :
+          containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+          simpa [Env.update] using hcontainedSlot
+        exact h.symm
+      subst hcontainedEq
+      exact borrowTargetsWellFormedInSlot_update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
+        (borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontainsTy)
+    · have hslotOld : env.slotAt y = some envSlot := by
+        simpa [Env.update, hy] using hslot
+      have hcontainsOld : env ⊢ y ↝ Ty.borrow mutable targets := by
+        rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+        have hcontainedOld : env.slotAt y = some containedSlot := by
+          simpa [Env.update, hy] using hcontainedSlot
+        exact ⟨containedSlot, hcontainedOld, hcontainsTy⟩
+      exact borrowTargetsWellFormedInSlot_update_fresh
+        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
+        (hwellEnv.1 y envSlot mutable targets hslotOld hcontainsOld)
+  · intro y envSlot hslot
+    by_cases hy : y = x
+    · subst hy
+      have hslotEq :
+          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        have h :
+            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+          simpa [Env.update] using hslot
+        exact h.symm
+      subst hslotEq
+      exact LifetimeOutlives.refl lifetime
+    · have hslotOld : env.slotAt y = some envSlot := by
+        simpa [Env.update, hy] using hslot
+      exact hwellEnv.2.1 y envSlot hslotOld
+  · obtain ⟨φ, hφ⟩ := hwellEnv.2.2
+    have hfreshEq : env.slotAt x = none := hfresh
+    have hxnotin : x ∉ Ty.vars ty := by
+      intro hx
+      obtain ⟨s, hs⟩ := wellFormedTy_vars_in_env hwellTy x hx
+      rw [hfreshEq] at hs
+      exact absurd hs (by simp)
+    refine ⟨fun n => if n = x then
+      (Ty.vars ty).foldr (fun w acc => max (φ w + 1) acc) 0 else φ n, ?_⟩
+    intro y slot hslot v hv
+    by_cases hy : y = x
+    · have hslotEq : slot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+        rw [hy] at hslot
+        simpa [Env.update] using hslot.symm
+      have hvty : v ∈ Ty.vars ty := by
+        rw [hslotEq] at hv; simpa [PartialTy.vars] using hv
+      have hvx : v ≠ x := fun h => hxnotin (h ▸ hvty)
+      simp only [if_neg hvx, if_pos hy]
+      exact lt_of_lt_of_le (Nat.lt_succ_self _) (mem_foldr_max_succ hvty)
+    · have hslotOld : env.slotAt y = some slot := by
+        simpa [Env.update, hy] using hslot
+      obtain ⟨s, hs⟩ := containedBorrows_slot_vars_in_env hwellEnv.1 hslotOld v hv
+      have hvx : v ≠ x := by
+        intro h; rw [h, hfreshEq] at hs; exact absurd hs (by simp)
+      simp only [if_neg hy, if_neg hvx]
+      exact hφ y slot hslotOld v hv
+
 /-- Updating a variable slot without changing its allocation lifetime preserves Definition 4.8(ii). -/
 theorem EnvSlotsOutlive.update_same_lifetime {env : Env} {x : Name}
     {slot : EnvSlot} {newTy : PartialTy} {current : Lifetime} :
@@ -1013,6 +1101,83 @@ theorem UpdateAtPath.cons_inv {rank : Nat} {env₁ env₂ : Env}
       exact Or.inl ⟨_, _, rfl, rfl, hinner⟩
   | mutBorrow hwrites =>
       exact Or.inr ⟨_, rfl, rfl, hwrites⟩
+
+theorem UpdateAtPath.borrow_cons_inv {rank : Nat} {env₁ env₂ : Env}
+    {path : List Unit} {mutable : Bool} {targets : List LVal}
+    {ty : Ty} {updatedTy : PartialTy} :
+    UpdateAtPath rank env₁ (() :: path) (.ty (.borrow mutable targets)) ty
+      env₂ updatedTy →
+    mutable = true ∧ updatedTy = .ty (.borrow true targets) ∧
+      WriteBorrowTargets (rank + 1) env₁ path targets ty env₂ := by
+  intro hupdate
+  rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+  · rcases hbox with ⟨inner, _updatedInner, htyEq, _hupdatedEq, _hinner⟩
+    cases htyEq
+  · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+    cases htyEq
+    cases hupdatedEq
+    exact ⟨rfl, rfl, hwrites⟩
+
+theorem UpdateAtPath.immBorrow_cons_false {rank : Nat} {env₁ env₂ : Env}
+    {path : List Unit} {targets : List LVal} {ty : Ty}
+    {updatedTy : PartialTy} :
+    ¬ UpdateAtPath rank env₁ (() :: path) (.ty (.borrow false targets)) ty
+      env₂ updatedTy := by
+  intro hupdate
+  exact Bool.noConfusion (UpdateAtPath.borrow_cons_inv hupdate).1
+
+/-- A path whose next selector crosses an immutable borrow, possibly below a
+box prefix.  This is the write-side analogue of "the selected owner is an
+immutable borrow": assignment cannot step through this path. -/
+inductive PathCrossesImmBorrow : PartialTy → List Unit → Prop where
+  | here {targets : List LVal} {path : List Unit} :
+      PathCrossesImmBorrow (.ty (.borrow false targets)) (() :: path)
+  | box {inner : PartialTy} {path : List Unit} :
+      PathCrossesImmBorrow inner path →
+      PathCrossesImmBorrow (.box inner) (() :: path)
+
+theorem UpdateAtPath.crossesImmBorrow_false {rank : Nat} {env₁ env₂ : Env}
+    {path : List Unit} {oldTy : PartialTy} {ty : Ty}
+    {updatedTy : PartialTy} :
+    PathCrossesImmBorrow oldTy path →
+    ¬ UpdateAtPath rank env₁ path oldTy ty env₂ updatedTy := by
+  intro hcross hupdate
+  induction hcross generalizing rank env₂ updatedTy with
+  | here =>
+      exact UpdateAtPath.immBorrow_cons_false hupdate
+  | box _hinner ih =>
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with ⟨inner, updatedInner, holdEq, hupdatedEq, hinner⟩
+        cases holdEq
+        cases hupdatedEq
+        exact ih hinner
+      · rcases hborrow with ⟨_targets, holdEq, _hupdatedEq, _hwrites⟩
+        cases holdEq
+
+theorem EnvWrite.crossesImmBorrow_false {rank : Nat} {env result : Env}
+    {lv : LVal} {slot : EnvSlot} {rhsTy : Ty} :
+    env.slotAt (LVal.base lv) = some slot →
+    PathCrossesImmBorrow slot.ty (LVal.path lv) →
+    ¬ EnvWrite rank env lv rhsTy result := by
+  intro hslot hcross hwrite
+  cases hwrite with
+  | intro hwriteSlot hupdate =>
+      rename_i writeEnv writeSlot updatedTy
+      have hslotEq : writeSlot = slot :=
+        Option.some.inj (hwriteSlot.symm.trans hslot)
+      subst hslotEq
+      exact UpdateAtPath.crossesImmBorrow_false hcross hupdate
+
+theorem EnvWrite.deref_immBorrow_var_false {rank : Nat} {env result : Env}
+    {x : Name} {slot : EnvSlot} {targets : List LVal} {rhsTy : Ty} :
+    env.slotAt x = some slot →
+    slot.ty = .ty (.borrow false targets) →
+    ¬ EnvWrite rank env (.deref (.var x)) rhsTy result := by
+  intro hslot hslotTy hwrite
+  exact EnvWrite.crossesImmBorrow_false
+    (lv := .deref (.var x)) (slot := slot)
+    (by simpa [LVal.base] using hslot)
+    (by rw [hslotTy]; exact PathCrossesImmBorrow.here) hwrite
 
 @[simp] theorem List.Unit_append_singleton (path : List Unit) :
     path ++ [()] = () :: path := by

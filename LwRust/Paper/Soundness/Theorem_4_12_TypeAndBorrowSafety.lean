@@ -120,7 +120,22 @@ The paper's theorem states terminal existence; this mechanized form is the
 conditional safety theorem for an explicitly supplied terminal multistep.
 -/
 theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
@@ -140,7 +155,8 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     hwellFormed hsafe hstoreProgress htyping
     (by
       intro finalStore finalValue hmulti
-      exact preservation hsource hvalidRuntime hvalidStoreTyping
+      exact preservation hcoherentTyping hcoherentWhileInvariant
+        hsource hvalidRuntime hvalidStoreTyping
         hwellFormed hborrowSafe hsafe htyping hmulti)
     hterminates
 
@@ -162,7 +178,22 @@ from step-stable finite support.
 theorem reachable_progress_bounded (fuel : Nat)
     {store store' : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
-    {ty : Ty} :
+    {ty : Ty}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     term.size ≤ fuel →
     SourceTerm term →
     ValidRuntimeState store term →
@@ -362,7 +393,7 @@ theorem reachable_progress_bounded (fuel : Nat)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
       _rhsTy hRhs hLhsPost _hshape _hwellTy _hwrite _hranked _hcoh
-      _hcontained _hnotWrite ih hsize htypingEq hsource store store' term'
+      _hnotWrite ih hsize htypingEq hsource store store' term'
       hvalid hvst hwf hbs hsafe hfs hmulti
     cases htypingEq
     have hsourceRhs : SourceTerm _rhs := SourceTerm.assign_inner hsource
@@ -380,7 +411,8 @@ theorem reachable_progress_bounded (fuel : Nat)
         -- the rhs finished: re-establish the post-rhs invariants and fire
         -- the assignment redex
         have hterminalRhs :=
-          preservation hsourceRhs (validRuntimeState_assign_inner hvalid)
+          preservation hcoherentTyping hcoherentWhileInvariant
+            hsourceRhs (validRuntimeState_assign_inner hvalid)
             (validStoreTyping_assign_inner hvst) hwf hbs hsafe hRhs hms
         rcases lvalTyping_allocated_location_of_safe hterminalRhs.2.1
             hLhsPost with ⟨location, slot, hloc, hslot⟩
@@ -433,14 +465,14 @@ theorem reachable_progress_bounded (fuel : Nat)
           ⟨leftValue, hleftValue⟩
         subst hleftValue
         have hterminalLeftState :=
-          preservation hsourceLeft
+          preservation hcoherentTyping hcoherentWhileInvariant hsourceLeft
             (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
             hvstLeft hwf hbs hsafe _hLhs hmsLeft
         have hwellLeft : WellFormedEnv _env₂ _lifetime :=
           (typingPreservesWellFormed_of_sourceTerm hsourceLeft
             (ValidRuntimeState.validState
               (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
-            hwf hsafe _hLhs).1
+            hcoherentTyping hcoherentWhileInvariant hwf hsafe _hLhs).1
         have hvalidRight : ValidRuntimeState store' _rhs :=
           validRuntimeState_of_sourceTerm hsourceRight hterminalLeftState.1
         have hvstRight : ValidStoreTyping store' _rhs typing :=
@@ -460,7 +492,8 @@ theorem reachable_progress_bounded (fuel : Nat)
         · exact progress_subEqRight hstepRight
       · exact progress_subEqLeft hstepLeft
     · have hterminalLeftState :=
-        preservation hsourceLeft (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
+        preservation hcoherentTyping hcoherentWhileInvariant hsourceLeft
+          (validRuntimeState_of_sourceTerm hsourceLeft hvalid)
           hvstLeft hwf hbs hsafe _hLhs hmsLeft
       have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
         (typingPreservesBorrowSafeCore hsourceLeft hbs _hLhs).1
@@ -473,7 +506,7 @@ theorem reachable_progress_bounded (fuel : Nat)
         (typingPreservesWellFormed_of_sourceTerm hsourceLeft
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceLeft hvalid))
-          hwf hsafe _hLhs).1
+          hcoherentTyping hcoherentWhileInvariant hwf hsafe _hLhs).1
       rcases hcase with ⟨rhs', hfinal, hmsRight⟩ |
         ⟨rightStore, rightValue, hmsRight, hredex⟩
       · subst hfinal
@@ -507,7 +540,7 @@ theorem reachable_progress_bounded (fuel : Nat)
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin
-      _hcoherent _hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
+      _hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
       ihFalse hsize htypingEq hsource store store' term' hvalid hvst hwf hbs
       hsafe hfs hmulti
     cases htypingEq
@@ -538,7 +571,7 @@ theorem reachable_progress_bounded (fuel : Nat)
           ⟨conditionValue, hconditionValue⟩
         subst hconditionValue
         have hterminalConditionState :=
-          preservation hsourceCondition
+          preservation hcoherentTyping hcoherentWhileInvariant hsourceCondition
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
             hvstCondition hwf hbs hsafe _hcondition hmsCondition
         cases hterminalConditionState.2.2 with
@@ -549,7 +582,7 @@ theorem reachable_progress_bounded (fuel : Nat)
             · exact Or.inr ⟨store', _trueBranch, Step.iteTrue⟩
       · exact progress_subIte hstepCondition
     · have hterminalConditionState :=
-        preservation hsourceCondition
+        preservation hcoherentTyping hcoherentWhileInvariant hsourceCondition
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
           hvstCondition hwf hbs hsafe _hcondition hmsCondition
       have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
@@ -565,11 +598,11 @@ theorem reachable_progress_bounded (fuel : Nat)
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
-          hwf hsafe _hcondition).1
+          hcoherentTyping hcoherentWhileInvariant hwf hsafe _hcondition).1
         hborrowSafeCondition hterminalConditionState.2.1
         (hfs.multiStep hmsCondition) hmsTrue
     · have hterminalConditionState :=
-        preservation hsourceCondition
+        preservation hcoherentTyping hcoherentWhileInvariant hsourceCondition
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
           hvstCondition hwf hbs hsafe _hcondition hmsCondition
       have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
@@ -585,7 +618,7 @@ theorem reachable_progress_bounded (fuel : Nat)
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
-          hwf hsafe _hcondition).1
+          hcoherentTyping hcoherentWhileInvariant hwf hsafe _hcondition).1
         hborrowSafeCondition hterminalConditionState.2.1
         (hfs.multiStep hmsCondition) hmsFalse
   -- T-IfDiv: every path recurses into a premise IH; the dead branch is
@@ -623,7 +656,7 @@ theorem reachable_progress_bounded (fuel : Nat)
           ⟨conditionValue, hconditionValue⟩
         subst hconditionValue
         have hterminalConditionState :=
-          preservation hsourceCondition
+          preservation hcoherentTyping hcoherentWhileInvariant hsourceCondition
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
             hvstCondition hwf hbs hsafe _hcondition hmsCondition
         cases hterminalConditionState.2.2 with
@@ -634,7 +667,7 @@ theorem reachable_progress_bounded (fuel : Nat)
             · exact Or.inr ⟨store', _trueBranch, Step.iteTrue⟩
       · exact progress_subIte hstepCondition
     · have hterminalConditionState :=
-        preservation hsourceCondition
+        preservation hcoherentTyping hcoherentWhileInvariant hsourceCondition
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
           hvstCondition hwf hbs hsafe _hcondition hmsCondition
       have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
@@ -650,11 +683,11 @@ theorem reachable_progress_bounded (fuel : Nat)
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
-          hwf hsafe _hcondition).1
+          hcoherentTyping hcoherentWhileInvariant hwf hsafe _hcondition).1
         hborrowSafeCondition hterminalConditionState.2.1
         (hfs.multiStep hmsCondition) hmsTrue
     · have hterminalConditionState :=
-        preservation hsourceCondition
+        preservation hcoherentTyping hcoherentWhileInvariant hsourceCondition
           (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
           hvstCondition hwf hbs hsafe _hcondition hmsCondition
       have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
@@ -670,7 +703,7 @@ theorem reachable_progress_bounded (fuel : Nat)
         (typingPreservesWellFormed_of_sourceTerm hsourceCondition
           (ValidRuntimeState.validState
             (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
-          hwf hsafe _hcondition).1
+          hcoherentTyping hcoherentWhileInvariant hwf hsafe _hcondition).1
         hborrowSafeCondition hterminalConditionState.2.1
         (hfs.multiStep hmsCondition) hmsFalse
   -- T-WhileDiv: the diverging body never completes an iteration; mid-body
@@ -725,7 +758,8 @@ theorem reachable_progress_bounded (fuel : Nat)
               · rcases (terminal_iff_value _).mp hterminal with ⟨v, hv⟩
                 subst hv
                 have hterminalState :=
-                  preservation hsourceCondition hvalid' hvst' hwf hbs hsafe'
+                  preservation hcoherentTyping hcoherentWhileInvariant
+                    hsourceCondition hvalid' hvst' hwf hbs hsafe'
                     _hcondition hms
                 cases hterminalState.2.2 with
                 | bool =>
@@ -747,12 +781,14 @@ theorem reachable_progress_bounded (fuel : Nat)
                 validStoreTyping_sourceTerm_of_validStoreTyping
                   hsourceCondition hvstCondition
               have hterminalCondState :=
-                preservation hsourceCondition hvalid' hvst' hwf hbs hsafe'
+                preservation hcoherentTyping hcoherentWhileInvariant
+                  hsourceCondition hvalid' hvst' hwf hbs hsafe'
                   _hcondition hcond
               have hfs₁ := hfs'.multiStep hcond
               have hwfCondOut : WellFormedEnv _env₂ _lifetime :=
                 (typingPreservesWellFormed_of_sourceTerm hsourceCondition
-                  (ValidRuntimeState.validState hvalid') hwf hsafe'
+                  (ValidRuntimeState.validState hvalid')
+                  hcoherentTyping hcoherentWhileInvariant hwf hsafe'
                   _hcondition).1
               have hwfBody : WellFormedEnv _env₂ _bodyLifetime :=
                 WellFormedEnv.of_outlives hwfCondOut
@@ -803,7 +839,7 @@ theorem reachable_progress_bounded (fuel : Nat)
   case whileLoop =>
     intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy hchild
-      _hgenerated hjoin hss1 hss2 hcbwf hcoh hlin hbse _hnameFresh
+      _hgenerated hjoin hss1 hss2 hcbwf hlin hbse _hnameFresh
       _hcondInv _hbodyInv _hwellTyBody hdropEq _hcondEntry _hbodyEntry
       _ihGenerated ihCondInv ihBodyInv _ihCondEntry
       _ihBodyEntry
@@ -854,11 +890,13 @@ theorem reachable_progress_bounded (fuel : Nat)
       EnvJoin.left_sameShapeStrengthening hjoin hbranchShape
     have hbackMap : EnvSameShapeStrengthening _envBack _envInv :=
       EnvJoin.right_sameShapeStrengthening hjoin hbranchShape
+    have hcohInv : Coherent _envInv :=
+      hcoherentWhileInvariant hwf _hgenerated hjoin
     have hwfInv : WellFormedEnv _envInv _lifetime :=
       ⟨hcbwf,
         EnvSlotsOutlive.of_lifetimesPreserved hwf.2.1
           (EnvJoin.lifetimesPreserved_left hjoin),
-        hcoh, hlin⟩
+        hcohInv, hlin⟩
     have hbseCondition : BorrowSafeEnv _env₂ :=
       (typingPreservesBorrowSafeCore hsourceCondition hbse
         _hcondInv).1
@@ -901,7 +939,8 @@ theorem reachable_progress_bounded (fuel : Nat)
               · rcases (terminal_iff_value _).mp hterminal with ⟨v, hv⟩
                 subst hv
                 have hterminalState :=
-                  preservation hsourceCondition hvalid' hvst' hwfInv hbse
+                  preservation hcoherentTyping hcoherentWhileInvariant
+                    hsourceCondition hvalid' hvst' hwfInv hbse
                     hsafe' _hcondInv hms
                 cases hterminalState.2.2 with
                 | bool =>
@@ -923,12 +962,14 @@ theorem reachable_progress_bounded (fuel : Nat)
                 validStoreTyping_sourceTerm_of_validStoreTyping
                   hsourceCondition hvstCondition
               have hterminalCondState :=
-                preservation hsourceCondition hvalid' hvst' hwfInv hbse
+                preservation hcoherentTyping hcoherentWhileInvariant
+                  hsourceCondition hvalid' hvst' hwfInv hbse
                   hsafe' _hcondInv hcond
               have hfs₁ := hfs'.multiStep hcond
               have hwfCondOut : WellFormedEnv _env₂ _lifetime :=
                 (typingPreservesWellFormed_of_sourceTerm hsourceCondition
-                  (ValidRuntimeState.validState hvalid') hwfInv hsafe'
+                  (ValidRuntimeState.validState hvalid')
+                  hcoherentTyping hcoherentWhileInvariant hwfInv hsafe'
                   _hcondInv).1
               have hwfBody : WellFormedEnv _env₂ _bodyLifetime :=
                 WellFormedEnv.of_outlives hwfCondOut
@@ -992,15 +1033,18 @@ theorem reachable_progress_bounded (fuel : Nat)
                 validStoreTyping_sourceTerm_of_validStoreTyping
                   hsourceCondition hvstCondition
               have hterminalCondState :=
-                preservation hsourceCondition hvalid' hvst' hwfInv hbse
+                preservation hcoherentTyping hcoherentWhileInvariant
+                  hsourceCondition hvalid' hvst' hwfInv hbse
                   hsafe' _hcondInv hcond
               have hfs₁ := hfs'.multiStep hcond
               have hwfCondOut : WellFormedEnv _env₂ _lifetime :=
                 (typingPreservesWellFormed_of_sourceTerm hsourceCondition
-                  (ValidRuntimeState.validState hvalid') hwfInv hsafe'
+                  (ValidRuntimeState.validState hvalid')
+                  hcoherentTyping hcoherentWhileInvariant hwfInv hsafe'
                   _hcondInv).1
               have hterminalBlock :=
-                preservation hsourceIterBlock
+                preservation hcoherentTyping hcoherentWhileInvariant
+                  hsourceIterBlock
                   (validRuntimeState_of_sourceTerm hsourceIterBlock
                     hterminalCondState.1)
                   (validStoreTyping_sourceTerm_of_validStoreTyping
@@ -1072,13 +1116,14 @@ theorem reachable_progress_bounded (fuel : Nat)
         -- the head finished: re-establish the mid-state invariants and
         -- recurse into the tail
         have hterminalHeadRuntime :=
-          preservation hsourceHead (validRuntimeState_block_head hvalid)
+          preservation hcoherentTyping hcoherentWhileInvariant
+            hsourceHead (validRuntimeState_block_head hvalid)
             (validStoreTyping_block_head hvst) hwf hbs hsafe hterm hmsHead
         have hwellInner : WellFormedEnv _env₂ _blockLifetime :=
           (typingPreservesWellFormed_of_sourceTerm hsourceHead
             (ValidRuntimeState.validState
               (validRuntimeState_block_head hvalid))
-            hwf hsafe hterm).1
+            hcoherentTyping hcoherentWhileInvariant hwf hsafe hterm).1
         have hborrowSafeInner : BorrowSafeEnv _env₂ :=
           (typingPreservesBorrowSafeCore hsourceHead hbs hterm).1
         have hvalueBlockValid :
@@ -1121,7 +1166,22 @@ theorem reachable_progress_bounded (fuel : Nat)
 /-- Public reachable-progress theorem, with the size fuel hidden. -/
 theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
-    {ty : Ty} :
+    {ty : Ty}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
@@ -1134,7 +1194,8 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
     ProgressResult store' lifetime term' := by
   intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
     hfinite htyping hmulti
-  exact reachable_progress_bounded term.size (Nat.le_refl _) hsource
+  exact reachable_progress_bounded term.size hcoherentTyping hcoherentWhileInvariant
+    (Nat.le_refl _) hsource
     hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
     htyping hmulti
 
@@ -1214,12 +1275,28 @@ theorem SoundState.multiStep {store store' : ProgramStore}
 
 /-- Progress holds at every state satisfying the soundness invariant. -/
 theorem SoundState.progress {store : ProgramStore} {lifetime : Lifetime}
-    {term : Term} :
+    {term : Term}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SoundState store lifetime term →
     ProgressResult store lifetime term := by
   rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
     hvst, hwf, hbs, hsafe, hfs, htyping, hreached⟩
-  exact reachable_progress hsource hvalid hvst hwf hbs hsafe hfs htyping
+  exact reachable_progress hcoherentTyping hcoherentWhileInvariant
+    hsource hvalid hvst hwf hbs hsafe hfs htyping
     hreached
 
 /--
@@ -1227,14 +1304,30 @@ Terminal preservation holds at every state satisfying the soundness
 invariant: any terminal run from it ends in a safe state.
 -/
 theorem SoundState.preservation {store finalStore : ProgramStore}
-    {lifetime : Lifetime} {term : Term} {finalValue : Value} :
+    {lifetime : Lifetime} {term : Term} {finalValue : Value}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SoundState store lifetime term →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ∃ env₂ ty, TerminalStateSafe finalStore finalValue env₂ ty := by
   rintro ⟨initialStore, initialTerm, env₁, env₂, typing, ty, hsource, hvalid,
     hvst, hwf, hbs, hsafe, _hfs, htyping, hreached⟩ hmulti
   exact ⟨env₂, ty,
-    _root_.LwRust.Paper.preservation hsource hvalid hvst hwf hbs hsafe htyping
+    _root_.LwRust.Paper.preservation hcoherentTyping hcoherentWhileInvariant
+      hsource hvalid hvst hwf hbs hsafe htyping
       (multistep_append hreached hmulti)⟩
 
 /--
@@ -1248,7 +1341,22 @@ termination.
 -/
 theorem no_stuck_states {store store' : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term term' : Term}
-    {ty : Ty} :
+    {ty : Ty}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
@@ -1261,7 +1369,8 @@ theorem no_stuck_states {store store' : ProgramStore} {env₁ env₂ : Env}
     Terminal term' ∨
       ∃ store'' term'', Step store' lifetime term' store'' term'' :=
   fun hsource hvalid hvst hwf hbs hsafe hfs htyping hmulti =>
-    reachable_progress hsource hvalid hvst hwf hbs hsafe hfs htyping hmulti
+    reachable_progress hcoherentTyping hcoherentWhileInvariant
+      hsource hvalid hvst hwf hbs hsafe hfs htyping hmulti
 
 end Paper
 end LwRust
@@ -1292,6 +1401,21 @@ theorem theorem_4_12_typeAndBorrowSafety
     (hsource : SourceTerm term)
       (hvalid : ValidRuntimeState store term)
       (hstoreTyping : ValidStoreTyping store term typing)
+      (hcoherentTyping :
+        ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+          {term : Term} {ty : Ty},
+          WellFormedEnv env₁ lifetime →
+          TermTyping env₁ typing lifetime term ty env₂ →
+          Coherent env₂)
+      (hcoherentWhileInvariant :
+        ∀ {envEntry envBack envInv envCond envBody : Env}
+          {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+          {condition body : Term} {bodyTy : Ty},
+          WellFormedEnv envEntry lifetime →
+          WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+            envEntry envInv envCond envBody envBack bodyTy →
+          EnvJoin envEntry envBack envInv →
+          Coherent envInv)
       (hwellFormed : WellFormedEnv env₁ lifetime)
       (hborrowSafe : BorrowSafeEnv env₁)
       (hsafe : store ∼ₛ env₁)
@@ -1302,7 +1426,7 @@ theorem theorem_4_12_typeAndBorrowSafety
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty :=
-    typeAndBorrowSafety hsource hvalid
+    typeAndBorrowSafety hcoherentTyping hcoherentWhileInvariant hsource hvalid
       hstoreTyping hwellFormed hborrowSafe hsafe hstore htyping hterminates
 
 /--
@@ -1316,6 +1440,21 @@ theorem theorem_4_12_no_stuck_states
     (hsource : SourceTerm term)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv)
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ∼ₛ env₁)
@@ -1324,7 +1463,8 @@ theorem theorem_4_12_no_stuck_states
     (hreach : MultiStep store lifetime term store' term') :
     Terminal term' ∨
       ∃ store'' term'', Step store' lifetime term' store'' term'' :=
-  no_stuck_states hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
+  no_stuck_states hcoherentTyping hcoherentWhileInvariant
+    hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
     hfinite htyping hreach
 
 /--
@@ -1340,6 +1480,21 @@ theorem theorem_4_12_typeAndBorrowSafety_total
     (hsource : SourceTerm term)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv)
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ∼ₛ env₁)
@@ -1350,7 +1505,8 @@ theorem theorem_4_12_typeAndBorrowSafety_total
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed hborrowSafe
+  typeAndBorrowSafety hcoherentTyping hcoherentWhileInvariant
+    hsource hvalid hstoreTyping hwellFormed hborrowSafe
     hsafe (OperationalStoreProgress.of_finiteSupport hfinite) htyping hterminates
 
 end LwRust.Paper.Soundness

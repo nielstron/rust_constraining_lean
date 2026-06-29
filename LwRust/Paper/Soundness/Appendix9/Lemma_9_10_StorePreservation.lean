@@ -35,7 +35,22 @@ Lemma 4.11.
 -/
 theorem lemma_9_10_storePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
-    {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
+    {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
+    (hcoherentTyping :
+      ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+        {term : Term} {ty : Ty},
+        WellFormedEnv env₁ lifetime →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        Coherent env₂)
+    (hcoherentWhileInvariant :
+      ∀ {envEntry envBack envInv envCond envBody : Env}
+        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+        {condition body : Term} {bodyTy : Ty},
+        WellFormedEnv envEntry lifetime →
+        WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+          envEntry envInv envCond envBody envBack bodyTy →
+        EnvJoin envEntry envBack envInv →
+        Coherent envInv) :
     SourceTerm term →
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
@@ -46,7 +61,8 @@ theorem lemma_9_10_storePreservation
     MultiStep store lifetime term finalStore (.val finalValue) →
     finalStore ∼ₛ env₂ := by
     intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
-    exact (preservation hsource hvalid hstoreTyping
+    exact (preservation hcoherentTyping hcoherentWhileInvariant
+      hsource hvalid hstoreTyping
       hwellFormed hborrowSafe hsafe htyping hmulti).2.1
 
 /--

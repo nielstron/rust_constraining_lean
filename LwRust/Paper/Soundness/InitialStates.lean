@@ -1,4 +1,5 @@
 import LwRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
+import LwRust.Paper.Soundness.Helpers.RuntimeFacts
 
 /-!
 # Source-level initial-state corollaries
@@ -12,6 +13,479 @@ namespace LwRust
 namespace Paper
 
 open Core
+
+/-- Legacy broad coherence oracle used by the current preservation wrappers.
+
+This is intentionally stronger than the source-level theorem we ultimately want:
+it quantifies over arbitrary input environments.  The generated/empty-start
+coherence result below is the meaningful target for source programs. -/
+def TermTypingOutputsCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty},
+    WellFormedEnv env₁ lifetime →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    Coherent env₂
+
+def WhileFixpointInvariantsCoherent : Prop :=
+  ∀ {envEntry envBack envInv envCond envBody : Env}
+    {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
+    {condition body : Term} {bodyTy : Ty},
+    WellFormedEnv envEntry lifetime →
+    WhileFixpointIteration envEntry typing lifetime bodyLifetime condition body
+      envEntry envInv envCond envBody envBack bodyTy →
+    EnvJoin envEntry envBack envInv →
+    Coherent envInv
+
+def BlockScopedSourceTermList (terms : List Term) : Prop :=
+  ∀ term, term ∈ terms → BlockScopedSourceTerm term
+
+def EmptyInitialBlockScopedTermTypingOutputsCoherent : Prop :=
+  ∀ {term ty env₂ lifetime},
+    BlockScopedSourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    Coherent env₂
+
+def EmptyInitialBlockScopedTermListTypingOutputsCoherent : Prop :=
+  ∀ {terms ty env₂ lifetime},
+    BlockScopedSourceTermList terms →
+    TermListTyping Env.empty StoreTyping.empty lifetime terms ty env₂ →
+    Coherent env₂
+
+inductive BlockScopedReachableEnv
+    (typing : StoreTyping) (lifetime : Lifetime) : Env → Prop where
+  | empty :
+      BlockScopedReachableEnv typing lifetime Env.empty
+  | step {env₁ env₂ : Env} {term : Term} {ty : Ty} :
+      BlockScopedReachableEnv typing lifetime env₁ →
+      BlockScopedSourceTerm term →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      BlockScopedReachableEnv typing lifetime env₂
+
+inductive BlockScopedGeneratedEnv (typing : StoreTyping) : Env → Prop where
+  | empty :
+      BlockScopedGeneratedEnv typing Env.empty
+  | step {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty} :
+      BlockScopedGeneratedEnv typing env₁ →
+      BlockScopedSourceTerm term →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      BlockScopedGeneratedEnv typing env₂
+
+theorem BlockScopedReachableEnv.to_generated
+    {typing : StoreTyping} {lifetime : Lifetime} {env : Env} :
+    BlockScopedReachableEnv typing lifetime env →
+    BlockScopedGeneratedEnv typing env := by
+  intro hreach
+  induction hreach with
+  | empty =>
+      exact BlockScopedGeneratedEnv.empty
+  | step hreach hsource htyping ih =>
+      exact BlockScopedGeneratedEnv.step ih hsource htyping
+
+def BlockScopedReachableTermTypingOutputsCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedReachableEnv StoreTyping.empty lifetime env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    Coherent env₂
+
+def BlockScopedReachableTermTypingOutputsLValCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedReachableEnv StoreTyping.empty lifetime env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingOutputsCoherent env₂
+
+def BlockScopedReachableTermTypingOutputsPartialLValCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedReachableEnv StoreTyping.empty lifetime env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingPartialOutputsCoherent env₂
+
+def BlockScopedGeneratedTermTypingOutputsCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    Coherent env₂
+
+def BlockScopedGeneratedTermTypingOutputsPartialLValCoherent : Prop :=
+  ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty},
+    BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+    BlockScopedSourceTerm term →
+    TermTyping env₁ StoreTyping.empty lifetime term ty env₂ →
+    LValTypingPartialOutputsCoherent env₂
+
+theorem BlockScopedReachableTermTypingOutputsLValCoherent.coherent :
+    BlockScopedReachableTermTypingOutputsLValCoherent →
+    BlockScopedReachableTermTypingOutputsCoherent := by
+  intro houtputs env₁ env₂ lifetime term ty hreach hsource htyping
+  exact LValTypingOutputsCoherent.coherent (houtputs hreach hsource htyping)
+
+theorem BlockScopedReachableTermTypingOutputsPartialLValCoherent.outputs :
+    BlockScopedReachableTermTypingOutputsPartialLValCoherent →
+    BlockScopedReachableTermTypingOutputsLValCoherent := by
+  intro hpartial env₁ env₂ lifetime term ty hreach hsource htyping
+  exact (hpartial hreach hsource htyping).outputs
+
+theorem BlockScopedReachableTermTypingOutputsPartialLValCoherent.coherent :
+    BlockScopedReachableTermTypingOutputsPartialLValCoherent →
+    BlockScopedReachableTermTypingOutputsCoherent := by
+  intro hpartial
+  exact BlockScopedReachableTermTypingOutputsLValCoherent.coherent
+    (BlockScopedReachableTermTypingOutputsPartialLValCoherent.outputs hpartial)
+
+theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.coherent :
+    BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
+    BlockScopedGeneratedTermTypingOutputsCoherent := by
+  intro hpartial env₁ env₂ lifetime term ty hgenerated hsource htyping
+  exact (hpartial hgenerated hsource htyping).coherent
+
+theorem BlockScopedGeneratedTermTypingOutputsCoherent.reachable :
+    BlockScopedGeneratedTermTypingOutputsCoherent →
+    BlockScopedReachableTermTypingOutputsCoherent := by
+  intro hgenerated env₁ env₂ lifetime term ty hreach hsource htyping
+  exact hgenerated hreach.to_generated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.reachable :
+    BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
+    BlockScopedReachableTermTypingOutputsPartialLValCoherent := by
+  intro hgenerated env₁ env₂ lifetime term ty hreach hsource htyping
+  exact hgenerated hreach.to_generated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialBlockScopedTerm :
+    BlockScopedGeneratedTermTypingOutputsCoherent →
+    EmptyInitialBlockScopedTermTypingOutputsCoherent := by
+  intro hgenerated term ty env₂ lifetime hsource htyping
+  exact hgenerated BlockScopedGeneratedEnv.empty hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.emptyInitialBlockScopedTerm :
+    BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
+    EmptyInitialBlockScopedTermTypingOutputsCoherent := by
+  intro hgenerated
+  exact BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialBlockScopedTerm
+    (BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.coherent
+      hgenerated)
+
+theorem TermTypingOutputsCoherent.emptyInitialBlockScopedTerm :
+    TermTypingOutputsCoherent →
+    EmptyInitialBlockScopedTermTypingOutputsCoherent := by
+  intro hcoherentTyping term ty env₂ lifetime _hsource htyping
+  exact hcoherentTyping (wellFormedEnv_empty lifetime) htyping
+
+theorem BlockScopedSourceTermList.nil :
+    BlockScopedSourceTermList [] := by
+  intro term hmem
+  cases hmem
+
+theorem BlockScopedSourceTermList.cons {term : Term} {rest : List Term} :
+    BlockScopedSourceTerm term →
+    BlockScopedSourceTermList rest →
+    BlockScopedSourceTermList (term :: rest) := by
+  intro hterm hrest candidate hmem
+  rcases List.mem_cons.mp hmem with hcandidate | hcandidate
+  · subst hcandidate
+    exact hterm
+  · exact hrest candidate hcandidate
+
+theorem BlockScopedSourceTermList.head {term : Term} {rest : List Term} :
+    BlockScopedSourceTermList (term :: rest) →
+    BlockScopedSourceTerm term := by
+  intro hterms
+  exact hterms term (by simp)
+
+theorem BlockScopedSourceTermList.tail {term : Term} {rest : List Term} :
+    BlockScopedSourceTermList (term :: rest) →
+    BlockScopedSourceTermList rest := by
+  intro hterms candidate hmem
+  exact hterms candidate (List.mem_cons_of_mem term hmem)
+
+theorem BlockScopedReachableEnv.of_termListTyping_from
+    {typing : StoreTyping} {lifetime : Lifetime} {env₁ env₂ : Env}
+    {terms : List Term} {ty : Ty} :
+    BlockScopedReachableEnv typing lifetime env₁ →
+    BlockScopedSourceTermList terms →
+    TermListTyping env₁ typing lifetime terms ty env₂ →
+    BlockScopedReachableEnv typing lifetime env₂ := by
+  intro hreach hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact BlockScopedReachableEnv.step hreach
+            (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadReach : BlockScopedReachableEnv typing lifetime _ :=
+            BlockScopedReachableEnv.step hreach
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadReach (BlockScopedSourceTermList.tail hsource) hrest
+
+theorem BlockScopedReachableEnv.of_termListTyping
+    {typing : StoreTyping} {lifetime : Lifetime} {env₂ : Env}
+    {terms : List Term} {ty : Ty} :
+    BlockScopedSourceTermList terms →
+    TermListTyping Env.empty typing lifetime terms ty env₂ →
+    BlockScopedReachableEnv typing lifetime env₂ := by
+  intro hsource htyping
+  exact BlockScopedReachableEnv.of_termListTyping_from
+    BlockScopedReachableEnv.empty hsource htyping
+
+theorem BlockScopedGeneratedEnv.of_termListTyping_from
+    {typing : StoreTyping} {lifetime : Lifetime} {env₁ env₂ : Env}
+    {terms : List Term} {ty : Ty} :
+    BlockScopedGeneratedEnv typing env₁ →
+    BlockScopedSourceTermList terms →
+    TermListTyping env₁ typing lifetime terms ty env₂ →
+    BlockScopedGeneratedEnv typing env₂ := by
+  intro hgenerated hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact BlockScopedGeneratedEnv.step hgenerated
+            (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadGenerated : BlockScopedGeneratedEnv typing _ :=
+            BlockScopedGeneratedEnv.step hgenerated
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadGenerated (BlockScopedSourceTermList.tail hsource) hrest
+
+theorem BlockScopedGeneratedEnv.of_termListTyping
+    {typing : StoreTyping} {lifetime : Lifetime} {env₂ : Env}
+    {terms : List Term} {ty : Ty} :
+    BlockScopedSourceTermList terms →
+    TermListTyping Env.empty typing lifetime terms ty env₂ →
+    BlockScopedGeneratedEnv typing env₂ := by
+  intro hsource htyping
+  exact BlockScopedGeneratedEnv.of_termListTyping_from
+    BlockScopedGeneratedEnv.empty hsource htyping
+
+theorem BlockScopedReachableTermTypingOutputsCoherent.termList_from :
+    BlockScopedReachableTermTypingOutputsCoherent →
+    ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {terms : List Term} {ty : Ty},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env₁ →
+      BlockScopedSourceTermList terms →
+      TermListTyping env₁ StoreTyping.empty lifetime terms ty env₂ →
+      Coherent env₂ := by
+  intro hcoherent env₁ env₂ lifetime terms ty hreach hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact hcoherent hreach (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadReach :
+              BlockScopedReachableEnv StoreTyping.empty lifetime _ :=
+            BlockScopedReachableEnv.step hreach
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadReach (BlockScopedSourceTermList.tail hsource) hrest
+
+theorem BlockScopedReachableTermTypingOutputsCoherent.emptyInitialTermList :
+    BlockScopedReachableTermTypingOutputsCoherent →
+    EmptyInitialBlockScopedTermListTypingOutputsCoherent := by
+  intro hcoherent terms ty env₂ lifetime hsource htyping
+  exact hcoherent.termList_from
+    BlockScopedReachableEnv.empty hsource htyping
+
+theorem BlockScopedReachableTermTypingOutputsCoherent.reachableEnv :
+    BlockScopedReachableTermTypingOutputsCoherent →
+    ∀ {env : Env} {lifetime : Lifetime},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env →
+      Coherent env := by
+  intro hcoherent env lifetime hreach
+  induction hreach with
+  | empty =>
+      exact Coherent.empty
+  | step hreach hsource htyping _ih =>
+      exact hcoherent hreach hsource htyping
+
+theorem BlockScopedReachableTermTypingOutputsLValCoherent.reachableEnv :
+    BlockScopedReachableTermTypingOutputsLValCoherent →
+    ∀ {env : Env} {lifetime : Lifetime},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env →
+      LValTypingOutputsCoherent env := by
+  intro houtputs env lifetime hreach
+  induction hreach with
+  | empty =>
+      exact LValTypingOutputsCoherent.empty
+  | step hreach hsource htyping _ih =>
+      exact houtputs hreach hsource htyping
+
+theorem BlockScopedReachableTermTypingOutputsPartialLValCoherent.reachableEnv :
+    BlockScopedReachableTermTypingOutputsPartialLValCoherent →
+    ∀ {env : Env} {lifetime : Lifetime},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env →
+      LValTypingPartialOutputsCoherent env := by
+  intro houtputs env lifetime hreach
+  induction hreach with
+  | empty =>
+      exact LValTypingPartialOutputsCoherent.empty
+  | step hreach hsource htyping _ih =>
+      exact houtputs hreach hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsCoherent.generatedEnv :
+    BlockScopedGeneratedTermTypingOutputsCoherent →
+    ∀ {env : Env},
+      BlockScopedGeneratedEnv StoreTyping.empty env →
+      Coherent env := by
+  intro houtputs env hgenerated
+  induction hgenerated with
+  | empty =>
+      exact Coherent.empty
+  | step hgenerated hsource htyping _ih =>
+      exact houtputs hgenerated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.generatedEnv :
+    BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
+    ∀ {env : Env},
+      BlockScopedGeneratedEnv StoreTyping.empty env →
+      LValTypingPartialOutputsCoherent env := by
+  intro houtputs env hgenerated
+  induction hgenerated with
+  | empty =>
+      exact LValTypingPartialOutputsCoherent.empty
+  | step hgenerated hsource htyping _ih =>
+      exact houtputs hgenerated hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsCoherent.termList_from :
+    BlockScopedGeneratedTermTypingOutputsCoherent →
+    ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {terms : List Term} {ty : Ty},
+      BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+      BlockScopedSourceTermList terms →
+      TermListTyping env₁ StoreTyping.empty lifetime terms ty env₂ →
+      Coherent env₂ := by
+  intro hcoherent env₁ env₂ lifetime terms ty hgenerated hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact hcoherent hgenerated
+            (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadGenerated :
+              BlockScopedGeneratedEnv StoreTyping.empty _ :=
+            BlockScopedGeneratedEnv.step hgenerated
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadGenerated (BlockScopedSourceTermList.tail hsource) hrest
+
+theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.termList_from :
+    BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
+    ∀ {env₁ env₂ : Env} {lifetime : Lifetime} {terms : List Term} {ty : Ty},
+      BlockScopedGeneratedEnv StoreTyping.empty env₁ →
+      BlockScopedSourceTermList terms →
+      TermListTyping env₁ StoreTyping.empty lifetime terms ty env₂ →
+      LValTypingPartialOutputsCoherent env₂ := by
+  intro houtputs env₁ env₂ lifetime terms ty hgenerated hsource htyping
+  induction terms generalizing env₁ env₂ ty with
+  | nil =>
+      cases htyping
+  | cons term rest ih =>
+      cases htyping with
+      | singleton hterm =>
+          exact houtputs hgenerated
+            (BlockScopedSourceTermList.head hsource) hterm
+      | cons hterm hrest =>
+          have hheadGenerated :
+              BlockScopedGeneratedEnv StoreTyping.empty _ :=
+            BlockScopedGeneratedEnv.step hgenerated
+              (BlockScopedSourceTermList.head hsource) hterm
+          exact ih hheadGenerated (BlockScopedSourceTermList.tail hsource) hrest
+
+theorem BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialTermList :
+    BlockScopedGeneratedTermTypingOutputsCoherent →
+    EmptyInitialBlockScopedTermListTypingOutputsCoherent := by
+  intro hcoherent terms ty env₂ lifetime hsource htyping
+  exact hcoherent.termList_from
+    BlockScopedGeneratedEnv.empty hsource htyping
+
+theorem BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.emptyInitialTermList :
+    BlockScopedGeneratedTermTypingOutputsPartialLValCoherent →
+    EmptyInitialBlockScopedTermListTypingOutputsCoherent := by
+  intro hpartial
+  exact BlockScopedGeneratedTermTypingOutputsCoherent.emptyInitialTermList
+    (BlockScopedGeneratedTermTypingOutputsPartialLValCoherent.coherent hpartial)
+
+/-- Reachable environments inherit the syntactic non-empty borrow-target
+invariant from the generated typing rules.  This is one of the invariants needed
+by the assignment-coherence proof: it rules out the vacuous `&[]` cases, while
+the actual joint target-list typing still comes from the write rule's
+`ShapeCompatible` evidence. -/
+theorem BlockScopedReachableEnv.borrowTargetsNonempty
+    {typing : StoreTyping} {lifetime : Lifetime} {env : Env} :
+    StoreTypingTypesBorrowTargetsNonempty typing →
+    BlockScopedReachableEnv typing lifetime env →
+    EnvTypesBorrowTargetsNonempty env := by
+  intro hstore hreach
+  induction hreach with
+  | empty =>
+      exact EnvTypesBorrowTargetsNonempty.empty
+  | step _hreach _hsource htyping ih =>
+      exact (TermTyping.borrowTargetsNonempty_of_envTypes
+        hstore htyping ih).2
+
+theorem BlockScopedReachableEnv.emptyStore_borrowTargetsNonempty
+    {lifetime : Lifetime} {env : Env} :
+    BlockScopedReachableEnv StoreTyping.empty lifetime env →
+    EnvTypesBorrowTargetsNonempty env := by
+  intro hreach
+  exact hreach.borrowTargetsNonempty
+    StoreTypingTypesBorrowTargetsNonempty.empty
+
+theorem BlockScopedGeneratedEnv.borrowTargetsNonempty
+    {typing : StoreTyping} {env : Env} :
+    StoreTypingTypesBorrowTargetsNonempty typing →
+    BlockScopedGeneratedEnv typing env →
+    EnvTypesBorrowTargetsNonempty env := by
+  intro hstore hgenerated
+  induction hgenerated with
+  | empty =>
+      exact EnvTypesBorrowTargetsNonempty.empty
+  | step _hgenerated _hsource htyping ih =>
+      exact (TermTyping.borrowTargetsNonempty_of_envTypes
+        hstore htyping ih).2
+
+theorem BlockScopedGeneratedEnv.emptyStore_borrowTargetsNonempty
+    {env : Env} :
+    BlockScopedGeneratedEnv StoreTyping.empty env →
+    EnvTypesBorrowTargetsNonempty env := by
+  intro hgenerated
+  exact hgenerated.borrowTargetsNonempty
+    StoreTypingTypesBorrowTargetsNonempty.empty
+
+theorem BlockScopedReachableTermTypingOutputsCoherent.reachableEnv_facts :
+    BlockScopedReachableTermTypingOutputsCoherent →
+    ∀ {env : Env} {lifetime : Lifetime},
+      BlockScopedReachableEnv StoreTyping.empty lifetime env →
+      Coherent env ∧ EnvTypesBorrowTargetsNonempty env := by
+  intro hcoherent env lifetime hreach
+  exact ⟨hcoherent.reachableEnv hreach,
+    BlockScopedReachableEnv.emptyStore_borrowTargetsNonempty hreach⟩
+
+theorem emptyInitialTermTyping_borrowTargetsNonempty {term : Term}
+    {ty : Ty} {env₂ : Env} {lifetime : Lifetime} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    TyBorrowTargetsNonempty ty ∧ EnvTypesBorrowTargetsNonempty env₂ := by
+  intro htyping
+  exact TermTyping.borrowTargetsNonempty_of_envTypes
+    StoreTypingTypesBorrowTargetsNonempty.empty htyping
+    EnvTypesBorrowTargetsNonempty.empty
+
+theorem emptyInitialTermListTyping_borrowTargetsNonempty {terms : List Term}
+    {ty : Ty} {env₂ : Env} {lifetime : Lifetime} :
+    TermListTyping Env.empty StoreTyping.empty lifetime terms ty env₂ →
+    TyBorrowTargetsNonempty ty ∧ EnvTypesBorrowTargetsNonempty env₂ := by
+  intro htyping
+  exact TermListTyping.borrowTargetsNonempty_of_envTypes
+    StoreTypingTypesBorrowTargetsNonempty.empty htyping
+    EnvTypesBorrowTargetsNonempty.empty
 
 theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
     SourceValue value →
@@ -120,7 +594,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
       _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hranked
-      _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
+      _hrhsWF _hnotWrite ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
@@ -136,7 +610,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy
       _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
-      _hwellJoin _hcoherent _hlinear _hborrowSafe _hresultSafe
+      _hwellJoin _hlinear _hborrowSafe _hresultSafe
       ihCondition ihTrue ihFalse htypingEq candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbranchMem
@@ -168,12 +642,12 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
       _hchild _hgenerated _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
       _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-      _ihGenerated ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq
+      _ihGenerated ihCondInv ihBodyInv _ihCondEntry htypingEq
       candidate hmem
     simp [termValues] at hmem
     rcases hmem with hconditionMem | hbodyMem
-    · exact ihCondInv htypingEq candidate hconditionMem
-    · exact ihBodyInv htypingEq candidate hbodyMem
+    · exact ihBodyInv htypingEq candidate hconditionMem
+    · exact ihCondInv htypingEq candidate hbodyMem
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
       candidate hmem
@@ -342,15 +816,18 @@ initial runtime assumptions derived from typing.
 -/
 theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} {finalStore : ProgramStore} {finalValue : Value} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hmulti
+  intro hcoherentTyping hcoherentWhileInvariant htyping hmulti
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, hborrowSafe,
       _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact preservation hsource hvalidRuntime hvalidStoreTyping
+  exact preservation hcoherentTyping hcoherentWhileInvariant
+    hsource hvalidRuntime hvalidStoreTyping
     (wellFormedEnv_empty lifetime) hborrowSafe hsafe htyping hmulti
 
 /--
@@ -362,6 +839,8 @@ premise: for empty source store typing, `SourceTerm` follows from typability by
 -/
 theorem lemma_4_11_preservation_emptyInitial {term : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} {finalStore : ProgramStore} {finalValue : Value} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue env₂ ty :=
@@ -373,18 +852,21 @@ typed from the empty initial runtime state.
 -/
 theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     TerminatesAsValue ProgramStore.empty lifetime term →
     ProgressResult ProgramStore.empty lifetime term ∧
       ∃ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hterminates
+  intro hcoherentTyping hcoherentWhileInvariant htyping hterminates
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
       hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping (hwellFormed _)
+  exact typeAndBorrowSafety hcoherentTyping hcoherentWhileInvariant
+    hsource hvalidRuntime hvalidStoreTyping (hwellFormed _)
     hborrowSafe hsafe hstoreProgress htyping hterminates
 
 /--
@@ -396,6 +878,8 @@ typability derives it.
 -/
 theorem theorem_4_12_typeAndBorrowSafety_emptyInitial {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     TerminatesAsValue ProgramStore.empty lifetime term →
     ProgressResult ProgramStore.empty lifetime term ∧
@@ -538,13 +1022,16 @@ theorem sourceInitial_multistep_value_preservation
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried route. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     {lifetime : Lifetime} {ty : Ty} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hsource htyping
+  intro hcoherentTyping hcoherentWhileInvariant hsource htyping
   exact borrowInvariance_emptyStoreTyping
     (sourceInitialRuntimeState_valid hsource).1
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+    hcoherentTyping hcoherentWhileInvariant
     (wellFormedEnv_empty lifetime)
     safeAbstraction_empty
     htyping
@@ -701,14 +1188,17 @@ obligations; the typing derivation carries the required local facts.
 theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
     :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hsource htyping
+  intro hcoherentTyping hcoherentWhileInvariant hsource htyping
   exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
+    hcoherentTyping hcoherentWhileInvariant
     (sourceInitialRuntimeState_valid hsource).1
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty lifetime)
@@ -718,14 +1208,17 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried obligation route. -/
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnv env₂ lifetime := by
-  intro hsource htyping
+  intro hcoherentTyping hcoherentWhileInvariant hsource htyping
   exact borrowInvariance_of_ruleCarriedObligations
     (by
       intro env lifetime
       exact storeTypingRefsWellFormed_empty env lifetime)
+    hcoherentTyping hcoherentWhileInvariant
     (sourceInitialRuntimeState_valid hsource).1
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty lifetime)
@@ -740,18 +1233,21 @@ generated `missing` syntax is well typed and diverges by self-loop.
 -/
 theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     TerminatesAsValue ProgramStore.empty lifetime term →
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty lifetime term finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hterminates
+  intro hcoherentTyping hcoherentWhileInvariant htyping hterminates
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
       _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
+    hcoherentTyping hcoherentWhileInvariant
     (hwellFormed lifetime) hborrowSafe hsafe
     ProgramStore.finiteSupport_empty htyping hterminates).2
 
@@ -762,16 +1258,19 @@ derived from typability against the empty environment and store typing.
 -/
 theorem emptyInitial_no_stuck_states {term term' : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} {store' : ProgramStore} :
+    TermTypingOutputsCoherent →
+    WhileFixpointInvariantsCoherent →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     MultiStep ProgramStore.empty lifetime term store' term' →
     Terminal term' ∨
       ∃ store'' term'', Step store' lifetime term' store'' term'' := by
-  intro htyping hreach
+  intro hcoherentTyping hcoherentWhileInvariant htyping hreach
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hborrowSafe,
       _hstoreProgress, _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact no_stuck_states hsource hvalidRuntime hvalidStoreTyping
+  exact no_stuck_states hcoherentTyping hcoherentWhileInvariant
+    hsource hvalidRuntime hvalidStoreTyping
     (hwellFormed lifetime) hborrowSafe hsafe ProgramStore.finiteSupport_empty
     htyping hreach
 

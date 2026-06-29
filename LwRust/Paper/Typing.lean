@@ -1002,36 +1002,6 @@ def EnvWriteRhsBorrowTargetsBelow (φ : Name → Nat) (result : Env) (rhsTy : Ty
           targetOther ∈ rhsTargets) →
       x = y)
 
-/--
-Generated coherence evidence for assignment writes.
-
-This is not a typing premise.  It is the proof target for the algorithmic
-construction: old-root borrow typings in the result transport back to the
-pre-write environment, and written-root borrow typings supply their joint target
-typing directly in the result.
--/
-structure EnvWriteCoherenceObligations
-    (env result : Env) (writeBase : Name) : Prop where
-  old_root_transport
-    {lv : LVal} {mutable : Bool} {targets : List LVal}
-    {borrowLifetime : Lifetime} :
-    LVal.base lv ≠ writeBase →
-    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
-    (∃ oldBorrowLifetime,
-      LValTyping env lv (.ty (.borrow mutable targets)) oldBorrowLifetime) ∧
-      (∀ targetTy targetLifetime,
-        LValTargetsTyping env targets (.ty targetTy) targetLifetime →
-        ∃ resultTargetTy resultTargetLifetime,
-          LValTargetsTyping result targets (.ty resultTargetTy)
-            resultTargetLifetime)
-  written_root_coherent
-    {lv : LVal} {mutable : Bool} {targets : List LVal}
-    {borrowLifetime : Lifetime} :
-    LVal.base lv = writeBase →
-    LValTyping result lv (.ty (.borrow mutable targets)) borrowLifetime →
-    ∃ targetTy targetLifetime,
-      LValTargetsTyping result targets (.ty targetTy) targetLifetime
-
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
   ∃ x targets target,
@@ -1122,15 +1092,17 @@ component used by drop/update preservation.
 Note the deliberate separation from Definition 3.21 (`WellFormedTy`, the
 well-formed *type* judgement): the paper's `L-Borrow` premise `Γ ⊢ u : ⟨T⟩^m`
 types the whole target set *jointly* (one shared target type `T`).  That joint
-typing is what the typing rules establish when a borrow is **created** (T-LvBor
-produces an `LValTargetsTyping`).  The well-formedness invariant that must be
-**preserved** through execution, however, is only the per-target statement of
-Definition 4.8(i).  Conflating the two — carrying the joint typing as the runtime
-invariant — is unsound at environment joins: rule W-Bor merges the target lists
-of two borrows (`&u₁ ⊔ &u₂ = &(u₁ ⊔ u₂)`) without requiring their target types
-to join, so the merged list has no joint typing in general, yet each target
-retains its own per-target typing.  Keeping this predicate per-target is exactly
-what makes borrow invariance provable across joins. -/
+typing is what the typing rules establish when a borrow is **created** and what
+the assignment-specific `ShapeCompatible` premises preserve when a write grows a
+mutable borrow target list.
+
+The well-formedness invariant that must be **preserved** through execution is
+only the per-target statement of Definition 4.8(i).  It is enough for runtime
+borrow invariance across environment joins because every target of a joined
+borrow comes from one side or the other.  It is intentionally weaker than the
+lvalue-facing `Coherent` predicate below: `Coherent` needs joint target-list
+typing, and assignment-created joins get that evidence from the write rules, not
+from generic `EnvJoinSameShape` facts. -/
 inductive BorrowTargetsWellFormed : Env → List LVal → Lifetime → Prop where
   | intro {env : Env} {targets : List LVal} {lifetime : Lifetime} :
       (∀ target, target ∈ targets →
@@ -1219,10 +1191,86 @@ def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=
 Coherence of contained borrows: every borrow-typed lvalue has jointly typeable
 targets, which is what `T-LvBor` needs for reborrows.
 -/
+def PartialTyCoherent (env : Env) (partialTy : PartialTy) : Prop :=
+  ∀ mutable targets,
+    PartialTyContains partialTy (.borrow mutable targets) →
+    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+
+def TyCoherent (env : Env) (ty : Ty) : Prop :=
+  PartialTyCoherent env (.ty ty)
+
+/-- Every contained borrow has at least one syntactic target. -/
+def PartialTyBorrowTargetsNonempty (partialTy : PartialTy) : Prop :=
+  ∀ mutable targets,
+    PartialTyContains partialTy (.borrow mutable targets) →
+    targets ≠ []
+
+def TyBorrowTargetsNonempty (ty : Ty) : Prop :=
+  PartialTyBorrowTargetsNonempty (.ty ty)
+
+def EnvTypesBorrowTargetsNonempty (env : Env) : Prop :=
+  ∀ x slot,
+    env.slotAt x = some slot →
+    PartialTyBorrowTargetsNonempty slot.ty
+
+def EnvTypesCoherent (env : Env) : Prop :=
+  ∀ x slot,
+    env.slotAt x = some slot →
+    PartialTyCoherent env slot.ty
+
+/--
+Recursive lvalue-facing coherence for every partial type observed by lvalue
+typing.
+
+This is the induction-friendly strengthening of `LValTypingOutputsCoherent`.
+`T-LvBox` observes a partial `.box ...` type before exposing its inner type, so
+the source-level coherence proof cannot induct only over full `(.ty T)` lvalue
+outputs.
+-/
+def LValTypingPartialOutputsCoherent (env : Env) : Prop :=
+  ∀ lv partialTy lifetime,
+    LValTyping env lv partialTy lifetime →
+    PartialTyCoherent env partialTy
+
+/--
+Recursive lvalue-facing coherence: every full type that can be observed by
+typing an lvalue is itself coherent.  This is stronger than slot-local
+`EnvTypesCoherent` because dereferencing a borrow observes the type produced by
+jointly typing the borrow target list, and that produced type also has to carry
+coherent contained borrows.
+-/
+def LValTypingOutputsCoherent (env : Env) : Prop :=
+  ∀ lv ty lifetime,
+    LValTyping env lv (.ty ty) lifetime →
+    TyCoherent env ty
+
+/--
+Environment coherence is the lvalue-facing analogue of `TyCoherent`: every
+borrow-typed lvalue has jointly typeable targets.
+-/
 def Coherent (env : Env) : Prop :=
   ∀ lv mutable targets borrowLifetime,
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
     ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+
+theorem LValTypingOutputsCoherent.coherent {env : Env} :
+    LValTypingOutputsCoherent env →
+    Coherent env := by
+  intro houtputs lv mutable targets borrowLifetime htyping
+  exact houtputs lv (.borrow mutable targets) borrowLifetime htyping
+    mutable targets PartialTyContains.here
+
+theorem LValTypingPartialOutputsCoherent.outputs {env : Env} :
+    LValTypingPartialOutputsCoherent env →
+    LValTypingOutputsCoherent env := by
+  intro houtputs lv ty lifetime htyping
+  exact houtputs lv (.ty ty) lifetime htyping
+
+theorem LValTypingPartialOutputsCoherent.coherent {env : Env} :
+    LValTypingPartialOutputsCoherent env →
+    Coherent env := by
+  intro houtputs
+  exact LValTypingOutputsCoherent.coherent houtputs.outputs
 
 theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
     LinearizedBy φ env → Linearizable env := by
@@ -1233,6 +1281,26 @@ theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
 def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
   ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
     Coherent env ∧ Linearizable env
+
+/-- The non-coherence part of Definition 4.8.
+
+Raw typing derivations can preserve these fields without proving static
+`Coherent`: coherence is only expected for generated/reachable environments. -/
+def WellFormedEnvCore (env : Env) (lifetime : Lifetime) : Prop :=
+  ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
+    Linearizable env
+
+theorem WellFormedEnv.core {env : Env} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime → WellFormedEnvCore env lifetime := by
+  intro hwell
+  exact ⟨hwell.1, hwell.2.1, hwell.2.2.2⟩
+
+theorem WellFormedEnv.of_core_coherent {env : Env} {lifetime : Lifetime} :
+    WellFormedEnvCore env lifetime →
+    Coherent env →
+    WellFormedEnv env lifetime := by
+  intro hcore hcoherent
+  exact ⟨hcore.1, hcore.2.1, hcoherent, hcore.2.2⟩
 
 /--
 Definition 4.13, borrow-safe environment.
@@ -1287,6 +1355,17 @@ def TyLoanFree (ty : Ty) : Prop :=
 def PartialTyLoanFree (ty : PartialTy) : Prop :=
   PartialTyBorrowFree ty
 
+/--
+Shape agreement between a branch/input environment and a joined/generated
+environment.
+
+This is transport evidence only: it lets already-established lvalue facts move
+across a join without changing initialization shape.  It is not a coherence
+source.  In particular, assignment coherence comes from the assignment rules
+below: writes can change target lists only at strong/weak leaves guarded by
+`ShapeCompatible`, and writes through borrow nodes are accepted only by the
+mutable-borrow fan-out case of `UpdateAtPath`.
+-/
 def EnvJoinSameShape (branch join : Env) : Prop :=
   ∀ x branchSlot joinSlot,
     branch.slotAt x = some branchSlot →
@@ -1408,7 +1487,10 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
       ShapeCompatible env left right →
       ShapeCompatible env (.box left) (.box right)
   /-- S-Bor.  Borrow shapes are compatible when their target-list output types
-  are shape-compatible in the current environment. -/
+  are shape-compatible in the current environment.  This is the assignment
+  premise that permits a borrow leaf to grow: the two target lists are not
+  merely same-shaped, they must be jointly typable with compatible output
+  shapes in this environment. -/
   | borrow {env : Env} {mutable : Bool} {leftTargets rightTargets : List LVal}
       {leftTy rightTy : Ty} :
       (∀ leftTarget, leftTarget ∈ leftTargets →
@@ -1445,6 +1527,10 @@ mutual
         {inner updatedInner : PartialTy} {ty : Ty} :
         UpdateAtPath rank env₁ path inner ty env₂ updatedInner →
         UpdateAtPath rank env₁ (() :: path) (.box inner) ty env₂ (.box updatedInner)
+    /-- Borrow traversal for assignment is mutable-only.  This is the only
+    `UpdateAtPath` constructor that can change the side environment while a
+    path is still being walked; it fans the remaining write out to the current
+    mutable borrow targets at positive rank. -/
     | mutBorrow {env₁ env₂ : Env} {rank : Nat} {path : List Unit}
         {targets : List LVal} {ty : Ty} :
         WriteBorrowTargets (rank + 1) env₁ path targets ty env₂ →
@@ -1654,19 +1740,18 @@ mutual
     post-condition environment, and the resulting type/environment are the
     joins (Definitions 3.8 and 3.10) of the branch results.
 
-    Legacy mechanisation obligations on the joined result, following the
-    repo's earlier convention of rule-carried obligations (cf. `T-Assign`).
-    The intended endpoint is that these invariants are derived for environments
-    reachable from `Env.empty`, rather than supplied by each typing derivation:
+    Mechanisation obligations still carried on the joined result:
 
     * `EnvJoinSameShape` for both branches — branches must agree on each
       variable's initialisation state (see that definition for why the
       paper's more liberal join is unsound against Definition 4.4 as
       printed);
-    * `Coherent`, `Linearizable` — the result invariants needed to type
-      dereferences through joined borrow target lists.  The per-target
-      `ContainedBorrowsWellFormed` invariant is derived in the preservation
-      proof from the branch invariants plus these result obligations;
+    * `Linearizable` — the result rank invariant needed by lvalue
+      determinism and transport.  `Coherent` is intentionally no longer a
+      premise of this rule; for real source programs it has to follow from
+      generated reachability.  The joins only combine reachable branch outputs;
+      borrow-list growth is justified at the assignment leaves by
+      `ShapeCompatible`, not by `EnvJoinSameShape`;
     * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
       variables into one target list, in which case the joined environment
       is genuinely not borrow safe even though each branch is.  The
@@ -1741,11 +1826,12 @@ mutual
     that widen borrow target lists across iterations (e.g. re-pointing an
     outer `&mut` inside the body).
 
-    This is the legacy relational version of the loop rule.  Its join result
-    and invariant are still supplied by the derivation, so it carries the
-    shape and invariant obligations needed by the existing preservation proof.
-    The intended endpoint is that loop invariants are accepted only when they
-    are reachable fixed points, so coherence follows from construction.
+    The invariant is generated by `WhileFixpointIteration`, whose `done` case
+    checks one concrete iteration at the candidate.  The rule still carries the
+    non-coherence invariants consumed by the existing preservation proof;
+    coherence is intended to follow because each fixed-point candidate is
+    reached by typed iterations whose writes carry assignment compatibility,
+    not from a separate `Coherent envInv` premise or from `EnvJoinSameShape`.
 
     The final two premises re-type the condition and body from the
     *entry-side* environments.  In real Rust this is implied: per-code

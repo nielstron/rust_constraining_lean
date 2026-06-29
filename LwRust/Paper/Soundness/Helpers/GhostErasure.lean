@@ -1288,6 +1288,22 @@ theorem Coherent.erase_ghost {env : Env} {ghost : Name} :
     not_mentions_of_mem_borrow_allVars hborrowFresh
   exact ⟨targetTy, targetLifetime, LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
 
+theorem TyCoherent.erase_ghost {env : Env} {ghost : Name} {ty : Ty} :
+    TyCoherent env ty →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    ghost ∉ Ty.allVars ty →
+    TyCoherent (env.erase ghost) ty := by
+  intro hcoherent hfresh htyFresh mutable targets hcontains
+  rcases hcoherent mutable targets hcontains with
+    ⟨targetTy, targetLifetime, htargets⟩
+  have hpartialFresh : ghost ∉ PartialTy.allVars (.ty ty) := by
+    simpa [PartialTy.allVars] using htyFresh
+  have htargetsNot :
+      ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+    not_mentions_of_partialTy_contains_allVars hpartialFresh hcontains
+  exact ⟨targetTy, targetLifetime,
+    LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
+
 theorem LinearizedBy.erase_ghost {φ : Name → Nat} {env : Env}
     {ghost : Name} :
     LinearizedBy φ env →
