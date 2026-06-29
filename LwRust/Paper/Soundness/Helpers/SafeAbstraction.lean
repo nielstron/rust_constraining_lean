@@ -1596,7 +1596,7 @@ theorem safeAbstraction_move_var {store : ProgramStore} {env : Env}
       env.slotAt y = some envSlot →
       store.slotAt (VariableProjection y) =
         some { value := value, lifetime := envSlot.lifetime } →
-      ValidPartialValue
+      ValidSlotValue
         (store.update (VariableProjection x)
           { value := .undef, lifetime := slot.lifetime })
         value envSlot.ty) →
@@ -1644,7 +1644,7 @@ theorem safeAbstraction_move_var {store : ProgramStore} {env : Env}
       rcases hsafe.2 y envSlot holdEnv with ⟨value, hstore, _hvalid⟩
       exact ⟨value, by
           simpa [ProgramStore.update, VariableProjection, hyx] using hstore,
-        (hpreserveOld y envSlot value hyx holdEnv hstore).toValidSlotValue⟩
+        hpreserveOld y envSlot value hyx holdEnv hstore⟩
 
 /-- Lemma 9.10, variable `R-Move` store-preservation fragment. -/
 theorem storePreservation_move_var_step {store store' : ProgramStore}
@@ -1659,7 +1659,7 @@ theorem storePreservation_move_var_step {store store' : ProgramStore}
       env₁.slotAt y = some envSlot →
       store.slotAt (VariableProjection y) =
         some { value := oldValue, lifetime := envSlot.lifetime } →
-      ValidPartialValue store' oldValue envSlot.ty) →
+      ValidSlotValue store' oldValue envSlot.ty) →
     store' ∼ₛ env₂ := by
   intro hsafe henvSlot hmove hstep hpreserveOld
   cases hstep with

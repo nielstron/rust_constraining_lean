@@ -897,7 +897,7 @@ theorem preservation_move_var_step_runtime {store store' : ProgramStore}
       env₁.slotAt y = some envSlot →
       store.slotAt (VariableProjection y) =
         some { value := oldValue, lifetime := envSlot.lifetime } →
-      ValidPartialValue store' oldValue envSlot.ty) →
+      ValidSlotValue store' oldValue envSlot.ty) →
     ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
       ValidValue store' value ty := by
   intro _hwellFormed hsafe hvalidRuntime henvSlot hmove _htyping hstep hvalidValue
@@ -968,10 +968,10 @@ theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStor
         env₁.slotAt y = some envSlot →
         store.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := envSlot.lifetime } →
-        ValidPartialValue store' oldValue envSlot.ty := by
+        ValidSlotValue store' oldValue envSlot.ty := by
     intro y envSlot oldValue hyx henvY hstoreY
     rw [hstore']
-    exact RuntimeFrame.validPartialValue_update_of_not_reaches
+    exact RuntimeFrame.validSlotValue_update_of_not_reaches
       (by
         rcases hsafe.2 y envSlot henvY with ⟨safeValue, hsafeSlot, hvalidOld⟩
         rw [hstoreY] at hsafeSlot
@@ -1149,7 +1149,7 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
       ∃ oldValue,
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
+        ValidSlotValue store' oldValue otherEnvSlot.ty) →
     ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
       ValidValue store' .unit .unit := by
   intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hvalidValue
@@ -1222,7 +1222,7 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
     · rw [hstoreAfterWrite]
       simpa [ProgramStore.update, VariableProjection, hyx] using hstoreY
     · rw [hstoreAfterWrite]
-      exact RuntimeFrame.validPartialValue_update_of_not_reaches hvalidOld
+      exact RuntimeFrame.validSlotValue_update_of_not_reaches hvalidOld
         (hotherFrames y otherEnvSlot oldValue hyx henvY hstoreY)
   exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
