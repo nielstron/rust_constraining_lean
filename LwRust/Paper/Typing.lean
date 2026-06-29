@@ -1393,6 +1393,19 @@ theorem EnvJoin.right_le {left right join : Env} :
   intro hjoin
   exact hjoin.1 (by simp)
 
+theorem EnvStrengthens.finiteSupport {source result : Env} :
+    EnvStrengthens source result →
+    Env.FiniteSupport source →
+    Env.FiniteSupport result := by
+  intro hstr hfinite
+  rcases hfinite with ⟨support, hsupport⟩
+  refine ⟨support, ?_⟩
+  intro x resultSlot hresultSlot
+  have h := hstr x
+  cases hsource : source.slotAt x with
+  | none => rw [hsource, hresultSlot] at h; exact False.elim h
+  | some sourceSlot => exact hsupport x sourceSlot hsource
+
 theorem EnvJoin.finiteSupport_left {left right join : Env} :
     EnvJoin left right join →
     Env.FiniteSupport left →
@@ -1770,9 +1783,15 @@ mutual
         TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
         TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
         PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
-        EnvJoin env₃ env₄ env₅ →
-        EnvJoinSameShape env₃ env₅ →
-        EnvJoinSameShape env₄ env₅ →
+        -- `env₅` is a *sanitized* join: an upper bound of both branch results
+        -- (so the executed branch transports into it) whose borrows are still
+        -- well formed.  Replacing the LUB `EnvJoin` + `EnvJoinSameShape` with
+        -- `EnvStrengthens` + `ContainedBorrowsWellFormed` lets a branch move out
+        -- a (possibly borrowed) variable: the join lifts the affected slots to
+        -- `undef`, which is still an upper bound and keeps CBWF strong.
+        EnvStrengthens env₃ env₅ →
+        EnvStrengthens env₄ env₅ →
+        ContainedBorrowsWellFormed env₅ →
         WellFormedTy env₅ joinTy lifetime →
         Linearizable env₅ →
         BorrowSafeEnv env₅ →
@@ -1849,9 +1868,11 @@ mutual
         LifetimeChild lifetime bodyLifetime →
         WhileFixpointIteration env₁ typing lifetime bodyLifetime condition body
           env₁ envInv env₂ env₃ envBack bodyTy →
-        EnvJoin env₁ envBack envInv →
-        EnvJoinSameShape env₁ envInv →
-        EnvJoinSameShape envBack envInv →
+        -- Sanitized join (see `T-If`): `envInv` is an upper bound of the entry
+        -- and back-edge environments whose borrows stay well formed, replacing
+        -- the LUB `EnvJoin` + `EnvJoinSameShape`.
+        EnvStrengthens env₁ envInv →
+        EnvStrengthens envBack envInv →
         ContainedBorrowsWellFormed envInv →
         Linearizable envInv →
         BorrowSafeEnv envInv →
@@ -2006,16 +2027,16 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
         _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
       rw [henvEq]
       exact (ihRhs (ihLhs hfinite).update).erase)
-    (fun _hcondition _htrue _hfalse _htyJoin henvJoin _hsameLeft
-        _hsameRight _hwellTy _hlinear _hborrowSafe _htySafe
+    (fun _hcondition _htrue _hfalse _htyJoin hstr3 _hstr4
+        _hcbwf _hwellTy _hlinear _hborrowSafe _htySafe
         ihCondition ihTrue _ihFalse hfinite =>
-      EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
+      EnvStrengthens.finiteSupport hstr3 (ihTrue (ihCondition hfinite)))
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hfinite =>
       ihTrue (ihCondition hfinite))
     (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
       ihCondition hfinite)
-    (fun _hchild _hgenerated _hjoin _hsameEntry _hsameBack _hcontained
+    (fun _hchild _hgenerated _hstr1 _hstrBack _hcontained
         _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
         _hwellTy _hback _hentryCondition _hentryBody ihGenerated ihCondition
         _ihBody _ihEntryCondition _ihEntryBody hfinite =>
