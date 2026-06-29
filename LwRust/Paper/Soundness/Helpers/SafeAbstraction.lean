@@ -765,26 +765,21 @@ theorem safeAbstraction_transport_sameShape {store : ProgramStore}
           sourceSlot.lifetime = resultSlot.lifetime) →
     store ∼ₛ result := by
   intro hsafe hback hfwd
-  refine safeAbstraction_of_domain_and_slots ?domain ?slots
-  · intro x
-    constructor
-    · intro hstoreDomain
-      rcases (hsafe.1 x).mp hstoreDomain with ⟨sourceSlot, hsource⟩
-      rcases hfwd x sourceSlot hsource with ⟨resultSlot, hresult, _⟩
-      exact ⟨resultSlot, hresult⟩
-    · intro hresultDomain
-      rcases hresultDomain with ⟨resultSlot, hresult⟩
-      rcases hback x resultSlot hresult with
-        ⟨sourceSlot, hsource, _hlife, _hstrength, _hshape⟩
-      exact (hsafe.1 x).mpr ⟨sourceSlot, hsource⟩
-  · intro x resultSlot hresult
-    rcases hback x resultSlot hresult with
-      ⟨sourceSlot, hsource, hlife, hstrength, hshape⟩
-    rcases hsafe.2 x sourceSlot hsource with
-      ⟨value, hstore, hvalid⟩
-    refine ⟨value, ?_, ?_⟩
-    · simpa [hlife] using hstore
-    · exact ValidSlotValue.mono_strengthens hstrength hvalid
+  -- Delegate to the plain `EnvStrengthens` transport: the per-slot maps give
+  -- exactly an `EnvStrengthens env result`.
+  refine SafeAbstraction.strengthens ?_ hsafe
+  intro x
+  cases hr : result.slotAt x with
+  | none =>
+      cases he : env.slotAt x with
+      | none => trivial
+      | some s =>
+          obtain ⟨r, hrr, _⟩ := hfwd x s he
+          exact absurd (hrr.symm.trans hr) (by simp)
+  | some r =>
+      obtain ⟨s, hs, hlife, hstrength, _hshape⟩ := hback x r hr
+      rw [hs]
+      exact ⟨hlife, hstrength⟩
 
 theorem safeAbstraction_env_no_lifetime_of_store_no_lifetime {store : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
