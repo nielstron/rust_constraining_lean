@@ -9833,7 +9833,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                       intro mutable targets hcontains
                       exact hwellFormed.1 y otherEnvSlot mutable targets henvY
                         ⟨otherEnvSlot, henvY, hcontains⟩
-                    rcases RuntimeFrame.reaches_owner_source_of_validPartialValue
+                    rcases RuntimeFrame.reaches_owner_source_of_validSlotValue
                         hborrows hvalidOldWrite hreach with hdirect | hsource
                     · have holdValueOwns :
                           oldValue = .value (owningRef reached) :=
@@ -9894,12 +9894,12 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                       hdropValuesHeap hdropValuesUnprotectedWrite
                       hborrowsOldPost hdependency
                   have hvalidOldFinal :
-                      ValidPartialValue store' oldValue otherEnvSlot.ty :=
-                    RuntimeFrame.validPartialValue_drops_of_avoids_reaches
+                      ValidSlotValue store' oldValue otherEnvSlot.ty :=
+                    RuntimeFrame.validSlotValue_drops_of_avoids_reaches
                       hdrops hvalidOldWrite
                       (by
                         intro reached hreach
-                        exact RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValue
+                        exact RuntimeFrame.dropsAvoids_of_reaches_stored_validSlotValue
                           hdrops hwriteValidStore hslotYWrite
                           (by
                             intro mutable targets hcontains
