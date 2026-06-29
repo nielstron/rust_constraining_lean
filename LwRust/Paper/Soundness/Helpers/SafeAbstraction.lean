@@ -1542,7 +1542,7 @@ theorem safeAbstraction_declare {store : ProgramStore} {env : Env}
       exact ⟨oldValue, by
           simpa [ProgramStore.declare, ProgramStore.update, VariableProjection, hyx]
             using hstoreSlot,
-        hpreserveOld y envSlot oldValue hyx holdEnv hstoreSlot⟩
+        (hpreserveOld y envSlot oldValue hyx holdEnv hstoreSlot).toValidSlotValue⟩
 
 /--
 Lemma 9.10 support, variable `R-Move` safe-abstraction preservation.
@@ -1611,7 +1611,7 @@ theorem safeAbstraction_move_var {store : ProgramStore} {env : Env}
       rcases hsafe.2 y envSlot holdEnv with ⟨value, hstore, _hvalid⟩
       exact ⟨value, by
           simpa [ProgramStore.update, VariableProjection, hyx] using hstore,
-        hpreserveOld y envSlot value hyx holdEnv hstore⟩
+        (hpreserveOld y envSlot value hyx holdEnv hstore).toValidSlotValue⟩
 
 /-- Lemma 9.10, variable `R-Move` store-preservation fragment. -/
 theorem storePreservation_move_var_step {store store' : ProgramStore}
