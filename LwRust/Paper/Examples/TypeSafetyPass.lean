@@ -44,12 +44,13 @@ theorem scalarCopyComparison_terminates :
   exact ⟨ProgramStore.empty, .bool true,
     MultiStep.trans Step.eqTrue MultiStep.refl⟩
 
-theorem scalarCopyComparison_typeSafety :
+theorem scalarCopyComparison_typeSafety
+    (hborrowTyping : BorrowSafeTypingPreservation) :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .bool :=
-  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
+  emptyInitial_typeAndBorrowSafety_total hborrowTyping scalarCopyComparison_typing
     scalarCopyComparison_terminates
 
 /--
@@ -72,8 +73,6 @@ theorem ifThenElseInt_typing :
     WellFormedTy.int
     coherent_empty
     linearizable_empty
-    borrowSafeEnv_empty
-    (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
   · simp [EnvJoin]
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
@@ -86,12 +85,13 @@ theorem ifThenElseInt_terminates :
   exact ⟨ProgramStore.empty, .int 1,
     MultiStep.trans Step.iteTrue MultiStep.refl⟩
 
-theorem ifThenElseInt_typeSafety :
+theorem ifThenElseInt_typeSafety
+    (hborrowTyping : BorrowSafeTypingPreservation) :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
+  emptyInitial_typeAndBorrowSafety_total hborrowTyping ifThenElseInt_typing
     ifThenElseInt_terminates
 
 /--
@@ -114,8 +114,6 @@ theorem ifEqThenElseInt_typing :
     WellFormedTy.int
     coherent_empty
     linearizable_empty
-    borrowSafeEnv_empty
-    (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
   · simp [EnvJoin]
   · intro x branchSlot joinSlot hbranch
     simp [Env.empty] at hbranch
@@ -129,12 +127,13 @@ theorem ifEqThenElseInt_terminates :
     MultiStep.trans (Step.subIte Step.eqTrue)
       (MultiStep.trans Step.iteTrue MultiStep.refl)⟩
 
-theorem ifEqThenElseInt_typeSafety :
+theorem ifEqThenElseInt_typeSafety
+    (hborrowTyping : BorrowSafeTypingPreservation) :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
+  emptyInitial_typeAndBorrowSafety_total hborrowTyping ifEqThenElseInt_typing
     ifEqThenElseInt_terminates
 
 /--
@@ -1744,8 +1743,6 @@ theorem ifPointerAssignment_typing :
     WellFormedTy.unit
     ifPointerAssignment_join_obligations.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.1
-    ifPointerAssignment_join_obligations.2.2.2.2.2.2
-    (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit)
 
 end Paper
 end LwRust

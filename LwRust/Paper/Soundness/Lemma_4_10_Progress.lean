@@ -1031,8 +1031,8 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
-      _hsameLeft _hsameRight _hwellJoin _hcoherent _hlinear _hborrowSafe
-      _hresultSafe ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
+      _hsameLeft _hsameRight _hwellJoin _hcoherent _hlinear ihCondition
+      _ihTrue _ihFalse hsize hvst hwf hsafe hstore
     rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
         hvst.ite_condition hwf hsafe hstore with
       hterminalCondition | hstepCondition

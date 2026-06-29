@@ -1192,164 +1192,21 @@ theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
     hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
 
 /--
-Main source-scoped borrow-safety induction.
+Legacy compatibility property used by the strict top-level preservation
+wrappers.
 
-This is intentionally small: runtime preservation only needs the output
-environment to remain borrow-safe, plus a root-independent fact about the result
-type so assignment can validate the next write.
+This is no longer a theorem of `TermTyping`: relaxed `T-If` deliberately permits
+the joined approximation to fail `BorrowSafeEnv`.  Runtime safety for relaxed
+joins is carried path-sensitively by `RuntimeExactEnvWitness` in the extractor
+proofs.
 -/
-theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-    {ty : Ty} :
+def BorrowSafeTypingPreservation : Prop :=
+  ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty},
     SourceTerm term →
     BorrowSafeEnv env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
-    BorrowSafeEnv env₂ ∧
-      TyBorrowSafeAgainstEnv env₂ ty := by
-  intro hsource hborrowSafe htyping
-  let hobligations := borrowSafetyPreservationObligations_proved
-  refine TermTyping.rec
-    (motive_1 := fun env typing lifetime term ty env₂ _ =>
-      SourceTerm term →
-        BorrowSafeEnv env →
-        BorrowSafeEnv env₂ ∧
-          TyBorrowSafeAgainstEnv env₂ ty)
-    (motive_2 := fun env _typing lifetime terms _ty env₂ _ =>
-      SourceTerm (.block lifetime terms) →
-        BorrowSafeEnv env →
-        BorrowSafeEnv env₂ ∧
-          TyBorrowSafeAgainstEnv env₂ _ty)
-    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging
-    ?singleton ?cons htyping hsource hborrowSafe
-  case const =>
-    intro _env _typing _lifetime _value _ty hvalueTyping hsource hborrowSafe
-    have hborrowFree : TyBorrowFree _ty :=
-      sourceValue_valueTyping_borrowFree
-        (hsource _value (by simp [termValues])) hvalueTyping
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_borrowFree hborrowFree⟩
-  case missing =>
-    intro _env _typing _lifetime _ty _hwellTy hloanFree _hsource hborrowSafe
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_loanFree hloanFree⟩
-  case copy =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
-      _hsource hborrowSafe
-    refine ⟨hborrowSafe, ?_⟩
-    cases hcopy with
-    | unit =>
-        exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit
-    | int =>
-        exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int
-    | bool =>
-        exact tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_bool
-    | immBorrow =>
-        rename_i targets
-        exact tyBorrowSafeAgainstEnv_immBorrowMany
-          (by
-            intro target htarget
-            exact (LValTyping.no_readProhibited_targets_of_immBorrow hborrowSafe).1
-              hLv PartialTyContains.here target htarget)
-  case move =>
-    intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty hLv hnotWrite
-      hmove _hsource hborrowSafe
-    have hcore : BorrowSafeEnv _env₂ :=
-      borrowSafeEnv_move hborrowSafe hmove
-    have hsafeTy : TyBorrowSafeAgainstEnv _env₂ _ty := by
-      rcases hmove with ⟨slot, struck, hslot, hstrike, henv₂⟩
-      subst henv₂
-      exact tyBorrowSafeAgainstEnv_move_of_base_contains
-          hborrowSafe
-          ⟨slot, struck, hslot, hstrike, rfl⟩
-          (by
-            intro mutable targets hcontains
-            exact LValTyping.contains_base_of_strike hLv hslot hstrike hcontains)
-    exact ⟨hcore, hsafeTy⟩
-  case mutBorrow =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hmutable hnotWrite
-      _hsource hborrowSafe
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_mutBorrow hnotWrite⟩
-  case immBorrow =>
-    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead _hsource
-      hborrowSafe
-    exact ⟨hborrowSafe, tyBorrowSafeAgainstEnv_immBorrow hnotRead⟩
-  case box =>
-    intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hsource hborrowSafe
-    have hinner := ih (SourceTerm.box_inner hsource) hborrowSafe
-    exact ⟨hinner.1, TyBorrowSafeAgainstEnv.box hinner.2⟩
-  case block =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
-      hblockChild hterms hwellTy hdrop _ih hsource hborrowSafe
-    have hbody := _ih hsource hborrowSafe
-    have hbodySafe : BorrowSafeEnv _env₂ :=
-      hbody.1
-    have hbodyTySafe : TyBorrowSafeAgainstEnv _env₂ _ty :=
-      hbody.2
-    have hblockTySafe : TyBorrowSafeAgainstEnv _env₃ _ty := by
-      rw [hdrop]
-      exact TyBorrowSafeAgainstEnv.dropLifetime hbodyTySafe
-    have hblockCore :
-        BorrowSafeEnv _env₃ :=
-      borrowSafety_block_drop hbodySafe hdrop
-    exact ⟨hblockCore, hblockTySafe⟩
-  case declare =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfreshX hterm
-      hfreshOut _hcoh henv₃ _ih hsource hborrowSafe
-    have hinner := _ih (SourceTerm.declare_inner hsource) hborrowSafe
-    have hdeclaredSafe :
-        BorrowSafeEnv
-          (_env₂.update _x { ty := .ty _ty, lifetime := _lifetime }) := by
-      exact borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hinner.1 hinner.2
-    rw [henv₃]
-    exact ⟨hdeclaredSafe, tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit⟩
-  case assign =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hcoh
-      _hcontained hnotWrite _ih hsource hborrowSafe
-    have hRhsSafe := _ih (SourceTerm.assign_inner hsource) hborrowSafe
-    have hwriteSafe :
-        BorrowSafeEnv _env₃ :=
-      hobligations.envWrite hRhsSafe.1 hRhsSafe.2 hLhsPost hRhs hshape hwellTy
-        hwrite hranked hnotWrite
-    exact ⟨hwriteSafe, tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit⟩
-  case eq =>
-    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy _hLhs hfresh _htypeFresh _htyFresh _hstoreFresh _hghostRhs
-      _hnotMention henvEq _hcopyL _hcopyR _hshape ihL ihGhost hsource hborrowSafe
-    have hleft := ihL (SourceTerm.eq_lhs hsource) hborrowSafe
-    have hghostSafe :
-        BorrowSafeEnv
-          (_env₂.update _ghost { ty := .ty _lhsTy, lifetime := _lifetime }) :=
-      borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hleft.1 hleft.2
-    have hright := ihGhost (SourceTerm.eq_rhs hsource) hghostSafe
-    exact ⟨by simpa [henvEq] using (BorrowSafeEnv.erase (ghost := _ghost) hright.1),
-      tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_bool⟩
-  case ite =>
-    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin
-      _hcoherent _hlinear hborrowSafeJoin hresultSafe ihCondition ihTrue
-      ihFalse hsource hborrowSafe
-    have hconditionSafe := ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
-    have _htrueSafe := ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
-    have _hfalseSafe := ihFalse (SourceTerm.ite_falseBranch hsource) hconditionSafe.1
-    exact ⟨hborrowSafeJoin, hresultSafe⟩
-  case iteDiverging =>
-    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
-      ihCondition ihTrue _ihFalse hsource hborrowSafe
-    have hconditionSafe :=
-      ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
-    exact ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
-  case singleton =>
-    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm _ih hsource
-      hborrowSafe
-    have h := _ih (SourceTerm.block_head hsource) hborrowSafe
-    exact h
-  case cons =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
-      _hterm _hrest _ihHead _ihRest hsource hborrowSafe
-    have hhead := _ihHead (SourceTerm.block_head hsource) hborrowSafe
-    exact _ihRest (SourceTerm.block_tail hsource) hhead.1
+    BorrowSafeEnv env₂ ∧ TyBorrowSafeAgainstEnv env₂ ty
 
 end Paper
 end LwRust

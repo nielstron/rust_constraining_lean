@@ -1100,12 +1100,11 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihGhost (SourceTerm.eq_rhs hsource))
         hnotMention henvEq hcopyL hcopyR hshape)
     (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
-        hcoherent hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
+        hcoherent hlinear ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear hborrowSafe
-        hresultSafe)
+        hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear)
     (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
         hsource =>
       TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
@@ -3672,8 +3671,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
         (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
               _trueBranch _falseBranch _trueTy _falseTy _joinTy}
             _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
-            hwellJoin hcoherent hlinear _hborrowSafe _hresultSafe
-            ihCondition ihTrue ihFalse hsize htypingEq hwellFormed =>
+            hwellJoin hcoherent hlinear ihCondition ihTrue ihFalse hsize
+            htypingEq hwellFormed =>
           let conditionResult := ihCondition
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq hwellFormed
@@ -3824,7 +3823,7 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition _trueBranch
           _falseBranch _trueTy _falseTy _joinTy}
         _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight hwellJoin
-        hcoherent hlinear _hborrowSafe _hresultSafe ihCondition ihTrue ihFalse
+        hcoherent hlinear ihCondition ihTrue ihFalse
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       let trueResult := ihTrue htypingEq conditionResult.1

@@ -1,20 +1,19 @@
 import LwRust.Extractor.Extractors.NestedBlocks
 
 /-!
-Completeness of the nested-block extractor for a relaxed control-flow typing
-relation.
+Completeness of the nested-block extractor for a control-flow typing relation
+whose `if` joins are relaxed.
 
-The strict mechanisation checks borrow safety after `if` environment joins so
-that the global borrow-safety theorem can thread a safe environment through all
-typing rules.  This file keeps the same syntax, extractor, and all non-join
-obligations, but defines a relaxed typing relation that does not enforce the
-post-merge borrow-safety premises:
+The paper-facing `TermTyping.ite` rule now also omits the old post-merge
+borrow-safety premises.  This file keeps a separate `RelaxedTermTyping`
+relation because the extractor proof was developed against that relation and
+the path-sensitive preservation/progress frontiers still use it:
 
 * `T-If` omits `BorrowSafeEnv` for the joined environment and
   `TyBorrowSafeAgainstEnv` for the joined result type.
 
-The result below is only extractor completeness for that relaxed checker.  It
-does not claim preservation or borrow safety for the relaxed system.
+The result below is extractor completeness for that checker; preservation and
+runtime safety are handled by the path-sensitive relaxed preservation files.
 -/
 
 namespace LwRust
@@ -227,7 +226,7 @@ theorem TermTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent
-      hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue ihFalse
+      hlinear ihCondition ihTrue ihFalse
     exact RelaxedTermTyping.ite ihCondition ihTrue ihFalse hjoin henvJoin
       hsameLeft hsameRight hwellJoin hcoherent hlinear
   case iteDivergingCase =>
@@ -333,7 +332,7 @@ theorem TermListTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent
-      hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue ihFalse
+      hlinear ihCondition ihTrue ihFalse
     exact RelaxedTermTyping.ite ihCondition ihTrue ihFalse hjoin henvJoin
       hsameLeft hsameRight hwellJoin hcoherent hlinear
   case iteDivergingCase =>

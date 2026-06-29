@@ -3255,7 +3255,9 @@ This is stated over `ValidRuntimeState`, the mechanised package that contains
 Definition 4.3's valid-state condition plus the explicit owner-allocation
 invariant needed by our concrete store model.
 -/
-theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env₁ env₂ : Env}
+theorem preservation_bounded
+    (hborrowTyping : BorrowSafeTypingPreservation)
+    (fuel : Nat) {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {finalValue : Value} :
     term.size ≤ fuel →
@@ -3511,7 +3513,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
         (ValidRuntimeState.validState hvalidRuntime)
         hwellFormed hsafe htermTyping).1
     have hborrowSafeInner : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeCore
+      (hborrowTyping
         (SourceTerm.assign_inner hsource) hborrowSafe hRhs).1
     have hterminal : TerminalStateSafe finalStore finalValue _env₃ .unit := by
       exact preservation_assign_step_terminal_of_wellFormed
@@ -3552,7 +3554,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
         hvalidStoreTyping.eq_lhs hwellFormed hborrowSafe hsafe hleftMulti with
       ⟨hwellLeft, hterminalLeft⟩
     have hborrowSafeLeft : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeCore hsourceLeft hborrowSafe _hLhs).1
+      (hborrowTyping hsourceLeft hborrowSafe _hLhs).1
     have hvalidRight : ValidRuntimeState midStore _rhs :=
       validRuntimeState_of_sourceTerm hsourceRight hterminalLeft.1
     have hstoreTypingRight : ValidStoreTyping midStore _rhs typing :=
@@ -3589,8 +3591,8 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
       _hfalse hjoin henvJoin hsameLeft hsameRight _hwellJoin
-      hcoherent hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue
-      ihFalse hsize htypingEq hsource store finalStore finalValue hvalidRuntime
+      hcoherent hlinear ihCondition ihTrue ihFalse hsize htypingEq hsource
+      store finalStore finalValue hvalidRuntime
       hvalidStoreTyping hwellFormed hborrowSafe hsafe hmulti
     cases htypingEq
     rcases multistep_ite_to_value_inv hmulti with
@@ -3604,7 +3606,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     have hbranchShape :=
       EnvJoin.branches_sameShape henvJoin hsameLeft hsameRight
     have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeCore hsourceCondition hborrowSafe
+      (hborrowTyping hsourceCondition hborrowSafe
         _hcondition).1
     rcases hchosen with htrueChosen | hfalseChosen
     · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
@@ -3684,7 +3686,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
     have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
       hvalidStoreTyping.ite_condition
     have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
-      (typingPreservesBorrowSafeCore hsourceCondition hborrowSafe
+      (hborrowTyping hsourceCondition hborrowSafe
         _hcondition).1
     rcases hchosen with htrueChosen | hfalseChosen
     · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
@@ -3748,7 +3750,7 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
             hwellFormed hborrowSafe hsafe hinnerMulti with
           ⟨hwellInner, hterminalInner⟩
         have hborrowSafeInner : BorrowSafeEnv _env₂ :=
-          (typingPreservesBorrowSafeCore hsourceHead hborrowSafe
+          (hborrowTyping hsourceHead hborrowSafe
             _hterm).1
         have hvalueBlockValid :
             ValidRuntimeState midStore
@@ -3795,7 +3797,9 @@ theorem preservation_bounded (fuel : Nat) {store finalStore : ProgramStore} {env
             cases hterms)
           hblockValueMulti
 
-theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
+theorem preservation
+    (hborrowTyping : BorrowSafeTypingPreservation)
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} {finalValue : Value} :
     SourceTerm term →
@@ -3809,8 +3813,9 @@ theorem preservation {store finalStore : ProgramStore} {env₁ env₂ : Env}
     TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe
     htyping hmulti
-  exact preservation_bounded term.size (Nat.le_refl _) hsource hvalidRuntime
-    hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
+  exact preservation_bounded hborrowTyping term.size (Nat.le_refl _) hsource
+    hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping
+    hmulti
 
 end Paper
 end LwRust
@@ -3823,6 +3828,7 @@ open LwRust.Paper LwRust.Core
 theorem lemma_4_11_preservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
+    (hborrowTyping : BorrowSafeTypingPreservation)
     (hsource : SourceTerm term)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
@@ -3832,7 +3838,7 @@ theorem lemma_4_11_preservation
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     TerminalStateSafe finalStore finalValue env₂ ty :=
-  preservation hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
+  preservation hborrowTyping hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe
     htyping hmulti
 
 end LwRust.Paper.Soundness

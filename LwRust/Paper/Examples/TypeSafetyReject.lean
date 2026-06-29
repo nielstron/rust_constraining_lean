@@ -151,8 +151,9 @@ def paperRejectedIfElse : Term :=
 /--
 The paper notes that the Section 6.1.3 conditional join is not borrow safe:
 `p` and `q` may both contain mutable borrows whose target lists include `a`.
-Our `T-If` rule rejects this by requiring `BorrowSafeEnv` for the joined
-environment of `paperRejectedIfElse`.
+This remains the counterexample to a global `BorrowSafeEnv` conclusion for
+joined approximations.  The relaxed `T-If` rule no longer rejects the join for
+that reason; runtime safety must be stated path-sensitively.
 -/
 theorem paperConditionalJoinEnv_not_borrowSafe :
     ¬ BorrowSafeEnv paperConditionalJoinEnv := by

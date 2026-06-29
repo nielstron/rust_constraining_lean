@@ -1174,9 +1174,10 @@ The paper phrases this over variables in `dom(Γ)` and borrowed lvalues inside
 contained borrow types.  The containment premises already imply the relevant
 variables are present in the environment.
 
-This lives here (rather than with the Section 4.3 helpers) because the
-control-flow extension's `T-If` rule carries it as an obligation for the
-joined result environment; see `TermTyping.ite`.
+This lives here (rather than with the Section 4.3 helpers) because assignment
+and preservation helpers need the predicate near the typing relation.  It is
+not required by the relaxed `T-If` join: joined environments may be static
+approximations that are not globally borrow-safe.
 -/
 def BorrowSafeEnv (env : Env) : Prop :=
   ∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
@@ -1588,10 +1589,8 @@ mutual
     post-condition environment, and the resulting type/environment are the
     joins (Definitions 3.8 and 3.10) of the branch results.
 
-    Legacy mechanisation obligations on the joined result, following the
-    repo's earlier convention of rule-carried obligations (cf. `T-Assign`).
-    The intended endpoint is that these invariants are derived for environments
-    reachable from `Env.empty`, rather than supplied by each typing derivation:
+    Mechanisation obligations on the joined result, following the repo's
+    convention of rule-carried structural obligations (cf. `T-Assign`).
 
     * `EnvJoinSameShape` for both branches — branches must agree on each
       variable's initialisation state (see that definition for why the
@@ -1600,18 +1599,7 @@ mutual
     * `Coherent`, `Linearizable` — the result invariants needed to type
       dereferences through joined borrow target lists.  The per-target
       `ContainedBorrowsWellFormed` invariant is derived in the preservation
-      proof from the branch invariants plus these result obligations;
-    * `BorrowSafeEnv` — joins can merge mutable borrows of *different*
-      variables into one target list, in which case the joined environment
-      is genuinely not borrow safe even though each branch is.  The
-      preservation architecture threads
-      borrow safety through sequencing, so the mechanised rule only accepts
-      conditionals whose join remains borrow safe;
-    * `TyBorrowSafeAgainstEnv` for the result type — this is the
-      root-independent result-type invariant used by the internal
-      borrow-safety induction.  It does not follow from branch-local result
-      safety because the joined result may later be written through an
-      environment root. -/
+      proof from the branch invariants plus these result obligations. -/
     | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy joinTy : Ty} :
@@ -1625,8 +1613,6 @@ mutual
         WellFormedTy env₅ joinTy lifetime →
         Coherent env₅ →
         Linearizable env₅ →
-        BorrowSafeEnv env₅ →
-        TyBorrowSafeAgainstEnv env₅ joinTy →
         TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
           joinTy env₅
     /-- T-IfDiv: divergence-aware conditional merge.
@@ -1700,8 +1686,8 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
       rw [henvEq]
       exact (ihRhs (ihLhs hfinite).update).erase)
     (fun _hcondition _htrue _hfalse _htyJoin henvJoin _hsameLeft
-        _hsameRight _hwellTy _hcoherent _hlinear _hborrowSafe _htySafe
-        ihCondition ihTrue _ihFalse hfinite =>
+        _hsameRight _hwellTy _hcoherent _hlinear ihCondition ihTrue
+        _ihFalse hfinite =>
       EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hfinite =>
