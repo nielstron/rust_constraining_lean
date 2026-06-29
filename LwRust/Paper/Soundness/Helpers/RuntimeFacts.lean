@@ -1958,55 +1958,12 @@ theorem validPartialValue_sameShape_of_strengthens {store : ProgramStore}
       cases hvalidNew
       cases hvalidOld
 
-/--
-If two environments abstract the same concrete store and one strengthens to the
-other, every common slot keeps the same structural shape.
--/
-theorem SafeAbstraction.envJoinSameShape_of_strengthens {store : ProgramStore}
-    {source result : Env} :
-    store ∼ₛ source →
-    store ∼ₛ result →
-    EnvStrengthens source result →
-    EnvJoinSameShape source result := by
-  intro hsafeSource hsafeResult hstrength x sourceSlot resultSlot hsource hresult
-  have hslotStrength := hstrength x
-  rw [hsource, hresult] at hslotStrength
-  rcases hslotStrength with ⟨_hlifetime, htyStrength⟩
-  rcases hsafeSource.2 x sourceSlot hsource with
-    ⟨sourceValue, hstoreSource, hvalidSource⟩
-  rcases hsafeResult.2 x resultSlot hresult with
-    ⟨resultValue, hstoreResult, hvalidResult⟩
-  have hstoreSlot :
-      StoreSlot.mk sourceValue sourceSlot.lifetime =
-        StoreSlot.mk resultValue resultSlot.lifetime :=
-    Option.some.inj (hstoreSource.symm.trans hstoreResult)
-  have hvalueEq : sourceValue = resultValue :=
-    congrArg StoreSlot.value hstoreSlot
-  have hvalidResultSource :
-      ValidPartialValue store sourceValue resultSlot.ty := by
-    simpa [hvalueEq] using hvalidResult
-  exact validPartialValue_sameShape_of_strengthens
-    hvalidSource htyStrength hvalidResultSource
-
-theorem EnvJoin.sameShape_left_of_safeAbstraction {store : ProgramStore}
-    {left right join : Env} :
-    store ∼ₛ left →
-    store ∼ₛ join →
-    EnvJoin left right join →
-    EnvJoinSameShape left join := by
-  intro hsafeLeft hsafeJoin hjoin
-  exact SafeAbstraction.envJoinSameShape_of_strengthens
-    hsafeLeft hsafeJoin (EnvJoin.left_le hjoin)
-
-theorem EnvJoin.sameShape_right_of_safeAbstraction {store : ProgramStore}
-    {left right join : Env} :
-    store ∼ₛ right →
-    store ∼ₛ join →
-    EnvJoin left right join →
-    EnvJoinSameShape right join := by
-  intro hsafeRight hsafeJoin hjoin
-  exact SafeAbstraction.envJoinSameShape_of_strengthens
-    hsafeRight hsafeJoin (EnvJoin.right_le hjoin)
+-- (Removed `SafeAbstraction.envJoinSameShape_of_strengthens` and
+-- `EnvJoin.sameShape_left/right_of_safeAbstraction`: they *derived*
+-- `EnvJoinSameShape` from two safe-abstractions of the same store, which is
+-- FALSE under the lax `ValidSlotValue` invariant — the same store can abstract a
+-- `.ty` source slot and a `.undef` result slot.  They had no external uses; the
+-- sanitized-join transport now goes through `SafeAbstraction.strengthens`.)
 
 /--
 Lemma 9.7, Value Typing.
@@ -2270,7 +2227,7 @@ def LValLocationAbstraction
   ∃ location slot,
     store.loc lv = some location ∧
     store.slotAt location = some slot ∧
-    ValidPartialValue store slot.value ty
+    ValidSlotValue store slot.value ty
 
 /--
 Runtime interpretation of an abstract borrow target list.
@@ -2410,12 +2367,12 @@ theorem location_box {store : ProgramStore} {lv : LVal} {inner : PartialTy} :
   intro hlocation
   rcases hlocation with ⟨source, sourceSlot, hloc, hslot, hvalid⟩
   rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
-  cases hvalid with
-  | box htarget hinner =>
-      exact ⟨_, _, by
-          simp [ProgramStore.loc, hloc, hslot],
-        htarget,
-        hinner⟩
+  simp only [ValidSlotValue] at hvalid
+  obtain ⟨loc, islot, hval, hislot, hinner⟩ := hvalid
+  exact ⟨loc, islot, by
+      simp [ProgramStore.loc, hloc, hslot, hval],
+    hislot,
+    hinner⟩
 
 theorem validPartialValue_full_value {store : ProgramStore}
     {partialValue : PartialValue} {ty : Ty} :
@@ -2491,7 +2448,7 @@ theorem lvalTyping_defined_location_of_safe {store : ProgramStore} {env : Env}
           hselectedSlot,
           by
             simpa [hselectedValue, ValidValue] using
-              safeStrengthening_of_strengthens hstrength hvalidSelectedValue⟩
+              (safeStrengthening_of_strengthens hstrength hvalidSelectedValue).toValidSlotValue⟩
   · intro target ty _lifetime _htarget ihTarget selected hmem
     simp at hmem
     subst hmem
