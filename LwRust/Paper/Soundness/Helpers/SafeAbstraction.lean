@@ -54,6 +54,67 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
         (.value (.ref { location := location, owner := true }))
         (.ty (.box ty))
 
+/-- **Recursively-lax slot validity** (Half B): like `ValidPartialValue` but a
+slot typed `undef` *at any depth* imposes no constraint on the stored value.
+This is the runtime invariant needed once `EnvJoinSameShape` is dropped: after an
+unbalanced conditional move the executed branch leaves a live value under a slot
+the conservative join marks `undef`, and such slots are never read (a deref needs
+a `.ty` target), so tolerating them is sound. -/
+def ValidSlotValue (store : ProgramStore) (value : PartialValue) (pty : PartialTy) : Prop :=
+  match pty with
+  | .undef _ => True
+  | .ty t => ValidPartialValue store value (.ty t)
+  | .box inner => ∃ location slot,
+      value = .value (.ref { location := location, owner := true }) ∧
+      store.slotAt location = some slot ∧
+      ValidSlotValue store slot.value inner
+
+theorem ValidPartialValue.toValidSlotValue {store : ProgramStore}
+    {value : PartialValue} {pty : PartialTy} :
+    ValidPartialValue store value pty → ValidSlotValue store value pty := by
+  intro h
+  induction h with
+  | unit => exact ValidPartialValue.unit
+  | int => exact ValidPartialValue.int
+  | bool => exact ValidPartialValue.bool
+  | undef => trivial
+  | borrow hmem hloc => exact ValidPartialValue.borrow hmem hloc
+  | @box location slot inner hslot _hinner ih =>
+      exact ⟨location, slot, rfl, hslot, ih⟩
+  | boxFull hslot hinner _ih => exact ValidPartialValue.boxFull hslot hinner
+
+/-- **The Half-B keystone**: recursively-lax slot validity is *monotone under
+strengthening*.  Since strengthening only shrinks borrow target lists, descends
+into boxes, or lifts a slot to `undef` (which `ValidSlotValue` accepts
+unconditionally), a value valid at the stronger type stays valid at the weaker
+(more-`undef`) one.  This is exactly what lets `∼ₛ` transport along plain
+`EnvStrengthens` at an `ite`/`while` join without `EnvJoinSameShape`. -/
+theorem ValidSlotValue.mono_strengthens {store : ProgramStore} {a b : PartialTy}
+    (hstr : PartialTyStrengthens a b) :
+    ∀ {value : PartialValue}, ValidSlotValue store value a → ValidSlotValue store value b := by
+  induction hstr with
+  | reflex => intro value h; exact h
+  | @box a' b' _hab ih =>
+      intro value h
+      simp only [ValidSlotValue] at h ⊢
+      obtain ⟨location, slot, hval, hslot, hinner⟩ := h
+      exact ⟨location, slot, hval, hslot, ih hinner⟩
+  | @tyBox ta tb _htab ih =>
+      intro value h
+      simp only [ValidSlotValue] at h ⊢
+      cases h with
+      | boxFull hslot hinner =>
+          exact ValidPartialValue.boxFull hslot
+            (by simpa only [ValidSlotValue] using ih (by simpa only [ValidSlotValue] using hinner))
+  | @borrow mutable la lb hsub =>
+      intro value h
+      simp only [ValidSlotValue] at h ⊢
+      cases h with
+      | borrow hmem hloc => exact ValidPartialValue.borrow (hsub hmem) hloc
+  | undefLeft _ _ => intro value _; trivial
+  | intoUndef _ _ => intro value _; trivial
+  | boxIntoUndef _ _ => intro value _; trivial
+
 def ValidValue (store : ProgramStore) (value : Value) (ty : Ty) : Prop :=
   ValidPartialValue store (.value value) (.ty ty)
 
