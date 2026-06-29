@@ -561,3 +561,46 @@ well-formedness-based move/assignment/while transport with relaxed runtime
 storage abstraction; start by proving direct variable move preservation over
 `RelaxedRuntimeEnvAbstraction`, using lossy `undef` evidence only for the moved
 slot and protected concrete evidence everywhere else.
+
+## PHASE 2 EXECUTION PLAN (premise removal via the relaxed approach)
+
+CONFIRMED (key facts that pin the approach):
+- The STRICT `RuntimeEnvAbstraction` does NOT transport through joins without
+  `EnvJoinSameShape` (only `strengthen_sameShape` exists; the strict evidence
+  cannot transport to undef-strengthened union types). So the green merge
+  (commit `f52f651`, 9c8daae rules) keeps the premises by necessity.
+- The RELAXED abstraction DOES transport through joins with no premise
+  (`RelaxedRuntimeEnvAbstraction.strengthen_join_left/right`, via `strengthen`
+  through `EnvJoin.left_le`). So premise removal REQUIRES the relaxed preservation
+  (81a25bf's `Lemma_4_11`), completing its 5 broken cases
+  (move/assign/whileLoop/whileLoopDiverging/singleton).
+- `f52f651` is the green fallback. The working tree is the clean relaxed dev state
+  (81a25bf Typing/Lemma_4_11 + Lemma_4_9 from stash ab18d32), `Lemma_4_9` green,
+  5 preservation cases broken.
+
+THE LINCHPIN for the 5 cases is runtime borrow-target faithfulness (the move/assign
+frame bridges need the dependency's borrow target to be env-typed). Two routes:
+  A. `RuntimeCoherent store env` (RuntimeFacts:1479) — a runtime-grounded coherence
+     giving, per borrow lval, a SELECTED target that is typed + `RuntimeBorrowPointsTo`.
+     It is transportable through reductions (store-grounded), matching the user's
+     "derivable at runtime from a sensible env". Plan: thread `RuntimeCoherent`
+     through the relaxed preservation motive; build `WritableRootsUnborrowed.of_runtimeCoherent`
+     (the dep's target = the selected target by `RuntimeBorrowPointsTo.unique`, so the
+     bridge applies); prove `RuntimeCoherent` maintenance per reduction; wire
+     `preservation_move_var_multistep_relaxedValue_of_invariant` (already built) into
+     `case move`, analogous helpers for assign/while/singleton.
+  B. Prove `Coherent`-of-join by WELL-FOUNDED induction on borrow-nesting depth
+     (the apparent circularity in `lvalTyping_transport_of_sameShapeStrengthening`
+     is structural recursion: re-typing a deref-borrow target needs Coherent for the
+     SMALLER inner borrow). Then `containedBorrowsWellFormed_join_of_runtimeAbstraction`
+     gives CBWF-join premise-free, `WellFormedEnv` threads through the relaxed
+     preservation, and `WritableRootsUnborrowed.of_wellFormed` discharges the frames.
+Route A (RuntimeCoherent) is the previous agent's intended design and likely cleaner.
+
+DEVELOPED ENABLERS ALREADY BUILT & COMPILING (in the relaxed Lemma_4_9):
+`WritableRootsUnborrowed` + `.relaxedEvidence_borrowDependency_ne_var` +
+`.protectingBase_ne_writable` + `.move_value_frame` + `.move_other_frame` +
+`.of_wellFormed`; `RuntimeFrame.ownerReaches_stored_ne_var`;
+`RelaxedEvidenceOwnerReach.ownerReaches`; `TerminalValueProtected.update_of_frame`;
+`containedBorrowsWellFormed_join_of_runtimeAbstraction`;
+`preservation_move_var_multistep_relaxedValue_of_invariant`.

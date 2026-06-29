@@ -2181,8 +2181,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
                 by simp [Ty.allVars]⟩)
     (by
       intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs
-        rhsTy hRhs hLhs hshape hwell hwrite hranked hcoh hcontained
-        hnotWrite ih hfresh hstore hnot
+        rhsTy hRhs hLhs hshape hwell hwrite hranked htargets hnotWrite
+        ih hfresh hstore hnot
       have hnotRhs : ¬ Term.Mentions ghost rhs := by
         intro hmention
         exact hnot (by simp [Term.Mentions, hmention])
@@ -2209,8 +2209,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         hwriteErased
         ⟨φ, LinearizedBy.erase_ghost hlinear,
           EnvWriteRhsBorrowTargetsBelow.erase_ghost hrhsBelow⟩
-        (Coherent.erase_ghost hcoh hfreshWrite)
-        (EnvWriteRhsTargetsWellFormed.erase_ghost hcontained hfreshWrite)
+        (EnvWriteRhsTargetsWellFormed.erase_ghost htargets hfreshWrite)
         (by
           intro hwriteProhibited
           exact hnotWrite (WriteProhibited.erase_to_env hwriteProhibited)),
@@ -2308,8 +2307,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ env₃ env₄ env₅ typing lifetime condition trueBranch
         falseBranch trueTy falseTy joinTy hcondition htrue hfalse htyJoin
-        henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear
-        hborrowSafe hresultSafe ihCondition ihTrue ihFalse
+        henvJoin hwellJoin hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse
         hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
@@ -2336,10 +2334,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         EnvJoin.typeNameFresh_erase henvJoin hfreshTrue hfreshFalse
       exact ⟨TermTyping.ite hconditionErased htrueErased hfalseErased
         htyJoin (EnvJoin.erase_ghost henvJoin)
-        (EnvJoinSameShape.erase_ghost hsameLeft)
-        (EnvJoinSameShape.erase_ghost hsameRight)
         (WellFormedTy.erase_ghost hwellJoin hfreshJoin hjoinTyFresh)
-        (Coherent.erase_ghost hcoherent hfreshJoin)
         (Linearizable.erase_ghost hlinear)
         (BorrowSafeEnv.erase hborrowSafe)
         (TyBorrowSafeAgainstEnv.erase_ghost hresultSafe),
@@ -2384,8 +2379,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ typing
         lifetime bodyLifetime condition body bodyTy bodyEntryTy hchild
-        hjoin hsameEntry hsameBack hcontained hcoherent hlinear hborrowSafe
-        hnameFresh hcondition hbody hbodyWell hdrop hentryCondition hentryBody
+        hjoin hlinear hborrowSafe hnameFresh hcondition hbody hbodyWell hdrop
+        hentryCondition hentryBody
         ihCondition ihBody ihEntryCondition ihEntryBody hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
@@ -2421,10 +2416,6 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         simpa [hdrop]
       exact ⟨TermTyping.whileLoop hchild
         (EnvJoin.erase_ghost hjoin)
-        (EnvJoinSameShape.erase_ghost hsameEntry)
-        (EnvJoinSameShape.erase_ghost hsameBack)
-        (ContainedBorrowsWellFormed.erase_ghost hcontained hfreshInv)
-        (Coherent.erase_ghost hcoherent hfreshInv)
         (Linearizable.erase_ghost hlinear)
         (BorrowSafeEnv.erase hborrowSafe)
         hnameFreshErased
