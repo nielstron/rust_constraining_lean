@@ -164,11 +164,6 @@ def termValues : Term → List Value
   | .eq lhs rhs => termValues lhs ++ termValues rhs
   | .ite condition trueBranch falseBranch =>
       termValues condition ++ termValues trueBranch ++ termValues falseBranch
-  | .whileLoop _ condition body => termValues condition ++ termValues body
-  | .whileCond _ conditionInFlight condition body =>
-      termValues conditionInFlight ++ termValues condition ++ termValues body
-  | .whileBody _ bodyInFlight condition body =>
-      termValues bodyInFlight ++ termValues condition ++ termValues body
 
 def termOwningLocations (term : Term) : List Location :=
   List.flatMap valueOwningLocations (termValues term)
@@ -299,24 +294,6 @@ theorem SourceTerm.ite_falseBranch {condition trueBranch falseBranch : Term} :
   exact hsource value (by
     simp [termValues] at hmem ⊢
     exact Or.inr (Or.inr hmem))
-
-theorem SourceTerm.while_condition {bodyLifetime : Lifetime}
-    {condition body : Term} :
-    SourceTerm (.whileLoop bodyLifetime condition body) →
-    SourceTerm condition := by
-  intro hsource value hmem
-  exact hsource value (by
-    simp [termValues] at hmem ⊢
-    exact Or.inl hmem)
-
-theorem SourceTerm.while_body {bodyLifetime : Lifetime}
-    {condition body : Term} :
-    SourceTerm (.whileLoop bodyLifetime condition body) →
-    SourceTerm body := by
-  intro hsource value hmem
-  exact hsource value (by
-    simp [termValues] at hmem ⊢
-    exact Or.inr hmem)
 
 theorem sourceTerm_unit_value : SourceTerm (.val .unit) := by
   intro value hmem

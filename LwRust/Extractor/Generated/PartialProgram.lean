@@ -115,12 +115,6 @@ inductive PartialTerm where
   -- partial syntax: `if term term else term ...`
   -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
   | iteFalseBranch (condition : Term) (trueBranch : Term) (falseBranch : PartialTerm)
-  -- partial syntax: `while lifetime term ...`
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
-  | whileCondition (bodyLifetime : Lifetime) (condition : PartialTerm)
-  -- partial syntax: `while lifetime term term ...`
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
-  | whileBody (bodyLifetime : Lifetime) (condition : Term) (body : PartialTerm)
   -- partial syntax: `block ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
   | blockStart
@@ -140,9 +134,6 @@ inductive PartialTerm where
   -- partial syntax: `if ...`
   -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
   | iteStart
-  -- partial syntax: `while ...`
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
-  | whileStart
   deriving Repr
 
 end
@@ -322,16 +313,6 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   | ctermIte_iteFalseBranch {condition : Term} {trueBranch : Term} {falseBranch : PartialTerm} {falseBranch' : Term} :
       CompletesTerm falseBranch falseBranch' →
       CompletesTerm (PartialTerm.iteFalseBranch condition trueBranch falseBranch) (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch')
-  -- partial syntax: `while lifetime term ...`
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
-  | ctermWhile_whileCondition {bodyLifetime : Lifetime} {condition : PartialTerm} {condition' : Term} {body : Term} :
-      CompletesTerm condition condition' →
-      CompletesTerm (PartialTerm.whileCondition bodyLifetime condition) (SyntaxCtor.ctermWhile_ctor bodyLifetime condition' body)
-  -- partial syntax: `while lifetime term term ...`
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
-  | ctermWhile_whileBody {bodyLifetime : Lifetime} {condition : Term} {body : PartialTerm} {body' : Term} :
-      CompletesTerm body body' →
-      CompletesTerm (PartialTerm.whileBody bodyLifetime condition body) (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body')
   -- partial syntax: `block ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
   | ctermBlock_blockStart {lifetime : Lifetime} {terms : List Term} :
@@ -360,10 +341,6 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
   | ctermIte_iteStart {condition : Term} {trueBranch : Term} {falseBranch : Term} :
       CompletesTerm (PartialTerm.iteStart) (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch)
-  -- partial syntax: `while ...`
-  -- derived from: SyntaxCtor.ctermWhile_ctor {bodyLifetime} {condition} {body}
-  | ctermWhile_whileStart {bodyLifetime : Lifetime} {condition : Term} {body : Term} :
-      CompletesTerm (PartialTerm.whileStart) (SyntaxCtor.ctermWhile_ctor bodyLifetime condition body)
   -- partial syntax: `lval ...`
   -- derived from: SyntaxCtor.ctermEq_ctor (SyntaxCtor.ctermMove_ctor {lval}) {rhs}
   | ctermEq_lvalStart {lval : PartialLVal} {lval' : LVal} {rhs : Term} :

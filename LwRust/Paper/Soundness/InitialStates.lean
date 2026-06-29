@@ -73,9 +73,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     (motive_2 := fun _env typing lifetime terms _ty _env₂ _ =>
       typing = StoreTyping.empty → SourceTerm (.block lifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging
-    ?whileLoopDiverging ?whileLoop ?singleton ?cons
-    htyping rfl
+    ?declare ?assign ?eq ?ite ?iteDiverging ?singleton ?cons htyping rfl
   case const =>
     intro _env _typing _lifetime value _ty hvalueTyping htypingEq
     subst htypingEq
@@ -153,24 +151,6 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     · rcases hbranchMem with htrueMem | hfalseMem
       · exact ihTrue htypingEq candidate htrueMem
       · exact ihFalse htypingEq candidate hfalseMem
-  case whileLoopDiverging =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
-      _body _bodyTy _hchild _hcond _hbody _hdiverges
-      ihCondition ihBody htypingEq candidate hmem
-    simp [termValues] at hmem
-    rcases hmem with hconditionMem | hbodyMem
-    · exact ihCondition htypingEq candidate hconditionMem
-    · exact ihBody htypingEq candidate hbodyMem
-  case whileLoop =>
-    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-      _lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop _hcondEntry _hbodyEntry
-      ihCondInv ihBodyInv _ihCondEntry _ihBodyEntry htypingEq candidate hmem
-    simp [termValues] at hmem
-    rcases hmem with hconditionMem | hbodyMem
-    · exact ihCondInv htypingEq candidate hconditionMem
-    · exact ihBodyInv htypingEq candidate hbodyMem
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
       candidate hmem

@@ -296,12 +296,11 @@ theorem ProgramStore.FiniteSupport.step {store store' : ProgramStore}
   | declare hstore =>
       exact fun hfs => hstore ▸ hfs.declare
   | seq hdrops => exact ProgramStore.FiniteSupport.drops hdrops
-  | blockA _ ih | subWhileCond _ ih | subWhileBody _ ih => exact ih
+  | blockA _ ih => exact ih
   | blockB hdrops => exact ProgramStore.FiniteSupport.dropsLifetime hdrops
   | subBox _ ih | subDeclare _ ih | subAssign _ ih => exact ih
   | eqTrue | eqFalse _ | iteTrue | iteFalse => exact id
   | subEqLeft _ ih | subEqRight _ ih | subIte _ ih => exact ih
-  | whileStart | whileCondFalse | whileCondTrue | whileBodyDone => exact id
 
 /-- Finite support is preserved along any execution. -/
 theorem ProgramStore.FiniteSupport.multiStep {store store' : ProgramStore}
@@ -948,8 +947,7 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
-    ?iteDiverging ?whileLoopDiverging ?whileLoop
-    ?singleton ?cons htyping
+    ?iteDiverging ?singleton ?cons htyping
   case const =>
     intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
@@ -1059,20 +1057,6 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       | const hvalueTyping =>
           exact progress_ite_value hvalueTyping hvst.ite_condition
     · exact progress_subIte hstepCondition
-  case whileLoopDiverging =>
-    intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
-      _bodyTy _hchild _hcond _hbody _hdiverges _ihCond _ihBody
-      _hsize _hvst _hwf _hsafe _hstore
-    exact Or.inr ⟨store, _, Step.whileStart⟩
-  case whileLoop =>
-    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
-      lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hjoin _hss1 _hss2 _hcbwf _hcoh _hlin _hbse
-      _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
-      _hcondEntry _hbodyEntry _ihCondInv _ihBodyInv _ihCondEntry
-      _ihBodyEntry
-      _hsize _hvst _hwf _hsafe _hstore
-    exact Or.inr ⟨store, _, Step.whileStart⟩
   case singleton =>
     intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hsize hvst outerLifetime
       hwf hsafe hstore

@@ -375,20 +375,6 @@ theorem ValidStoreTyping.ite_falseBranch {store : ProgramStore}
     ValidStoreTyping store falseBranch typing :=
   hvalid.mono fun value hmem => by simp [termValues, hmem]
 
-theorem ValidStoreTyping.while_condition {store : ProgramStore}
-    {bodyLifetime : Lifetime} {condition body : Term} {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.whileLoop bodyLifetime condition body)
-      typing) :
-    ValidStoreTyping store condition typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
-theorem ValidStoreTyping.while_body {store : ProgramStore}
-    {bodyLifetime : Lifetime} {condition body : Term} {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.whileLoop bodyLifetime condition body)
-      typing) :
-    ValidStoreTyping store body typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
 theorem validStoreTyping_sourceTerm_of_validStoreTyping
     {store store' : ProgramStore} {term : Term} {typing : StoreTyping} :
     SourceTerm term →
