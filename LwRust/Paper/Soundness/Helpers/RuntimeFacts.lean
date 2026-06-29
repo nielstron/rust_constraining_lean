@@ -2103,7 +2103,8 @@ theorem preservation_refl_runtime_value {store : ProgramStore} {env env₂ : Env
       ValidRuntimeState.storeOwnersAllocated hvalidRuntime,
       ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
       ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
-      ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime⟩,
+      ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime,
+      ValidRuntimeState.storeAcyclic hvalidRuntime⟩,
     hsafe₂, hvalidValue⟩
 
 /--

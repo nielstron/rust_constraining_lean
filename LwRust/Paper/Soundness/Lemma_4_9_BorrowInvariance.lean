@@ -7039,13 +7039,6 @@ theorem ProgramStore.OwnsTransitively.erase_to_store {store : ProgramStore}
       exact ProgramStore.OwnsTransitively.trans
         (ProgramStore.OwnsAt.erase_to_store howns) ih
 
-/-- `StoreAcyclic` is preserved by `erase`: erasing a slot only removes ownership
-edges, so any cycle after the erase was already a cycle before it. -/
-theorem StoreAcyclic.erase {store : ProgramStore} {erased : Location} :
-    StoreAcyclic store → StoreAcyclic (store.erase erased) := by
-  intro hacyclic location hcycle
-  exact hacyclic location (ProgramStore.OwnsTransitively.erase_to_store hcycle)
-
 theorem ProtectedByBase.erase_to_store {store : ProgramStore}
     {erased location : Location} {x : Name} :
     ProtectedByBase (store.erase erased) x location →
@@ -9767,11 +9760,18 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                 drops_storeOwnerTargetsHeap hdrops hwriteOwnerHeap
               have hrootFinal : HeapSlotsRootLifetime store' :=
                 drops_heapSlotsRootLifetime hdrops hrootWrite
+              have hacyclicFinal : StoreAcyclic store' :=
+                StoreAcyclic.drops hdrops
+                  (StoreAcyclic.write_var_value
+                    (ValidRuntimeState.storeAcyclic hvalidRuntime)
+                    (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                    (ValueOwnerTargetsHeap.partial hnewValueHeap)
+                    hstoreX hwriteStoreConcrete)
               have hvalidRuntimeFinal : ValidRuntimeState store' (.val .unit) :=
                 validRuntimeState_assign_step_of_postWriteDrop_invariants
                   (lifetime := lifetime)
-                  hvalidRuntime hallocatedFinal hheapFinal hrootFinal hread
-                  hwriteStoreConcrete hdrops
+                  hvalidRuntime hallocatedFinal hheapFinal hrootFinal hacyclicFinal
+                  hread hwriteStoreConcrete hdrops
               have hsafeFinal : store' ∼ₛ env' := by
                 rw [henv']
                 refine safeAbstraction_update_var_of_preserved henvSlot ?hstoreXFinal

@@ -871,7 +871,7 @@ leaves implicit.
 -/
 def ValidRuntimeState (store : ProgramStore) (term : Term) : Prop :=
   ValidState store term ∧ StoreOwnersAllocated store ∧ StoreOwnerTargetsHeap store ∧
-  HeapSlotsRootLifetime store ∧ TermOwnerTargetsHeap term
+  HeapSlotsRootLifetime store ∧ TermOwnerTargetsHeap term ∧ StoreAcyclic store
 
 theorem ValidState.validStore {store : ProgramStore} {term : Term} :
     ValidState store term → ValidStore store := by
@@ -909,7 +909,12 @@ theorem ValidRuntimeState.heapSlotsRootLifetime {store : ProgramStore} {term : T
 theorem ValidRuntimeState.termOwnerTargetsHeap {store : ProgramStore} {term : Term} :
     ValidRuntimeState store term → TermOwnerTargetsHeap term := by
   intro hvalid
-  exact hvalid.2.2.2.2
+  exact hvalid.2.2.2.2.1
+
+theorem ValidRuntimeState.storeAcyclic {store : ProgramStore} {term : Term} :
+    ValidRuntimeState store term → StoreAcyclic store := by
+  intro hvalid
+  exact hvalid.2.2.2.2.2
 
 theorem TermOwnerTargetsHeap.value {value : Value} :
     TermOwnerTargetsHeap (.val value) → ValueOwnerTargetsHeap value := by
@@ -1072,7 +1077,8 @@ theorem validRuntimeState_block_singleton_inner {store : ProgramStore}
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
     termOwnerTargetsHeap_block_singleton
-      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_block_head {store : ProgramStore}
     {blockLifetime : Lifetime} {term : Term} {rest : List Term} :
@@ -1103,7 +1109,8 @@ theorem validRuntimeState_block_head {store : ProgramStore}
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
     termOwnerTargetsHeap_block_head
-      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_block_singleton_value_of_value {store : ProgramStore}
     {blockLifetime : Lifetime} {value : Value} :
@@ -1124,7 +1131,8 @@ theorem validRuntimeState_block_singleton_value_of_value {store : ProgramStore}
     by
       intro owned hmem
       exact (ValidRuntimeState.termOwnerTargetsHeap hvalid) owned
-        (by simpa [termOwningLocations, termValues] using hmem)⟩
+        (by simpa [termOwningLocations, termValues] using hmem),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validRuntimeState_block_value_cons_of_value_source_tail
     {store : ProgramStore} {blockLifetime : Lifetime}
@@ -1160,7 +1168,8 @@ theorem validRuntimeState_block_value_cons_of_value_source_tail
       have hvalueMem : owned ∈ valueOwningLocations value := by
         simpa [termOwningLocations, termValues, htailOwnersExpanded] using hmem
       exact (ValidRuntimeState.termOwnerTargetsHeap hvalidValue) owned
-        (by simpa [termOwningLocations, termValues] using hvalueMem)⟩
+        (by simpa [termOwningLocations, termValues] using hvalueMem),
+    ValidRuntimeState.storeAcyclic hvalidValue⟩
 
 theorem validState_box_inner {store : ProgramStore} {term : Term} :
     ValidState store (.box term) →
@@ -1176,7 +1185,8 @@ theorem validRuntimeState_box_inner {store : ProgramStore} {term : Term} :
     ValidRuntimeState.storeOwnersAllocated hvalid,
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
-    termOwnerTargetsHeap_box_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+    termOwnerTargetsHeap_box_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_box_value_of_value {store : ProgramStore} {value : Value} :
     ValidState store (.val value) →
@@ -1193,7 +1203,8 @@ theorem validRuntimeState_box_value_of_value {store : ProgramStore} {value : Val
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
     termOwnerTargetsHeap_box_value_of_value
-      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_declare_value_of_value {store : ProgramStore} {x : Name}
     {value : Value} :
@@ -1212,7 +1223,8 @@ theorem validRuntimeState_declare_value_of_value {store : ProgramStore} {x : Nam
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
     termOwnerTargetsHeap_declare_value_of_value
-      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_declare_inner {store : ProgramStore} {x : Name} {term : Term} :
     ValidState store (.letMut x term) →
@@ -1229,7 +1241,8 @@ theorem validRuntimeState_declare_inner {store : ProgramStore} {x : Name}
     ValidRuntimeState.storeOwnersAllocated hvalid,
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
-    termOwnerTargetsHeap_declare_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+    termOwnerTargetsHeap_declare_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_assign_value_of_value {store : ProgramStore} {lhs : LVal}
     {value : Value} :
@@ -1248,7 +1261,8 @@ theorem validRuntimeState_assign_value_of_value {store : ProgramStore} {lhs : LV
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
     termOwnerTargetsHeap_assign_value_of_value
-      (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+      (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem validState_assign_inner {store : ProgramStore} {lhs : LVal} {rhs : Term} :
     ValidState store (.assign lhs rhs) →
@@ -1265,7 +1279,8 @@ theorem validRuntimeState_assign_inner {store : ProgramStore} {lhs : LVal}
     ValidRuntimeState.storeOwnersAllocated hvalid,
     ValidRuntimeState.storeOwnerTargetsHeap hvalid,
     ValidRuntimeState.heapSlotsRootLifetime hvalid,
-    termOwnerTargetsHeap_assign_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid)⟩
+    termOwnerTargetsHeap_assign_inner (ValidRuntimeState.termOwnerTargetsHeap hvalid),
+    ValidRuntimeState.storeAcyclic hvalid⟩
 
 theorem ValidRuntimeState.validStore {store : ProgramStore} {term : Term} :
     ValidRuntimeState store term → ValidStore store := by
@@ -1620,6 +1635,71 @@ theorem StoreAcyclic.update_fresh {store : ProgramStore} {updated : Location}
   · exact hacyclic location hstore
   · subst hloc
     exact hnoIncoming hcycle.to_owns
+
+/-- `StoreAcyclic` is preserved by `erase` (erasing only removes ownership edges). -/
+theorem StoreAcyclic.erase {store : ProgramStore} {erased : Location} :
+    StoreAcyclic store → StoreAcyclic (store.erase erased) := by
+  intro hacyclic
+  have conv : ∀ a b, ProgramStore.OwnsTransitively (store.erase erased) a b →
+      ProgramStore.OwnsTransitively store a b := by
+    intro a b hpath
+    induction hpath with
+    | direct howns => exact ProgramStore.OwnsTransitively.direct (ownsAt_erase howns).2
+    | trans howns _htail ih =>
+        exact ProgramStore.OwnsTransitively.trans (ownsAt_erase howns).2 ih
+  intro location hcycle
+  exact hacyclic location (conv _ _ hcycle)
+
+/-- `StoreAcyclic` is preserved by a recursive `Drops` (a sequence of erases). -/
+theorem StoreAcyclic.drops {store store' : ProgramStore} {values : List PartialValue} :
+    Drops store values store' → StoreAcyclic store → StoreAcyclic store' := by
+  intro hdrops
+  induction hdrops with
+  | nil => exact fun h => h
+  | nonOwner _ _ ih => exact ih
+  | ownerMissing _ _ _ ih => exact ih
+  | ownerPresent _ _ _ ih => exact fun hacyclic => ih (StoreAcyclic.erase hacyclic)
+
+/-- `StoreAcyclic` is preserved by a lifetime drop. -/
+theorem StoreAcyclic.dropsLifetime {store store' : ProgramStore} {lifetime : Lifetime} :
+    DropsLifetime store lifetime store' → StoreAcyclic store → StoreAcyclic store' := by
+  intro hdrops hacyclic
+  cases hdrops with
+  | intro _ hdrops => exact StoreAcyclic.drops hdrops hacyclic
+
+/-- `StoreAcyclic` is preserved by writing `undef` through an lvalue. -/
+theorem StoreAcyclic.write_undef {store store' : ProgramStore} {lv : LVal} :
+    StoreAcyclic store →
+    store.write lv .undef = some store' →
+    StoreAcyclic store' := by
+  intro hacyclic hwrite
+  unfold ProgramStore.write at hwrite
+  cases hloc : store.loc lv with
+  | none => simp [hloc] at hwrite
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none => simp [hloc, hslot] at hwrite
+      | some slot =>
+          simp [hloc, hslot] at hwrite
+          subst hwrite
+          exact StoreAcyclic.update_undef hacyclic
+
+/-- `StoreAcyclic` is preserved by updating a variable slot whose new value owns
+only heap cells: variables never have incoming ownership (`StoreOwnerTargetsHeap`),
+so this is a corollary of `update_fresh`. -/
+theorem StoreAcyclic.update_var {store : ProgramStore} {x : Name} {slot : StoreSlot} :
+    StoreAcyclic store →
+    StoreOwnerTargetsHeap store →
+    PartialValueOwnerTargetsHeap slot.value →
+    StoreAcyclic (store.update (.var x) slot) := by
+  intro hacyclic hheap hvalueHeap
+  refine StoreAcyclic.update_fresh hacyclic ?_ ?_
+  · intro howns
+    obtain ⟨addr, h⟩ := hheap (.var x) howns
+    simp at h
+  · intro hmem
+    obtain ⟨addr, h⟩ := hvalueHeap (.var x) hmem
+    simp at h
 
 /-- Updating a store slot to `undef` preserves store validity. -/
 theorem validStore_update_undef {store : ProgramStore} {updated : Location}

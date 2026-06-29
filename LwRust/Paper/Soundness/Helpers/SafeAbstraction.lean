@@ -1115,6 +1115,27 @@ theorem write_var_eq {store store' : ProgramStore} {x : Name}
   subst hwrite
   rfl
 
+/-- `StoreAcyclic` is preserved by writing a heap-targeting value to a variable
+slot: the variable location has no incoming ownership (`StoreOwnerTargetsHeap`),
+so this reduces to `update_fresh`. -/
+theorem StoreAcyclic.write_var_value {store store' : ProgramStore} {x : Name}
+    {oldSlot : StoreSlot} {value : Value} :
+    StoreAcyclic store →
+    StoreOwnerTargetsHeap store →
+    PartialValueOwnerTargetsHeap (.value value) →
+    store.slotAt (VariableProjection x) = some oldSlot →
+    store.write (.var x) (.value value) = some store' →
+    StoreAcyclic store' := by
+  intro hacyclic hheap hvalueHeap hslot hwrite
+  rw [write_var_eq hslot hwrite]
+  refine StoreAcyclic.update_fresh hacyclic ?_ ?_
+  · intro howns
+    obtain ⟨addr, h⟩ := hheap (VariableProjection x) howns
+    simp [VariableProjection] at h
+  · intro hmem
+    obtain ⟨addr, h⟩ := hvalueHeap (VariableProjection x) (by simpa using hmem)
+    simp [VariableProjection] at h
+
 /--
 Safe-abstraction preservation for a direct variable type/value update.
 

@@ -500,7 +500,8 @@ theorem validRuntimeState_copy_step_of_safe {store : ProgramStore} {env env₂ :
       (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
     ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
     ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
-    htermHeap⟩
+    htermHeap,
+    ValidRuntimeState.storeAcyclic hvalidRuntime⟩
 
 /-- Runtime-validity preservation for `R-Copy`. -/
 theorem validRuntimeState_copy_step {store : ProgramStore} {env env₂ : Env}
@@ -528,7 +529,8 @@ theorem validRuntimeState_borrow_step {store : ProgramStore}
       (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
     ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime,
     ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime,
-    termOwnerTargetsHeap_borrowed_ref⟩
+    termOwnerTargetsHeap_borrowed_ref,
+    ValidRuntimeState.storeAcyclic hvalidRuntime⟩
 
 /-- Runtime-validity preservation for `R-Move`. -/
 theorem validRuntimeState_move_step {store store' : ProgramStore}
@@ -549,7 +551,8 @@ theorem validRuntimeState_move_step {store store' : ProgramStore}
         heapSlotsRootLifetime_write_undef
           (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime) hwrite,
         termOwnerTargetsHeap_value_of_store_read
-          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hread⟩
+          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hread,
+        StoreAcyclic.write_undef (ValidRuntimeState.storeAcyclic hvalidRuntime) hwrite⟩
 
 /--
 Runtime-validity preservation for `R-Assign`, assuming the assignment's
@@ -565,11 +568,12 @@ theorem validRuntimeState_assign_step {store store' : ProgramStore}
     StoreOwnersAllocated store' →
     StoreOwnerTargetsHeap store' →
     HeapSlotsRootLifetime store' →
+    StoreAcyclic store' →
     Step store lifetime (.assign lhs (.val value)) store' (.val .unit) →
     ValidRuntimeState store' (.val .unit) := by
-  intro hvalidRuntime hallocated hheap hroot hstep
+  intro hvalidRuntime hallocated hheap hroot hacyclic hstep
   exact ⟨validState_assign_step hvalidRuntime.1 hstep, hallocated, hheap,
-    hroot, termOwnerTargetsHeap_unit⟩
+    hroot, termOwnerTargetsHeap_unit, hacyclic⟩
 
 /--
 Runtime-validity preservation for `R-Assign` from final post-write/post-drop
@@ -583,13 +587,14 @@ theorem validRuntimeState_assign_step_of_postWriteDrop_invariants
     StoreOwnersAllocated store' →
     StoreOwnerTargetsHeap store' →
     HeapSlotsRootLifetime store' →
+    StoreAcyclic store' →
     store.read lhs = some oldSlot →
     store.write lhs (.value value) = some storeAfterWrite →
     Drops storeAfterWrite [oldSlot.value] store' →
     ValidRuntimeState store' (.val .unit) := by
-  intro hvalidRuntime hallocated hheap hroot hread hwrite hdrops
+  intro hvalidRuntime hallocated hheap hroot hacyclic hread hwrite hdrops
   exact validRuntimeState_assign_step (lifetime := lifetime) hvalidRuntime
-    hallocated hheap hroot
+    hallocated hheap hroot hacyclic
     (Step.assign (lifetime := lifetime) hread hwrite hdrops)
 
 /--
@@ -607,8 +612,9 @@ theorem validRuntimeState_assign_step_old_nonOwner
     store.read lhs = some oldSlot →
     store.write lhs (.value value) = some storeAfterWrite →
     Drops storeAfterWrite [oldSlot.value] store' →
+    StoreAcyclic store' →
     ValidRuntimeState store' (.val .unit) := by
-  intro hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops
+  intro hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops hacyclic
   have hdropEq : store' = storeAfterWrite :=
     drops_partialValue_nonOwner_eq hnonOwner hdrops
   subst store'
@@ -625,7 +631,7 @@ theorem validRuntimeState_assign_step_old_nonOwner
       (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap hwrite)
     (heapSlotsRootLifetime_write
       (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime) hwrite)
-    hread hwrite hdrops
+    hacyclic hread hwrite hdrops
 
 /-- Runtime-validity preservation for `R-Declare`, from initializer validity. -/
 theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStore}
@@ -656,7 +662,11 @@ theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStor
           simpa [ProgramStore.declare] using
             heapSlotsRootLifetime_update_var
               (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
-        termOwnerTargetsHeap_unit⟩
+        termOwnerTargetsHeap_unit,
+        by
+          simpa [ProgramStore.declare] using
+            StoreAcyclic.update_var (ValidRuntimeState.storeAcyclic hvalidRuntime)
+              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap⟩
 
 /-- Runtime-validity preservation for `R-Seq`. -/
 theorem validRuntimeState_seq_step {store store' : ProgramStore}
@@ -677,7 +687,8 @@ theorem validRuntimeState_seq_step {store store' : ProgramStore}
         drops_heapSlotsRootLifetime hdrops
           (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
         termOwnerTargetsHeap_block_tail
-          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)⟩
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime),
+        StoreAcyclic.drops hdrops (ValidRuntimeState.storeAcyclic hvalidRuntime)⟩
 
 /-- Runtime-validity preservation for `R-BlockB`. -/
 theorem validRuntimeState_blockB_step {store store' : ProgramStore}
@@ -698,7 +709,8 @@ theorem validRuntimeState_blockB_step {store store' : ProgramStore}
         dropsLifetime_heapSlotsRootLifetime hdrops
           (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
         termOwnerTargetsHeap_block_value
-          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)⟩
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime),
+        StoreAcyclic.dropsLifetime hdrops (ValidRuntimeState.storeAcyclic hvalidRuntime)⟩
 
 /--
 Runtime-validity preservation for `R-BlockB` under the typed block-lifetime
@@ -757,7 +769,19 @@ theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
           simp [termOwningLocations, termValues, valueOwningLocations,
             valueOwnedLocation?] at hmem
           subst hmem
-          exact ⟨_, rfl⟩⟩
+          exact ⟨_, rfl⟩,
+        by
+          cases hbox
+          refine StoreAcyclic.update_fresh
+            (ValidRuntimeState.storeAcyclic hvalidRuntime) ?_ ?_
+          · intro howns
+            obtain ⟨slot, hslot⟩ :=
+              (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) _ howns
+            rw [ProgramStore.fresh] at hfresh
+            rw [hfresh] at hslot
+            cases hslot
+          · simpa [partialValueOwningLocations] using
+              validValue_fresh_not_owningLocation hvalidValue hfresh⟩
 
 /-- Lemma 9.10, `R-Copy` store-preservation fragment, safe-only form. -/
 theorem storePreservation_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
@@ -1154,8 +1178,19 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
       ValidValue store' .unit .unit := by
   intro hsafe hvalidRuntime henvX hwriteEnv hnonOwner hvalidValue
     hread hwrite hdrops hnewValid hpreserveOther
+  have hstoreX : store.slotAt (VariableProjection x) = some oldSlot := by
+    simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
+  have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+    ValueOwnerTargetsHeap.partial
+      (TermOwnerTargetsHeap.value
+        (termOwnerTargetsHeap_assign_inner
+          (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+  have hacyclic' : StoreAcyclic store' :=
+    StoreAcyclic.drops hdrops
+      (StoreAcyclic.write_var_value (ValidRuntimeState.storeAcyclic hvalidRuntime)
+        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap hstoreX hwrite)
   exact ⟨validRuntimeState_assign_step_old_nonOwner (lifetime := lifetime)
-      hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops,
+      hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops hacyclic',
     storePreservation_assign_var_old_nonOwner_of_preserved hsafe henvX hwriteEnv
       hnonOwner hread hwrite hdrops hnewValid hpreserveOther,
     ValidPartialValue.unit⟩
