@@ -6857,19 +6857,20 @@ theorem lval_loc_var_writeProhibited_or_base {store : ProgramStore} {env : Env}
     rcases hsourceAbs with
       ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
     rcases sourceSlot with ⟨_sourceValue, sourceSlotLifetime⟩
-    cases hsourceValid with
-    | @box ownerLocation _ownerSlot _ hownerSlot _hinnerValid =>
-        have hderefLoc : store.loc source.deref = some ownerLocation := by
-          simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-        have hownerEq : ownerLocation = VariableProjection x := by
-          rw [hloc] at hderefLoc
-          exact Option.some.inj hderefLoc.symm
-        subst hownerEq
-        have howns : ProgramStore.Owns store (VariableProjection x) := by
-          refine ⟨sourceLocation, sourceSlotLifetime, ?_⟩
-          simpa [owningRef] using hsourceSlot
-        rcases hheap (VariableProjection x) howns with ⟨address, hheapLoc⟩
-        cases hheapLoc
+    simp only [ValidSlotValue] at hsourceValid
+    obtain ⟨ownerLocation, _ownerSlot, hvalEq, _hownerSlot, _hinnerValid⟩ :=
+      hsourceValid
+    have hderefLoc : store.loc source.deref = some ownerLocation := by
+      simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hvalEq]
+    have hownerEq : ownerLocation = VariableProjection x := by
+      rw [hloc] at hderefLoc
+      exact Option.some.inj hderefLoc.symm
+    subst hownerEq
+    have howns : ProgramStore.Owns store (VariableProjection x) := by
+      refine ⟨sourceLocation, sourceSlotLifetime, ?_⟩
+      simpa [owningRef, hvalEq] using hsourceSlot
+    rcases hheap (VariableProjection x) howns with ⟨address, hheapLoc⟩
+    cases hheapLoc
   · intro source mutable targets _borrowLifetime _targetLifetime _targetTy
       hborrow _htargets _ihBorrow ihTargets hloc
     have hsourceAbs :
