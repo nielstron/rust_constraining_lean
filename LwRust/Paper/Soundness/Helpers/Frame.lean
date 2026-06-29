@@ -929,6 +929,27 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
         · exact hlocNe
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
+/-- Lax (`ValidSlotValue`) analogue of `validPartialValue_erase_of_not_reaches`. -/
+theorem validSlotValue_erase_of_not_reaches {store : ProgramStore}
+    {erased : Location} :
+    ∀ {v : PartialValue} {ty : PartialTy},
+      ValidSlotValue store v ty →
+      (∀ ℓ, Reaches store v ty ℓ → ℓ ≠ erased) →
+      ValidSlotValue (store.erase erased) v ty
+  | _, .undef _, _, _ => trivial
+  | _, .ty _, h, hreach => validPartialValue_erase_of_not_reaches h hreach
+  | _, .box _inner, h, hreach => by
+      simp only [ValidSlotValue] at h ⊢
+      obtain ⟨loc, slot, hval, hslot, hin⟩ := h
+      subst hval
+      have hlocNe : loc ≠ erased := hreach loc (Reaches.boxHere hslot)
+      refine ⟨loc, slot, rfl, ?_, ?_⟩
+      · rw [ProgramStore.erase_slotAt_ne]
+        · exact hslot
+        · exact hlocNe
+      · exact validSlotValue_erase_of_not_reaches hin
+          (fun ℓ hℓ => hreach ℓ (Reaches.boxInner hslot hℓ))
+
 /-- Value reachability observed after an erase was already present in the original store. -/
 theorem reaches_erase_to_store {store : ProgramStore}
     {erased : Location} {v : PartialValue} {ty : PartialTy} {location : Location} :
@@ -1003,6 +1024,78 @@ theorem validPartialValue_drops_of_avoids_reaches {store store' : ProgramStore}
       have hvalidErased :
           ValidPartialValue (storeBefore.erase ref.location) v ty :=
         validPartialValue_erase_of_not_reaches hvalid hnotErased
+      exact ih hvalidErased (by
+        intro location hreachErased
+        have hreachStore : Reaches storeBefore v ty location :=
+          reaches_erase_to_store hreachErased
+        have havoid := havoids location hreachStore
+        cases havoid with
+        | nonOwner hnonOwner _ =>
+            exact False.elim
+              (not_partialValueNonOwner_owning_ref howner hnonOwner)
+        | ownerMissing _ hmissing _ =>
+            rw [hpresent] at hmissing
+            cases hmissing
+        | ownerPresent _ hpresent' _ hrest =>
+            rw [hpresent] at hpresent'
+            cases hpresent'
+            exact hrest)
+
+/-- Lax (`ValidSlotValue`) analogue of `validPartialValue_drops_of_avoids_reaches`. -/
+theorem validSlotValue_drops_of_avoids_reaches {store store' : ProgramStore}
+    {values : List PartialValue} {v : PartialValue} {ty : PartialTy} :
+    Drops store values store' →
+    ValidSlotValue store v ty →
+    (∀ location, Reaches store v ty location →
+      DropsAvoids store values location) →
+    ValidSlotValue store' v ty := by
+  intro hdrops hvalid havoids
+  induction hdrops generalizing v ty with
+  | nil =>
+      exact hvalid
+  | nonOwner hnonOwner _hdrops ih =>
+      exact ih hvalid (by
+        intro location hreach
+        have havoid := havoids location hreach
+        cases havoid with
+        | nonOwner _ hrest => exact hrest
+        | ownerMissing howner _ _ =>
+            exact False.elim
+              (not_partialValueNonOwner_owning_ref howner hnonOwner)
+        | ownerPresent howner _ _ _ =>
+            exact False.elim
+              (not_partialValueNonOwner_owning_ref howner hnonOwner))
+  | ownerMissing howner hmissing _hdrops ih =>
+      exact ih hvalid (by
+        intro location hreach
+        have havoid := havoids location hreach
+        cases havoid with
+        | nonOwner hnonOwner _ =>
+            exact False.elim
+              (not_partialValueNonOwner_owning_ref howner hnonOwner)
+        | ownerMissing _ _ hrest => exact hrest
+        | ownerPresent _ hpresent _ _ =>
+            rw [hmissing] at hpresent
+            cases hpresent)
+  | ownerPresent howner hpresent _hdrops ih =>
+      rename_i storeBefore _storeAfter ref erasedSlot rest
+      have hnotErased :
+          ∀ location, Reaches storeBefore v ty location →
+            location ≠ ref.location := by
+        intro location hreach hlocation
+        have havoid := havoids location hreach
+        cases havoid with
+        | nonOwner hnonOwner _ =>
+            exact False.elim
+              (not_partialValueNonOwner_owning_ref howner hnonOwner)
+        | ownerMissing _ hmissing _ =>
+            rw [hpresent] at hmissing
+            cases hmissing
+        | ownerPresent _ _ hne _ =>
+            exact hne hlocation.symm
+      have hvalidErased :
+          ValidSlotValue (storeBefore.erase ref.location) v ty :=
+        validSlotValue_erase_of_not_reaches hvalid hnotErased
       exact ih hvalidErased (by
         intro location hreachErased
         have hreachStore : Reaches storeBefore v ty location :=
@@ -1482,6 +1575,28 @@ theorem store_owns_of_reaches_stored_validPartialValue {env : Env}
     ProgramStore.Owns store location := by
   intro hstored hborrows hvalid hreach
   rcases reaches_owner_source_of_validPartialValue hborrows hvalid hreach with
+    hdirect | hsource
+  · have hstoredValue : storedValue = .value (owningRef location) :=
+      eq_owningRef_of_mem_partialValueOwningLocations hdirect
+    exact ⟨storage, storageLifetime, by
+      cases hstoredValue
+      simpa [owningRef] using hstored⟩
+  · rcases hsource with ⟨sourceStorage, _hsourceReach, howns⟩
+    exact ⟨sourceStorage, howns⟩
+
+/-- Lax (`ValidSlotValue`) analogue of `store_owns_of_reaches_stored_validPartialValue`. -/
+theorem store_owns_of_reaches_stored_validSlotValue {env : Env}
+    {store : ProgramStore} {slotLifetime storageLifetime : Lifetime}
+    {storage : Location} {storedValue : PartialValue} {partialTy : PartialTy}
+    {location : Location} :
+    store.slotAt storage =
+      some { value := storedValue, lifetime := storageLifetime } →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+    ValidSlotValue store storedValue partialTy →
+    OwnerReaches store storedValue partialTy location →
+    ProgramStore.Owns store location := by
+  intro hstored hborrows hvalid hreach
+  rcases reaches_owner_source_of_validSlotValue hborrows hvalid hreach with
     hdirect | hsource
   · have hstoredValue : storedValue = .value (owningRef location) :=
       eq_owningRef_of_mem_partialValueOwningLocations hdirect
