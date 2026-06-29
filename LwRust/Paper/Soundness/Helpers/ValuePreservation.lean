@@ -1237,7 +1237,6 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
