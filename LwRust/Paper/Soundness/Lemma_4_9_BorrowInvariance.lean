@@ -7039,6 +7039,13 @@ theorem ProgramStore.OwnsTransitively.erase_to_store {store : ProgramStore}
       exact ProgramStore.OwnsTransitively.trans
         (ProgramStore.OwnsAt.erase_to_store howns) ih
 
+/-- `StoreAcyclic` is preserved by `erase`: erasing a slot only removes ownership
+edges, so any cycle after the erase was already a cycle before it. -/
+theorem StoreAcyclic.erase {store : ProgramStore} {erased : Location} :
+    StoreAcyclic store → StoreAcyclic (store.erase erased) := by
+  intro hacyclic location hcycle
+  exact hacyclic location (ProgramStore.OwnsTransitively.erase_to_store hcycle)
+
 theorem ProtectedByBase.erase_to_store {store : ProgramStore}
     {erased location : Location} {x : Name} :
     ProtectedByBase (store.erase erased) x location →

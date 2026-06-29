@@ -1532,6 +1532,31 @@ theorem ownsAt_update_undef {store : ProgramStore} {updated owned storage : Loca
   · exact ⟨hstorage, ⟨slotLifetime, by
       simpa [ProgramStore.update, hstorage] using hslot⟩⟩
 
+/-- Transitive ownership after an `undef` update was already present before it
+(the update only removes the owning value at `updated`). -/
+theorem ProgramStore.OwnsTransitively.update_undef_to_store {store : ProgramStore}
+    {updated storage owned : Location} {updatedLifetime : Lifetime} :
+    ProgramStore.OwnsTransitively
+      (store.update updated { value := .undef, lifetime := updatedLifetime })
+      storage owned →
+    ProgramStore.OwnsTransitively store storage owned := by
+  intro hpath
+  induction hpath with
+  | direct howns =>
+      exact ProgramStore.OwnsTransitively.direct (ownsAt_update_undef howns).2
+  | trans howns _htail ih =>
+      exact ProgramStore.OwnsTransitively.trans (ownsAt_update_undef howns).2 ih
+
+/-- `StoreAcyclic` is preserved by an `undef` update (edges only removed). -/
+theorem StoreAcyclic.update_undef {store : ProgramStore} {updated : Location}
+    {updatedLifetime : Lifetime} :
+    StoreAcyclic store →
+    StoreAcyclic
+      (store.update updated { value := .undef, lifetime := updatedLifetime }) := by
+  intro hacyclic location hcycle
+  exact hacyclic location
+    (ProgramStore.OwnsTransitively.update_undef_to_store hcycle)
+
 /-- Updating a store slot to `undef` preserves store validity. -/
 theorem validStore_update_undef {store : ProgramStore} {updated : Location}
     {updatedLifetime : Lifetime} :
