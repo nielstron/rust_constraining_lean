@@ -1050,13 +1050,19 @@ theorem safeAbstraction_store_fresh_var {store : ProgramStore} {env : Env}
       rw [hfresh] at henvSlot
       cases henvSlot
 
+/-- Reading a variable at a **live** (`.ty`-shaped) slot yields a non-owner.
+The `.undef` case is intentionally excluded: under the lax runtime invariant a
+moved-out slot's stored value may be a live owner, so non-ownership no longer
+holds there — and an `undef` slot is never *read* (a deref needs a `.ty`
+target).  The assign-over-moved-out-owner case is instead handled "safe-drop" in
+the assign preservation, where the borrow invariant guarantees the freed cell is
+unreferenced. -/
 theorem safeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
     {env : Env} {x : Name} {envSlot : EnvSlot} {oldSlot : StoreSlot} :
     store ∼ₛ env →
     env.slotAt x = some envSlot →
     store.read (.var x) = some oldSlot →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner oldSlot.value := by
   intro hsafe henv hread hshape
@@ -1070,7 +1076,15 @@ theorem safeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
   have hvalueEq : safeValue = oldSlot.value :=
     (congrArg StoreSlot.value hslotEq).symm
   subst hvalueEq
-  exact validPartialValue_nonOwner_of_envShape hvalid hshape
+  rcases hshape with h | h | h | ⟨m, t, h⟩
+  · rw [h] at hvalid; exact validPartialValue_nonOwner_of_envShape hvalid (Or.inl rfl)
+  · rw [h] at hvalid
+    exact validPartialValue_nonOwner_of_envShape hvalid (Or.inr (Or.inl rfl))
+  · rw [h] at hvalid
+    exact validPartialValue_nonOwner_of_envShape hvalid (Or.inr (Or.inr (Or.inl rfl)))
+  · rw [h] at hvalid
+    exact validPartialValue_nonOwner_of_envShape hvalid
+      (Or.inr (Or.inr (Or.inr (Or.inr ⟨m, t, rfl⟩))))
 
 /-- Definition 3.23, direct variable write: `write₀(Γ, x, T)` updates only `x`. -/
 theorem envWrite_zero_var_eq {env env' : Env} {x : Name} {slot : EnvSlot}
