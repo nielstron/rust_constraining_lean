@@ -1187,12 +1187,12 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         htypeFresh htyFresh (hfreshTyping _)
         (ihGhost (SourceTerm.eq_rhs hsource))
         hnotMention henvEq hcopyL hcopyR hshape)
-    (fun _hcondition _htrue _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin
+    (fun _hcondition _htrue _hfalse hjoin henvJoin hsan hcbwf hwellJoin
         hlinear hborrowSafe hresultSafe ihCondition ihTrue ihFalse hsource =>
       TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hsameLeft hsameRight hwellJoin hlinear hborrowSafe hresultSafe)
+        hjoin henvJoin hsan hcbwf hwellJoin hlinear hborrowSafe hresultSafe)
     (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
         hsource =>
       TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
@@ -1204,13 +1204,13 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihCond (SourceTerm.while_condition hsource))
         (ihBody (SourceTerm.while_body hsource))
         hdiverges)
-    (fun hchild _hgenerated hjoin hss1 hss2 hcbwf hlin hbse hnameFresh
+    (fun hchild _hgenerated hjoin hsan hcbwf hlin hbse hnameFresh
         _hcondInv _hbodyInv hwellTy hdrop _hcondEntry _hbodyEntry
         ihGenerated ihCondInv ihBodyInv ihCondEntry ihBodyEntry hsource =>
       TermTyping.whileLoop hchild
         (ihGenerated (SourceTerm.while_condition hsource)
           (SourceTerm.while_body hsource))
-        hjoin hss1 hss2 hcbwf hlin hbse
+        hjoin hsan hcbwf hlin hbse
         hnameFresh
         (ihCondInv (SourceTerm.while_condition hsource))
         (ihBodyInv (SourceTerm.while_body hsource))
@@ -6349,9 +6349,9 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
                 hrefs hcoherentTyping hcoherentWhileInvariant leftResult.1
                 hRhsErased
             exact ⟨by simpa [henvEq] using rightResult.1, WellFormedTy.bool⟩)
-        (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+        (fun {_env₁ _env₂ _env₃ _env₄ _envLub _env₅ _typing _lifetime _condition
               _trueBranch _falseBranch _trueTy _falseTy _joinTy}
-            _hcondition _htrue _hfalse _hjoin _henvJoin _hsameLeft _hsameRight
+            _hcondition _htrue _hfalse _hjoin hlub hsan hcbwf
             hwellJoin hlinear _hborrowSafe _hresultSafe
             ihCondition ihTrue ihFalse hsize htypingEq hwellFormed =>
           let conditionResult := ihCondition
@@ -6360,19 +6360,19 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           let trueResult := ihTrue
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq conditionResult.1
-          let falseResult := ihFalse
+          let _falseResult := ihFalse
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq conditionResult.1
           let hiteTyping : TermTyping _env₁ _typing _lifetime
               (.ite _condition _trueBranch _falseBranch) _joinTy _env₅ :=
-            TermTyping.ite _hcondition _htrue _hfalse _hjoin _henvJoin
-              _hsameLeft _hsameRight hwellJoin hlinear _hborrowSafe
-              _hresultSafe
+            TermTyping.ite _hcondition _htrue _hfalse _hjoin hlub hsan hcbwf
+              hwellJoin hlinear _hborrowSafe _hresultSafe
           let hcoherent := hcoherentTyping hwellFormed hiteTyping
-          ⟨⟨containedBorrowsWellFormed_join _henvJoin _hsameLeft _hsameRight
-              trueResult.1.1 falseResult.1.1 hcoherent hlinear, by
+          ⟨⟨hcbwf, by
               exact EnvSlotsOutlive.of_lifetimesPreserved trueResult.1.2.1
-                (EnvJoin.lifetimesPreserved_left _henvJoin),
+                (EnvStrengthens.lifetimesPreserved
+                  (EnvStrengthens.trans (EnvJoin.left_le hlub)
+                    (EnvSanitize.envStrengthens hsan))),
             hcoherent, hlinear⟩, hwellJoin⟩)
         (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
               _trueBranch _falseBranch _trueTy _falseTy}

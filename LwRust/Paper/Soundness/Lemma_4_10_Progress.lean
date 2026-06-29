@@ -1033,9 +1033,9 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
           · exact progress_subEqRight hstepR
     · exact progress_subEqLeft hstepL
   case ite =>
-    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
+    intro _env₁ _env₂ _env₃ _env₄ _envLub _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
-      _hsameLeft _hsameRight _hwellJoin _hlinear _hborrowSafe _hresultSafe
+      _hsan _hcbwf _hwellJoin _hlinear _hborrowSafe _hresultSafe
       ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
     rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
         hvst.ite_condition hwf hsafe hstore with
@@ -1067,9 +1067,9 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, _, Step.whileStart⟩
   case whileLoop =>
-    intro _env₁ _envBack _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
+    intro _env₁ _envBack _envLub _envInv _env₂ _envEntry₂ _env₃ _envEntry₃ _typing
       lifetime _bodyLifetime _condition _body _bodyTy _bodyEntryTy
-      _hchild _hgenerated _hjoin _hss1 _hss2 _hcbwf _hlin _hbse
+      _hchild _hgenerated _hjoin _hsan _hcbwf _hlin _hbse
       _hnameFresh _hcondInv _hbodyInv _hwellTy _hdrop
       _hcondEntry _hbodyEntry _ihGenerated _ihCondInv _ihBodyInv _ihCondEntry
       _ihBodyEntry
