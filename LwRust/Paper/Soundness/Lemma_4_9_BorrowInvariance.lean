@@ -8824,6 +8824,71 @@ theorem stored_var_not_reaches_leaf_of_not_reaches_root {store : ProgramStore}
         cases hownedHeap
       exact ih hstoredNeOwned hownedNoReach
 
+/-- Lax (`ValidSlotValue`) analogue of
+`stored_var_not_reaches_leaf_of_not_reaches_root`: identical spine induction, the
+only validity use is routed through `reaches_owner_source_of_validSlotValue`. -/
+theorem stored_var_not_reaches_leaf_of_not_reaches_root_lax {store : ProgramStore}
+    {env : Env} {slotLifetime storedLifetime : Lifetime}
+    {storedName : Name} {storedValue : PartialValue} {storedTy : PartialTy}
+    {root leaf : Location} {rootSlot leafSlot : StoreSlot}
+    {rootTy leafTy : PartialTy} {path : Path} :
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    store.slotAt (VariableProjection storedName) =
+      some { value := storedValue, lifetime := storedLifetime } →
+    PartialTyBorrowsWellFormedInSlot env slotLifetime storedTy →
+    ValidSlotValue store storedValue storedTy →
+    StoreOwnerSpine store root rootSlot rootTy path leaf leafSlot leafTy →
+    VariableProjection storedName ≠ root →
+    (∀ reached,
+      RuntimeFrame.OwnerReaches store storedValue storedTy reached →
+      reached ≠ root) →
+    ∀ reached,
+      RuntimeFrame.OwnerReaches store storedValue storedTy reached →
+      reached ≠ leaf := by
+  intro hvalidStore hheap hstored hborrows hvalid hspine
+  induction hspine with
+  | nil _hslot _hvalidRoot =>
+      intro _hstoredNeRoot hrootNoReach
+      exact hrootNoReach
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot howner
+      htail ih =>
+      intro hstoredNeStorage hstorageNoReach
+      have howns : ProgramStore.OwnsAt store owned storage :=
+        StoreOwnerSpine.ownsAt_of_box hslot howner htail
+      have hownedNoReach :
+          ∀ reached,
+            RuntimeFrame.OwnerReaches store storedValue storedTy reached →
+            reached ≠ owned := by
+        intro reached hreach hreached
+        subst reached
+        rcases RuntimeFrame.reaches_owner_source_of_validSlotValue
+            hborrows hvalid hreach with hdirect | hsource
+        · have hstoredOwns :
+              ProgramStore.OwnsAt store owned (VariableProjection storedName) := by
+            have hstoredValue :
+                storedValue = .value (owningRef owned) :=
+              eq_owningRef_of_mem_partialValueOwningLocations hdirect
+            exact ⟨storedLifetime, by
+              cases hstoredValue
+              simpa [owningRef] using hstored⟩
+          have hstorageEq : VariableProjection storedName = storage :=
+            hvalidStore owned (VariableProjection storedName) storage
+              hstoredOwns howns
+          exact hstoredNeStorage hstorageEq
+        · rcases hsource with ⟨sourceStorage, hsourceReach, hsourceOwns⟩
+          have hstorageEq : sourceStorage = storage :=
+            hvalidStore owned sourceStorage storage hsourceOwns howns
+          exact hstorageNoReach sourceStorage hsourceReach hstorageEq
+      have hstoredNeOwned : VariableProjection storedName ≠ owned := by
+        intro hstoredEq
+        have hownedHeap : ∃ address, owned = .heap address :=
+          hheap owned ⟨storage, howns⟩
+        rcases hownedHeap with ⟨address, hownedHeap⟩
+        rw [← hstoredEq] at hownedHeap
+        cases hownedHeap
+      exact ih hstoredNeOwned hownedNoReach
+
 end StoreOwnerSpine
 
 /-- Direct variable `move` multistep preservation with the frame facts derived
@@ -9122,7 +9187,7 @@ theorem preservation_move_deref_box_multistep_runtime_of_wellFormed
                       ∀ reached,
                         RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty reached →
                         reached ≠ ownerLocation :=
-                    StoreOwnerSpine.stored_var_not_reaches_leaf_of_not_reaches_root
+                    StoreOwnerSpine.stored_var_not_reaches_leaf_of_not_reaches_root_lax
                       (ValidRuntimeState.validStore hvalidRuntime)
                       (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                       hslotY hborrowsOld hvalidOld hspine hvarYNeRoot
@@ -9150,7 +9215,7 @@ theorem preservation_move_deref_box_multistep_runtime_of_wellFormed
                           hnotWriteRoot hnotWriteRoot hdependency)
                         (by simpa [hreached] using hleafProtected)
                   exact ⟨oldValue, hslotYFinal,
-                    RuntimeFrame.validPartialValue_update_of_not_reaches
+                    RuntimeFrame.validSlotValue_update_of_not_reaches
                       hvalidOld holdNoReachLeaf⟩
               exact ⟨validRuntimeState_move_step hvalidRuntime
                   (Step.move (lifetime := lifetime) hread hwrite),
@@ -9493,9 +9558,9 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                     rw [hwrittenStore]
                     simpa [ProgramStore.update, VariableProjection, hyx] using hslotY
                   have hvalidOldWrite :
-                      ValidPartialValue writtenStore oldValue otherEnvSlot.ty := by
+                      ValidSlotValue writtenStore oldValue otherEnvSlot.ty := by
                     rw [hwrittenStore]
-                    exact RuntimeFrame.validPartialValue_update_of_not_reaches
+                    exact RuntimeFrame.validSlotValue_update_of_not_reaches
                       hvalidOld
                       (by
                         intro reached hreach
@@ -9735,9 +9800,9 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
                     dropsAvoids_var_of_ownerTargetsHeap hdrops hwriteOwnerHeap
                       hdropValuesHeap
                   have hvalidOldWrite :
-                      ValidPartialValue writtenStore oldValue otherEnvSlot.ty := by
+                      ValidSlotValue writtenStore oldValue otherEnvSlot.ty := by
                     rw [hwrittenStore]
-                    exact RuntimeFrame.validPartialValue_update_of_not_reaches
+                    exact RuntimeFrame.validSlotValue_update_of_not_reaches
                       hvalidOld
                       (by
                         intro reached hreach
@@ -10167,7 +10232,7 @@ theorem safeAbstraction_update_owner_spine_of_frames
         some { value := oldValue, lifetime := otherEnvSlot.lifetime } := by
       simpa [ProgramStore.update, hvarNeLeaf] using hslotY
     exact ⟨oldValue, hslotYFinal,
-      RuntimeFrame.validPartialValue_update_of_not_reaches hvalidOld
+      RuntimeFrame.validSlotValue_update_of_not_reaches hvalidOld
         (hotherNoReachLeaf y otherEnvSlot oldValue hyx henvY hslotY)⟩
 
 theorem RuntimeFrame.validPartialValue_update_of_owner_and_borrow_dependency_frame

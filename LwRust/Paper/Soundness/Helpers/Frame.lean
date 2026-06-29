@@ -1392,6 +1392,55 @@ theorem reaches_owner_source_of_validPartialValue {env : Env}
           · rcases hsource with ⟨storage, hstorageReach, howns⟩
             exact Or.inr ⟨storage, OwnerReaches.boxFullInner hslot hstorageReach, howns⟩
 
+/-- Lax (`ValidSlotValue`) analogue of `reaches_owner_source_of_validPartialValue`.
+For `.undef` slots `OwnerReaches` is uninhabited; for `.ty` slots `ValidSlotValue`
+is definitionally `ValidPartialValue`; the `.box` case mirrors the strict box case
+through the recursively-lax inner. -/
+theorem reaches_owner_source_of_validSlotValue {env : Env}
+    {store : ProgramStore} {slotLifetime : Lifetime} :
+    ∀ {value : PartialValue} {ty : PartialTy} {location : Location},
+    PartialTyBorrowsWellFormedInSlot env slotLifetime ty →
+    ValidSlotValue store value ty →
+    OwnerReaches store value ty location →
+    location ∈ partialValueOwningLocations value ∨
+      ∃ storage,
+        OwnerReaches store value ty storage ∧
+          ProgramStore.OwnsAt store location storage
+  | _value, .undef _, _location, _hborrows, _hvalid, hreach => by cases hreach
+  | _value, .ty _t, _location, hborrows, hvalid, hreach =>
+      reaches_owner_source_of_validPartialValue hborrows hvalid hreach
+  | _value, .box inner, location, hborrows, hvalid, hreach => by
+      simp only [ValidSlotValue] at hvalid
+      obtain ⟨loc, slot, hval, hslot, hinner⟩ := hvalid
+      subst hval
+      cases hreach with
+      | boxHere _hslot =>
+          exact Or.inl (by
+            simp [partialValueOwningLocations, valueOwningLocations,
+              valueOwnedLocation?])
+      | @boxInner _ reachedSlot _ _ hslot' hinnerReach =>
+          have hslotEq : reachedSlot = slot := by
+            rw [hslot] at hslot'
+            injection hslot' with hslotEq
+            exact hslotEq.symm
+          subst reachedSlot
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.box hcontains)
+          rcases reaches_owner_source_of_validSlotValue hinnerBorrows hinner
+              hinnerReach with howned | hsource
+          · exact Or.inr ⟨loc, OwnerReaches.boxHere hslot,
+              slot.lifetime, by
+                have hslotValue : slot.value = .value (owningRef location) :=
+                  eq_owningRef_of_mem_partialValueOwningLocations howned
+                cases slot with
+                | mk slotValue slotLifetime =>
+                    cases hslotValue
+                    simpa using hslot⟩
+          · rcases hsource with ⟨storage, hstorageReach, howns⟩
+            exact Or.inr ⟨storage, OwnerReaches.boxInner hslot hstorageReach, howns⟩
+
 /-- Owner reachability from a value stored at `storage` is a transitive ownership
 path rooted at `storage`. -/
 theorem ownsTransitively_of_ownerReaches_stored {store : ProgramStore}
