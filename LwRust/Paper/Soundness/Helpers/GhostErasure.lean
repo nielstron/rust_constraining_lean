@@ -1348,6 +1348,17 @@ theorem EnvStrengthens.erase_ghost {left right : Env} {ghost : Name} :
     simp [Env.erase]
   · simpa [Env.erase, hx] using hstrength x
 
+theorem EnvSanitize.erase_ghost {source result : Env} {ghost : Name} :
+    EnvSanitize source result →
+    EnvSanitize (source.erase ghost) (result.erase ghost) := by
+  intro hsan x
+  by_cases hx : x = ghost
+  · subst hx; left; simp [Env.erase]
+  · rcases hsan x with heq | ⟨slot, shape, hslot, hres, hstr, hvars⟩
+    · left; simpa [Env.erase, hx] using heq
+    · exact Or.inr ⟨slot, shape, by simpa [Env.erase, hx] using hslot,
+        by simpa [Env.erase, hx] using hres, hstr, hvars⟩
+
 theorem EnvJoin.erase_ghost {left right join : Env} {ghost : Name} :
     EnvJoin left right join →
     EnvJoin (left.erase ghost) (right.erase ghost) (join.erase ghost) := by
@@ -2396,9 +2407,9 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
             exact Env.typeNameFresh_erase hfreshRhsRaw,
           by simp [Ty.allVars]⟩)
     (by
-      intro env₁ env₂ env₃ env₄ env₅ typing lifetime condition trueBranch
+      intro env₁ env₂ env₃ env₄ envLub env₅ typing lifetime condition trueBranch
         falseBranch trueTy falseTy joinTy hcondition htrue hfalse htyJoin
-        henvJoin hsameLeft hsameRight hwellJoin hlinear hborrowSafe
+        hlub hsan hcbwf hwellJoin hlinear hborrowSafe
         hresultSafe ihCondition ihTrue ihFalse
         hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
@@ -2422,12 +2433,14 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
             (by simpa [PartialTy.allVars] using htrueTyFresh)
             (by simpa [PartialTy.allVars] using hfalseTyFresh)
         simpa [PartialTy.allVars] using hpartial
+      have hfreshLub : Env.TypeNameFresh (envLub.erase ghost) ghost :=
+        EnvJoin.typeNameFresh_erase hlub hfreshTrue hfreshFalse
       have hfreshJoin : Env.TypeNameFresh (env₅.erase ghost) ghost :=
-        EnvJoin.typeNameFresh_erase henvJoin hfreshTrue hfreshFalse
+        EnvSanitize.typeNameFresh (EnvSanitize.erase_ghost hsan) hfreshLub
       exact ⟨TermTyping.ite hconditionErased htrueErased hfalseErased
-        htyJoin (EnvJoin.erase_ghost henvJoin)
-        (EnvJoinSameShape.erase_ghost hsameLeft)
-        (EnvJoinSameShape.erase_ghost hsameRight)
+        htyJoin (EnvJoin.erase_ghost hlub)
+        (EnvSanitize.erase_ghost hsan)
+        (ContainedBorrowsWellFormed.erase_ghost hcbwf hfreshJoin)
         (WellFormedTy.erase_ghost hwellJoin hfreshJoin hjoinTyFresh)
         (Linearizable.erase_ghost hlinear)
         (BorrowSafeEnv.erase hborrowSafe)
@@ -2471,9 +2484,9 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨TermTyping.whileLoopDiverging hchild hconditionErased
         hbodyErased hdiverges, hfreshCond, by simp [Ty.allVars]⟩)
     (by
-      intro env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ typing
+      intro env₁ envBack envLub envInv env₂ envEntry₂ env₃ envEntry₃ typing
         lifetime bodyLifetime condition body bodyTy bodyEntryTy hchild
-        hgenerated hjoin hsameEntry hsameBack hcontained hlinear hborrowSafe
+        hgenerated hjoin hsan hcontained hlinear hborrowSafe
         hnameFresh hcondition hbody hbodyWell hdrop
         hentryCondition hentryBody ihGenerated ihCondition ihBody
         ihEntryCondition ihEntryBody hfresh hstore hnot
@@ -2510,8 +2523,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨TermTyping.whileLoop hchild
         hgeneratedErased
         (EnvJoin.erase_ghost hjoin)
-        (EnvJoinSameShape.erase_ghost hsameEntry)
-        (EnvJoinSameShape.erase_ghost hsameBack)
+        (EnvSanitize.erase_ghost hsan)
         (ContainedBorrowsWellFormed.erase_ghost hcontained hfreshInv)
         (Linearizable.erase_ghost hlinear)
         (BorrowSafeEnv.erase hborrowSafe)

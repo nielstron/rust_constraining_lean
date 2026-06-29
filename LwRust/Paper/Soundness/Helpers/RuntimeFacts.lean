@@ -816,9 +816,9 @@ theorem TermTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
       ⟨TyBorrowTargetsNonempty.bool, by
         rw [henv₃]
         exact EnvTypesBorrowTargetsNonempty.erase rightResult.2⟩)
-    (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+    (fun {_env₁ _env₂ _env₃ _env₄ _envLub _env₅ _typing _lifetime _condition
           _trueBranch _falseBranch _trueTy _falseTy _joinTy}
-        _hcondition _htrue _hfalse hjoin hstr3 _hstr4 _hcbwf
+        _hcondition _htrue _hfalse hjoin hlub hsan _hcbwf
         _hwellJoin _hlinear _hborrowSafe _hresultSafe ihCondition ihTrue
         ihFalse hstore henv =>
       let conditionResult := ihCondition hstore henv
@@ -828,7 +828,8 @@ theorem TermTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
         intro mutable targets hcontains
         exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
           trueResult.1 falseResult.1 hjoin hcontains
-      ⟨hjoinTy, EnvTypesBorrowTargetsNonempty.strengthens hstr3 trueResult.2⟩)
+      ⟨hjoinTy, EnvTypesBorrowTargetsNonempty.strengthens (EnvSanitize.envStrengthens hsan)
+        (EnvJoin.preserves_envTypesBorrowTargetsNonempty hlub trueResult.2 falseResult.2)⟩)
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hstore henv =>
       let conditionResult := ihCondition hstore henv
