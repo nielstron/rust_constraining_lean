@@ -749,6 +749,26 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
         exact hslot
       · exact ih (fun ℓ hℓ => hreach ℓ (Reaches.boxFullInner hslot hℓ))
 
+/-- Lax (`ValidSlotValue`) analogue of `validPartialValue_update_of_not_reaches`:
+an update the value does not reach preserves recursively-lax slot validity. -/
+theorem validSlotValue_update_of_not_reaches {store : ProgramStore}
+    {updated : Location} {newSlot : StoreSlot} :
+    ∀ {v : PartialValue} {ty : PartialTy},
+      ValidSlotValue store v ty →
+      (∀ ℓ, Reaches store v ty ℓ → ℓ ≠ updated) →
+      ValidSlotValue (store.update updated newSlot) v ty
+  | _, .undef _, _, _ => trivial
+  | _, .ty _, h, hreach => validPartialValue_update_of_not_reaches h hreach
+  | _, .box _inner, h, hreach => by
+      simp only [ValidSlotValue] at h ⊢
+      obtain ⟨loc, slot, hval, hslot, hin⟩ := h
+      subst hval
+      have hlocNe : loc ≠ updated := hreach loc (Reaches.boxHere hslot)
+      exact ⟨loc, slot, rfl,
+        by rw [ProgramStore.slotAt_update_ne hlocNe]; exact hslot,
+        validSlotValue_update_of_not_reaches hin
+          (fun ℓ hℓ => hreach ℓ (Reaches.boxInner hslot hℓ))⟩
+
 /--
 Evidence-indexed frame lemma for store updates.
 
