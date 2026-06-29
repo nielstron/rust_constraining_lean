@@ -646,9 +646,45 @@ def SafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
     ∃ value,
       store.slotAt (VariableProjection x) =
         some (StoreSlot.mk value envSlot.lifetime) ∧
-      ValidPartialValue store value envSlot.ty
+      ValidSlotValue store value envSlot.ty
 
 infix:50 " ∼ₛ " => SafeAbstraction
+
+/-- **Safe abstraction transports along plain environment strengthening.**
+This is the Half-B replacement for the same-shape transport `EnvSameShapeStrengthening.safe`:
+it needs neither `EnvJoinSameShape` nor shape equality, only `EnvStrengthens`,
+because the runtime slot validity (`ValidSlotValue`) is monotone under
+strengthening and the slot lifetimes are preserved.  This is what makes the
+`ite`/`while` join's `TerminalStateSafe.strengthen_join` go through without the
+dropped premise. -/
+theorem SafeAbstraction.strengthens {store : ProgramStore} {source result : Env} :
+    EnvStrengthens source result → store ∼ₛ source → store ∼ₛ result := by
+  intro hstr hsafe
+  refine ⟨?dom, ?val⟩
+  · intro x
+    refine (hsafe.1 x).trans ?_
+    have h := hstr x
+    constructor
+    · rintro ⟨s, hs⟩
+      rw [hs] at h
+      cases hr : result.slotAt x with
+      | none => rw [hr] at h; exact h.elim
+      | some r => exact ⟨r, rfl⟩
+    · rintro ⟨r, hr⟩
+      rw [hr] at h
+      cases hsrc : source.slotAt x with
+      | none => rw [hsrc] at h; exact h.elim
+      | some s => exact ⟨s, rfl⟩
+  · intro x envSlot hres
+    have h := hstr x
+    rw [hres] at h
+    cases hs : source.slotAt x with
+    | none => rw [hs] at h; exact False.elim h
+    | some srcSlot =>
+        rw [hs] at h
+        obtain ⟨hlife, hstrengthen⟩ := h
+        obtain ⟨value, hstore, hvalid⟩ := hsafe.2 x srcSlot hs
+        exact ⟨value, by rw [hstore, hlife], ValidSlotValue.mono_strengthens hstrengthen hvalid⟩
 
 theorem SafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
@@ -699,7 +735,10 @@ theorem safeAbstraction_of_domain_and_slots {store : ProgramStore} {env : Env} :
         ValidPartialValue store value envSlot.ty) →
     store ∼ₛ env := by
   intro hdomain hslots
-  exact ⟨hdomain, hslots⟩
+  refine ⟨hdomain, ?_⟩
+  intro x envSlot henv
+  obtain ⟨value, hstore, hvalid⟩ := hslots x envSlot henv
+  exact ⟨value, hstore, hvalid.toValidSlotValue⟩
 
 /--
 Transport safe abstraction across an environment shape/strengthening map when
@@ -745,7 +784,7 @@ theorem safeAbstraction_transport_sameShape {store : ProgramStore}
       ⟨value, hstore, hvalid⟩
     refine ⟨value, ?_, ?_⟩
     · simpa [hlife] using hstore
-    · exact validPartialValue_strengthen_sameShape hvalid hstrength hshape
+    · exact ValidSlotValue.mono_strengthens hstrength hvalid
 
 theorem safeAbstraction_env_no_lifetime_of_store_no_lifetime {store : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
@@ -864,7 +903,8 @@ theorem safeAbstraction_dropLifetime_of_preserved
   · intro x envSlot henvDropped
     rcases (Env.dropLifetime_slotAt_eq_some.mp henvDropped) with
       ⟨henv, hlifetime⟩
-    exact hpreserve x envSlot henv hlifetime
+    obtain ⟨value, hstore, hvalid⟩ := hpreserve x envSlot henv hlifetime
+    exact ⟨value, hstore, hvalid.toValidSlotValue⟩
 
 /--
 Lemma 9.5, Drop Preservation, lifetime-drop form.
