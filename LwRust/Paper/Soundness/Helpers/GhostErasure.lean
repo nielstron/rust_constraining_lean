@@ -1348,13 +1348,39 @@ theorem EnvStrengthens.erase_ghost {left right : Env} {ghost : Name} :
     simp [Env.erase]
   · simpa [Env.erase, hx] using hstrength x
 
+/-- Freshness of a sanitized result's erasure from the source's — uses only the
+per-slot part of `EnvSanitize` (no `Coherent`), so it can be used to *supply* the
+freshness that `EnvSanitize.erase_ghost`/`Coherent.erase_ghost` need (breaking the
+apparent circularity). -/
+theorem EnvSanitize.typeNameFresh_erase {source result : Env} {ghost : Name} :
+    EnvSanitize source result →
+    Env.TypeNameFresh (source.erase ghost) ghost →
+    Env.TypeNameFresh (result.erase ghost) ghost := by
+  intro hsan hfresh y slot hslot
+  by_cases hy : y = ghost
+  · subst hy; simp [Env.erase] at hslot
+  · have hslotR : result.slotAt y = some slot := by
+      simpa [Env.erase, hy] using hslot
+    rcases hsan.1 y with heq | ⟨srcSlot, shape, hsrcSlot, hres, _hstr, hvars⟩
+    · have hsrc : source.slotAt y = some slot := by rw [← heq]; exact hslotR
+      exact hfresh y slot (by simpa [Env.erase, hy] using hsrc)
+    · have hslotEq : slot = { srcSlot with ty := .undef shape } :=
+        Option.some.inj (hslotR.symm.trans hres)
+      subst hslotEq
+      intro hmem
+      exact hfresh y srcSlot (by simpa [Env.erase, hy] using hsrcSlot)
+        (hvars (by simpa [PartialTy.allVars] using hmem))
+
 theorem EnvSanitize.erase_ghost {source result : Env} {ghost : Name} :
     EnvSanitize source result →
+    Env.TypeNameFresh (result.erase ghost) ghost →
     EnvSanitize (source.erase ghost) (result.erase ghost) := by
-  intro hsan x
+  intro hsan hfreshResult
+  refine ⟨?_, Coherent.erase_ghost hsan.2 hfreshResult⟩
+  intro x
   by_cases hx : x = ghost
   · subst hx; left; simp [Env.erase]
-  · rcases hsan x with heq | ⟨slot, shape, hslot, hres, hstr, hvars⟩
+  · rcases hsan.1 x with heq | ⟨slot, shape, hslot, hres, hstr, hvars⟩
     · left; simpa [Env.erase, hx] using heq
     · exact Or.inr ⟨slot, shape, by simpa [Env.erase, hx] using hslot,
         by simpa [Env.erase, hx] using hres, hstr, hvars⟩
@@ -2436,10 +2462,10 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       have hfreshLub : Env.TypeNameFresh (envLub.erase ghost) ghost :=
         EnvJoin.typeNameFresh_erase hlub hfreshTrue hfreshFalse
       have hfreshJoin : Env.TypeNameFresh (env₅.erase ghost) ghost :=
-        EnvSanitize.typeNameFresh (EnvSanitize.erase_ghost hsan) hfreshLub
+        EnvSanitize.typeNameFresh_erase hsan hfreshLub
       exact ⟨TermTyping.ite hconditionErased htrueErased hfalseErased
         htyJoin (EnvJoin.erase_ghost hlub)
-        (EnvSanitize.erase_ghost hsan)
+        (EnvSanitize.erase_ghost hsan hfreshJoin)
         (ContainedBorrowsWellFormed.erase_ghost hcbwf hfreshJoin)
         (WellFormedTy.erase_ghost hwellJoin hfreshJoin hjoinTyFresh)
         (Linearizable.erase_ghost hlinear)
@@ -2523,7 +2549,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨TermTyping.whileLoop hchild
         hgeneratedErased
         (EnvJoin.erase_ghost hjoin)
-        (EnvSanitize.erase_ghost hsan)
+        (EnvSanitize.erase_ghost hsan hfreshInv)
         (ContainedBorrowsWellFormed.erase_ghost hcontained hfreshInv)
         (Linearizable.erase_ghost hlinear)
         (BorrowSafeEnv.erase hborrowSafe)

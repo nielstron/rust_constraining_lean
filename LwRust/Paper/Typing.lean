@@ -677,32 +677,6 @@ def PartialTy.allVars : PartialTy → List Name
   | .box inner => PartialTy.allVars inner
   | .undef t => Ty.allVars t
 
-/-- `result` is a *sanitization* of `source`: every slot is either kept verbatim
-or lifted to an `undef` shape that the original strengthens to and that
-introduces no new type variables.  This is how an `ite`/`while` join discards
-borrows whose targets were moved out in the other branch — keeping
-`ContainedBorrowsWellFormed` strong — without inventing new borrow targets
-(unlike an arbitrary `EnvStrengthens`, which rule W-Bor lets *grow* target
-lists).  The two side conditions are exactly what the extractor proves when it
-lifts a slot to its canonical `undef` form (`.ty t`/`.box _ ↦ .undef …`). -/
-def EnvSanitize (source result : Env) : Prop :=
-  ∀ x, result.slotAt x = source.slotAt x ∨
-       ∃ slot shape, source.slotAt x = some slot ∧
-         result.slotAt x = some { slot with ty := .undef shape } ∧
-         PartialTyStrengthens slot.ty (.undef shape) ∧
-         Ty.allVars shape ⊆ PartialTy.allVars slot.ty
-
-theorem EnvSanitize.envStrengthens {source result : Env} :
-    EnvSanitize source result → EnvStrengthens source result := by
-  intro hsan x
-  rcases hsan x with heq | ⟨slot, shape, hslot, hres, hstrengthen, _hvars⟩
-  · rw [heq]
-    cases source.slotAt x with
-    | none => trivial
-    | some s => exact ⟨rfl, PartialTyStrengthens.reflex⟩
-  · rw [hslot, hres]
-    exact ⟨rfl, hstrengthen⟩
-
 mutual
   theorem Ty.vars_subset_allVars {ty : Ty} {v : Name} :
       v ∈ Ty.vars ty → v ∈ Ty.allVars ty := by
@@ -736,21 +710,6 @@ end
 including the type shadows carried below `undef`. -/
 def Env.TypeNameFresh (env : Env) (x : Name) : Prop :=
   ∀ y slot, env.slotAt y = some slot → x ∉ PartialTy.allVars slot.ty
-
-/-- Sanitization preserves type-name freshness: it never introduces new type
-variables (each kept slot is unchanged, each lifted slot's `undef` shape has
-`allVars ⊆` the original by the `EnvSanitize` side condition). -/
-theorem EnvSanitize.typeNameFresh {source result : Env} {x : Name} :
-    EnvSanitize source result → Env.TypeNameFresh source x →
-    Env.TypeNameFresh result x := by
-  intro hsan hfresh y slot hslot
-  rcases hsan y with heq | ⟨srcSlot, shape, hsrcSlot, hres, _hstr, hvars⟩
-  · exact hfresh y slot (by rw [← heq]; exact hslot)
-  · have hslotEq : slot = { srcSlot with ty := .undef shape } :=
-      Option.some.inj (hslot.symm.trans hres)
-    subst hslotEq
-    intro hmem
-    exact hfresh y srcSlot hsrcSlot (hvars (by simpa [PartialTy.allVars] using hmem))
 
 namespace StoreTyping
 
@@ -1293,6 +1252,48 @@ def Coherent (env : Env) : Prop :=
   ∀ lv mutable targets borrowLifetime,
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
     ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+
+/-- `result` is a *sanitization* of `source` (used by the `ite`/`while` join):
+every slot is either kept verbatim or lifted to an `undef` shape the original
+strengthens to with no new type variables, **and** the result is `Coherent`.
+The `Coherent` conjunct is the coherence-closure that makes the sanitized join's
+surviving borrows resolvable: borrows whose targets were moved out in the other
+branch are lifted away, so every remaining lval-typed borrow still has
+jointly-typeable targets.  The extractor discharges all conditions when it lifts
+each dead-borrow slot to its canonical `undef` form. -/
+def EnvSanitize (source result : Env) : Prop :=
+  (∀ x, result.slotAt x = source.slotAt x ∨
+       ∃ slot shape, source.slotAt x = some slot ∧
+         result.slotAt x = some { slot with ty := .undef shape } ∧
+         PartialTyStrengthens slot.ty (.undef shape) ∧
+         Ty.allVars shape ⊆ PartialTy.allVars slot.ty) ∧
+  Coherent result
+
+theorem EnvSanitize.coherent {source result : Env} :
+    EnvSanitize source result → Coherent result := fun h => h.2
+
+theorem EnvSanitize.envStrengthens {source result : Env} :
+    EnvSanitize source result → EnvStrengthens source result := by
+  intro hsan x
+  rcases hsan.1 x with heq | ⟨slot, shape, hslot, hres, hstrengthen, _hvars⟩
+  · rw [heq]
+    cases source.slotAt x with
+    | none => trivial
+    | some s => exact ⟨rfl, PartialTyStrengthens.reflex⟩
+  · rw [hslot, hres]
+    exact ⟨rfl, hstrengthen⟩
+
+theorem EnvSanitize.typeNameFresh {source result : Env} {x : Name} :
+    EnvSanitize source result → Env.TypeNameFresh source x →
+    Env.TypeNameFresh result x := by
+  intro hsan hfresh y slot hslot
+  rcases hsan.1 y with heq | ⟨srcSlot, shape, hsrcSlot, hres, _hstr, hvars⟩
+  · exact hfresh y slot (by rw [← heq]; exact hslot)
+  · have hslotEq : slot = { srcSlot with ty := .undef shape } :=
+      Option.some.inj (hslot.symm.trans hres)
+    subst hslotEq
+    intro hmem
+    exact hfresh y srcSlot hsrcSlot (hvars (by simpa [PartialTy.allVars] using hmem))
 
 theorem LValTypingOutputsCoherent.coherent {env : Env} :
     LValTypingOutputsCoherent env →
