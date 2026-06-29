@@ -1510,6 +1510,17 @@ theorem validPartialValue_declare {store : ProgramStore} {x : Name}
   | boxFull hslot _hinner ih =>
       exact ValidPartialValue.boxFull (slotAt_declare_of_slotAt hfresh hslot) ih
 
+/-- Lax (`ValidSlotValue`) analogue of `validPartialValue_declare`. -/
+theorem validSlotValue_declare {store : ProgramStore} {x : Name}
+    {lifetime : Lifetime} {newValue : Value} {v : PartialValue} {ty : PartialTy} :
+    store.fresh (.var x) →
+    ValidSlotValue store v ty →
+    ValidSlotValue (store.declare x lifetime newValue) v ty := by
+  intro hfresh h
+  exact ValidSlotValue.store_mono
+    (fun _loc _slot hloc => slotAt_declare_of_slotAt hfresh hloc)
+    (fun hpv => validPartialValue_declare hfresh hpv) h
+
 /--
 Lemma 9.10 support, `R-Declare` safe-abstraction preservation.
 

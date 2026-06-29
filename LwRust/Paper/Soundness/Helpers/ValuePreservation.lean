@@ -1091,7 +1091,7 @@ theorem preservation_declare_redex_runtime_of_validValue {store store' : Program
             rw [hstoreSlot] at hsafeSlot
             injection hsafeSlot with hslotEq
             cases hslotEq
-            exact validPartialValue_declare hfreshStore hsafeValid)
+            exact validSlotValue_declare hfreshStore hsafeValid)
       exact ⟨validRuntimeState_declare_step_of_validValue
           hvalidRuntime hfreshStore hvalidValue (Step.declare (lifetime := lifetime) rfl),
         hsafe',
