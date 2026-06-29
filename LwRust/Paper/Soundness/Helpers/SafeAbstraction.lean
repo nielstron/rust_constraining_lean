@@ -1135,10 +1135,11 @@ theorem safeAbstraction_update_var_of_preserved {store' : ProgramStore}
           updatedSlot = { envSlot with ty := .ty ty } := by
         simpa [Env.update] using henvUpdated.symm
       subst hupdatedSlot
-      exact ⟨.value value, hstoreX, hnewValid⟩
+      exact ⟨.value value, hstoreX, hnewValid.toValidSlotValue⟩
     · have henv : env.slotAt y = some updatedSlot := by
         simpa [Env.update, hyx] using henvUpdated
-      exact hpreserveOther y updatedSlot hyx henv
+      obtain ⟨v, hs, hv⟩ := hpreserveOther y updatedSlot hyx henv
+      exact ⟨v, hs, hv.toValidSlotValue⟩
 
 /--
 Safe-abstraction preservation for updating one variable's abstract slot to an
@@ -1195,10 +1196,11 @@ theorem safeAbstraction_update_var_partial_of_preserved {store' : ProgramStore}
           updatedSlot = { envSlot with ty := newTy } := by
         simpa [Env.update] using henvUpdated.symm
       subst hupdatedSlot
-      exact ⟨value, hstoreX, hnewValid⟩
+      exact ⟨value, hstoreX, hnewValid.toValidSlotValue⟩
     · have henv : env.slotAt y = some updatedSlot := by
         simpa [Env.update, hyx] using henvUpdated
-      exact hpreserveOther y updatedSlot hyx henv
+      obtain ⟨v, hs, hv⟩ := hpreserveOther y updatedSlot hyx henv
+      exact ⟨v, hs, hv.toValidSlotValue⟩
 
 /--
 Variable-base assignment store preservation, factored around the paper's
@@ -1603,7 +1605,7 @@ theorem safeAbstraction_move_var {store : ProgramStore} {env : Env}
       exact ⟨.undef, by
           simp [ProgramStore.update, VariableProjection],
         by
-          simpa [hty] using (ValidPartialValue.undef (ty := ty))⟩
+          simp [ValidSlotValue, hty]⟩
     · have holdEnv : env.slotAt y = some envSlot := by
         simpa [Env.update, hyx] using henvUpdated
       rcases hsafe.2 y envSlot holdEnv with ⟨value, hstore, _hvalid⟩
