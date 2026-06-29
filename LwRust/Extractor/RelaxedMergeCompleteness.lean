@@ -163,6 +163,192 @@ inductive RelaxedTermListTyping :
 
 end
 
+/-- Every ordinary term typing derivation is also a relaxed typing derivation. -/
+theorem TermTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    TermTyping env₁ typing lifetime term ty env₂ →
+    RelaxedTermTyping env₁ typing lifetime term ty env₂ := by
+  intro htyping
+  refine TermTyping.rec
+    (motive_1 := fun env typing lifetime term ty env₂ _ =>
+      RelaxedTermTyping env typing lifetime term ty env₂)
+    (motive_2 := fun env typing lifetime terms ty env₂ _ =>
+      RelaxedTermListTyping env typing lifetime terms ty env₂)
+    ?constCase ?missingCase ?copyCase ?moveCase ?mutBorrowCase
+    ?immBorrowCase ?boxCase ?blockCase ?declareCase ?assignCase ?eqCase
+    ?iteCase ?iteDivergingCase ?singletonCase ?consCase htyping
+  case constCase =>
+    intro _env _typing _lifetime _value _ty hvalue
+    exact RelaxedTermTyping.const hvalue
+  case missingCase =>
+    intro _env _typing _lifetime _ty hwellTy hloanFree
+    exact RelaxedTermTyping.missing hwellTy hloanFree
+  case copyCase =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
+    exact RelaxedTermTyping.copy hLv hcopy hnotRead
+  case moveCase =>
+    intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty hLv
+      hnotWrite hmove
+    exact RelaxedTermTyping.move hLv hnotWrite hmove
+  case mutBorrowCase =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hmutable
+      hnotWrite
+    exact RelaxedTermTyping.mutBorrow hLv hmutable hnotWrite
+  case immBorrowCase =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead
+    exact RelaxedTermTyping.immBorrow hLv hnotRead
+  case boxCase =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
+    exact RelaxedTermTyping.box ih
+  case blockCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
+      hchild _hterms hwellTy hdrop ih
+    exact RelaxedTermTyping.block hchild ih hwellTy hdrop
+  case declareCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh _hterm
+      hfreshOut hcoh henvOut ih
+    exact RelaxedTermTyping.declare hfresh ih hfreshOut hcoh henvOut
+  case assignCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
+      _rhs _rhsTy _hRhs hLhs hshape hwellTy hwrite hranked hcoh htargets
+      hnotWrite ih
+    exact RelaxedTermTyping.assign ih hLhs hshape hwellTy hwrite hranked
+      hcoh htargets hnotWrite
+  case eqCase =>
+    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+      _lhsTy _rhsTy _hLhs hfresh htypeFresh htyFresh hstoreFresh _hRhs
+      hnotMention henvOut hcopyL hcopyR hshape ihL ihR
+    exact RelaxedTermTyping.eq ihL hfresh htypeFresh
+      (by
+        intro hmem
+        exact htyFresh (Ty.vars_subset_allVars hmem))
+      hstoreFresh ihR hnotMention henvOut hcopyL hcopyR hshape
+  case iteCase =>
+    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
+      _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent
+      hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue ihFalse
+    exact RelaxedTermTyping.ite ihCondition ihTrue ihFalse hjoin henvJoin
+      hsameLeft hsameRight hwellJoin hcoherent hlinear
+  case iteDivergingCase =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse
+      hdiverges ihCondition ihTrue ihFalse
+    exact RelaxedTermTyping.iteDiverging ihCondition ihTrue ihFalse hdiverges
+  case singletonCase =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
+    exact RelaxedTermListTyping.singleton ih
+  case consCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
+      _hterm _hrest ihTerm ihRest
+    exact RelaxedTermListTyping.cons ihTerm ihRest
+
+/--
+Build a relaxed conditional from ordinarily typed subterms without the strict
+`T-If` post-join borrow-safety payload.
+-/
+theorem RelaxedTermTyping.ite_of_termTyping_without_join_borrow_safety
+    {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+    {trueTy falseTy joinTy : Ty} :
+    TermTyping env₁ typing lifetime condition .bool env₂ →
+    TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
+    TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
+    PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
+    EnvJoin env₃ env₄ env₅ →
+    EnvJoinSameShape env₃ env₅ →
+    EnvJoinSameShape env₄ env₅ →
+    WellFormedTy env₅ joinTy lifetime →
+    Coherent env₅ →
+    Linearizable env₅ →
+    RelaxedTermTyping env₁ typing lifetime
+      (.ite condition trueBranch falseBranch) joinTy env₅ := by
+  intro hcondition htrue hfalse hjoin henvJoin hsameLeft hsameRight
+    hwellJoin hcoherent hlinear
+  exact RelaxedTermTyping.ite (TermTyping.toRelaxed hcondition)
+    (TermTyping.toRelaxed htrue) (TermTyping.toRelaxed hfalse) hjoin
+    henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear
+
+/-- Every ordinary term-list typing derivation is also relaxed. -/
+theorem TermListTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {terms : List Term} {ty : Ty} :
+    TermListTyping env₁ typing lifetime terms ty env₂ →
+    RelaxedTermListTyping env₁ typing lifetime terms ty env₂ := by
+  intro htyping
+  refine TermListTyping.rec
+    (motive_1 := fun env typing lifetime term ty env₂ _ =>
+      RelaxedTermTyping env typing lifetime term ty env₂)
+    (motive_2 := fun env typing lifetime terms ty env₂ _ =>
+      RelaxedTermListTyping env typing lifetime terms ty env₂)
+    ?constCase ?missingCase ?copyCase ?moveCase ?mutBorrowCase
+    ?immBorrowCase ?boxCase ?blockCase ?declareCase ?assignCase ?eqCase
+    ?iteCase ?iteDivergingCase ?singletonCase ?consCase htyping
+  case constCase =>
+    intro _env _typing _lifetime _value _ty hvalue
+    exact RelaxedTermTyping.const hvalue
+  case missingCase =>
+    intro _env _typing _lifetime _ty hwellTy hloanFree
+    exact RelaxedTermTyping.missing hwellTy hloanFree
+  case copyCase =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
+    exact RelaxedTermTyping.copy hLv hcopy hnotRead
+  case moveCase =>
+    intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty hLv
+      hnotWrite hmove
+    exact RelaxedTermTyping.move hLv hnotWrite hmove
+  case mutBorrowCase =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hmutable
+      hnotWrite
+    exact RelaxedTermTyping.mutBorrow hLv hmutable hnotWrite
+  case immBorrowCase =>
+    intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead
+    exact RelaxedTermTyping.immBorrow hLv hnotRead
+  case boxCase =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
+    exact RelaxedTermTyping.box ih
+  case blockCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
+      hchild _hterms hwellTy hdrop ih
+    exact RelaxedTermTyping.block hchild ih hwellTy hdrop
+  case declareCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh _hterm
+      hfreshOut hcoh henvOut ih
+    exact RelaxedTermTyping.declare hfresh ih hfreshOut hcoh henvOut
+  case assignCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
+      _rhs _rhsTy _hRhs hLhs hshape hwellTy hwrite hranked hcoh htargets
+      hnotWrite ih
+    exact RelaxedTermTyping.assign ih hLhs hshape hwellTy hwrite hranked
+      hcoh htargets hnotWrite
+  case eqCase =>
+    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
+      _lhsTy _rhsTy _hLhs hfresh htypeFresh htyFresh hstoreFresh _hRhs
+      hnotMention henvOut hcopyL hcopyR hshape ihL ihR
+    exact RelaxedTermTyping.eq ihL hfresh htypeFresh
+      (by
+        intro hmem
+        exact htyFresh (Ty.vars_subset_allVars hmem))
+      hstoreFresh ihR hnotMention henvOut hcopyL hcopyR hshape
+  case iteCase =>
+    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
+      _hfalse hjoin henvJoin hsameLeft hsameRight hwellJoin hcoherent
+      hlinear _hborrowSafeJoin _hresultSafe ihCondition ihTrue ihFalse
+    exact RelaxedTermTyping.ite ihCondition ihTrue ihFalse hjoin henvJoin
+      hsameLeft hsameRight hwellJoin hcoherent hlinear
+  case iteDivergingCase =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse
+      hdiverges ihCondition ihTrue ihFalse
+    exact RelaxedTermTyping.iteDiverging ihCondition ihTrue ihFalse hdiverges
+  case singletonCase =>
+    intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
+    exact RelaxedTermListTyping.singleton ih
+  case consCase =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
+      _hterm _hrest ihTerm ihRest
+    exact RelaxedTermListTyping.cons ihTerm ihRest
+
 end Paper
 end LwRust
 
