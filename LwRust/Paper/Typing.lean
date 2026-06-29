@@ -501,14 +501,6 @@ mutual
     | .ite condition trueBranch falseBranch =>
         Term.Mentions x condition ∨ Term.Mentions x trueBranch ∨
           Term.Mentions x falseBranch
-    | .whileLoop _ condition body =>
-        Term.Mentions x condition ∨ Term.Mentions x body
-    | .whileCond _ conditionInFlight condition body =>
-        Term.Mentions x conditionInFlight ∨ Term.Mentions x condition ∨
-          Term.Mentions x body
-    | .whileBody _ bodyInFlight condition body =>
-        Term.Mentions x bodyInFlight ∨ Term.Mentions x condition ∨
-          Term.Mentions x body
 
   /-- Syntactic occurrence of a variable name in a term list. -/
   def TermList.Mentions (x : Name) : List Term → Prop
@@ -531,12 +523,6 @@ mutual
     | .eq lhs rhs => Term.names lhs ∪ Term.names rhs
     | .ite condition trueBranch falseBranch =>
         Term.names condition ∪ Term.names trueBranch ∪ Term.names falseBranch
-    | .whileLoop _ condition body =>
-        Term.names condition ∪ Term.names body
-    | .whileCond _ conditionInFlight condition body =>
-        Term.names conditionInFlight ∪ Term.names condition ∪ Term.names body
-    | .whileBody _ bodyInFlight condition body =>
-        Term.names bodyInFlight ∪ Term.names condition ∪ Term.names body
 
   def TermList.names : List Term → Finset Name
     | [] => ∅
@@ -563,7 +549,7 @@ theorem Term.mentions_mem_names {x : Name} {term : Term}
     (motive_1 := fun term => Term.Mentions x term → x ∈ Term.names term)
     (motive_2 := fun terms => TermList.Mentions x terms → x ∈ TermList.names terms)
     ?block ?letMut ?assign ?box ?borrow ?move ?copy ?val ?missing ?eq ?ite
-    ?whileLoop ?whileCond ?whileBody ?nil ?cons term
+    ?nil ?cons term
   case block =>
     intro _lifetime _terms ih hmentions
     exact ih hmentions
@@ -609,29 +595,6 @@ theorem Term.mentions_mem_names {x : Name} {term : Term}
     · exact Finset.mem_union.mpr (Or.inl
         (Finset.mem_union.mpr (Or.inr (ihTrue htrue))))
     · exact Finset.mem_union.mpr (Or.inr (ihFalse hfalse))
-  case whileLoop =>
-    intro _bodyLifetime _condition _body ihCondition ihBody hmentions
-    rcases hmentions with hcondition | hbody
-    · exact Finset.mem_union.mpr (Or.inl (ihCondition hcondition))
-    · exact Finset.mem_union.mpr (Or.inr (ihBody hbody))
-  case whileCond =>
-    intro _bodyLifetime _conditionInFlight _condition _body ihInFlight
-      ihCondition ihBody hmentions
-    rcases hmentions with hinFlight | hcondition | hbody
-    · exact Finset.mem_union.mpr (Or.inl
-        (Finset.mem_union.mpr (Or.inl (ihInFlight hinFlight))))
-    · exact Finset.mem_union.mpr (Or.inl
-        (Finset.mem_union.mpr (Or.inr (ihCondition hcondition))))
-    · exact Finset.mem_union.mpr (Or.inr (ihBody hbody))
-  case whileBody =>
-    intro _bodyLifetime _bodyInFlight _condition _body ihInFlight
-      ihCondition ihBody hmentions
-    rcases hmentions with hinFlight | hcondition | hbody
-    · exact Finset.mem_union.mpr (Or.inl
-        (Finset.mem_union.mpr (Or.inl (ihInFlight hinFlight))))
-    · exact Finset.mem_union.mpr (Or.inl
-        (Finset.mem_union.mpr (Or.inr (ihCondition hcondition))))
-    · exact Finset.mem_union.mpr (Or.inr (ihBody hbody))
   case nil =>
     intro hmentions
     cases hmentions
@@ -1702,66 +1665,6 @@ mutual
         trueBranch.Diverges →
         TermTyping env₁ typing lifetime
           (.ite condition trueBranch falseBranch) falseTy env₄
-    /-- T-WhileDiv: while loop with a diverging body — the loop-body
-    counterpart of `T-IfDiv`.  A body ending in `panic!()` never reaches the
-    back edge, so no re-entry invariant is required; the body is still fully
-    type- and borrow-checked.  This is what `ast_copier` relies on when it
-    rebuilds a truncated loop body as `while c { …; panic!() }`. -/
-    | whileLoopDiverging {env₁ env₂ env₃ : Env} {typing : StoreTyping}
-        {lifetime bodyLifetime : Lifetime} {condition body : Term}
-        {bodyTy : Ty} :
-        LifetimeChild lifetime bodyLifetime →
-        TermTyping env₁ typing lifetime condition .bool env₂ →
-        TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
-        body.Diverges →
-        TermTyping env₁ typing lifetime
-          (.whileLoop bodyLifetime condition body) .unit env₂
-    /-- T-While: NLL-style loop invariant.
-
-    The loop is checked against an invariant environment `envInv` solving the
-    fixpoint equation `envInv = env₁ ⊔ envBack`: the condition is typed from
-    the invariant, and the back edge (post-body, after the body-scope drop)
-    must be exactly the `envBack` that closes the join.  This accepts loops
-    that widen borrow target lists across iterations (e.g. re-pointing an
-    outer `&mut` inside the body).
-
-    This is the legacy relational version of the loop rule.  Its join result
-    and invariant are still supplied by the derivation, so it carries the
-    shape and invariant obligations needed by the existing preservation proof.
-    The intended endpoint is that loop invariants are accepted only when they
-    are reachable fixed points, so coherence follows from construction.
-
-    The final two premises re-type the condition and body from the
-    *entry-side* environments.  In real Rust this is implied: per-code
-    borrow checking is monotone under removing loans, so anything that
-    checks at the widened loop-head state also checks at the entry state.
-    In this calculus that implication is genuinely unprovable without a
-    well-formedness condition on the widened environment: strengthening can
-    shrink a borrow target list to `[]`, while weakening may add a target whose
-    base variable is absent or untypable (`Examples/ThinningFalse.lean`).  The
-    conservative extractor's transport relies on these entry-side derivations
-    to keep loop-frontier extraction precise. -/
-    | whileLoop {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
-        {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
-        {condition body : Term} {bodyTy bodyEntryTy : Ty} :
-        LifetimeChild lifetime bodyLifetime →
-        EnvJoin env₁ envBack envInv →
-        EnvJoinSameShape env₁ envInv →
-        EnvJoinSameShape envBack envInv →
-        ContainedBorrowsWellFormed envInv →
-        Coherent envInv →
-        Linearizable envInv →
-        BorrowSafeEnv envInv →
-        LoopInvariantNameFresh env₁ envInv condition body →
-        TermTyping envInv typing lifetime condition .bool env₂ →
-        TermTyping env₂ typing bodyLifetime body bodyTy env₃ →
-        WellFormedTy env₃ bodyTy lifetime →
-        env₃.dropLifetime bodyLifetime = envBack →
-        TermTyping env₁ typing lifetime condition .bool envEntry₂ →
-        TermTyping envEntry₂ typing bodyLifetime body bodyEntryTy envEntry₃ →
-        TermTyping env₁ typing lifetime
-          (.whileLoop bodyLifetime condition body) .unit env₂
-
   inductive TermListTyping : Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
     /-- T-Seq, singleton sequence. -/
     | singleton {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
@@ -1818,13 +1721,6 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue
         ihFalse hfinite =>
       ihFalse (ihCondition hfinite))
-    (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
-      ihCondition hfinite)
-    (fun _hchild hjoin _hsameEntry _hsameBack _hcontained _hcoherent
-        _hlinear _hborrowSafe _hnameFresh _hcondition _hbody _hwellTy
-        _hback _hentryCondition _hentryBody ihCondition _ihBody
-        _ihEntryCondition _ihEntryBody hfinite =>
-      ihCondition (EnvJoin.finiteSupport_left hjoin hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>
       ihRest (ihTerm hfinite))

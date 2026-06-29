@@ -1,7 +1,7 @@
 # Rust Constraining Formalization
 
 Lean mechanisation of the core FR calculus from the paper "A Lightweight Formalism for Reference Lifetimes and
-Borrowing in Rust" (`Paper`), extended with if/else constructs, diverging panic statements, and while loops.
+Borrowing in Rust" (`Paper`), extended with if/else constructs and diverging panic statements.
 
 It additionally includes a formalization of the extractor and completion definitions from the Rust Constraining paper (`Extractor`) and shows that the extractor is indeed complete. The main argument is around the fact that follow-up statements can only add conflicts to the type- and borrow system and thus partial code is usually more permissible than the completed code.
 
@@ -81,10 +81,7 @@ stated; the deviation then documents the corrected claim).
     much weaker than the broad result CBWF (e.g. it follows from it via
     `EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed`) and is shown to
     reject the multi-target counterexample
-    (`Examples/TypeSafetyReject.lean`).  Only `T-While` still carries the full
-    `ContainedBorrowsWellFormed`, as an irreducible loop fixpoint (deriving it for
-    `envInv = env₁ ⊔ envBack` is circular: it needs the back edge, which needs
-    the body result, which needs `envInv`).
+    (`Examples/TypeSafetyReject.lean`).
   - *`EnvWrite` internals* (fan-out initialized-typing witnesses, weak-update
     `ShapeCompatible`) — **formalised paper prose**: the paper asserts
     "borrowed locations cannot have partial types"; for pipeline
@@ -118,26 +115,6 @@ stated; the deviation then documents the corrected claim).
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
 
-- **While loops (`T-While`, `T-WhileDiv`), beyond the paper.**  The paper's
-  calculus is loop-free (its original termination argument depended on it).
-  `Term.whileLoop` adds `while cond { body }` with two in-flight runtime forms
-  (`whileCond`, `whileBody`) instead of syntactic unfolding — unfolding is
-  unsound here: the copied continuation would nest inside the iteration block,
-  so body locals would leak across iterations and the copied loop would sit at
-  lifetimes violating the lexical `LifetimeChild` discipline.  `T-While` checks
-  a loop against an invariant environment solving `Γ_inv = Γ_entry ⊔ Γ_back`.
-  The identity-invariant case covers strict loops, and the general join accepts
-  NLL-style loops that widen borrow target lists across iterations.  The rule
-  carries the `T-If` obligation kit for the join plus final entry-side typings
-  of the condition and body.  In rustc those entry-side typings are implied by
-  monotonicity under removing loans, but in this calculus that implication is
-  unprovable (`Examples/ThinningFalse.lean`: borrow types carry pointee
-  information in their target lists, so shrinking a target list can make a
-  dereference typeless).  `T-WhileDiv` types a loop whose body is checked but
-  diverges (`…; panic!()`) with no back-edge obligation — what `ast_copier`
-  relies on when rebuilding a truncated loop body — and the extractor rebuilds
-  partial loop bodies this way (`while c { …stmts…; missing }`).
-
 - **`T-Eq` keeps the paper's ghost-slot check, rule-carried.**  The paper
   types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and
   erases `γ` afterwards, so borrows inside the left operand's result type keep
@@ -152,7 +129,7 @@ These deviations from the paper should be kept.
   thinning metatheorem is in the same family as the false environment
   weakening of `Examples/ThinningFalse.lean` (target-list borrow types make
   dereferences environment-sensitive).  Following the
-  rule-carried-obligation convention (cf. `T-While`), the monotonicity
+  rule-carried-obligation convention, the monotonicity
   fact is carried as a premise rather than proven; no precision is lost
   relative to the paper, and right operands conflicting with lhs-result
   borrows are rejected as the paper intends.

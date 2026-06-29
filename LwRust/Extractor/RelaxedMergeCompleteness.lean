@@ -4,15 +4,14 @@ import LwRust.Extractor.Extractors.NestedBlocks
 Completeness of the nested-block extractor for a relaxed control-flow typing
 relation.
 
-The strict mechanisation checks borrow safety after `if`/`while` environment
-joins so that the global borrow-safety theorem can thread a safe environment
-through all typing rules.  This file keeps the same syntax, extractor, and all
-non-join obligations, but defines a relaxed typing relation that does not
-enforce the post-merge borrow-safety premises:
+The strict mechanisation checks borrow safety after `if` environment joins so
+that the global borrow-safety theorem can thread a safe environment through all
+typing rules.  This file keeps the same syntax, extractor, and all non-join
+obligations, but defines a relaxed typing relation that does not enforce the
+post-merge borrow-safety premises:
 
 * `T-If` omits `BorrowSafeEnv` for the joined environment and
   `TyBorrowSafeAgainstEnv` for the joined result type.
-* `T-While` omits `BorrowSafeEnv` for the loop invariant environment.
 
 The result below is only extractor completeness for that relaxed checker.  It
 does not claim preservation or borrow safety for the relaxed system.
@@ -157,36 +156,6 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       trueBranch.Diverges →
       RelaxedTermTyping env1 typing lifetime
         (.ite condition trueBranch falseBranch) falseTy env4
-  /-- T-WhileDiv. -/
-  | whileLoopDiverging {env1 env2 env3 : Env} {typing : StoreTyping}
-      {lifetime bodyLifetime : Lifetime} {condition body : Term}
-      {bodyTy : Ty} :
-      LifetimeChild lifetime bodyLifetime →
-      RelaxedTermTyping env1 typing lifetime condition .bool env2 →
-      RelaxedTermTyping env2 typing bodyLifetime body bodyTy env3 →
-      body.Diverges →
-      RelaxedTermTyping env1 typing lifetime
-        (.whileLoop bodyLifetime condition body) .unit env2
-  /-- T-While, without post-join borrow-safety checks. -/
-  | whileLoop {env1 envBack envInv env2 envEntry2 env3 envEntry3 : Env}
-      {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
-      {condition body : Term} {bodyTy bodyEntryTy : Ty} :
-      LifetimeChild lifetime bodyLifetime →
-      EnvJoin env1 envBack envInv →
-      EnvJoinSameShape env1 envInv →
-      EnvJoinSameShape envBack envInv →
-      ContainedBorrowsWellFormed envInv →
-      Coherent envInv →
-      Linearizable envInv →
-      RelaxedTermTyping envInv typing lifetime condition .bool env2 →
-      RelaxedTermTyping env2 typing bodyLifetime body bodyTy env3 →
-      WellFormedTy env3 bodyTy lifetime →
-      env3.dropLifetime bodyLifetime = envBack →
-      RelaxedTermTyping env1 typing lifetime condition .bool envEntry2 →
-      RelaxedTermTyping envEntry2 typing bodyLifetime body bodyEntryTy envEntry3 →
-      RelaxedTermTyping env1 typing lifetime
-        (.whileLoop bodyLifetime condition body) .unit env2
-
 inductive RelaxedTermListTyping :
     Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
   /-- T-Seq, singleton sequence. -/
@@ -549,73 +518,6 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
         obtain ⟨env', hstmts⟩ := extractTermStmts_relaxedTyped hfalse hfalse'
         simp only [extractTermStmts, branchRebuildable] at hstmts ⊢
         exact ⟨env', .cons hcondition' hstmts⟩
-  case ctermWhile_whileCondition hcondition =>
-      simp only [extractTermStmts]
-      cases htyped with
-      | whileLoopDiverging hchild hcondition' hbody hdiverges =>
-          exact extractTermStmts_relaxedTyped hcondition hcondition'
-      | whileLoop hchild hjoin hss1 hss2 hcbwf hcoh hlin hcondInv
-          hbodyInv hwellTy hdropEq hcondEntry hbodyEntry =>
-          exact extractTermStmts_relaxedTyped hcondition hcondEntry
-  case ctermWhile_whileBody bodyLifetime condition body bodyCompletion
-      hbody =>
-      obtain ⟨envMid, hchild', hcondition', tyBody, envBody, hbody'⟩ :
-          ∃ envMid,
-            LifetimeChild currentLifetime bodyLifetime ∧
-            RelaxedTermTyping env typing currentLifetime condition .bool envMid ∧
-            ∃ tyBody envBody,
-              RelaxedTermTyping envMid typing bodyLifetime bodyCompletion tyBody
-                envBody := by
-        cases htyped with
-        | whileLoopDiverging hchild hcondition' hbody' _ =>
-            exact ⟨_, hchild, hcondition', _, _, hbody'⟩
-        | whileLoop hchild _ _ _ _ _ _ _ _ _ _ hcondEntry hbodyEntry =>
-            exact ⟨_, hchild, hcondEntry, _, _, hbodyEntry⟩
-      simp only [extractTermStmts]
-      cases body
-      case done bodyTerm =>
-          cases hbody
-          simp [branchRebuildable, extractTerm]
-          exact ⟨env2, .cons htyped .nil⟩
-      case cutoff =>
-          simp [branchRebuildable, extractTerm]
-          exact ⟨envMid, .cons
-            (RelaxedTermTyping.whileLoopDiverging hchild' hcondition'
-              (RelaxedTermTyping.missing WellFormedTy.unit tyLoanFree_unit)
-              .missing) .nil⟩
-      case blockStart =>
-          simp [branchRebuildable, extractTerm]
-          exact ⟨envMid, .cons
-            (RelaxedTermTyping.whileLoopDiverging hchild' hcondition'
-              relaxedMissingBlock_typed (.block (by simp) .missing)) .nil⟩
-      case blockTerms blockLifetime terms =>
-          cases hbody with
-          | ctermBlock_blockTerms hterms =>
-              cases terms
-              case done xs =>
-                  cases hterms
-                  simp [branchRebuildable, extractTerm, extractTerms]
-                  exact ⟨env2, .cons htyped .nil⟩
-              all_goals
-                cases hbody' with
-                | «block» hchild2 hlist hwf _heq =>
-                    obtain ⟨tyBlock, envBlock, hlist', hdisj⟩ :=
-                      extractTerms_relaxedTyped hterms hlist
-                    simp [branchRebuildable, extractTerm]
-                    refine ⟨envMid, .cons
-                      (RelaxedTermTyping.whileLoopDiverging hchild' hcondition'
-                        (RelaxedTermTyping.block hchild2 hlist' ?_ rfl)
-                        (.block (extractTerms_diverging nofun) .missing))
-                      .nil⟩
-                    rcases hdisj with rfl | ⟨rfl, rfl⟩
-                    · exact WellFormedTy.unit
-                    · exact hwf
-      all_goals
-        simp only [branchRebuildable]
-        exact ⟨envMid, .cons
-          (RelaxedTermTyping.whileLoopDiverging hchild' hcondition'
-            (RelaxedTermTyping.missing WellFormedTy.unit tyLoanFree_unit)
-            .missing) .nil⟩
   all_goals
     first
     | exact extractTermStmts_relaxedTyped (by assumption) htyped
