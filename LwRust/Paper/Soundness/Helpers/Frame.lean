@@ -1735,6 +1735,123 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
                 (BorrowDependency.boxFullInner hslot hdependency))
             hinnerReach
 
+/-- Lax (`ValidSlotValue`) analogue of
+`dropsAvoids_of_reaches_stored_validPartialValue`.  Proved by induction on the
+reach (so the box-location index is a fresh motive variable, unlike `cases`),
+destructing the lax validity only where the recursive step needs inner validity. -/
+theorem dropsAvoids_of_reaches_stored_validSlotValue
+    {store store' : ProgramStore} {values : List PartialValue}
+    (hdrops : Drops store values store') (hvalidStore : ValidStore store)
+    {env : Env} {slotLifetime : Lifetime} :
+    ∀ {storageLifetime : Lifetime} {storage : Location}
+      {storedValue : PartialValue} {partialTy : PartialTy} {location : Location},
+      store.slotAt storage =
+        some { value := storedValue, lifetime := storageLifetime } →
+      PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+      ValidSlotValue store storedValue partialTy →
+      DropsAvoids store values storage →
+      (∀ reached,
+        OwnerReaches store storedValue partialTy reached →
+        ∀ dropValue, dropValue ∈ values →
+          reached ∉ partialValueOwningLocations dropValue) →
+      (∀ dependency,
+        BorrowDependency store storedValue partialTy dependency →
+          DropsAvoids store values dependency) →
+      Reaches store storedValue partialTy location →
+      DropsAvoids store values location := by
+  intro storageLifetime storage storedValue partialTy location
+    hstored hborrows hvalid havoidStorage hdisjoint hborrowAvoids hreach
+  induction hreach generalizing storage storageLifetime with
+  | @boxHere loc slot inner hslotBox =>
+      have howns : ProgramStore.OwnsAt store loc storage :=
+        ⟨storageLifetime, hstored⟩
+      exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
+        havoidStorage (by
+          intro dropValue hmem howned
+          exact hdisjoint loc (OwnerReaches.boxHere hslotBox) dropValue hmem howned)
+  | @boxInner loc slot inner ℓ hslotBox hinnerReach ih =>
+      have hrootAvoid : DropsAvoids store values loc := by
+        have howns : ProgramStore.OwnsAt store loc storage :=
+          ⟨storageLifetime, hstored⟩
+        exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
+          havoidStorage (by
+            intro dropValue hmem howned
+            exact hdisjoint loc (OwnerReaches.boxHere hslotBox) dropValue hmem howned)
+      simp only [ValidSlotValue] at hvalid
+      obtain ⟨loc', slot', hval, hslot', hinnerValid⟩ := hvalid
+      have hlocEq : loc = loc' := by simpa [owningRef] using hval
+      subst hlocEq
+      have hslotEq : slot' = slot := by
+        rw [hslotBox] at hslot'
+        injection hslot' with hslotEq
+        exact hslotEq.symm
+      subst slot'
+      have hinnerBorrows :
+          PartialTyBorrowsWellFormedInSlot env slotLifetime inner := by
+        intro mutable targets hcontains
+        exact hborrows (PartialTyContains.box hcontains)
+      exact ih
+        (storage := loc) (storageLifetime := slot.lifetime)
+        (by
+          cases slot with
+          | mk slotValue slotLifetime => simpa using hslotBox)
+        hinnerBorrows hinnerValid hrootAvoid
+        (by
+          intro innerReached hinnerReached dropValue hmem howned
+          exact hdisjoint innerReached
+            (OwnerReaches.boxInner hslotBox hinnerReached) dropValue hmem howned)
+        (by
+          intro dependency hdependency
+          exact hborrowAvoids dependency
+            (BorrowDependency.boxInner hslotBox hdependency))
+  | @boxFullHere loc slot ty hslotBox =>
+      have howns : ProgramStore.OwnsAt store loc storage :=
+        ⟨storageLifetime, hstored⟩
+      exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
+        havoidStorage (by
+          intro dropValue hmem howned
+          exact hdisjoint loc (OwnerReaches.boxFullHere hslotBox)
+            dropValue hmem howned)
+  | @boxFullInner loc slot ty ℓ hslotBox hinnerReach ih =>
+      have hrootAvoid : DropsAvoids store values loc := by
+        have howns : ProgramStore.OwnsAt store loc storage :=
+          ⟨storageLifetime, hstored⟩
+        exact LwRust.Paper.dropsAvoids_of_protected_owner hdrops hvalidStore howns
+          havoidStorage (by
+            intro dropValue hmem howned
+            exact hdisjoint loc (OwnerReaches.boxFullHere hslotBox)
+              dropValue hmem howned)
+      have hvalidStrict :
+          ValidPartialValue store (.value (owningRef loc)) (.ty (.box ty)) := hvalid
+      cases hvalidStrict with
+      | @boxFull _ bSlot _ hslotStrict hinnerValid =>
+          have hslotEq : bSlot = slot := by
+            rw [hslotBox] at hslotStrict
+            injection hslotStrict with hslotEq
+            exact hslotEq.symm
+          subst bSlot
+          have hinnerBorrows :
+              PartialTyBorrowsWellFormedInSlot env slotLifetime (.ty ty) := by
+            intro mutable targets hcontains
+            exact hborrows (PartialTyContains.tyBox hcontains)
+          exact ih
+            (storage := loc) (storageLifetime := slot.lifetime)
+            (by
+              cases slot with
+              | mk slotValue slotLifetime => simpa using hslotBox)
+            hinnerBorrows hinnerValid hrootAvoid
+            (by
+              intro innerReached hinnerReached dropValue hmem howned
+              exact hdisjoint innerReached
+                (OwnerReaches.boxFullInner hslotBox hinnerReached)
+                dropValue hmem howned)
+            (by
+              intro dependency hdependency
+              exact hborrowAvoids dependency
+                (BorrowDependency.boxFullInner hslotBox hdependency))
+  | @borrow loc ℓ mutable targets target hmem hloc hreads =>
+      exact hborrowAvoids _ (BorrowDependency.borrow hmem hloc hreads)
+
 /--
 If the direct owners carried by a valid value are disjoint from the store, then
 every location reached by the value is protected from a drop list whose explicit

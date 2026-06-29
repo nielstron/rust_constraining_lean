@@ -10025,16 +10025,16 @@ theorem safeAbstraction_drops_of_orphaned_values
       intro mutable targets hcontains
       exact hwellFormed.1 x envSlot mutable targets henvSlot
         ⟨envSlot, henvSlot, hcontains⟩
-    have hvalidOld' : ValidPartialValue store' oldValue envSlot.ty :=
-      RuntimeFrame.validPartialValue_drops_of_avoids_reaches hdrops hvalidOld
+    have hvalidOld' : ValidSlotValue store' oldValue envSlot.ty :=
+      RuntimeFrame.validSlotValue_drops_of_avoids_reaches hdrops hvalidOld
         (by
           intro reached hreach
-          exact RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValue
+          exact RuntimeFrame.dropsAvoids_of_reaches_stored_validSlotValue
             hdrops hvalidStore hstoreSlot hborrows hvalidOld havoidVar
             (by
               intro reached' hownerReach dropValue hdropMem howned
               have hownsReached : ProgramStore.Owns store reached' :=
-                RuntimeFrame.store_owns_of_reaches_stored_validPartialValue
+                RuntimeFrame.store_owns_of_reaches_stored_validSlotValue
                   hstoreSlot hborrows hvalidOld hownerReach
               exact hdropOwnersOrphaned reached'
                 (by
