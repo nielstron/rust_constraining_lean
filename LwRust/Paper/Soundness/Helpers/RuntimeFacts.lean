@@ -322,6 +322,56 @@ theorem EnvTypesBorrowTargetsNonempty.dropLifetime {env : Env}
   rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨horig, _hne⟩
   exact henv x slot horig
 
+/-- A borrow contained in a *strengthened* type reflects to a borrow contained
+in the source type, with the source's target list a subset of the result's.
+(Strengthening can only shrink target lists or lift slots to `undef`.) -/
+theorem PartialTyStrengthens.contains_borrow_reflect {source result : PartialTy}
+    {mutable : Bool} {targets : List LVal} :
+    PartialTyStrengthens source result →
+    PartialTyContains result (.borrow mutable targets) →
+    ∃ srcTargets, PartialTyContains source (.borrow mutable srcTargets) ∧
+      srcTargets ⊆ targets := by
+  intro hstr
+  induction hstr with
+  | reflex => intro hc; exact ⟨targets, hc, fun _ h => h⟩
+  | box _ ih =>
+      intro hc; cases hc with
+      | box hcInner =>
+          obtain ⟨st, hsc, hsub⟩ := ih hcInner
+          exact ⟨st, PartialTyContains.box hsc, hsub⟩
+  | tyBox _ ih =>
+      intro hc; cases hc with
+      | tyBox hcInner =>
+          obtain ⟨st, hsc, hsub⟩ := ih hcInner
+          exact ⟨st, PartialTyContains.tyBox hsc, hsub⟩
+  | @borrow _bm ls _rs hsub =>
+      intro hc; cases hc with
+      | here => exact ⟨ls, PartialTyContains.here, hsub⟩
+  | undefLeft _ _ => intro hc; cases hc
+  | intoUndef _ _ => intro hc; cases hc
+  | boxIntoUndef _ _ => intro hc; cases hc
+
+/-- `EnvTypesBorrowTargetsNonempty` transports along plain strengthening: a
+result borrow comes from a source borrow with a (nonempty) subset target list. -/
+theorem EnvTypesBorrowTargetsNonempty.strengthens {source result : Env} :
+    EnvStrengthens source result →
+    EnvTypesBorrowTargetsNonempty source →
+    EnvTypesBorrowTargetsNonempty result := by
+  intro hstr hsource x resultSlot hresultSlot mutable targets hcontains
+  have h := hstr x
+  rw [hresultSlot] at h
+  cases hsrc : source.slotAt x with
+  | none => rw [hsrc] at h; exact False.elim h
+  | some sourceSlot =>
+      rw [hsrc] at h
+      obtain ⟨_hlife, hstrengthen⟩ := h
+      obtain ⟨srcTargets, hsc, hsub⟩ :=
+        PartialTyStrengthens.contains_borrow_reflect hstrengthen hcontains
+      intro htargetsEmpty
+      subst htargetsEmpty
+      exact (hsource x sourceSlot hsrc mutable srcTargets hsc)
+        (List.subset_nil.mp hsub)
+
 theorem Strike.borrowTargetsNonempty {path : Path} {source struck : PartialTy} :
     Strike path source struck →
     PartialTyBorrowTargetsNonempty source →
@@ -768,7 +818,7 @@ theorem TermTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
         exact EnvTypesBorrowTargetsNonempty.erase rightResult.2⟩)
     (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
           _trueBranch _falseBranch _trueTy _falseTy _joinTy}
-        _hcondition _htrue _hfalse hjoin henvJoin _hsameLeft _hsameRight
+        _hcondition _htrue _hfalse hjoin hstr3 _hstr4 _hcbwf
         _hwellJoin _hlinear _hborrowSafe _hresultSafe ihCondition ihTrue
         ihFalse hstore henv =>
       let conditionResult := ihCondition hstore henv
@@ -778,8 +828,7 @@ theorem TermTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
         intro mutable targets hcontains
         exact PartialTyUnion.contains_borrow_targets_ne_nil_of_nonempty
           trueResult.1 falseResult.1 hjoin hcontains
-      ⟨hjoinTy, EnvJoin.preserves_envTypesBorrowTargetsNonempty henvJoin
-        trueResult.2 falseResult.2⟩)
+      ⟨hjoinTy, EnvTypesBorrowTargetsNonempty.strengthens hstr3 trueResult.2⟩)
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hstore henv =>
       let conditionResult := ihCondition hstore henv
@@ -787,7 +836,7 @@ theorem TermTyping.borrowTargetsNonempty_of_envTypes {env₁ env₂ : Env}
     (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hstore henv =>
       let conditionResult := ihCondition hstore henv
       ⟨TyBorrowTargetsNonempty.unit, conditionResult.2⟩)
-    (fun _hchild _hgenerated _hjoin _hsameEntry _hsameBack _hcontained
+    (fun _hchild _hgenerated _hstr1 _hstrBack _hcontained
         _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
         _hwellTy _hback _hentryCondition _hentryBody ihGenerated ihCondition
         _ihBody _ihEntryCondition _ihEntryBody hstore henv =>
