@@ -677,6 +677,32 @@ def PartialTy.allVars : PartialTy → List Name
   | .box inner => PartialTy.allVars inner
   | .undef t => Ty.allVars t
 
+/-- `result` is a *sanitization* of `source`: every slot is either kept verbatim
+or lifted to an `undef` shape that the original strengthens to and that
+introduces no new type variables.  This is how an `ite`/`while` join discards
+borrows whose targets were moved out in the other branch — keeping
+`ContainedBorrowsWellFormed` strong — without inventing new borrow targets
+(unlike an arbitrary `EnvStrengthens`, which rule W-Bor lets *grow* target
+lists).  The two side conditions are exactly what the extractor proves when it
+lifts a slot to its canonical `undef` form (`.ty t`/`.box _ ↦ .undef …`). -/
+def EnvSanitize (source result : Env) : Prop :=
+  ∀ x, result.slotAt x = source.slotAt x ∨
+       ∃ slot shape, source.slotAt x = some slot ∧
+         result.slotAt x = some { slot with ty := .undef shape } ∧
+         PartialTyStrengthens slot.ty (.undef shape) ∧
+         Ty.allVars shape ⊆ PartialTy.allVars slot.ty
+
+theorem EnvSanitize.envStrengthens {source result : Env} :
+    EnvSanitize source result → EnvStrengthens source result := by
+  intro hsan x
+  rcases hsan x with heq | ⟨slot, shape, hslot, hres, hstrengthen, _hvars⟩
+  · rw [heq]
+    cases source.slotAt x with
+    | none => trivial
+    | some s => exact ⟨rfl, PartialTyStrengthens.reflex⟩
+  · rw [hslot, hres]
+    exact ⟨rfl, hstrengthen⟩
+
 mutual
   theorem Ty.vars_subset_allVars {ty : Ty} {v : Name} :
       v ∈ Ty.vars ty → v ∈ Ty.allVars ty := by
@@ -710,6 +736,21 @@ end
 including the type shadows carried below `undef`. -/
 def Env.TypeNameFresh (env : Env) (x : Name) : Prop :=
   ∀ y slot, env.slotAt y = some slot → x ∉ PartialTy.allVars slot.ty
+
+/-- Sanitization preserves type-name freshness: it never introduces new type
+variables (each kept slot is unchanged, each lifted slot's `undef` shape has
+`allVars ⊆` the original by the `EnvSanitize` side condition). -/
+theorem EnvSanitize.typeNameFresh {source result : Env} {x : Name} :
+    EnvSanitize source result → Env.TypeNameFresh source x →
+    Env.TypeNameFresh result x := by
+  intro hsan hfresh y slot hslot
+  rcases hsan y with heq | ⟨srcSlot, shape, hsrcSlot, hres, _hstr, hvars⟩
+  · exact hfresh y slot (by rw [← heq]; exact hslot)
+  · have hslotEq : slot = { srcSlot with ty := .undef shape } :=
+      Option.some.inj (hslot.symm.trans hres)
+    subst hslotEq
+    intro hmem
+    exact hfresh y srcSlot hsrcSlot (hvars (by simpa [PartialTy.allVars] using hmem))
 
 namespace StoreTyping
 
@@ -1776,21 +1817,21 @@ mutual
       borrow-safety induction.  It does not follow from branch-local result
       safety because the joined result may later be written through an
       environment root. -/
-    | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
+    | ite {env₁ env₂ env₃ env₄ envLub env₅ : Env} {typing : StoreTyping}
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy joinTy : Ty} :
         TermTyping env₁ typing lifetime condition .bool env₂ →
         TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
         TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
         PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
-        -- `env₅` is a *sanitized* join: an upper bound of both branch results
-        -- (so the executed branch transports into it) whose borrows are still
-        -- well formed.  Replacing the LUB `EnvJoin` + `EnvJoinSameShape` with
-        -- `EnvStrengthens` + `ContainedBorrowsWellFormed` lets a branch move out
-        -- a (possibly borrowed) variable: the join lifts the affected slots to
-        -- `undef`, which is still an upper bound and keeps CBWF strong.
-        EnvStrengthens env₃ env₅ →
-        EnvStrengthens env₄ env₅ →
+        -- `env₅` is a *sanitized* join (replacing the LUB `EnvJoin` +
+        -- `EnvJoinSameShape`): take the LUB `envLub`, then lift any slot whose
+        -- borrow targets a moved-out (now `undef`) variable to `undef`
+        -- (`EnvSanitize`).  This lets a branch move out a (possibly borrowed)
+        -- variable while keeping `ContainedBorrowsWellFormed` strong, and unlike
+        -- an arbitrary upper bound it never invents new borrow targets.
+        EnvJoin env₃ env₄ envLub →
+        EnvSanitize envLub env₅ →
         ContainedBorrowsWellFormed env₅ →
         WellFormedTy env₅ joinTy lifetime →
         Linearizable env₅ →
@@ -1862,17 +1903,16 @@ mutual
     base variable is absent or untypable (`Examples/ThinningFalse.lean`).  The
     conservative extractor's transport relies on these entry-side derivations
     to keep loop-frontier extraction precise. -/
-    | whileLoop {env₁ envBack envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
+    | whileLoop {env₁ envBack envLub envInv env₂ envEntry₂ env₃ envEntry₃ : Env}
         {typing : StoreTyping} {lifetime bodyLifetime : Lifetime}
         {condition body : Term} {bodyTy bodyEntryTy : Ty} :
         LifetimeChild lifetime bodyLifetime →
         WhileFixpointIteration env₁ typing lifetime bodyLifetime condition body
           env₁ envInv env₂ env₃ envBack bodyTy →
-        -- Sanitized join (see `T-If`): `envInv` is an upper bound of the entry
-        -- and back-edge environments whose borrows stay well formed, replacing
-        -- the LUB `EnvJoin` + `EnvJoinSameShape`.
-        EnvStrengthens env₁ envInv →
-        EnvStrengthens envBack envInv →
+        -- Sanitized join (see `T-If`): take the LUB `envLub` of the entry and
+        -- back-edge environments, then lift moved-out borrow slots to `undef`.
+        EnvJoin env₁ envBack envLub →
+        EnvSanitize envLub envInv →
         ContainedBorrowsWellFormed envInv →
         Linearizable envInv →
         BorrowSafeEnv envInv →
@@ -2027,16 +2067,17 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
         _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
       rw [henvEq]
       exact (ihRhs (ihLhs hfinite).update).erase)
-    (fun _hcondition _htrue _hfalse _htyJoin hstr3 _hstr4
+    (fun _hcondition _htrue _hfalse _htyJoin hjoin hsan
         _hcbwf _hwellTy _hlinear _hborrowSafe _htySafe
         ihCondition ihTrue _ihFalse hfinite =>
-      EnvStrengthens.finiteSupport hstr3 (ihTrue (ihCondition hfinite)))
+      EnvStrengthens.finiteSupport (EnvSanitize.envStrengthens hsan)
+        (EnvJoin.finiteSupport_left hjoin (ihTrue (ihCondition hfinite))))
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hfinite =>
       ihTrue (ihCondition hfinite))
     (fun _hchild _hcondition _hbody _hdiverges ihCondition _ihBody hfinite =>
       ihCondition hfinite)
-    (fun _hchild _hgenerated _hstr1 _hstrBack _hcontained
+    (fun _hchild _hgenerated _hjoin _hsan _hcontained
         _hlinear _hborrowSafe _hnameFresh _hcondition _hbody
         _hwellTy _hback _hentryCondition _hentryBody ihGenerated ihCondition
         _ihBody _ihEntryCondition _ihEntryBody hfinite =>
