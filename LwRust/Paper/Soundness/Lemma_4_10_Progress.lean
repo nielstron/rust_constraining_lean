@@ -948,7 +948,7 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
-    ?iteDiverging ?whileLoopDiverging ?whileLoop
+    ?iteDiverging ?iteTrueDiverging ?whileLoopDiverging ?whileLoop
     ?singleton ?cons htyping
   case const =>
     intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf _hsafe _hstore
@@ -1046,6 +1046,20 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
           exact progress_ite_value hvalueTyping hvst.ite_condition
     · exact progress_subIte hstepCondition
   case iteDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
+      falseBranch trueTy falseTy hcondition _htrue _hfalse _hdiverges
+      ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
+    rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
+        hvst.ite_condition hwf hsafe hstore with
+      hterminalCondition | hstepCondition
+    · rcases (terminal_iff_value condition).mp hterminalCondition with
+        ⟨conditionValue, hconditionValue⟩
+      subst hconditionValue
+      cases hcondition with
+      | const hvalueTyping =>
+          exact progress_ite_value hvalueTyping hvst.ite_condition
+    · exact progress_subIte hstepCondition
+  case iteTrueDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy hcondition _htrue _hfalse _hdiverges
       ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore

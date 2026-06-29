@@ -1220,7 +1220,7 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
         BorrowSafeEnv env₂ ∧
           TyBorrowSafeAgainstEnv env₂ _ty)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging
+    ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
     ?whileLoopDiverging ?whileLoop ?singleton ?cons
     htyping hsource hborrowSafe
   case const =>
@@ -1341,6 +1341,13 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
     have hconditionSafe :=
       ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
     exact ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1
+  case iteTrueDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
+      ihCondition _ihTrue ihFalse hsource hborrowSafe
+    have hconditionSafe :=
+      ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
+    exact ihFalse (SourceTerm.ite_falseBranch hsource) hconditionSafe.1
   case whileLoopDiverging =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
       _bodyTy _hchild _hcond _hbody _hdiverges ihCond _ihBody hsource

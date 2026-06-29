@@ -2428,6 +2428,27 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨TermTyping.iteDiverging hconditionErased htrueErased
         hfalseErased hdiverges, hfreshTrue, htrueFresh⟩)
     (by
+      intro env₁ env₂ env₃ env₄ typing lifetime condition trueBranch
+        falseBranch trueTy falseTy hcondition htrue hfalse hdiverges
+        ihCondition ihTrue ihFalse hfresh hstore hnot
+      have hnotCondition : ¬ Term.Mentions ghost condition := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hnotTrue : ¬ Term.Mentions ghost trueBranch := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hnotFalse : ¬ Term.Mentions ghost falseBranch := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      rcases ihCondition hfresh hstore hnotCondition with
+        ⟨hconditionErased, hfreshCond, _hboolFresh⟩
+      rcases ihTrue hfreshCond hstore hnotTrue with
+        ⟨htrueErased, _hfreshTrue, _htrueFresh⟩
+      rcases ihFalse hfreshCond hstore hnotFalse with
+        ⟨hfalseErased, hfreshFalse, hfalseFresh⟩
+      exact ⟨TermTyping.iteTrueDiverging hconditionErased htrueErased
+        hfalseErased hdiverges, hfreshFalse, hfalseFresh⟩)
+    (by
       intro env₁ env₂ env₃ typing lifetime bodyLifetime condition body
         bodyTy hchild hcondition hbody hdiverges ihCondition ihBody
         hfresh hstore hnot
