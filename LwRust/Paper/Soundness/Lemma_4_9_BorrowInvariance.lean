@@ -11354,7 +11354,8 @@ theorem firstNodePack {store : ProgramStore} {env : Env} {current : Lifetime}
                   lifetime := slot.lifetime }
                 (.ty (.borrow mutable targets)) := by
             rw [← hslotTy]
-            exact StoreOwnerSpine.nil hstoreSlot hvalid
+            exact StoreOwnerSpine.nil hstoreSlot
+              (by rw [hslotTy] at hvalid ⊢; exact hvalid)
           refine ⟨slot,
             PartialValue.value (Value.ref { location := L, owner := false }),
             VariableProjection b,
