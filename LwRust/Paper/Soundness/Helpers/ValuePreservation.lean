@@ -1215,7 +1215,7 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
         ∃ oldValue,
           storeAfterWrite.slotAt (VariableProjection y) =
             some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-          ValidPartialValue storeAfterWrite oldValue otherEnvSlot.ty := by
+          ValidSlotValue storeAfterWrite oldValue otherEnvSlot.ty := by
     intro y otherEnvSlot hyx henvY
     rcases hsafe.2 y otherEnvSlot henvY with ⟨oldValue, hstoreY, hvalidOld⟩
     refine ⟨oldValue, ?_, ?_⟩

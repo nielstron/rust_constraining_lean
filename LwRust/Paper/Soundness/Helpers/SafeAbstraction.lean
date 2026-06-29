@@ -1139,7 +1139,7 @@ theorem safeAbstraction_update_var_of_preserved {store' : ProgramStore}
       ∃ oldValue,
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
+        ValidSlotValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
   intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
   subst henv'
@@ -1171,8 +1171,7 @@ theorem safeAbstraction_update_var_of_preserved {store' : ProgramStore}
       exact ⟨.value value, hstoreX, hnewValid.toValidSlotValue⟩
     · have henv : env.slotAt y = some updatedSlot := by
         simpa [Env.update, hyx] using henvUpdated
-      obtain ⟨v, hs, hv⟩ := hpreserveOther y updatedSlot hyx henv
-      exact ⟨v, hs, hv.toValidSlotValue⟩
+      exact hpreserveOther y updatedSlot hyx henv
 
 /--
 Safe-abstraction preservation for updating one variable's abstract slot to an
@@ -1200,7 +1199,7 @@ theorem safeAbstraction_update_var_partial_of_preserved {store' : ProgramStore}
       ∃ oldValue,
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
+        ValidSlotValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
   intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
   subst henv'
@@ -1232,8 +1231,7 @@ theorem safeAbstraction_update_var_partial_of_preserved {store' : ProgramStore}
       exact ⟨value, hstoreX, hnewValid.toValidSlotValue⟩
     · have henv : env.slotAt y = some updatedSlot := by
         simpa [Env.update, hyx] using henvUpdated
-      obtain ⟨v, hs, hv⟩ := hpreserveOther y updatedSlot hyx henv
-      exact ⟨v, hs, hv.toValidSlotValue⟩
+      exact hpreserveOther y updatedSlot hyx henv
 
 /--
 Variable-base assignment store preservation, factored around the paper's
@@ -1260,7 +1258,7 @@ theorem storePreservation_assign_var_of_preserved
       ∃ oldValue,
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
+        ValidSlotValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
   intro henvX hwriteEnv hruntimeX hlifetime hwriteStore hnewValid
     hdomainOther hpreserveOther
@@ -1307,7 +1305,7 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
       ∃ oldValue,
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
-        ValidPartialValue store' oldValue otherEnvSlot.ty) →
+        ValidSlotValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
   intro hsafe henvX hwriteEnv hnonOwner hread hwrite hdrops hnewValid hpreserveOther
   have hdropEq : store' = storeAfterWrite :=
@@ -1528,7 +1526,7 @@ theorem safeAbstraction_declare {store : ProgramStore} {env : Env}
       env.slotAt y = some envSlot →
       store.slotAt (VariableProjection y) =
         some { value := oldValue, lifetime := envSlot.lifetime } →
-      ValidPartialValue (store.declare x lifetime value) oldValue envSlot.ty) →
+      ValidSlotValue (store.declare x lifetime value) oldValue envSlot.ty) →
     store.declare x lifetime value ∼ₛ
       env.update x { ty := .ty ty, lifetime := lifetime } := by
   intro hsafe hfresh hnewValid hpreserveOld
@@ -1575,7 +1573,7 @@ theorem safeAbstraction_declare {store : ProgramStore} {env : Env}
       exact ⟨oldValue, by
           simpa [ProgramStore.declare, ProgramStore.update, VariableProjection, hyx]
             using hstoreSlot,
-        (hpreserveOld y envSlot oldValue hyx holdEnv hstoreSlot).toValidSlotValue⟩
+        hpreserveOld y envSlot oldValue hyx holdEnv hstoreSlot⟩
 
 /--
 Lemma 9.10 support, variable `R-Move` safe-abstraction preservation.
