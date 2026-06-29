@@ -1557,6 +1557,70 @@ theorem StoreAcyclic.update_undef {store : ProgramStore} {updated : Location}
   exact hacyclic location
     (ProgramStore.OwnsTransitively.update_undef_to_store hcycle)
 
+/-- An ownership edge in an updated store whose owner is not the updated location
+was already present in the original store. -/
+theorem ProgramStore.ownsAt_update_owner_ne {store : ProgramStore}
+    {updated owned storage : Location} {slot : StoreSlot} :
+    ProgramStore.OwnsAt (store.update updated slot) owned storage →
+    storage ≠ updated →
+    ProgramStore.OwnsAt store owned storage := by
+  intro howns hne
+  rcases howns with ⟨lifetime, hslot⟩
+  exact ⟨lifetime, by simpa [ProgramStore.update, hne] using hslot⟩
+
+/-- Transitive ownership in a store updated at a location with no incoming
+ownership either holds in the original store or starts at the updated location. -/
+theorem ProgramStore.OwnsTransitively.update_to_store {store : ProgramStore}
+    {updated : Location} {slot : StoreSlot} {a b : Location} :
+    ¬ ProgramStore.Owns (store.update updated slot) updated →
+    ProgramStore.OwnsTransitively (store.update updated slot) a b →
+    ProgramStore.OwnsTransitively store a b ∨ a = updated := by
+  intro hnoIncoming hpath
+  induction hpath with
+  | @direct storage owned howns =>
+      by_cases hstorage : storage = updated
+      · exact Or.inr hstorage
+      · exact Or.inl (ProgramStore.OwnsTransitively.direct
+          (ProgramStore.ownsAt_update_owner_ne howns hstorage))
+  | @trans storage middle owned hfirst _htail ih =>
+      by_cases hstorage : storage = updated
+      · exact Or.inr hstorage
+      · have hfirstStore : ProgramStore.OwnsAt store middle storage :=
+          ProgramStore.ownsAt_update_owner_ne hfirst hstorage
+        rcases ih with hmid | hmidUpdated
+        · exact Or.inl (ProgramStore.OwnsTransitively.trans hfirstStore hmid)
+        · subst hmidUpdated
+          exact absurd ⟨storage, hfirst⟩ hnoIncoming
+
+/-- `StoreAcyclic` is preserved by updating a location that has no incoming
+ownership and whose new value does not own that very location.  This covers the
+fresh-location updates `declare` and `boxAt`, where the updated slot is fresh
+(nothing owns it) and the stored value was built before the location existed. -/
+theorem StoreAcyclic.update_fresh {store : ProgramStore} {updated : Location}
+    {slot : StoreSlot} :
+    StoreAcyclic store →
+    ¬ ProgramStore.Owns store updated →
+    updated ∉ partialValueOwningLocations slot.value →
+    StoreAcyclic (store.update updated slot) := by
+  intro hacyclic hNoOwn hNotInCells
+  have hnoIncoming : ¬ ProgramStore.Owns (store.update updated slot) updated := by
+    rintro ⟨storage, howns⟩
+    by_cases hstorage : storage = updated
+    · rcases howns with ⟨lifetime, hslot⟩
+      rw [hstorage] at hslot
+      have hslotEq : slot = { value := .value (owningRef updated), lifetime := lifetime } := by
+        simpa [ProgramStore.update] using hslot
+      exact hNotInCells
+        (mem_partialValueOwningLocations_of_eq_owningRef
+          (congrArg StoreSlot.value hslotEq))
+    · exact hNoOwn ⟨storage, ProgramStore.ownsAt_update_owner_ne howns hstorage⟩
+  intro location hcycle
+  rcases ProgramStore.OwnsTransitively.update_to_store hnoIncoming hcycle with
+    hstore | hloc
+  · exact hacyclic location hstore
+  · subst hloc
+    exact hnoIncoming hcycle.to_owns
+
 /-- Updating a store slot to `undef` preserves store validity. -/
 theorem validStore_update_undef {store : ProgramStore} {updated : Location}
     {updatedLifetime : Lifetime} :
