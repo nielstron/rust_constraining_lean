@@ -3824,8 +3824,15 @@ namespace LwRust.Paper.Soundness
 
 open LwRust.Paper LwRust.Core
 
-/-- Lemma 4.11, Preservation. -/
-theorem lemma_4_11_preservation
+/--
+Legacy strict preservation wrapper.
+
+This compatibility theorem is stronger than the relaxed paper statement in the
+wrong direction: it assumes the global `BorrowSafeTypingPreservation` property,
+which is false for the relaxed joined approximation.  The paper-facing
+path-sensitive wrapper is in `Lemma_4_11_RelaxedPreservation`.
+-/
+theorem lemma_4_11_preservation_legacy
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value}
     (hborrowTyping : BorrowSafeTypingPreservation)
