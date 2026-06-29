@@ -7278,36 +7278,36 @@ theorem lval_loc_or_reads_protected_writeProhibited_or_base
       rcases hsourceAbs with
         ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
       rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
-      cases hsourceValid with
-      | @box ownerLocation ownerSlot _ hownedSlot _hinnerValid =>
-          have hderefLoc :
-              store.loc source.deref = some ownerLocation := by
-            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-          have hlocationEq : location = ownerLocation := by
-            rw [hloc] at hderefLoc
-            exact Option.some.inj hderefLoc
-          subst location
-          have hownsSource :
-              ProgramStore.OwnsAt store ownerLocation sourceLocation :=
-            ⟨sourceLifetime, by simpa [owningRef] using hsourceSlot⟩
-          have hsourceProtected :
-              ProtectedByBase store x sourceLocation := by
-            rcases hprotected with hroot | hpath
-            · subst hroot
-              have hownsVar : ProgramStore.Owns store (VariableProjection x) :=
-                ⟨sourceLocation, hownsSource⟩
-              rcases hheap (VariableProjection x) hownsVar with
-                ⟨address, hheapLoc⟩
-              cases hheapLoc
-            · rcases ProgramStore.OwnsTransitively.predecessor_eq_or_owned
-                  hvalidStore hpath hownsSource with hsourceRoot | hsourcePath
-              · left
-                exact hsourceRoot
-              · right
-                exact hsourcePath
-          rcases ihSource.1 hsourceLoc hsourceProtected with hwp | hbase
-          · exact Or.inl hwp
-          · exact Or.inr (by simpa [LVal.base] using hbase)
+      simp only [ValidSlotValue] at hsourceValid
+      obtain ⟨ownerLocation, ownerSlot, hvalEq, hownedSlot, _hinnerValid⟩ := hsourceValid
+      have hderefLoc :
+          store.loc source.deref = some ownerLocation := by
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hvalEq]
+      have hlocationEq : location = ownerLocation := by
+        rw [hloc] at hderefLoc
+        exact Option.some.inj hderefLoc
+      subst location
+      have hownsSource :
+          ProgramStore.OwnsAt store ownerLocation sourceLocation :=
+        ⟨sourceLifetime, by simpa [owningRef, hvalEq] using hsourceSlot⟩
+      have hsourceProtected :
+          ProtectedByBase store x sourceLocation := by
+        rcases hprotected with hroot | hpath
+        · subst hroot
+          have hownsVar : ProgramStore.Owns store (VariableProjection x) :=
+            ⟨sourceLocation, hownsSource⟩
+          rcases hheap (VariableProjection x) hownsVar with
+            ⟨address, hheapLoc⟩
+          cases hheapLoc
+        · rcases ProgramStore.OwnsTransitively.predecessor_eq_or_owned
+              hvalidStore hpath hownsSource with hsourceRoot | hsourcePath
+          · left
+            exact hsourceRoot
+          · right
+            exact hsourcePath
+      rcases ihSource.1 hsourceLoc hsourceProtected with hwp | hbase
+      · exact Or.inl hwp
+      · exact Or.inr (by simpa [LVal.base] using hbase)
     · intro location hreads hprotected
       cases hreads with
       | here hsourceLoc =>
@@ -7440,20 +7440,20 @@ theorem lval_loc_or_reads_protectedBySomeBase
       rcases hsourceAbs with
         ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
       rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
-      cases hsourceValid with
-      | @box ownerLocation ownerSlot _ hownedSlot _hinnerValid =>
-          have hderefLoc :
-              store.loc source.deref = some ownerLocation := by
-            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-          have hlocationEq : location = ownerLocation := by
-            rw [hloc] at hderefLoc
-            exact Option.some.inj hderefLoc
-          subst hlocationEq
-          rcases ihSource.1 hsourceLoc with ⟨x, hprotectedSource⟩
-          have hownsSource :
-              ProgramStore.OwnsAt store location sourceLocation :=
-            ⟨sourceLifetime, by simpa [owningRef] using hsourceSlot⟩
-          exact ⟨x, ProtectedByBase.trans_owned hprotectedSource hownsSource⟩
+      simp only [ValidSlotValue] at hsourceValid
+      obtain ⟨ownerLocation, ownerSlot, hvalEq, hownedSlot, _hinnerValid⟩ := hsourceValid
+      have hderefLoc :
+          store.loc source.deref = some ownerLocation := by
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hvalEq]
+      have hlocationEq : location = ownerLocation := by
+        rw [hloc] at hderefLoc
+        exact Option.some.inj hderefLoc
+      subst hlocationEq
+      rcases ihSource.1 hsourceLoc with ⟨x, hprotectedSource⟩
+      have hownsSource :
+          ProgramStore.OwnsAt store location sourceLocation :=
+        ⟨sourceLifetime, by simpa [owningRef, hvalEq] using hsourceSlot⟩
+      exact ⟨x, ProtectedByBase.trans_owned hprotectedSource hownsSource⟩
     · intro location hreads
       cases hreads with
       | here hsourceLoc =>
@@ -7620,30 +7620,30 @@ theorem lval_loc_or_reads_dropsAvoids_lifetime
       rcases hsourceAbs with
         ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
       rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
-      cases hsourceValid with
-      | @box ownerLocation ownerSlot _ hownedSlot _hinnerValid =>
-          have hderefLoc :
-              store.loc source.deref = some ownerLocation := by
-            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-          have hlocationEq : location = ownerLocation := by
-            rw [hloc] at hderefLoc
-            exact Option.some.inj hderefLoc
-          subst location
-          have hsourceLocationAvoid : DropsAvoids store dropSet sourceLocation :=
-            hsourceAvoid.1 hsourceLoc
-          have hownsSource :
-              ProgramStore.OwnsAt store ownerLocation sourceLocation :=
-            ⟨sourceSlotLifetime, by simpa [owningRef] using hsourceSlot⟩
-          exact dropsAvoids_of_protected_owner hdrops hvalidStore hownsSource
-            hsourceLocationAvoid (by
-              intro dropValue hmem howned
-              rcases (hdropSet dropValue).mp hmem with
-                ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
-              have hdropEq : ownerLocation = dropLocation :=
-                eq_location_of_mem_lifetime_drop_value hdropValue howned
-              subst hdropEq
-              exact hdropDisjoint ownerLocation dropSlot hdropSlot hdropLifetime
-                ⟨sourceLocation, hownsSource⟩)
+      simp only [ValidSlotValue] at hsourceValid
+      obtain ⟨ownerLocation, ownerSlot, hvalEq, hownedSlot, _hinnerValid⟩ := hsourceValid
+      have hderefLoc :
+          store.loc source.deref = some ownerLocation := by
+        simp [ProgramStore.loc, hsourceLoc, hsourceSlot, hvalEq]
+      have hlocationEq : location = ownerLocation := by
+        rw [hloc] at hderefLoc
+        exact Option.some.inj hderefLoc
+      subst location
+      have hsourceLocationAvoid : DropsAvoids store dropSet sourceLocation :=
+        hsourceAvoid.1 hsourceLoc
+      have hownsSource :
+          ProgramStore.OwnsAt store ownerLocation sourceLocation :=
+        ⟨sourceSlotLifetime, by simpa [owningRef, hvalEq] using hsourceSlot⟩
+      exact dropsAvoids_of_protected_owner hdrops hvalidStore hownsSource
+        hsourceLocationAvoid (by
+          intro dropValue hmem howned
+          rcases (hdropSet dropValue).mp hmem with
+            ⟨dropLocation, dropSlot, hdropSlot, hdropLifetime, hdropValue⟩
+          have hdropEq : ownerLocation = dropLocation :=
+            eq_location_of_mem_lifetime_drop_value hdropValue howned
+          subst hdropEq
+          exact hdropDisjoint ownerLocation dropSlot hdropSlot hdropLifetime
+            ⟨sourceLocation, hownsSource⟩)
     · intro location hreads
       cases hreads with
       | here hsourceLoc =>
@@ -9265,7 +9265,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
           exact preservation_assign_var_envShape_step_runtime_of_frames
             (lifetime := lifetime)
             hsafe hvalidRuntime henvSlot hwrite
-              (by right; right; right; right; exact ⟨_, _, htyEq⟩)
+              (by right; right; right; exact ⟨_, _, htyEq⟩)
               hvalidValue hread hwriteStoreWritten hdrops
               hvalueNoReach hotherNoReach
       | undefLeft hinner =>
