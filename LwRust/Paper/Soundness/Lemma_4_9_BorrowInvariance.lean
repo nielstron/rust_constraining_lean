@@ -8413,6 +8413,23 @@ theorem leaf_ne_storage_of_cons {store : ProgramStore} {storage leaf : Location}
     (StoreOwnerSpine.valid hspine)
     hcycle
 
+/-- Store-structural version of `leaf_ne_storage_of_cons`: derives the leaf/root
+distinction from the explicit `StoreAcyclic` invariant rather than from per-value
+`ValidPartialValue` (which the lax `ValidSlotValue` invariant no longer supplies
+at sanitized slots).  This is the lax-compatible replacement used once the spine
+carries only lax validity. -/
+theorem leaf_ne_storage_of_cons_of_acyclic {store : ProgramStore}
+    {storage leaf : Location} {slot leafSlot : StoreSlot}
+    {ty leafTy : PartialTy} {path : Path} :
+    StoreAcyclic store →
+    StoreOwnerSpine store storage slot ty (() :: path) leaf leafSlot leafTy →
+    leaf ≠ storage := by
+  intro hacyclic hspine hleaf
+  apply hacyclic storage
+  have h := ownsTransitively_of_cons hspine
+  rw [hleaf] at h
+  exact h
+
 theorem snoc_box {store : ProgramStore} {root storage owned : Location}
     {rootSlot slot ownedSlot : StoreSlot} {rootTy leafTy inner : PartialTy}
     {path : Path} :

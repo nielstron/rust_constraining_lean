@@ -764,6 +764,21 @@ def ValidStore (store : ProgramStore) : Prop :=
     storage₁ = storage₂
 
 /--
+Store-side ownership acyclicity: no location transitively owns itself.
+
+Under the strict `ValidPartialValue` invariant this followed from the
+well-founded box nesting of each stored value (`no_storage_ownership_cycle`).
+The lax `ValidSlotValue` invariant (used to drop `EnvJoinSameShape`) deliberately
+forgets the inner type of an `undef`-typed slot, so a sanitized slot may hold a
+live owner whose type structure no longer witnesses acyclicity.  We therefore
+track acyclicity as an explicit store-level invariant; it is a property of the
+concrete ownership graph (unchanged by env-side sanitization) and is preserved
+because allocation only ever introduces fresh owned heap cells.
+-/
+def StoreAcyclic (store : ProgramStore) : Prop :=
+  ∀ location, ¬ ProgramStore.OwnsTransitively store location location
+
+/--
 Auxiliary well-formedness for the abstract partial-map store: every owning
 reference contained in a store slot points at an allocated location.
 
