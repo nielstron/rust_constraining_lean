@@ -115,6 +115,25 @@ theorem ValidSlotValue.mono_strengthens {store : ProgramStore} {a b : PartialTy}
   | intoUndef _ _ => intro value _; trivial
   | boxIntoUndef _ _ => intro value _; trivial
 
+/-- `ValidSlotValue` is preserved by any store map that preserves `slotAt` on
+existing locations and preserves full-type validity.  Every store-extension
+operation (`boxAt`, fresh `update`, `declare`, …) is an instance, so this single
+lemma discharges all the `ValidSlotValue`-preservation obligations the lax
+`SafeAbstraction` cascade produces. -/
+theorem ValidSlotValue.store_mono {store store' : ProgramStore}
+    (hslot : ∀ loc slot, store.slotAt loc = some slot → store'.slotAt loc = some slot)
+    (hpv : ∀ {v : PartialValue} {t : Ty},
+      ValidPartialValue store v (.ty t) → ValidPartialValue store' v (.ty t)) :
+    ∀ {value : PartialValue} {pty : PartialTy},
+      ValidSlotValue store value pty → ValidSlotValue store' value pty
+  | _, .undef _, _ => trivial
+  | _, .ty _, h => hpv h
+  | _, .box _inner, h => by
+      simp only [ValidSlotValue] at h ⊢
+      obtain ⟨loc, slot, hval, hsl, hin⟩ := h
+      exact ⟨loc, slot, hval, hslot loc slot hsl,
+        ValidSlotValue.store_mono hslot hpv hin⟩
+
 def ValidValue (store : ProgramStore) (value : Value) (ty : Ty) : Prop :=
   ValidPartialValue store (.value value) (.ty ty)
 
@@ -1720,10 +1739,16 @@ theorem safeAbstraction_boxAt {store : ProgramStore} {env : Env}
           using hslot⟩
   · intro x envSlot henv
     rcases hsafe.2 x envSlot henv with ⟨oldValue, hslot, hvalid⟩
-    exact ⟨oldValue, by
+    refine ⟨oldValue, by
         simpa [ProgramStore.boxAt, ProgramStore.update, VariableProjection]
-          using hslot,
-      validPartialValue_boxAt hfresh hvalid⟩
+          using hslot, ?_⟩
+    refine ValidSlotValue.store_mono (fun loc slot h => ?_)
+      (fun hv => validPartialValue_boxAt hfresh hv) hvalid
+    have hne : loc ≠ Location.heap address := by
+      intro he; subst he
+      simp only [ProgramStore.fresh] at hfresh
+      exact absurd (h.symm.trans hfresh) (by simp)
+    simpa [ProgramStore.boxAt, ProgramStore.update, hne] using h
 
 end Paper
 end LwRust
