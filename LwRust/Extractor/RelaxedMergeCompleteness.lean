@@ -209,8 +209,8 @@ theorem TermTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
     exact RelaxedTermTyping.declare hfresh ih hfreshOut hcoh henvOut
   case assignCase =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-      _rhs _rhsTy _hRhs hLhs hshape hwellTy hwrite hranked hcoh htargets
-      hnotWrite ih
+      _rhs _rhsTy _hRhs hLhs hshape hwellTy hwrite _hnoStale hranked hcoh
+      htargets hnotWrite ih
     exact RelaxedTermTyping.assign ih hLhs hshape hwellTy hwrite hranked
       hcoh htargets hnotWrite
   case eqCase =>
@@ -315,8 +315,8 @@ theorem TermListTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
     exact RelaxedTermTyping.declare hfresh ih hfreshOut hcoh henvOut
   case assignCase =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-      _rhs _rhsTy _hRhs hLhs hshape hwellTy hwrite hranked hcoh htargets
-      hnotWrite ih
+      _rhs _rhsTy _hRhs hLhs hshape hwellTy hwrite _hnoStale hranked hcoh
+      htargets hnotWrite ih
     exact RelaxedTermTyping.assign ih hLhs hshape hwellTy hwrite hranked
       hcoh htargets hnotWrite
   case eqCase =>
