@@ -1,5 +1,4 @@
 import LwRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
-import LwRust.Paper.Soundness.Lemma_4_11_RelaxedPreservation
 
 /-!
 # Relaxed safety boundary
@@ -9,9 +8,9 @@ statement that still assumed `BorrowSafeEnv` at the input.  That is not a valid
 soundness theorem for the relaxed `T-If` rule, because an input environment may
 itself be a joined approximation.
 
-This module is the explicit relaxed boundary: it derives the conditional
-Theorem 4.12 wrapper from the checked borrow-safety-free preservation theorem in
-`Lemma_4_11_RelaxedPreservation`.
+This module is a compatibility boundary: the canonical Theorem 4.12 wrapper is
+already relaxed, and this theorem keeps the old relaxed name as a direct
+specialization of the canonical statement.
 -/
 
 namespace LwRust.Paper.Soundness
@@ -35,12 +34,7 @@ theorem theorem_4_12_relaxed_typeAndBorrowSafety
         TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe
     hstoreProgress htyping hterminates
-  exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
-    hwellFormed hsafe hstoreProgress htyping
-    (by
-      intro finalStore finalValue hmulti
-      exact lemma_4_11_preservation hsource hvalidRuntime hvalidStoreTyping
-        hwellFormed hsafe htyping hmulti)
-    hterminates
+  exact theorem_4_12_typeAndBorrowSafety hsource hvalidRuntime
+    hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping hterminates
 
 end LwRust.Paper.Soundness
