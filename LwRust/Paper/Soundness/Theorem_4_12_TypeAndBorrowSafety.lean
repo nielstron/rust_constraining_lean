@@ -211,7 +211,7 @@ theorem reachable_progress_bounded
           store' term' →
         ProgressResult store' outerLifetime term')
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging
+    ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
     ?singleton ?cons htyping hsize rfl hsource store store' term'
     hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite hmulti
   -- T-Const: values are terminal; runs from them are empty.
@@ -586,6 +586,90 @@ theorem reachable_progress_bounded
   -- T-IfDiv: every path recurses into a premise IH; the dead branch is
   -- typed, so execution inside it keeps progressing.
   case iteDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
+      ihCondition ihTrue ihFalse hsize htypingEq hsource store store' term'
+      hvalid hvst hwf hbs hsafe hfs hmulti
+    cases htypingEq
+    have hsourceCondition : SourceTerm _condition :=
+      SourceTerm.ite_condition hsource
+    have hsourceTrue : SourceTerm _trueBranch :=
+      SourceTerm.ite_trueBranch hsource
+    have hsourceFalse : SourceTerm _falseBranch :=
+      SourceTerm.ite_falseBranch hsource
+    have hvstCondition : ValidStoreTyping store _condition typing :=
+      hvst.ite_condition
+    have hvstTrueSource : ValidStoreTyping store _trueBranch typing :=
+      hvst.ite_trueBranch
+    have hvstFalseSource : ValidStoreTyping store _falseBranch typing :=
+      hvst.ite_falseBranch
+    rcases multistep_ite_prefix_inv hmulti with
+      ⟨condition', hfinal, hmsCondition⟩ |
+      ⟨midStore, hmsCondition, hmsTrue⟩ |
+      ⟨midStore, hmsCondition, hmsFalse⟩
+    · subst hfinal
+      have hprogressCondition :=
+        ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceCondition store store' condition'
+          (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+          hvstCondition hwf hbs hsafe hfs hmsCondition
+      rcases hprogressCondition with hterminalCondition | hstepCondition
+      · rcases (terminal_iff_value condition').mp hterminalCondition with
+          ⟨conditionValue, hconditionValue⟩
+        subst hconditionValue
+        have hterminalConditionState :=
+          preservation hsourceCondition
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+            hvstCondition hwf hsafe _hcondition hmsCondition
+        cases hterminalConditionState.2.2 with
+        | bool =>
+            rename_i b
+            cases b
+            · exact Or.inr ⟨store', _falseBranch, Step.iteFalse⟩
+            · exact Or.inr ⟨store', _trueBranch, Step.iteTrue⟩
+      · exact progress_subIte hstepCondition
+    · have hterminalConditionState :=
+        preservation hsourceCondition
+          (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+          hvstCondition hwf hsafe _hcondition hmsCondition
+      have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
+        (hborrowTyping hsourceCondition hbs
+          _hcondition).1
+      have hvalidTrue : ValidRuntimeState midStore _trueBranch :=
+        validRuntimeState_of_sourceTerm hsourceTrue hterminalConditionState.1
+      have hvstTrue : ValidStoreTyping midStore _trueBranch typing :=
+        validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
+          hvstTrueSource
+      exact ihTrue (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceTrue midStore store' term' hvalidTrue hvstTrue
+        (typingPreservesWellFormed_of_sourceTerm hsourceCondition
+          (ValidRuntimeState.validState
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
+          hwf hsafe _hcondition).1
+        hborrowSafeCondition hterminalConditionState.2.1
+        (hfs.multiStep hmsCondition) hmsTrue
+    · have hterminalConditionState :=
+        preservation hsourceCondition
+          (validRuntimeState_of_sourceTerm hsourceCondition hvalid)
+          hvstCondition hwf hsafe _hcondition hmsCondition
+      have hborrowSafeCondition : BorrowSafeEnv _env₂ :=
+        (hborrowTyping hsourceCondition hbs
+          _hcondition).1
+      have hvalidFalse : ValidRuntimeState midStore _falseBranch :=
+        validRuntimeState_of_sourceTerm hsourceFalse hterminalConditionState.1
+      have hvstFalse : ValidStoreTyping midStore _falseBranch typing :=
+        validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
+          hvstFalseSource
+      exact ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceFalse midStore store' term' hvalidFalse hvstFalse
+        (typingPreservesWellFormed_of_sourceTerm hsourceCondition
+          (ValidRuntimeState.validState
+            (validRuntimeState_of_sourceTerm hsourceCondition hvalid))
+          hwf hsafe _hcondition).1
+        hborrowSafeCondition hterminalConditionState.2.1
+        (hfs.multiStep hmsCondition) hmsFalse
+  -- T-IfDivT: symmetric case, with the true branch diverging.
+  case iteTrueDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
       _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse _hdiverges
       ihCondition ihTrue ihFalse hsize htypingEq hsource store store' term'

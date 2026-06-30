@@ -145,7 +145,16 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       falseBranch.Diverges →
       RelaxedTermTyping env1 typing lifetime
         (.ite condition trueBranch falseBranch) trueTy env3
-
+  /-- T-IfDivT. -/
+  | iteTrueDiverging {env1 env2 env3 env4 : Env} {typing : StoreTyping}
+      {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+      {trueTy falseTy : Ty} :
+      RelaxedTermTyping env1 typing lifetime condition .bool env2 →
+      RelaxedTermTyping env2 typing lifetime trueBranch trueTy env3 →
+      RelaxedTermTyping env2 typing lifetime falseBranch falseTy env4 →
+      trueBranch.Diverges →
+      RelaxedTermTyping env1 typing lifetime
+        (.ite condition trueBranch falseBranch) falseTy env4
 inductive RelaxedTermListTyping :
     Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
   /-- T-Seq, singleton sequence. -/
@@ -175,7 +184,8 @@ theorem TermTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
       RelaxedTermListTyping env typing lifetime terms ty env₂)
     ?constCase ?missingCase ?copyCase ?moveCase ?mutBorrowCase
     ?immBorrowCase ?boxCase ?blockCase ?declareCase ?assignCase ?eqCase
-    ?iteCase ?iteDivergingCase ?singletonCase ?consCase htyping
+    ?iteCase ?iteDivergingCase ?iteTrueDivergingCase
+    ?singletonCase ?consCase htyping
   case constCase =>
     intro _env _typing _lifetime _value _ty hvalue
     exact RelaxedTermTyping.const hvalue
@@ -234,6 +244,11 @@ theorem TermTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
       _trueBranch _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse
       hdiverges ihCondition ihTrue ihFalse
     exact RelaxedTermTyping.iteDiverging ihCondition ihTrue ihFalse hdiverges
+  case iteTrueDivergingCase =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse
+      hdiverges ihCondition ihTrue ihFalse
+    exact RelaxedTermTyping.iteTrueDiverging ihCondition ihTrue ihFalse hdiverges
   case singletonCase =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
     exact RelaxedTermListTyping.singleton ih
@@ -281,7 +296,8 @@ theorem TermListTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
       RelaxedTermListTyping env typing lifetime terms ty env₂)
     ?constCase ?missingCase ?copyCase ?moveCase ?mutBorrowCase
     ?immBorrowCase ?boxCase ?blockCase ?declareCase ?assignCase ?eqCase
-    ?iteCase ?iteDivergingCase ?singletonCase ?consCase htyping
+    ?iteCase ?iteDivergingCase ?iteTrueDivergingCase
+    ?singletonCase ?consCase htyping
   case constCase =>
     intro _env _typing _lifetime _value _ty hvalue
     exact RelaxedTermTyping.const hvalue
@@ -340,6 +356,11 @@ theorem TermListTyping.toRelaxed {env₁ env₂ : Env} {typing : StoreTyping}
       _trueBranch _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse
       hdiverges ihCondition ihTrue ihFalse
     exact RelaxedTermTyping.iteDiverging ihCondition ihTrue ihFalse hdiverges
+  case iteTrueDivergingCase =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse
+      hdiverges ihCondition ihTrue ihFalse
+    exact RelaxedTermTyping.iteTrueDiverging ihCondition ihTrue ihFalse hdiverges
   case singletonCase =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih
     exact RelaxedTermListTyping.singleton ih
@@ -565,6 +586,8 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
           exact extractTermStmts_relaxedTyped hcondition hcondition'
       | iteDiverging hcondition' =>
           exact extractTermStmts_relaxedTyped hcondition hcondition'
+      | iteTrueDiverging hcondition' =>
+          exact extractTermStmts_relaxedTyped hcondition hcondition'
   case ctermIte_iteTrueBranch condition trueBranch trueCompletion
       falseCompletion htrue =>
       obtain ⟨envMid, hcondition', tyLive, envOut, htrue'⟩ :
@@ -576,19 +599,60 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
         cases htyped with
         | ite hcondition' htrue' => exact ⟨_, hcondition', _, _, htrue'⟩
         | iteDiverging hcondition' htrue' => exact ⟨_, hcondition', _, _, htrue'⟩
-      simp only [extractTermStmts]
-      cases hrebuild : branchRebuildable trueBranch with
-      | «true» =>
-          simp
-          obtain ⟨tyLive', envLive, hlive⟩ := extractTerm_relaxedTyped htrue htrue'
-          exact ⟨envLive, .cons
-            (RelaxedTermTyping.iteDiverging hcondition' hlive
+        | iteTrueDiverging hcondition' htrue' => exact ⟨_, hcondition', _, _, htrue'⟩
+      cases trueBranch
+      case done trueTerm =>
+          cases htrue
+          rw [extractTermStmts.eq_22]
+          exact ⟨envOut, .cons
+            (RelaxedTermTyping.iteDiverging hcondition' htrue'
               (RelaxedTermTyping.missing WellFormedTy.unit tyLoanFree_unit)
               .missing) .nil⟩
-      | «false» =>
-          simp
-          obtain ⟨env', hstmts⟩ := extractTermStmts_relaxedTyped htrue htrue'
-          exact ⟨env', .cons hcondition' hstmts⟩
+      case cutoff =>
+          rw [extractTermStmts.eq_23]
+          exact ⟨envMid, .cons
+            (RelaxedTermTyping.iteTrueDiverging hcondition'
+              (RelaxedTermTyping.missing WellFormedTy.unit tyLoanFree_unit)
+              (RelaxedTermTyping.const ValueTyping.unit)
+              .missing) .nil⟩
+      case blockStart =>
+          rw [extractTermStmts.eq_24]
+          exact ⟨envMid, .cons
+            (RelaxedTermTyping.iteTrueDiverging hcondition'
+              relaxedMissingBlock_typed
+              (RelaxedTermTyping.const ValueTyping.unit)
+              (.block (by simp) .missing)) .nil⟩
+      case blockTerms blockLifetime terms =>
+          cases htrue with
+          | ctermBlock_blockTerms hterms =>
+              cases terms
+              case done xs =>
+                  cases hterms
+                  rw [extractTermStmts.eq_25]
+                  exact ⟨envOut, .cons
+                    (RelaxedTermTyping.iteDiverging hcondition' htrue'
+                      (RelaxedTermTyping.missing WellFormedTy.unit tyLoanFree_unit)
+                      .missing) .nil⟩
+              all_goals
+                cases htrue' with
+                | «block» hchild hlist hwf _heq =>
+                    obtain ⟨tyBody, envBody, hlist', hdisj⟩ :=
+                      extractTerms_relaxedTyped hterms hlist
+                    rw [extractTermStmts.eq_26
+                      (x_1 := by intro xs hdone; cases hdone)]
+                    refine ⟨envMid, .cons
+                      (RelaxedTermTyping.iteTrueDiverging hcondition'
+                        (RelaxedTermTyping.block hchild hlist' ?_ rfl)
+                        (RelaxedTermTyping.const ValueTyping.unit)
+                        (.block (extractTerms_diverging nofun) .missing))
+                      .nil⟩
+                    rcases hdisj with rfl | ⟨rfl, rfl⟩
+                    · exact WellFormedTy.unit
+                    · exact hwf
+      all_goals
+        obtain ⟨env', hstmts⟩ := extractTermStmts_relaxedTyped htrue htrue'
+        simp only [extractTermStmts] at hstmts ⊢
+        exact ⟨env', .cons hcondition' hstmts⟩
   case ctermIte_iteFalseBranch condition trueBranch falseBranch
       falseCompletion hfalse =>
       obtain ⟨envMid, hcondition', tyLive, envOut, htrue', tyDead, envDead,
@@ -605,6 +669,8 @@ theorem extractTermStmts_relaxedTyped {currentLifetime : Lifetime} {p : PartialT
         | ite hcondition' htrue' hfalse' =>
             exact ⟨_, hcondition', _, _, htrue', _, _, hfalse'⟩
         | iteDiverging hcondition' htrue' hfalse' =>
+            exact ⟨_, hcondition', _, _, htrue', _, _, hfalse'⟩
+        | iteTrueDiverging hcondition' htrue' hfalse' =>
             exact ⟨_, hcondition', _, _, htrue', _, _, hfalse'⟩
       simp only [extractTermStmts]
       cases falseBranch

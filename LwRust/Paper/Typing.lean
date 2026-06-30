@@ -1967,8 +1967,7 @@ mutual
     three) — this is what lets the extractor keep a truncated branch's
     constraints — but the result type and environment are exactly the live
     branch's, and none of `T-If`'s join obligations are needed because no
-    join happens.  The mirror-image rule (diverging *true* branch) is
-    omitted: place the diverging branch in `else` position. -/
+    join happens. -/
     | iteDiverging {env₁ env₂ env₃ env₄ : Env} {typing : StoreTyping}
         {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
         {trueTy falseTy : Ty} :
@@ -1978,6 +1977,19 @@ mutual
         falseBranch.Diverges →
         TermTyping env₁ typing lifetime
           (.ite condition trueBranch falseBranch) trueTy env₃
+    /-- T-IfDivT: mirror image of `T-IfDiv` for a diverging true branch.
+
+    This models Rust's statement-level `if c { ...; panic!() }`: when the
+    true branch diverges, only the false branch can reach the merge point. -/
+    | iteTrueDiverging {env₁ env₂ env₃ env₄ : Env} {typing : StoreTyping}
+        {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
+        {trueTy falseTy : Ty} :
+        TermTyping env₁ typing lifetime condition .bool env₂ →
+        TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
+        TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
+        trueBranch.Diverges →
+        TermTyping env₁ typing lifetime
+          (.ite condition trueBranch falseBranch) falseTy env₄
   inductive TermListTyping : Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
     /-- T-Seq, singleton sequence. -/
     | singleton {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
@@ -2031,6 +2043,9 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hfinite =>
       ihTrue (ihCondition hfinite))
+    (fun _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue
+        ihFalse hfinite =>
+      ihFalse (ihCondition hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>
       ihRest (ihTerm hfinite))

@@ -1111,6 +1111,13 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         (ihTrue (SourceTerm.ite_trueBranch hsource))
         (ihFalse (SourceTerm.ite_falseBranch hsource))
         hdiverges)
+    (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
+        hsource =>
+      TermTyping.iteTrueDiverging
+        (ihCondition (SourceTerm.ite_condition hsource))
+        (ihTrue (SourceTerm.ite_trueBranch hsource))
+        (ihFalse (SourceTerm.ite_falseBranch hsource))
+        hdiverges)
     (fun _hterm ih hsource =>
       TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
     (fun _hterm _hrest ihHead ihRest hsource =>
@@ -3694,9 +3701,19 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
           let conditionResult := ihCondition
             (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             htypingEq hwellFormed
-        ihTrue
+          ihTrue
           (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
           htypingEq conditionResult.1)
+        (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+              _trueBranch _falseBranch _trueTy _falseTy}
+            _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue ihFalse
+            hsize htypingEq hwellFormed =>
+          let conditionResult := ihCondition
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq hwellFormed
+          ihFalse
+            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            htypingEq conditionResult.1)
         (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih hsize
             htypingEq hwellFormed =>
           ih
@@ -3839,6 +3856,12 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         htypingEq hwellFormed =>
       let conditionResult := ihCondition htypingEq hwellFormed
       ihTrue htypingEq conditionResult.1)
+    (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+          _falseBranch _trueTy _falseTy}
+        _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue ihFalse
+        htypingEq hwellFormed =>
+      let conditionResult := ihCondition htypingEq hwellFormed
+      ihFalse htypingEq conditionResult.1)
     (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih htypingEq
         hwellFormed =>
       ih htypingEq hwellFormed)

@@ -5741,7 +5741,7 @@ theorem preservation_bounded
         TerminalStateSafe finalStore finalValue
           (env₂.dropLifetime blockLifetime) ty)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging
+    ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
     ?singleton ?cons htyping hsize rfl hsource store finalStore finalValue
     hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti).2
   -- T-Val: a value is already terminal.
@@ -6124,6 +6124,39 @@ theorem preservation_bounded
         hstoreTypingTrue hwellCondition hterminalCondition.2.1 htrueMulti
     · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
       exact absurd hfalseMulti (diverges_multistep_not_value hdiverges)
+  -- T-IfDivT: only the false branch can terminate.
+  case iteTrueDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
+      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
+      ihCondition _ihTrue ihFalse hsize htypingEq hsource store finalStore
+      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
+    cases htypingEq
+    rcases multistep_ite_to_value_inv hmulti with
+      ⟨midStore, hchosen⟩
+    have hsourceCondition : SourceTerm _condition :=
+      SourceTerm.ite_condition hsource
+    have hvalidCondition : ValidRuntimeState store _condition :=
+      validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
+    have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
+      hvalidStoreTyping.ite_condition
+    rcases hchosen with htrueChosen | hfalseChosen
+    · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
+      exact absurd htrueMulti (diverges_multistep_not_value hdiverges)
+    · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
+      rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceCondition store midStore (.bool false)
+          hvalidCondition hstoreTypingCondition hwellFormed hsafe _hconditionMulti with
+        ⟨hwellCondition, hterminalCondition⟩
+      have hsourceFalse : SourceTerm _falseBranch :=
+        SourceTerm.ite_falseBranch hsource
+      have hvalidFalse : ValidRuntimeState midStore _falseBranch :=
+        validRuntimeState_of_sourceTerm hsourceFalse hterminalCondition.1
+      have hstoreTypingFalse : ValidStoreTyping midStore _falseBranch typing :=
+        validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
+          hvalidStoreTyping.ite_falseBranch
+      exact ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+        rfl hsourceFalse midStore finalStore finalValue hvalidFalse
+        hstoreTypingFalse hwellCondition hterminalCondition.2.1 hfalseMulti
   -- Block list, singleton case.
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm _ih hsize htypingEq hsource

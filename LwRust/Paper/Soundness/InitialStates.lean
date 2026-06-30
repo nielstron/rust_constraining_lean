@@ -73,7 +73,8 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     (motive_2 := fun _env typing lifetime terms _ty _env₂ _ =>
       typing = StoreTyping.empty → SourceTerm (.block lifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging ?singleton ?cons htyping rfl
+    ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
+    ?singleton ?cons htyping rfl
   case const =>
     intro _env _typing _lifetime value _ty hvalueTyping htypingEq
     subst htypingEq
@@ -141,6 +142,17 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       · exact ihTrue htypingEq candidate htrueMem
       · exact ihFalse htypingEq candidate hfalseMem
   case iteDiverging =>
+    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
+      _trueBranch _falseBranch _trueTy _falseTy
+      _hcondition _htrue _hfalse _hdiverges
+      ihCondition ihTrue ihFalse htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbranchMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · rcases hbranchMem with htrueMem | hfalseMem
+      · exact ihTrue htypingEq candidate htrueMem
+      · exact ihFalse htypingEq candidate hfalseMem
+  case iteTrueDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy
       _hcondition _htrue _hfalse _hdiverges

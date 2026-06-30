@@ -347,6 +347,27 @@ theorem RelaxedTermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨RelaxedTermTyping.iteDiverging hconditionErased htrueErased
         hfalseErased hdiverges, hfreshTrue, htrueFresh⟩)
     (by
+      intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime condition trueBranch
+        falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
+        ihCondition ihTrue ihFalse hfresh hstore hnot
+      have hnotCondition : ¬ Term.Mentions ghost condition := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hnotTrue : ¬ Term.Mentions ghost trueBranch := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hnotFalse : ¬ Term.Mentions ghost falseBranch := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      rcases ihCondition hfresh hstore hnotCondition with
+        ⟨hconditionErased, hfreshCond, _hboolFresh⟩
+      rcases ihTrue hfreshCond hstore hnotTrue with
+        ⟨htrueErased, _hfreshTrue, _htrueFresh⟩
+      rcases ihFalse hfreshCond hstore hnotFalse with
+        ⟨hfalseErased, hfreshFalse, hfalseFresh⟩
+      exact ⟨RelaxedTermTyping.iteTrueDiverging hconditionErased htrueErased
+        hfalseErased hdiverges, hfreshFalse, hfalseFresh⟩)
+    (by
       intro _env₁ _env₂ _typing _lifetime singletonTerm _ty _hterm ih
         hfresh hstore hnot
       have hnotTerm : ¬ Term.Mentions ghost singletonTerm := by
@@ -425,7 +446,8 @@ theorem relaxed_progress_typing_bounded {store : ProgramStore} (fuel : Nat)
             ProgressResult store lifetime (.block blockLifetime terms))
         ?caseConst ?caseMissing ?caseCopy ?caseMove ?caseMutBorrow
         ?caseImmBorrow ?caseBox ?caseBlock ?caseDeclare ?caseAssign ?caseEq
-        ?caseIte ?caseIteDiverging ?caseSingleton ?caseCons htyping
+        ?caseIte ?caseIteDiverging ?caseIteTrueDiverging
+        ?caseSingleton ?caseCons htyping
       case caseConst =>
         intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf
           _hsafe _hstore
@@ -545,6 +567,20 @@ theorem relaxed_progress_typing_bounded {store : ProgramStore} (fuel : Nat)
               exact progress_ite_value hvalueTyping hvst.ite_condition
         · exact progress_subIte hstepCondition
       case caseIteDiverging =>
+        intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime condition _trueBranch
+          _falseBranch _trueTy _falseTy hcondition _htrue _hfalse _hdiverges
+          ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
+        rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
+            hvst.ite_condition hwf hsafe hstore with
+          hterminalCondition | hstepCondition
+        · rcases (terminal_iff_value condition).mp hterminalCondition with
+            ⟨conditionValue, hconditionValue⟩
+          subst hconditionValue
+          cases hcondition with
+          | const hvalueTyping =>
+              exact progress_ite_value hvalueTyping hvst.ite_condition
+        · exact progress_subIte hstepCondition
+      case caseIteTrueDiverging =>
         intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime condition _trueBranch
           _falseBranch _trueTy _falseTy hcondition _htrue _hfalse _hdiverges
           ihCondition _ihTrue _ihFalse hsize hvst hwf hsafe hstore
