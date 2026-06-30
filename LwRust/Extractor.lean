@@ -4,6 +4,3 @@ import LwRust.Extractor.PartialProgram
 import LwRust.Extractor.Checkers
 import LwRust.Extractor.Extractors.Empty
 import LwRust.Extractor.Extractors.NestedBlocks
-import LwRust.Extractor.RelaxedMergeCompleteness
-import LwRust.Extractor.RelaxedProgress
-import LwRust.Extractor.RelaxedWellFormed
