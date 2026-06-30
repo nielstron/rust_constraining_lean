@@ -468,6 +468,54 @@ mutual
         LValTargetsTyping env (target :: rest) unionTy lifetime
 end
 
+/--
+Stale-aware target-list typing used by coherence invariants.
+
+Unlike `LValTargetsTyping`, this allows a target to contribute an `undef`
+partial type.  It records that the static target list still has a least common
+partial type, without making the corresponding borrow dereference readable:
+`T-LvBor` continues to use `LValTargetsTyping`, whose singleton targets must be
+fully initialized.
+-/
+inductive LValTargetsMaybeTyping :
+    Env → List LVal → PartialTy → Lifetime → Prop where
+  | singleton {env : Env} {target : LVal} {partialTy : PartialTy}
+      {lifetime : Lifetime} :
+      LValTyping env target partialTy lifetime →
+      LValTargetsMaybeTyping env [target] partialTy lifetime
+  | cons {env : Env} {target : LVal} {rest : List LVal}
+      {headTy : PartialTy} {headLifetime restLifetime lifetime : Lifetime}
+      {restTy unionTy : PartialTy} :
+      LValTyping env target headTy headLifetime →
+      LValTargetsMaybeTyping env rest restTy restLifetime →
+      PartialTyUnion headTy restTy unionTy →
+      LifetimeIntersection headLifetime restLifetime lifetime →
+      LValTargetsMaybeTyping env (target :: rest) unionTy lifetime
+
+theorem LValTargetsTyping.toMaybe {env : Env} {targets : List LVal}
+    {partialTy : PartialTy} {lifetime : Lifetime} :
+    LValTargetsTyping env targets partialTy lifetime →
+    LValTargetsMaybeTyping env targets partialTy lifetime := by
+  intro htyping
+  exact LValTargetsTyping.rec
+    (motive_1 := fun _lv _partialTy _lifetime _ => True)
+    (motive_2 := fun targets partialTy lifetime _ =>
+      LValTargetsMaybeTyping env targets partialTy lifetime)
+    (by intro _x _slot _hslot; trivial)
+    (by intro _lv _inner _lifetime _htyping _ih; trivial)
+    (by
+      intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+        _hborrow _htargets _ihBorrow _ihTargets
+      trivial)
+    (by
+      intro target _ty _lifetime htarget _ihTarget
+      exact LValTargetsMaybeTyping.singleton htarget)
+    (by
+      intro target rest _headTy _headLifetime _restLifetime _lifetime _restTy
+        _unionTy hhead _hrest hunion hintersection _ihHead ihRest
+      exact LValTargetsMaybeTyping.cons hhead ihRest hunion hintersection)
+    htyping
+
 /-- Definitions 3.12 and 3.13 collapse to a list of dereference selectors. -/
 abbrev Path := List Unit
 
@@ -1205,7 +1253,7 @@ targets, which is what `T-LvBor` needs for reborrows.
 def Coherent (env : Env) : Prop :=
   ∀ lv mutable targets borrowLifetime,
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
-    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+    ∃ partialTy lifetime, LValTargetsMaybeTyping env targets partialTy lifetime
 
 /-- A target list whose every target is currently initialized. -/
 def BorrowTargetsInitialized (env : Env) (targets : List LVal) : Prop :=
@@ -1223,7 +1271,7 @@ def CoherentWhenInitialized (env : Env) : Prop :=
   ∀ lv mutable targets borrowLifetime,
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
     BorrowTargetsInitialized env targets →
-    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+    ∃ partialTy lifetime, LValTargetsMaybeTyping env targets partialTy lifetime
 
 theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
     LinearizedBy φ env → Linearizable env := by

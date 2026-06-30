@@ -1620,6 +1620,36 @@ theorem boxedLiveJoin_p_live :
   exact @LValTyping.var boxedLiveJoinEnv "p" boxedLivePJoinSlot (by
     simp [boxedLiveJoinEnv, boxedLivePJoinSlot, Env.update])
 
+theorem boxedLiveJoin_x_undef_typing :
+    LValTyping boxedLiveJoinEnv (.var "x") (.undef .int) Lifetime.root := by
+  exact @LValTyping.var boxedLiveJoinEnv "x" staleJoinXMovedSlot (by
+    simp [boxedLiveJoinEnv, staleJoinXMovedSlot, Env.update])
+
+theorem boxedLiveJoin_y_typing :
+    LValTyping boxedLiveJoinEnv (.var "y") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var boxedLiveJoinEnv "y" staleJoinYSlot (by
+    simp [boxedLiveJoinEnv, staleJoinYSlot, Env.update])
+
+theorem boxedLiveJoin_int_undef_union :
+    PartialTyUnion (.ty .int) (.undef .int) (.undef .int) := by
+  constructor
+  · intro candidate hcandidate
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at hcandidate
+    rcases hcandidate with rfl | rfl
+    · exact PartialTyStrengthens.intoUndef PartialTyStrengthens.reflex
+    · exact PartialTyStrengthens.reflex
+  · intro upper hupper
+    exact hupper (.undef .int) (by simp)
+
+theorem boxedLiveJoin_y_x_targets_maybe_typing :
+    LValTargetsMaybeTyping boxedLiveJoinEnv [.var "y", .var "x"]
+      (.undef .int) Lifetime.root := by
+  exact LValTargetsMaybeTyping.cons
+    boxedLiveJoin_y_typing
+    (LValTargetsMaybeTyping.singleton boxedLiveJoin_x_undef_typing)
+    boxedLiveJoin_int_undef_union
+    (LifetimeIntersection.self Lifetime.root)
+
 theorem boxedLiveJoin_writeProhibited_x :
     WriteProhibited boxedLiveJoinEnv (.var "x") := by
   exact Or.inl

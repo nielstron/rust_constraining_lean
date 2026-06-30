@@ -816,8 +816,8 @@ theorem pointerIfRetarget_coherent : Coherent pointerIfRetargetEnv := by
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIfRetarget_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
-    exact ⟨.int, Lifetime.root,
-      LValTargetsTyping.singleton pointerIfRetarget_y_typing⟩
+    exact ⟨.ty .int, Lifetime.root,
+      (LValTargetsTyping.singleton pointerIfRetarget_y_typing).toMaybe⟩
   · rcases pointerIfRetarget_old_root_int hbase htyping with
       ⟨_, hpartialTy, _⟩
     cases hpartialTy
@@ -1052,7 +1052,8 @@ theorem pointerIf_coherent : Coherent pointerIfEnv := by
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIf_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
-    exact ⟨.int, Lifetime.root, LValTargetsTyping.singleton pointerIf_x_typing⟩
+    exact ⟨.ty .int, Lifetime.root,
+      (LValTargetsTyping.singleton pointerIf_x_typing).toMaybe⟩
   · rcases pointerIf_old_root_int hbase htyping with ⟨_, hpartialTy, _⟩
     cases hpartialTy
 
@@ -1335,11 +1336,11 @@ theorem pointerIfJoin_coherent : Coherent pointerIfJoinEnv := by
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIfJoin_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
-    exact ⟨.int, Lifetime.root,
-      LValTargetsTyping.cons pointerIfJoin_y_typing
+    exact ⟨.ty .int, Lifetime.root,
+      (LValTargetsTyping.cons pointerIfJoin_y_typing
         (LValTargetsTyping.singleton pointerIfJoin_x_typing)
         (PartialTyUnion.self (.ty .int))
-        (LifetimeIntersection.self Lifetime.root)⟩
+        (LifetimeIntersection.self Lifetime.root)).toMaybe⟩
   · rcases pointerIfJoin_old_root_int hbase htyping with ⟨_, hpartialTy, _⟩
     cases hpartialTy
 

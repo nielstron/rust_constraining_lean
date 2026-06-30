@@ -85,6 +85,12 @@ def EnvSameShapeStrengthening (source result : Env) : Prop :=
       result.slotAt x = some resultSlot ∧
         sourceSlot.lifetime = resultSlot.lifetime)
 
+def FullCoherent (env : Env) : Prop :=
+  ∀ lv mutable targets borrowLifetime,
+    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
+    ∃ targetTy targetLifetime,
+      LValTargetsTyping env targets (.ty targetTy) targetLifetime
+
 theorem EnvSameShapeStrengthening.refl (env : Env) :
     EnvSameShapeStrengthening env env := by
   constructor
@@ -1653,7 +1659,9 @@ theorem CoherentWhenInitialized.update_fresh_ty {env : Env} {x : Name}
   intro hcontained hcoh hfresh hobligations lv mutable targets borrowLifetime
     htyping hinitialized
   by_cases hbase : LVal.base lv = x
-  · exact hobligations.fresh_root_coherent hbase htyping
+  · rcases hobligations.fresh_root_coherent hbase htyping with
+      ⟨targetTy, targetLifetime, htargets⟩
+    exact ⟨.ty targetTy, targetLifetime, htargets.toMaybe⟩
   · rcases hobligations.old_root_transport hbase htyping with
       ⟨oldBorrowLifetime, htypingOld⟩
     have htargetsOldInitialized : BorrowTargetsInitialized env targets := by
@@ -1677,7 +1685,7 @@ theorem CoherentWhenInitialized.update_fresh_ty {env : Env} {x : Name}
         htargetsOldInitialized with
       ⟨targetTy, targetLifetime, htargetsOld⟩
     exact ⟨targetTy, targetLifetime,
-      LValTargetsTyping.update_fresh
+      LValTargetsMaybeTyping.update_fresh
         (slot := { ty := .ty ty, lifetime := lifetime }) hfresh htargetsOld⟩
 
 theorem Linearizable.update_fresh_ty_whenInitialized {env : Env} {x : Name}
@@ -2475,6 +2483,29 @@ theorem LValTyping.move_of_not_pathConflicts {env env' : Env} {moved : LVal} :
           hunion hintersection)
       htyping
 
+theorem LValTargetsMaybeTyping.move_of_not_pathConflicts {env env' : Env}
+    {moved : LVal} {targets : List LVal} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    EnvMove env moved env' →
+    ¬ WriteProhibited env moved →
+    LValTargetsMaybeTyping env targets partialTy lifetime →
+    (∀ target, target ∈ targets → ¬ target ⋈ moved) →
+    LValTargetsMaybeTyping env' targets partialTy lifetime := by
+  intro hmove hnotWrite htyping hnotTargets
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        ((LValTyping.move_of_not_pathConflicts hmove hnotWrite).1
+          htarget (hnotTargets _ (by simp)))
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        ((LValTyping.move_of_not_pathConflicts hmove hnotWrite).1
+          hhead (hnotTargets _ (by simp)))
+        (ihRest (by
+          intro target hmem
+          exact hnotTargets target (List.mem_cons_of_mem _ hmem)))
+        hunion hintersection
+
 theorem LValTyping.update_of_not_pathConflicts {env : Env} {x : Name}
     {slot : EnvSlot} :
     ¬ WriteProhibited (env.update x slot) (.var x) →
@@ -3147,7 +3178,8 @@ theorem Coherent.move {env env' : Env} {lv : LVal} {lifetime : Lifetime}
       PartialTyContains.here target htarget
   -- forward transport of the joint typing across the move
   exact ⟨ty, lt,
-    (LValTyping.move_of_not_pathConflicts hmove hnotWrite).2 htgtsEnv hnotTargets⟩
+    LValTargetsMaybeTyping.move_of_not_pathConflicts
+      hmove hnotWrite htgtsEnv hnotTargets⟩
 
 /--
 Move Preservation for well-formed environments, used in Lemma 4.9.
@@ -3317,8 +3349,8 @@ theorem CoherentWhenInitialized.move {env env' : Env} {lv : LVal}
   rcases hcohEnv lv' m T bLf htyEnv hinitializedEnv with
     ⟨ty, lt, htgtsEnv⟩
   exact ⟨ty, lt,
-    (LValTyping.move_of_not_pathConflicts hmove hnotWrite).2
-      htgtsEnv hnotTargets⟩
+    LValTargetsMaybeTyping.move_of_not_pathConflicts
+      hmove hnotWrite htgtsEnv hnotTargets⟩
 
 theorem move_preserves_wellFormedWhenInitialized {env env' : Env} {lv : LVal}
     {ty : Ty} {valueLifetime lifetime : Lifetime} :
@@ -3369,14 +3401,14 @@ enclosing parent lifetime, and the reached location also lives at the parent
 side, then dropping the immediate child lifetime preserves the lval typing.
 -/
 theorem LValTyping.dropLifetime_child_of_base_outlives {env : Env}
-    {parent child : Lifetime} {lv : LVal} {targetTy : Ty}
+    {parent child : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {targetLifetime : Lifetime} :
     LifetimeChild parent child →
     WellFormedEnv env child →
     LValBaseOutlives env lv parent →
-    LValTyping env lv (.ty targetTy) targetLifetime →
+    LValTyping env lv partialTy targetLifetime →
     targetLifetime ≤ parent →
-    LValTyping (env.dropLifetime child) lv (.ty targetTy) targetLifetime := by
+    LValTyping (env.dropLifetime child) lv partialTy targetLifetime := by
   intro hchild hwellBody hbase htyping houtlives
   have htransport :
       (∀ {lv partialTy lifetime},
@@ -3576,6 +3608,76 @@ theorem LValTargetsTyping.dropLifetime_child_of_wellFormedTargets {env : Env}
       exact hbase)
     htyping houtlives
 
+theorem LValTargetsMaybeTyping.lifetime_outlives_of_base_outlives {env : Env}
+    {current : Lifetime} {targets : List LVal} {partialTy : PartialTy}
+    {targetLifetime : Lifetime} :
+    ContainedBorrowsWellFormed env →
+    LValTargetsMaybeTyping env targets partialTy targetLifetime →
+    (∀ target, target ∈ targets → LValBaseOutlives env target current) →
+    targetLifetime ≤ current := by
+  intro hcontained htyping hbaseTargets
+  induction htyping with
+  | singleton htarget =>
+      exact LValTyping.lifetime_outlives_of_base_outlives_one hcontained
+        htarget (hbaseTargets _ (by simp))
+  | cons hhead _hrest _hunion hintersection ihRest =>
+      exact LifetimeIntersection.le_of_le hintersection
+        (LValTyping.lifetime_outlives_of_base_outlives_one hcontained
+          hhead (hbaseTargets _ (by simp)))
+        (ihRest (by
+          intro selected hselected
+          exact hbaseTargets selected (List.mem_cons_of_mem _ hselected)))
+
+theorem LValTargetsMaybeTyping.dropLifetime_child_of_member_base_outlives
+    {env : Env} {parent child : Lifetime} {targets : List LVal}
+    {partialTy : PartialTy} {targetLifetime : Lifetime} :
+    LifetimeChild parent child →
+    WellFormedEnv env child →
+    (∀ target, target ∈ targets → LValBaseOutlives env target parent) →
+    LValTargetsMaybeTyping env targets partialTy targetLifetime →
+    targetLifetime ≤ parent →
+    LValTargetsMaybeTyping (env.dropLifetime child) targets partialTy
+      targetLifetime := by
+  intro hchild hwellBody hbaseTargets htyping houtlives
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        (LValTyping.dropLifetime_child_of_base_outlives
+          hchild hwellBody (hbaseTargets _ (by simp)) htarget houtlives)
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        (LValTyping.dropLifetime_child_of_base_outlives
+          hchild hwellBody (hbaseTargets _ (by simp)) hhead
+          (LifetimeOutlives.trans
+            (LifetimeIntersection.left_le hintersection) houtlives))
+        (ihRest
+          (by
+            intro selected hselected
+            exact hbaseTargets selected (List.mem_cons_of_mem _ hselected))
+          (LifetimeOutlives.trans
+            (LifetimeIntersection.right_le hintersection) houtlives))
+        hunion hintersection
+
+theorem LValTargetsMaybeTyping.dropLifetime_child_of_wellFormedTargets
+    {env : Env} {parent child : Lifetime} {targets : List LVal}
+    {partialTy : PartialTy} {targetLifetime : Lifetime} :
+    LifetimeChild parent child →
+    WellFormedEnv env child →
+    BorrowTargetsWellFormed env targets parent →
+    LValTargetsMaybeTyping env targets partialTy targetLifetime →
+    targetLifetime ≤ parent →
+    LValTargetsMaybeTyping (env.dropLifetime child) targets partialTy
+      targetLifetime := by
+  intro hchild hwellBody hwellTargets htyping houtlives
+  exact LValTargetsMaybeTyping.dropLifetime_child_of_member_base_outlives
+    hchild hwellBody
+    (by
+      intro target htarget
+      rcases BorrowTargetsWellFormed.member hwellTargets target htarget with
+        ⟨_targetTy, _selectedLifetime, _htargetTyping, _htargetOutlives, hbase⟩
+      exact hbase)
+    htyping houtlives
+
 /-- Backward typing across a lifetime drop: `dropLifetime` only *removes* slots
 (leaving the rest unchanged), so any typing in the dropped environment also holds
 in the original. -/
@@ -3752,12 +3854,13 @@ theorem Coherent.dropLifetime_child {env : Env} {parent child : Lifetime}
         PartialTyContains.here)
       hbLfParent
   have hltParent : lt ≤ parent :=
-    (LValTyping.lifetime_outlives_of_base_outlives hwellBody.1).2 htgtsEnv (by
+    LValTargetsMaybeTyping.lifetime_outlives_of_base_outlives
+      hwellBody.1 htgtsEnv (by
       intro target htarget
       rcases BorrowTargetsWellFormed.member hwellT target htarget with
         ⟨_, _, _, _, hb⟩
       exact hb)
-  exact ⟨ty, lt, LValTargetsTyping.dropLifetime_child_of_wellFormedTargets
+  exact ⟨ty, lt, LValTargetsMaybeTyping.dropLifetime_child_of_wellFormedTargets
     hchild hwellBody hwellT htgtsEnv hltParent⟩
 
 /--
@@ -3802,14 +3905,14 @@ theorem block_preserves_wellFormed {env₁ env₂ env₃ : Env}
   exact Env.dropLifetime_preserves_wellFormed_child hchild hwellBody hwellTy hdrop
 
 theorem LValTyping.dropLifetime_child_of_base_outlives_whenInitialized
-    {env : Env} {parent child : Lifetime} {lv : LVal} {targetTy : Ty}
+    {env : Env} {parent child : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {targetLifetime : Lifetime} :
     LifetimeChild parent child →
     WellFormedEnvWhenInitialized env child →
     LValBaseOutlives env lv parent →
-    LValTyping env lv (.ty targetTy) targetLifetime →
+    LValTyping env lv partialTy targetLifetime →
     targetLifetime ≤ parent →
-    LValTyping (env.dropLifetime child) lv (.ty targetTy) targetLifetime := by
+    LValTyping (env.dropLifetime child) lv partialTy targetLifetime := by
   intro hchild hwellBody hbase htyping houtlives
   have htransport :
       (∀ {lv partialTy lifetime},
@@ -4007,6 +4110,74 @@ theorem LValTargetsTyping.dropLifetime_child_of_wellFormedTargetsWhenInitialized
       exact (hwellTargets target htarget).1)
     htyping houtlives
 
+theorem LValTargetsMaybeTyping.lifetime_outlives_of_base_outlives_whenInitialized
+    {env : Env} {current : Lifetime} {targets : List LVal}
+    {partialTy : PartialTy} {targetLifetime : Lifetime} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    LValTargetsMaybeTyping env targets partialTy targetLifetime →
+    (∀ target, target ∈ targets → LValBaseOutlives env target current) →
+    targetLifetime ≤ current := by
+  intro hcontained htyping hbaseTargets
+  induction htyping with
+  | singleton htarget =>
+      exact LValTyping.lifetime_outlives_of_base_outlives_one_whenInitialized
+        hcontained htarget (hbaseTargets _ (by simp))
+  | cons hhead _hrest _hunion hintersection ihRest =>
+      exact LifetimeIntersection.le_of_le hintersection
+        (LValTyping.lifetime_outlives_of_base_outlives_one_whenInitialized
+          hcontained hhead (hbaseTargets _ (by simp)))
+        (ihRest (by
+          intro selected hselected
+          exact hbaseTargets selected (List.mem_cons_of_mem _ hselected)))
+
+theorem LValTargetsMaybeTyping.dropLifetime_child_of_member_base_outlives_whenInitialized
+    {env : Env} {parent child : Lifetime} {targets : List LVal}
+    {partialTy : PartialTy} {targetLifetime : Lifetime} :
+    LifetimeChild parent child →
+    WellFormedEnvWhenInitialized env child →
+    (∀ target, target ∈ targets → LValBaseOutlives env target parent) →
+    LValTargetsMaybeTyping env targets partialTy targetLifetime →
+    targetLifetime ≤ parent →
+    LValTargetsMaybeTyping (env.dropLifetime child) targets partialTy
+      targetLifetime := by
+  intro hchild hwellBody hbaseTargets htyping houtlives
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        (LValTyping.dropLifetime_child_of_base_outlives_whenInitialized
+          hchild hwellBody (hbaseTargets _ (by simp)) htarget houtlives)
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        (LValTyping.dropLifetime_child_of_base_outlives_whenInitialized
+          hchild hwellBody (hbaseTargets _ (by simp)) hhead
+          (LifetimeOutlives.trans
+            (LifetimeIntersection.left_le hintersection) houtlives))
+        (ihRest
+          (by
+            intro selected hselected
+            exact hbaseTargets selected (List.mem_cons_of_mem _ hselected))
+          (LifetimeOutlives.trans
+            (LifetimeIntersection.right_le hintersection) houtlives))
+        hunion hintersection
+
+theorem LValTargetsMaybeTyping.dropLifetime_child_of_wellFormedTargetsWhenInitialized
+    {env : Env} {parent child : Lifetime} {targets : List LVal}
+    {partialTy : PartialTy} {targetLifetime : Lifetime} :
+    LifetimeChild parent child →
+    WellFormedEnvWhenInitialized env child →
+    BorrowTargetsWellFormedWhenInitialized env targets parent →
+    LValTargetsMaybeTyping env targets partialTy targetLifetime →
+    targetLifetime ≤ parent →
+    LValTargetsMaybeTyping (env.dropLifetime child) targets partialTy
+      targetLifetime := by
+  intro hchild hwellBody hwellTargets htyping houtlives
+  exact LValTargetsMaybeTyping.dropLifetime_child_of_member_base_outlives_whenInitialized
+    hchild hwellBody
+    (by
+      intro target htarget
+      exact (hwellTargets target htarget).1)
+    htyping houtlives
+
 theorem BorrowTargetsWellFormedInSlotWhenInitialized.dropLifetime_child_of_transport
     {env : Env} {parent child slotLifetime : Lifetime} {targets : List LVal} :
     LifetimeChild parent child →
@@ -4119,12 +4290,12 @@ theorem CoherentWhenInitialized.dropLifetime_child {env : Env}
         hwellBody.1 htyEnv PartialTyContains.here)
       hbLfParent
   have hltParent : lt ≤ parent :=
-    (LValTyping.lifetime_outlives_of_base_outlives_whenInitialized
-      hwellBody.1).2 htgtsEnv (by
+    LValTargetsMaybeTyping.lifetime_outlives_of_base_outlives_whenInitialized
+      hwellBody.1 htgtsEnv (by
         intro target htarget
         exact (hwellT target htarget).1)
   exact ⟨ty, lt,
-    LValTargetsTyping.dropLifetime_child_of_wellFormedTargetsWhenInitialized
+    LValTargetsMaybeTyping.dropLifetime_child_of_wellFormedTargetsWhenInitialized
       hchild hwellBody hwellT htgtsEnv hltParent⟩
 
 theorem Env.dropLifetime_preserves_wellFormedWhenInitialized_child
@@ -4401,6 +4572,53 @@ theorem lvalTyping_eqv_of_linearizedBy {env : Env} {φ : Name → Nat}
   intro lv p1 l1 p2 l2 h1 h2
   exact key (φ (LVal.base lv)) lv (le_refl _) h1 h2
 
+theorem LValTyping.partialTy_eq_ty_of_initialized_linearizedBy {env : Env}
+    {φ : Name → Nat} {lv : LVal} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    LinearizedBy φ env →
+    LValTyping env lv partialTy lifetime →
+    (∃ ty targetLifetime, LValTyping env lv (.ty ty) targetLifetime) →
+    ∃ ty, partialTy = .ty ty := by
+  intro hφ htyping hinitialized
+  rcases hinitialized with ⟨targetTy, targetLifetime, htarget⟩
+  have heqv : PartialTy.eqv partialTy (.ty targetTy) :=
+    lvalTyping_eqv_of_linearizedBy hφ htyping htarget
+  cases partialTy with
+  | ty ty => exact ⟨ty, rfl⟩
+  | box _ => simp [PartialTy.eqv] at heqv
+  | undef _ => simp [PartialTy.eqv] at heqv
+
+theorem LValTargetsMaybeTyping.full_of_initialized_linearizedBy {env : Env}
+    {φ : Name → Nat} {targets : List LVal} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    LinearizedBy φ env →
+    LValTargetsMaybeTyping env targets partialTy lifetime →
+    BorrowTargetsInitialized env targets →
+    ∃ ty, partialTy = .ty ty ∧
+      LValTargetsTyping env targets (.ty ty) lifetime := by
+  intro hφ htyping hinitialized
+  induction htyping with
+  | singleton htarget =>
+      rcases LValTyping.partialTy_eq_ty_of_initialized_linearizedBy
+          hφ htarget (hinitialized _ (by simp)) with
+        ⟨targetTy, htargetTy⟩
+      subst htargetTy
+      exact ⟨targetTy, rfl, LValTargetsTyping.singleton htarget⟩
+  | cons hhead _hrest hunion hintersection ihRest =>
+      rcases LValTyping.partialTy_eq_ty_of_initialized_linearizedBy
+          hφ hhead (hinitialized _ (by simp)) with
+        ⟨headTyFull, hheadTy⟩
+      subst hheadTy
+      rcases ihRest (by
+          intro target htarget
+          exact hinitialized target (List.mem_cons_of_mem _ htarget)) with
+        ⟨restTyFull, hrestTy, hrestFull⟩
+      subst hrestTy
+      rcases PartialTyUnion.ty_ty_full hunion with ⟨unionFull, hunionFull⟩
+      subst hunionFull
+      exact ⟨unionFull, rfl,
+        LValTargetsTyping.cons hhead hrestFull hunion hintersection⟩
+
 /-- Lvalue typings transport backwards through an environment strengthening when
 the source environment is weakly coherent and linearizable.
 
@@ -4505,7 +4723,12 @@ theorem lvalTyping_back_of_envStrengthens {source result : Env}
                   exact ⟨sourceTargetTy, sourceTargetLifetime, hsourceTarget⟩
                 rcases hcoh inner mutable sourceTargets sourceBorrowLifetime
                     hsourceBorrowRaw hsourceInitialized with
-                  ⟨sourceTargetTy, sourceTargetLifetime, hsourceTargets⟩
+                  ⟨sourceTargetPartialTy, sourceTargetLifetime,
+                    hsourceTargetsMaybe⟩
+                rcases LValTargetsMaybeTyping.full_of_initialized_linearizedBy
+                    hφ hsourceTargetsMaybe hsourceInitialized with
+                  ⟨sourceTargetTy, hsourceTargetTyEq, hsourceTargets⟩
+                subst hsourceTargetTyEq
                 have hsourceTargetStrength :
                     PartialTyStrengthens (.ty sourceTargetTy) pty := by
                   exact lvalTargetsTyping_strengthens_of_all_members
@@ -4773,7 +4996,7 @@ lvalue typing transports from `source` to `result`, with the result output type
 both `eqv`-strengthening and `sameShape` to the source one. -/
 theorem lvalTyping_transport_of_sameShapeStrengthening {source result : Env}
     (hmap : EnvSameShapeStrengthening source result)
-    (hcoh : Coherent result) (hlin : Linearizable result) :
+    (hcoh : FullCoherent result) (hlin : Linearizable result) :
     ∀ {lv pty lf}, LValTyping source lv pty lf →
       ∃ pty' lf', LValTyping result lv pty' lf' ∧
         PartialTyStrengthens pty pty' ∧ PartialTy.sameShape pty pty' := by
@@ -4901,7 +5124,7 @@ half of CBWF (`hdecomp`), with the result slot lifetime equal to the source. -/
 theorem borrowTargetWellFormed_transport {source result : Env} {T : LVal}
     {sourceSlotLife resultSlotLife : Lifetime}
     (hmap : EnvSameShapeStrengthening source result)
-    (hcoh : Coherent result) (hlin : Linearizable result)
+    (hcoh : FullCoherent result) (hlin : Linearizable result)
     (hdecomp : ∀ z zslot m W, result.slotAt z = some zslot →
       PartialTyContains zslot.ty (.borrow m W) →
       ∀ w, w ∈ W → ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
@@ -4932,7 +5155,7 @@ strengthening, by transporting each target. -/
 theorem borrowTargetsWellFormedInSlot_transport {source result : Env}
     {targets : List LVal} {sourceSlotLife resultSlotLife : Lifetime}
     (hmap : EnvSameShapeStrengthening source result)
-    (hcoh : Coherent result) (hlin : Linearizable result)
+    (hcoh : FullCoherent result) (hlin : Linearizable result)
     (hdecomp : ∀ z zslot m W, result.slotAt z = some zslot →
       PartialTyContains zslot.ty (.borrow m W) →
       ∀ w, w ∈ W → ∃ wbs, result.slotAt (LVal.base w) = some wbs ∧
@@ -4952,7 +5175,7 @@ theorem containedBorrowsWellFormed_join {left right join : Env}
     (hssLeft : EnvJoinSameShape left join) (hssRight : EnvJoinSameShape right join)
     (hcbwfL : ContainedBorrowsWellFormed left)
     (hcbwfR : ContainedBorrowsWellFormed right)
-    (hcoh : Coherent join) (hlin : Linearizable join) :
+    (hcoh : FullCoherent join) (hlin : Linearizable join) :
     ContainedBorrowsWellFormed join := by
   have hbranch := EnvJoin.branches_sameShape hjoin hssLeft hssRight
   have hmapL : EnvSameShapeStrengthening left join :=
@@ -5261,7 +5484,7 @@ theorem EnvWrite.sameShapeStrengthening_or_singleSlot {env result : Env}
     · exact Or.inr ⟨slot, updatedTy, hslot, by rw [hinterEq]⟩
 
 /-- **CBWF of an assignment write result**, derived from `ContainedBorrowsWellFormed`
-of the pre-write environment, the kept `T-Assign` premises (`Coherent`,
+of the pre-write environment, the legacy full-coherence premise,
 `Linearizable` of the result, `¬WriteProhibited`), and the *minimal* RHS-target
 obligation `EnvWriteRhsTargetsWellFormed`.  The old-origin borrows transport via
 the borrow-invariance keystone; the RHS-origin borrows are supplied by the
@@ -5269,7 +5492,7 @@ minimal obligation. -/
 theorem containedBorrowsWellFormed_assign {env₂ env₃ : Env}
     {lhs : LVal} {rhsTy : Ty}
     (hcbwf₂ : ContainedBorrowsWellFormed env₂)
-    (hcoh₃ : Coherent env₃) (hlin₃ : Linearizable env₃)
+    (hcoh₃ : FullCoherent env₃) (hlin₃ : Linearizable env₃)
     (hrhsWF : EnvWriteRhsTargetsWellFormed env₃ rhsTy)
     (hwrite : EnvWrite 0 env₂ lhs rhsTy env₃)
     (hnotWrite : ¬ WriteProhibited env₃ lhs) :

@@ -35,16 +35,16 @@ structure EnvJoinCoherenceObligations (left right join : Env) : Prop where
       (∃ leftBorrowLifetime,
         LValTyping left lv (.ty (.borrow mutable targets)) leftBorrowLifetime ∧
           ∀ targetTy targetLifetime,
-            LValTargetsTyping left targets (.ty targetTy) targetLifetime →
+            LValTargetsMaybeTyping left targets targetTy targetLifetime →
               ∃ joinTargetTy joinTargetLifetime,
-                LValTargetsTyping join targets (.ty joinTargetTy) joinTargetLifetime)
+                LValTargetsMaybeTyping join targets joinTargetTy joinTargetLifetime)
       ∨
       (∃ rightBorrowLifetime,
         LValTyping right lv (.ty (.borrow mutable targets)) rightBorrowLifetime ∧
           ∀ targetTy targetLifetime,
-            LValTargetsTyping right targets (.ty targetTy) targetLifetime →
+            LValTargetsMaybeTyping right targets targetTy targetLifetime →
               ∃ joinTargetTy joinTargetLifetime,
-                LValTargetsTyping join targets (.ty joinTargetTy) joinTargetLifetime)
+                LValTargetsMaybeTyping join targets joinTargetTy joinTargetLifetime)
 
 theorem EnvJoin.preserves_coherent_of_obligations {left right join : Env} :
     Coherent left →
@@ -1892,11 +1892,14 @@ theorem runtimeCoherent_selectedTarget_of_safe {store : ProgramStore} {env : Env
     htargetTyping, htargetLoc, hpointsTo⟩
 
 theorem runtimeCoherent_of_coherent_safe {store : ProgramStore} {env : Env} :
-    Coherent env →
+    (∀ {lv mutable targets lifetime},
+      LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
+        ∃ targetTy targetLifetime,
+          LValTargetsTyping env targets (.ty targetTy) targetLifetime) →
     store ∼ₛ env →
     RuntimeCoherent store env := by
   intro hcoherent hsafe _lv _mutable _targets _lifetime htyping
-  rcases hcoherent _ _ _ _ htyping with ⟨targetTy, targetLifetime, htargets⟩
+  rcases hcoherent htyping with ⟨targetTy, targetLifetime, htargets⟩
   exact runtimeCoherent_selectedTarget_of_safe hsafe htyping htargets
 
 theorem lvalTyping_allocated_location_of_safe {store : ProgramStore} {env : Env}

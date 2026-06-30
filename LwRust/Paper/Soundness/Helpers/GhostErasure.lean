@@ -628,6 +628,27 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
           hunion hintersection)
       htyping hfresh hnotTargets
 
+theorem LValTargetsMaybeTyping.erase_ghost {env : Env} {ghost : Name}
+    {targets : List LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
+    LValTargetsMaybeTyping env targets partialTy lifetime →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+    LValTargetsMaybeTyping (env.erase ghost) targets partialTy lifetime := by
+  intro htyping hfresh hnotTargets
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        (LValTyping.erase_ghost.1 htarget hfresh
+          (hnotTargets _ (by simp)))
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        (LValTyping.erase_ghost.1 hhead hfresh
+          (hnotTargets _ (by simp)))
+        (ihRest (by
+          intro target hmem
+          exact hnotTargets target (List.mem_cons_of_mem _ hmem)))
+        hunion hintersection
+
 theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
     (∀ {lv partialTy lifetime},
       LValTyping (env.erase ghost) lv partialTy lifetime →
@@ -1286,7 +1307,8 @@ theorem Coherent.erase_ghost {env : Env} {ghost : Name} :
   have htargetsNot :
       ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
     not_mentions_of_mem_borrow_allVars hborrowFresh
-  exact ⟨targetTy, targetLifetime, LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTargetsMaybeTyping.erase_ghost htargets hfresh htargetsNot⟩
 
 theorem LinearizedBy.erase_ghost {φ : Name → Nat} {env : Env}
     {ghost : Name} :
