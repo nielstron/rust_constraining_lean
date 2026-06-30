@@ -48,7 +48,7 @@ theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
-      TerminalStateSafe finalStore finalValue Env.empty .bool :=
+      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .bool :=
   emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
     scalarCopyComparison_terminates
 
@@ -68,17 +68,13 @@ theorem ifThenElseInt_typing :
     (TermTyping.const ValueTyping.int)
     (TermTyping.const ValueTyping.int)
     (PartialTyJoin.self (.ty .int))
-    ?join ?leftShape ?rightShape
+    ?join
     WellFormedTy.int
     coherent_empty
     linearizable_empty
     borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
   · simp [EnvJoin]
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
 
 theorem ifThenElseInt_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root ifThenElseInt := by
@@ -90,7 +86,7 @@ theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
-      TerminalStateSafe finalStore finalValue Env.empty .int :=
+      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
     ifThenElseInt_terminates
 
@@ -110,17 +106,13 @@ theorem ifEqThenElseInt_typing :
     (TermTyping.const ValueTyping.int)
     (TermTyping.const ValueTyping.int)
     (PartialTyJoin.self (.ty .int))
-    ?join ?leftShape ?rightShape
+    ?join
     WellFormedTy.int
     coherent_empty
     linearizable_empty
     borrowSafeEnv_empty
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_int)
   · simp [EnvJoin]
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
 
 theorem ifEqThenElseInt_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root ifEqThenElseInt := by
@@ -133,7 +125,7 @@ theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
-      TerminalStateSafe finalStore finalValue Env.empty .int :=
+      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
     ifEqThenElseInt_terminates
 
@@ -1633,100 +1625,12 @@ theorem pointerIf_envJoin :
       (henv' pointerIfRetargetEnv (by simp))
       (henv' pointerIfWriteEnv (by simp))
 
-theorem pointerIfRetarget_join_sameShape :
-    EnvJoinSameShape pointerIfRetargetEnv pointerIfJoinEnv := by
-  intro name branchSlot joinSlot hbranch hjoin
-  by_cases hp : name = "p"
-  · subst hp
-    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "y"]) := by
-      simpa [pointerIfRetargetEnv, pointerIfPYSlot, Env.update] using
-        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
-    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
-      simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
-        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
-    simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
-  · by_cases hy : name = "y"
-    · subst hy
-      have hbranchTy : branchSlot.ty = .ty .int := by
-        simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
-          pointerIfPYSlot, Env.update] using
-          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
-      have hjoinTy : joinSlot.ty = .ty .int := by
-        simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
-          Env.update] using
-          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
-      simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
-    · by_cases hx : name = "x"
-      · subst hx
-        have hbranchTy : branchSlot.ty = .ty .int := by
-          simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-            pointerIfYSlot, pointerIfPYSlot, Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-              hbranch).symm
-        have hjoinTy : joinSlot.ty = .ty .int := by
-          simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
-            pointerIfJoinPSlot, Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-              hjoin).symm
-        simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
-      · have hnone : pointerIfRetargetEnv.slotAt name = none := by
-          simp [pointerIfRetargetEnv, pointerIfEnv, Env.update, Env.empty,
-            hp, hy, hx]
-        rw [hbranch] at hnone
-        cases hnone
-
-theorem pointerIfWrite_join_sameShape :
-    EnvJoinSameShape pointerIfWriteEnv pointerIfJoinEnv := by
-  intro name branchSlot joinSlot hbranch hjoin
-  rw [pointerIfWriteEnv_eq] at hbranch
-  by_cases hp : name = "p"
-  · subst hp
-    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "x"]) := by
-      simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
-        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
-    have hjoinTy : joinSlot.ty = .ty (.borrow true [.var "y", .var "x"]) := by
-      simpa [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update] using
-        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
-    simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
-  · by_cases hy : name = "y"
-    · subst hy
-      have hbranchTy : branchSlot.ty = .ty .int := by
-        simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
-          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
-      have hjoinTy : joinSlot.ty = .ty .int := by
-        simpa [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
-          Env.update] using
-          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
-      simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
-    · by_cases hx : name = "x"
-      · subst hx
-        have hbranchTy : branchSlot.ty = .ty .int := by
-          simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-            Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-              hbranch).symm
-        have hjoinTy : joinSlot.ty = .ty .int := by
-          simpa [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
-            pointerIfJoinPSlot, Env.update] using
-            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-              hjoin).symm
-        simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
-      · have hnone : pointerIfEnv.slotAt name = none := by
-          simp [pointerIfEnv, Env.update, Env.empty, hp, hy, hx]
-        rw [hbranch] at hnone
-        cases hnone
-
 theorem ifPointerAssignment_join_obligations :
     EnvJoin pointerIfRetargetEnv pointerIfWriteEnv pointerIfJoinEnv ∧
-    EnvJoinSameShape pointerIfRetargetEnv pointerIfJoinEnv ∧
-    EnvJoinSameShape pointerIfWriteEnv pointerIfJoinEnv ∧
-    ContainedBorrowsWellFormed pointerIfJoinEnv ∧
     Coherent pointerIfJoinEnv ∧
     Linearizable pointerIfJoinEnv ∧
     BorrowSafeEnv pointerIfJoinEnv :=
-  ⟨pointerIf_envJoin, pointerIfRetarget_join_sameShape,
-    pointerIfWrite_join_sameShape, pointerIfJoin_contained,
-    pointerIfJoin_coherent, pointerIfJoin_linearizable,
+  ⟨pointerIf_envJoin, pointerIfJoin_coherent, pointerIfJoin_linearizable,
     pointerIfJoin_borrowSafe⟩
 
 theorem ifPointerAssignment_typing :
@@ -1739,12 +1643,10 @@ theorem ifPointerAssignment_typing :
     pointerWriteBranch_typing
     (PartialTyJoin.self (.ty .unit))
     ifPointerAssignment_join_obligations.1
+    WellFormedTy.unit
     ifPointerAssignment_join_obligations.2.1
     ifPointerAssignment_join_obligations.2.2.1
-    WellFormedTy.unit
-    ifPointerAssignment_join_obligations.2.2.2.2.1
-    ifPointerAssignment_join_obligations.2.2.2.2.2.1
-    ifPointerAssignment_join_obligations.2.2.2.2.2.2
+    ifPointerAssignment_join_obligations.2.2.2
     (tyBorrowSafeAgainstEnv_borrowFree tyBorrowFree_unit)
 
 end Paper

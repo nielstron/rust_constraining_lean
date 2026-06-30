@@ -1186,7 +1186,7 @@ theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
     WellFormedEnv env₁ lifetime →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
-    WellFormedEnv env₂ lifetime := by
+    WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
   exact borrowInvariance_of_ruleCarriedObligations
     hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
@@ -1326,8 +1326,8 @@ theorem typingPreservesBorrowSafeCore {env₁ env₂ : Env}
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
       _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse _hjoin _henvJoin _hsameLeft _hsameRight _hwellJoin
-      _hcoherent _hlinear hborrowSafeJoin hresultSafe ihCondition ihTrue
+      _hfalse _hjoin _henvJoin _hwellJoin _hcoherent _hlinear
+      hborrowSafeJoin hresultSafe ihCondition ihTrue
       ihFalse hsource hborrowSafe
     have hconditionSafe := ihCondition (SourceTerm.ite_condition hsource) hborrowSafe
     have _htrueSafe := ihTrue (SourceTerm.ite_trueBranch hsource) hconditionSafe.1

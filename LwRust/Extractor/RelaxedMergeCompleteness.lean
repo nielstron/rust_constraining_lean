@@ -129,8 +129,6 @@ inductive RelaxedTermTyping : Env → StoreTyping → Lifetime → Term → Ty �
       RelaxedTermTyping env2 typing lifetime falseBranch falseTy env4 →
       PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
       EnvJoin env3 env4 env5 →
-      EnvJoinSameShape env3 env5 →
-      EnvJoinSameShape env4 env5 →
       WellFormedTy env5 joinTy lifetime →
       Coherent env5 →
       Linearizable env5 →

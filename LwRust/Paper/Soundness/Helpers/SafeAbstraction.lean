@@ -16,6 +16,40 @@ open Core
 /--
 Definition 4.4, valid type/value abstraction `S ⊢ v⊥ ∼ T̃`.
 -/
+inductive ValidPartialValueSkeleton : ProgramStore → PartialValue → PartialTy → Prop where
+  | unit {store : ProgramStore} :
+      ValidPartialValueSkeleton store (.value .unit) (.ty .unit)
+  | int {store : ProgramStore} {value : Int} :
+      ValidPartialValueSkeleton store (.value (.int value)) (.ty .int)
+  | bool {store : ProgramStore} {value : Bool} :
+      ValidPartialValueSkeleton store (.value (.bool value)) (.ty .bool)
+  | undef {store : ProgramStore} {ty : Ty} :
+      ValidPartialValueSkeleton store .undef (.undef ty)
+  | borrow {store : ProgramStore} {location : Location} {mutable : Bool}
+      {targets : List LVal} :
+      ValidPartialValueSkeleton store
+        (.value (.ref { location := location, owner := false }))
+        (.ty (.borrow mutable targets))
+  | box {store : ProgramStore} {location : Location} {slot : StoreSlot}
+      {inner : PartialTy} :
+      store.slotAt location = some slot →
+      ValidPartialValueSkeleton store slot.value inner →
+      ValidPartialValueSkeleton store
+        (.value (.ref { location := location, owner := true }))
+        (.box inner)
+  | boxFull {store : ProgramStore} {location : Location} {slot : StoreSlot}
+      {ty : Ty} :
+      store.slotAt location = some slot →
+      ValidPartialValueSkeleton store slot.value (.ty ty) →
+      ValidPartialValueSkeleton store
+        (.value (.ref { location := location, owner := true }))
+        (.ty (.box ty))
+  | undefOf {store : ProgramStore} {value : PartialValue}
+      {oldTy : PartialTy} {ty : Ty} :
+      ValidPartialValueSkeleton store value oldTy →
+      PartialTyStrengthens oldTy (.undef ty) →
+      ValidPartialValueSkeleton store value (.undef ty)
+
 inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Prop where
   /-- V-Unit. -/
   | unit {store : ProgramStore} :
@@ -29,6 +63,16 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
   /-- V-Undef. -/
   | undef {store : ProgramStore} {ty : Ty} :
       ValidPartialValue store .undef (.undef ty)
+  /--
+  V-Undef-live.  A statically moved-out slot may still contain the concrete
+  value from a branch that did not execute the move.  The value remains valid at
+  some pre-move partial type that weakens to the carried `undef` shadow.
+  -/
+  | undefOf {store : ProgramStore} {value : PartialValue}
+      {oldTy : PartialTy} {ty : Ty} :
+      ValidPartialValueSkeleton store value oldTy →
+      PartialTyStrengthens oldTy (.undef ty) →
+      ValidPartialValue store value (.undef ty)
   /-- V-Borrow. -/
   | borrow {store : ProgramStore} {location : Location} {mutable : Bool}
       {targets : List LVal} {target : LVal} :
@@ -61,6 +105,128 @@ notation:50 store:51 " ⊢ " value:51 " ∼ " ty:51 =>
   ValidPartialValue store value ty
 
 /--
+Runtime value validity for environments that may contain stale loan
+annotations.
+
+For initialized borrow target lists this is the ordinary `ValidPartialValue`
+obligation: the reference must resolve through one of the static targets.  If a
+target list is not fully initialized, the borrow annotation is only a protection
+token; runtime validity records the value shape but does not require target
+resolution that typing cannot use.
+-/
+inductive ValidPartialValueWhenInitialized (env : Env) (store : ProgramStore) :
+    PartialValue → PartialTy → Prop where
+  | unit :
+      ValidPartialValueWhenInitialized env store (.value .unit) (.ty .unit)
+  | int {value : Int} :
+      ValidPartialValueWhenInitialized env store (.value (.int value)) (.ty .int)
+  | bool {value : Bool} :
+      ValidPartialValueWhenInitialized env store (.value (.bool value)) (.ty .bool)
+  | undef {ty : Ty} :
+      ValidPartialValueWhenInitialized env store .undef (.undef ty)
+  | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty} :
+      ValidPartialValueSkeleton store value oldTy →
+      PartialTyStrengthens oldTy (.undef ty) →
+      ValidPartialValueWhenInitialized env store value (.undef ty)
+  | borrowLive {location : Location} {mutable : Bool}
+      {targets : List LVal} {target : LVal} :
+      BorrowTargetsInitialized env targets →
+      target ∈ targets →
+      store.loc target = some location →
+      ValidPartialValueWhenInitialized env store
+        (.value (.ref { location := location, owner := false }))
+        (.ty (.borrow mutable targets))
+  | borrowStale {location : Location} {mutable : Bool}
+      {targets : List LVal} :
+      ¬ BorrowTargetsInitialized env targets →
+      ValidPartialValueWhenInitialized env store
+        (.value (.ref { location := location, owner := false }))
+        (.ty (.borrow mutable targets))
+  | box {location : Location} {slot : StoreSlot} {inner : PartialTy} :
+      store.slotAt location = some slot →
+      ValidPartialValueWhenInitialized env store slot.value inner →
+      ValidPartialValueWhenInitialized env store
+        (.value (.ref { location := location, owner := true }))
+        (.box inner)
+  | boxFull {location : Location} {slot : StoreSlot} {ty : Ty} :
+      store.slotAt location = some slot →
+      ValidPartialValueWhenInitialized env store slot.value (.ty ty) →
+      ValidPartialValueWhenInitialized env store
+        (.value (.ref { location := location, owner := true }))
+        (.ty (.box ty))
+
+theorem ValidPartialValue.whenInitialized {env : Env} {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValue store value ty →
+    ValidPartialValueWhenInitialized env store value ty := by
+  intro hvalid
+  induction hvalid with
+  | unit => exact ValidPartialValueWhenInitialized.unit
+  | int => exact ValidPartialValueWhenInitialized.int
+  | bool => exact ValidPartialValueWhenInitialized.bool
+  | undef => exact ValidPartialValueWhenInitialized.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
+  | @borrow location mutable targets target hmem hloc =>
+      by_cases hinitialized : BorrowTargetsInitialized env targets
+      · exact ValidPartialValueWhenInitialized.borrowLive
+          hinitialized hmem hloc
+      · exact ValidPartialValueWhenInitialized.borrowStale
+          (location := location) (mutable := mutable) (targets := targets)
+          hinitialized
+  | box hslot _hinner ih =>
+      exact ValidPartialValueWhenInitialized.box hslot ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueWhenInitialized.boxFull hslot ih
+
+theorem ValidPartialValueWhenInitialized.skeleton {env : Env}
+    {store : ProgramStore} {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValueWhenInitialized env store value ty →
+    ValidPartialValueSkeleton store value ty := by
+  intro hvalid
+  induction hvalid with
+  | unit => exact ValidPartialValueSkeleton.unit
+  | int => exact ValidPartialValueSkeleton.int
+  | bool => exact ValidPartialValueSkeleton.bool
+  | undef => exact ValidPartialValueSkeleton.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValueSkeleton.undefOf hinner hstrength
+  | borrowLive _hinitialized _hmem _hloc =>
+      exact ValidPartialValueSkeleton.borrow
+  | borrowStale _hstale =>
+      exact ValidPartialValueSkeleton.borrow
+  | box hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.box hslot ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.boxFull hslot ih
+
+theorem borrowTargetsInitialized_subset {env : Env} {left right : List LVal} :
+    left.Subset right →
+    BorrowTargetsInitialized env right →
+    BorrowTargetsInitialized env left := by
+  intro hsubset hright target htarget
+  exact hright target (hsubset htarget)
+
+theorem ValidPartialValue.skeleton {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValue store value ty →
+    ValidPartialValueSkeleton store value ty := by
+  intro hvalid
+  induction hvalid with
+  | unit => exact ValidPartialValueSkeleton.unit
+  | int => exact ValidPartialValueSkeleton.int
+  | bool => exact ValidPartialValueSkeleton.bool
+  | undef => exact ValidPartialValueSkeleton.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValueSkeleton.undefOf hinner hstrength
+  | borrow =>
+      exact ValidPartialValueSkeleton.borrow
+  | box hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.box hslot ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.boxFull hslot ih
+
+/--
 Local ownership acyclicity for a valid stored value.
 
 If a slot contains a valid value and that value owns `owned`, then following
@@ -68,9 +234,9 @@ ownership edges from `owned` can never lead back to the slot's storage location.
 This is the finite-derivation version of the paper's assignment-progress cycle
 argument.
 -/
-theorem ValidPartialValue.no_owned_path_to_storage {store : ProgramStore}
+theorem ValidPartialValueSkeleton.no_owned_path_to_storage {store : ProgramStore}
     {value : PartialValue} {ty : PartialTy} :
-    ValidPartialValue store value ty →
+    ValidPartialValueSkeleton store value ty →
     ∀ {storage : Location} {slot : StoreSlot} {owned : Location},
       store.slotAt storage = some slot →
       slot.value = value →
@@ -93,6 +259,9 @@ theorem ValidPartialValue.no_owned_path_to_storage {store : ProgramStore}
   | undef =>
       intro storage slot owned _hslot _hvalue hmem hpath
       simp [partialValueOwningLocations] at hmem
+  | undefOf _hinner _hstrength ih =>
+      intro storage slot owned hslot hvalue hmem hpath
+      exact ih hslot hvalue hmem hpath
   | borrow =>
       intro storage slot owned _hslot _hvalue hmem hpath
       simp [partialValueOwningLocations, valueOwningLocations,
@@ -188,6 +357,25 @@ theorem ValidPartialValue.no_owned_path_to_storage {store : ProgramStore}
           exact ih hownedSlot rfl hmiddleMem
             (ProgramStore.OwnsTransitively.trans_right htail hparentOwns)
 
+/--
+Local ownership acyclicity for a valid stored value.
+
+If a slot contains a valid value and that value owns `owned`, then following
+ownership edges from `owned` can never lead back to the slot's storage location.
+This is the finite-derivation version of the paper's assignment-progress cycle
+argument.
+-/
+theorem ValidPartialValue.no_owned_path_to_storage {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValue store value ty →
+    ∀ {storage : Location} {slot : StoreSlot} {owned : Location},
+      store.slotAt storage = some slot →
+      slot.value = value →
+      owned ∈ partialValueOwningLocations value →
+      ¬ ProgramStore.OwnsTransitively store owned storage := by
+  intro hvalid
+  exact ValidPartialValueSkeleton.no_owned_path_to_storage hvalid.skeleton
+
 /-- A valid stored value cannot make its own storage part of an ownership cycle. -/
 theorem ValidPartialValue.no_storage_ownership_cycle {store : ProgramStore}
     {storage : Location} {slot : StoreSlot} {ty : PartialTy} :
@@ -227,59 +415,290 @@ theorem ValidPartialValue.no_storage_ownership_cycle {store : ProgramStore}
         mem_partialValueOwningLocations_of_eq_owningRef hslotValue
       exact ValidPartialValue.no_owned_path_to_storage hvalid hslot rfl hmem htail
 
+theorem ValidPartialValueWhenInitialized.no_storage_ownership_cycle {env : Env}
+    {store : ProgramStore} {storage : Location} {slot : StoreSlot}
+    {ty : PartialTy} :
+    store.slotAt storage = some slot →
+    ValidPartialValueWhenInitialized env store slot.value ty →
+    ¬ ProgramStore.OwnsTransitively store storage storage := by
+  intro hslot hvalid hpath
+  cases hpath with
+  | direct howns =>
+      rcases howns with ⟨ownerLifetime, hownerSlot⟩
+      have hslotValue :
+          slot.value = .value (owningRef storage) := by
+        have hslotEq :
+            slot =
+              { value := .value (owningRef storage),
+                lifetime := ownerLifetime } :=
+          Option.some.inj (hslot.symm.trans hownerSlot)
+        exact congrArg StoreSlot.value hslotEq
+      have hmem :
+          storage ∈ partialValueOwningLocations slot.value :=
+        mem_partialValueOwningLocations_of_eq_owningRef hslotValue
+      exact ValidPartialValueSkeleton.no_owned_path_to_storage
+        hvalid.skeleton hslot rfl hmem
+        (ProgramStore.OwnsTransitively.direct ⟨ownerLifetime, hownerSlot⟩)
+  | trans howns htail =>
+      rename_i middle
+      rcases howns with ⟨ownerLifetime, hownerSlot⟩
+      have hslotValue :
+          slot.value = .value (owningRef middle) := by
+        have hslotEq :
+            slot =
+              { value := .value (owningRef middle),
+                lifetime := ownerLifetime } :=
+          Option.some.inj (hslot.symm.trans hownerSlot)
+        exact congrArg StoreSlot.value hslotEq
+      have hmem :
+          middle ∈ partialValueOwningLocations slot.value :=
+        mem_partialValueOwningLocations_of_eq_owningRef hslotValue
+      exact ValidPartialValueSkeleton.no_owned_path_to_storage
+        hvalid.skeleton hslot rfl hmem htail
+
+theorem partialTyStrengthens_trans_safe {left middle right : PartialTy} :
+    PartialTyStrengthens left middle →
+    PartialTyStrengthens middle right →
+    PartialTyStrengthens left right := by
+  intro hleft hright
+  induction hleft generalizing right with
+  | reflex =>
+      exact hright
+  | box hbox ih =>
+      cases hright with
+      | reflex => exact PartialTyStrengthens.box hbox
+      | box hinner => exact PartialTyStrengthens.box (ih hinner)
+      | boxIntoUndef hinner =>
+          exact PartialTyStrengthens.boxIntoUndef (ih hinner)
+  | tyBox hbox ih =>
+      cases hright with
+      | reflex => exact PartialTyStrengthens.tyBox hbox
+      | tyBox hinner => exact PartialTyStrengthens.tyBox (ih hinner)
+      | intoUndef hinner =>
+          cases hinner with
+          | reflex =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.tyBox hbox)
+          | tyBox hrightInner =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.tyBox (ih hrightInner))
+  | borrow hsubset₁ =>
+      cases hright with
+      | reflex => exact PartialTyStrengthens.borrow hsubset₁
+      | borrow hsubset₂ =>
+          exact PartialTyStrengthens.borrow
+            (fun target hmem => hsubset₂ (hsubset₁ hmem))
+      | intoUndef hinner =>
+          cases hinner with
+          | reflex =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.borrow hsubset₁)
+          | borrow hsubset₂ =>
+              exact PartialTyStrengthens.intoUndef
+                (PartialTyStrengthens.borrow
+                  (fun target hmem => hsubset₂ (hsubset₁ hmem)))
+  | undefLeft hundef ih =>
+      cases hright with
+      | reflex => exact PartialTyStrengthens.undefLeft hundef
+      | undefLeft hinner => exact PartialTyStrengthens.undefLeft (ih hinner)
+  | intoUndef hundef ih =>
+      cases hright with
+      | reflex => exact PartialTyStrengthens.intoUndef hundef
+      | undefLeft hinner => exact PartialTyStrengthens.intoUndef (ih hinner)
+  | boxIntoUndef hundef ih =>
+      cases hright with
+      | reflex => exact PartialTyStrengthens.boxIntoUndef hundef
+      | undefLeft hinner =>
+          cases hinner with
+          | reflex => exact PartialTyStrengthens.boxIntoUndef hundef
+          | tyBox hbox =>
+              exact PartialTyStrengthens.boxIntoUndef
+                (ih (PartialTyStrengthens.undefLeft hbox))
+
+theorem validPartialValue_strengthen {store : ProgramStore}
+    {value : PartialValue} {oldTy newTy : PartialTy} :
+    ValidPartialValue store value oldTy →
+    PartialTyStrengthens oldTy newTy →
+    ValidPartialValue store value newTy := by
+  intro hvalid
+  induction hvalid generalizing newTy with
+  | unit =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.unit
+      | intoUndef hinner =>
+          exact ValidPartialValue.undefOf ValidPartialValueSkeleton.unit
+            (PartialTyStrengthens.intoUndef hinner)
+  | int =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.int
+      | intoUndef hinner =>
+          exact ValidPartialValue.undefOf ValidPartialValueSkeleton.int
+            (PartialTyStrengthens.intoUndef hinner)
+  | bool =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.bool
+      | intoUndef hinner =>
+          exact ValidPartialValue.undefOf ValidPartialValueSkeleton.bool
+            (PartialTyStrengthens.intoUndef hinner)
+  | undef =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.undef
+      | undefLeft _ => exact ValidPartialValue.undef
+  | borrow hmem hloc =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.borrow hmem hloc
+      | borrow hsubset => exact ValidPartialValue.borrow (hsubset hmem) hloc
+      | intoUndef hinner =>
+          exact ValidPartialValue.undefOf
+            ValidPartialValueSkeleton.borrow
+            (PartialTyStrengthens.intoUndef hinner)
+  | box hslot _hinner ih =>
+      intro hstrength
+      cases hstrength with
+      | reflex =>
+          exact ValidPartialValue.box hslot _hinner
+      | box hinnerStrength =>
+          exact ValidPartialValue.box hslot (ih hinnerStrength)
+      | boxIntoUndef hinner =>
+          exact ValidPartialValue.undefOf
+            (ValidPartialValueSkeleton.box hslot _hinner.skeleton)
+            (PartialTyStrengthens.boxIntoUndef hinner)
+  | boxFull hslot hinner ih =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.boxFull hslot hinner
+      | tyBox hinnerStrength =>
+          exact ValidPartialValue.boxFull hslot (ih hinnerStrength)
+      | intoUndef htoUndef =>
+          exact ValidPartialValue.undefOf
+            (ValidPartialValueSkeleton.boxFull hslot hinner.skeleton)
+            (PartialTyStrengthens.intoUndef htoUndef)
+  | undefOf hinner htoUndef =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValue.undefOf hinner htoUndef
+      | undefLeft hinnerStrength =>
+          exact ValidPartialValue.undefOf hinner
+            (partialTyStrengthens_trans_safe htoUndef
+              (PartialTyStrengthens.undefLeft hinnerStrength))
+
 theorem validPartialValue_strengthen_sameShape {store : ProgramStore}
     {value : PartialValue} {oldTy newTy : PartialTy} :
     ValidPartialValue store value oldTy →
     PartialTyStrengthens oldTy newTy →
     PartialTy.sameShape oldTy newTy →
     ValidPartialValue store value newTy := by
+  intro hvalid hstrength _hshape
+  exact validPartialValue_strengthen hvalid hstrength
+
+theorem validPartialValueWhenInitialized_strengthen {env : Env}
+    {store : ProgramStore} {value : PartialValue} {oldTy newTy : PartialTy} :
+    ValidPartialValueWhenInitialized env store value oldTy →
+    PartialTyStrengthens oldTy newTy →
+    ValidPartialValueWhenInitialized env store value newTy := by
   intro hvalid
   induction hvalid generalizing newTy with
   | unit =>
-      intro hstrength hshape
+      intro hstrength
       cases hstrength with
-      | reflex => exact ValidPartialValue.unit
-      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+      | reflex => exact ValidPartialValueWhenInitialized.unit
+      | intoUndef hinner =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            ValidPartialValueSkeleton.unit
+            (PartialTyStrengthens.intoUndef hinner)
   | int =>
-      intro hstrength hshape
+      intro hstrength
       cases hstrength with
-      | reflex => exact ValidPartialValue.int
-      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+      | reflex => exact ValidPartialValueWhenInitialized.int
+      | intoUndef hinner =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            ValidPartialValueSkeleton.int
+            (PartialTyStrengthens.intoUndef hinner)
   | bool =>
-      intro hstrength hshape
+      intro hstrength
       cases hstrength with
-      | reflex => exact ValidPartialValue.bool
-      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+      | reflex => exact ValidPartialValueWhenInitialized.bool
+      | intoUndef hinner =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            ValidPartialValueSkeleton.bool
+            (PartialTyStrengthens.intoUndef hinner)
   | undef =>
-      intro hstrength _hshape
+      intro hstrength
       cases hstrength with
-      | reflex => exact ValidPartialValue.undef
-      | undefLeft _ => exact ValidPartialValue.undef
-  | borrow hmem hloc =>
-      intro hstrength hshape
-      cases hstrength with
-      | reflex => exact ValidPartialValue.borrow hmem hloc
-      | borrow hsubset => exact ValidPartialValue.borrow (hsubset hmem) hloc
-      | intoUndef _ => simp [PartialTy.sameShape] at hshape
-  | box hslot _hinner ih =>
-      intro hstrength hshape
+      | reflex => exact ValidPartialValueWhenInitialized.undef
+      | undefLeft _ => exact ValidPartialValueWhenInitialized.undef
+  | @borrowLive location mutable targets target hinitialized hmem hloc =>
+      intro hstrength
       cases hstrength with
       | reflex =>
-          exact ValidPartialValue.box hslot _hinner
-      | box hinnerStrength =>
-          exact ValidPartialValue.box hslot
-            (ih hinnerStrength (by simpa [PartialTy.sameShape] using hshape))
-      | boxIntoUndef _ =>
-          simp [PartialTy.sameShape] at hshape
-  | boxFull hslot hinner ih =>
-      intro hstrength hshape
+          exact ValidPartialValueWhenInitialized.borrowLive
+            hinitialized hmem hloc
+      | @borrow _mutable _leftTargets rightTargets hsubset =>
+          by_cases hright : BorrowTargetsInitialized env rightTargets
+          · exact ValidPartialValueWhenInitialized.borrowLive
+              hright (hsubset hmem) hloc
+          · exact ValidPartialValueWhenInitialized.borrowStale
+              (location := location) (mutable := mutable)
+              (targets := rightTargets) hright
+      | intoUndef hinner =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            ValidPartialValueSkeleton.borrow
+            (PartialTyStrengthens.intoUndef hinner)
+  | @borrowStale location mutable targets hstale =>
+      intro hstrength
       cases hstrength with
-      | reflex => exact ValidPartialValue.boxFull hslot hinner
+      | reflex =>
+          exact ValidPartialValueWhenInitialized.borrowStale
+            (location := location) (mutable := mutable)
+            (targets := targets) hstale
+      | @borrow _mutable _leftTargets rightTargets hsubset =>
+          have hright : ¬ BorrowTargetsInitialized env rightTargets := by
+            intro hinit
+            exact hstale (borrowTargetsInitialized_subset hsubset hinit)
+          exact ValidPartialValueWhenInitialized.borrowStale
+            (location := location) (mutable := mutable)
+            (targets := rightTargets) hright
+      | intoUndef hinner =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            ValidPartialValueSkeleton.borrow
+            (PartialTyStrengthens.intoUndef hinner)
+  | box hslot _hinner ih =>
+      intro hstrength
+      cases hstrength with
+      | reflex =>
+          exact ValidPartialValueWhenInitialized.box hslot _hinner
+      | box hinnerStrength =>
+          exact ValidPartialValueWhenInitialized.box hslot
+            (ih hinnerStrength)
+      | boxIntoUndef hinner =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            (ValidPartialValueSkeleton.box hslot _hinner.skeleton)
+            (PartialTyStrengthens.boxIntoUndef hinner)
+  | boxFull hslot hinner ih =>
+      intro hstrength
+      cases hstrength with
+      | reflex =>
+          exact ValidPartialValueWhenInitialized.boxFull hslot hinner
       | tyBox hinnerStrength =>
-          exact ValidPartialValue.boxFull hslot
-            (ih hinnerStrength
-              (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape))
-      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+          exact ValidPartialValueWhenInitialized.boxFull hslot
+            (ih hinnerStrength)
+      | intoUndef htoUndef =>
+          exact ValidPartialValueWhenInitialized.undefOf
+            (ValidPartialValueSkeleton.boxFull hslot hinner.skeleton)
+            (PartialTyStrengthens.intoUndef htoUndef)
+  | undefOf hinner htoUndef =>
+      intro hstrength
+      cases hstrength with
+      | reflex => exact ValidPartialValueWhenInitialized.undefOf hinner htoUndef
+      | undefLeft hinnerStrength =>
+          exact ValidPartialValueWhenInitialized.undefOf hinner
+            (partialTyStrengthens_trans_safe htoUndef
+              (PartialTyStrengthens.undefLeft hinnerStrength))
 
 /--
 Definition 4.5, valid store typing `S ▷ t ⊢ σ`.
@@ -405,13 +824,13 @@ theorem validStoreTyping_block_singleton_inner {store : ProgramStore}
   intro htyping value hmem
   exact htyping value (by simpa [termValues] using hmem)
 
-theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
+theorem validPartialValueSkeleton_owningLocation_allocated {store : ProgramStore}
     {partialValue : PartialValue} {partialTy : PartialTy} {owned : Location} :
-    ValidPartialValue store partialValue partialTy →
+    ValidPartialValueSkeleton store partialValue partialTy →
     owned ∈ partialValueOwningLocations partialValue →
     ∃ slot, store.slotAt owned = some slot := by
   intro hvalid hmem
-  cases hvalid with
+  induction hvalid with
   | unit =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | int =>
@@ -420,26 +839,33 @@ theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | undef =>
       simp [partialValueOwningLocations] at hmem
+  | undefOf _hinner _hstrength ih =>
+      exact ih hmem
   | borrow =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
-  | box hslot _hinner =>
-      rename_i location slot inner
+  | @box location slot _inner hslot _hinner _ih =>
       have howned : owned = location := by
         simpa [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] using hmem
-      subst howned
-      exact ⟨_, hslot⟩
-  | boxFull hslot _hinner =>
-      rename_i location slot ty
+      rw [howned]
+      exact ⟨slot, hslot⟩
+  | @boxFull location slot _ty hslot _hinner _ih =>
       have howned : owned = location := by
         simpa [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] using hmem
-      subst howned
-      exact ⟨_, hslot⟩
+      rw [howned]
+      exact ⟨slot, hslot⟩
+
+theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
+    {partialValue : PartialValue} {partialTy : PartialTy} {owned : Location} :
+    ValidPartialValue store partialValue partialTy →
+    owned ∈ partialValueOwningLocations partialValue →
+    ∃ slot, store.slotAt owned = some slot := by
+  intro hvalid
+  exact validPartialValueSkeleton_owningLocation_allocated hvalid.skeleton
 
 theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
     {value : PartialValue} {ty : PartialTy} :
     ValidPartialValue store value ty →
     (ty = .ty .unit ∨ ty = .ty .int ∨ ty = .ty .bool ∨
-      (∃ inner, ty = .undef inner) ∨
       ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner value := by
   intro hvalid hshape
@@ -451,25 +877,80 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
   | bool =>
       exact partialValueNonOwner_bool _
   | undef =>
-      exact partialValueNonOwner_undef
+      rcases hshape with hunit | hint | hbool | hborrow
+      · cases hunit
+      · cases hint
+      · cases hbool
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
+  | undefOf =>
+      rcases hshape with hunit | hint | hbool | hborrow
+      · cases hunit
+      · cases hint
+      · cases hbool
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
   | borrow =>
       exact partialValueNonOwner_borrowed _
   | box =>
-      rcases hshape with hunit | hint | hbool | hundef | hborrow
+      rcases hshape with hunit | hint | hbool | hborrow
       · cases hunit
       · cases hint
       · cases hbool
-      · rcases hundef with ⟨_inner, hundef⟩
-        cases hundef
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | boxFull =>
-      rcases hshape with hunit | hint | hbool | hundef | hborrow
+      rcases hshape with hunit | hint | hbool | hborrow
       · cases hunit
       · cases hint
       · cases hbool
-      · rcases hundef with ⟨_inner, hundef⟩
-        cases hundef
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
+
+theorem validPartialValueWhenInitialized_nonOwner_of_envShape {env : Env}
+    {store : ProgramStore} {value : PartialValue} {ty : PartialTy} :
+    ValidPartialValueWhenInitialized env store value ty →
+    (ty = .ty .unit ∨ ty = .ty .int ∨ ty = .ty .bool ∨
+      ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
+    PartialValueNonOwner value := by
+  intro hvalid hshape
+  cases hvalid with
+  | unit =>
+      exact partialValueNonOwner_unit
+  | int =>
+      exact partialValueNonOwner_int _
+  | bool =>
+      exact partialValueNonOwner_bool _
+  | undef =>
+      rcases hshape with hunit | hint | hbool | hborrow
+      · cases hunit
+      · cases hint
+      · cases hbool
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
+  | undefOf =>
+      rcases hshape with hunit | hint | hbool | hborrow
+      · cases hunit
+      · cases hint
+      · cases hbool
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
+  | borrowLive =>
+      exact partialValueNonOwner_borrowed _
+  | borrowStale =>
+      exact partialValueNonOwner_borrowed _
+  | box =>
+      rcases hshape with hunit | hint | hbool | hborrow
+      · cases hunit
+      · cases hint
+      · cases hbool
+      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
+        cases hborrow
+  | boxFull =>
+      rcases hshape with hunit | hint | hbool | hborrow
+      · cases hunit
+      · cases hint
+      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
 
@@ -489,6 +970,62 @@ theorem validValue_fresh_not_owningLocation {store : ProgramStore}
     owned ∉ valueOwningLocations value := by
   intro hvalid hfresh hmem
   rcases validValue_owningLocation_allocated hvalid hmem with ⟨slot, hslot⟩
+  rw [ProgramStore.fresh] at hfresh
+  rw [hfresh] at hslot
+  cases hslot
+
+theorem validPartialValueWhenInitialized_owningLocation_allocated
+    {env : Env} {store : ProgramStore}
+    {partialValue : PartialValue} {partialTy : PartialTy} {owned : Location} :
+    ValidPartialValueWhenInitialized env store partialValue partialTy →
+    owned ∈ partialValueOwningLocations partialValue →
+    ∃ slot, store.slotAt owned = some slot := by
+  intro hvalid hmem
+  induction hvalid with
+  | unit =>
+      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
+  | int =>
+      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
+  | bool =>
+      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
+  | undef =>
+      simp [partialValueOwningLocations] at hmem
+  | undefOf hinner _hstrength =>
+      exact validPartialValueSkeleton_owningLocation_allocated hinner hmem
+  | borrowLive =>
+      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
+  | borrowStale =>
+      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
+  | @box location slot inner hslot _hinner ih =>
+      have howned : owned = location := by
+        simpa [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?]
+          using hmem
+      rw [howned]
+      exact ⟨slot, hslot⟩
+  | @boxFull location slot ty hslot _hinner ih =>
+      have howned : owned = location := by
+        simpa [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?]
+          using hmem
+      rw [howned]
+      exact ⟨slot, hslot⟩
+
+theorem validValueWhenInitialized_owningLocation_allocated {env : Env}
+    {store : ProgramStore} {value : Value} {ty : Ty} {owned : Location} :
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    owned ∈ valueOwningLocations value →
+    ∃ slot, store.slotAt owned = some slot := by
+  intro hvalid hmem
+  exact validPartialValueWhenInitialized_owningLocation_allocated hvalid
+    (by simpa [partialValueOwningLocations] using hmem)
+
+theorem validValueWhenInitialized_fresh_not_owningLocation {env : Env}
+    {store : ProgramStore} {value : Value} {ty : Ty} {owned : Location} :
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    store.fresh owned →
+    owned ∉ valueOwningLocations value := by
+  intro hvalid hfresh hmem
+  rcases validValueWhenInitialized_owningLocation_allocated hvalid hmem with
+    ⟨slot, hslot⟩
   rw [ProgramStore.fresh] at hfresh
   rw [hfresh] at hslot
   cases hslot
@@ -531,6 +1068,45 @@ theorem storeOwnersAllocated_boxAt_of_validValue {store : ProgramStore}
     (updatedLocation := .heap address)
     (lifetime := Lifetime.root) hallocated hvalidValue
 
+theorem storeOwnersAllocated_update_value_of_validValueWhenInitialized
+    {env : Env} {store : ProgramStore}
+    {updatedLocation : Location} {lifetime : Lifetime} {value : Value} {ty : Ty} :
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    StoreOwnersAllocated
+      (store.update updatedLocation { value := .value value, lifetime := lifetime }) := by
+  intro hallocated hvalidValue
+  exact storeOwnersAllocated_update hallocated (by
+    intro owned hmem
+    rcases validValueWhenInitialized_owningLocation_allocated hvalidValue hmem with
+      ⟨allocatedSlot, hallocatedSlot⟩
+    by_cases howned : owned = updatedLocation
+    · subst howned
+      exact ⟨{ value := .value value, lifetime := lifetime }, by
+        simp [ProgramStore.update]⟩
+    · exact ⟨allocatedSlot, by
+        simpa [ProgramStore.update, howned] using hallocatedSlot⟩)
+
+theorem storeOwnersAllocated_boxAt_of_validValueWhenInitialized {env : Env}
+    {store : ProgramStore} {address : Nat} {value : Value} {ty : Ty} :
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    StoreOwnersAllocated (store.boxAt address value).1 := by
+  intro hallocated hvalidValue
+  exact storeOwnersAllocated_update_value_of_validValueWhenInitialized
+    (updatedLocation := .heap address)
+    (lifetime := Lifetime.root) hallocated hvalidValue
+
+theorem storeOwnersAllocated_declare_of_validValueWhenInitialized {env : Env}
+    {store : ProgramStore} {x : Name} {lifetime : Lifetime} {value : Value}
+    {ty : Ty} :
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    StoreOwnersAllocated (store.declare x lifetime value) := by
+  intro hallocated hvalidValue
+  exact storeOwnersAllocated_update_value_of_validValueWhenInitialized
+    (updatedLocation := .var x) hallocated hvalidValue
+
 /-- Writing a valid value through an lval preserves owner allocation. -/
 theorem storeOwnersAllocated_write_value_of_validValue {store store' : ProgramStore}
     {lv : LVal} {value : Value} {ty : Ty} :
@@ -551,6 +1127,29 @@ theorem storeOwnersAllocated_write_value_of_validValue {store store' : ProgramSt
           simp [hloc, hslot] at hwrite
           subst hwrite
           exact storeOwnersAllocated_update_value_of_validValue hallocated hvalidValue
+
+/-- Writing a weakly valid value through an lval preserves owner allocation. -/
+theorem storeOwnersAllocated_write_value_of_validValueWhenInitialized
+    {env : Env} {store store' : ProgramStore}
+    {lv : LVal} {value : Value} {ty : Ty} :
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    store.write lv (.value value) = some store' →
+    StoreOwnersAllocated store' := by
+  intro hallocated hvalidValue hwrite
+  unfold ProgramStore.write at hwrite
+  cases hloc : store.loc lv with
+  | none =>
+      simp [hloc] at hwrite
+  | some location =>
+      cases hslot : store.slotAt location with
+      | none =>
+          simp [hloc, hslot] at hwrite
+      | some slot =>
+          simp [hloc, hslot] at hwrite
+          subst hwrite
+          exact storeOwnersAllocated_update_value_of_validValueWhenInitialized
+            hallocated hvalidValue
 
 /-- Definition 4.6, variable projection `Θ`. -/
 def VariableProjection (name : Name) : Location :=
@@ -574,6 +1173,31 @@ def SafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
       ValidPartialValue store value envSlot.ty
 
 infix:50 " ∼ₛ " => SafeAbstraction
+
+/--
+Safe abstraction for environments with stale loan annotations.  Domain and
+lifetime agreement are unchanged; the slot value relation is weakened only at
+borrow annotations whose target list is not currently initialized.
+-/
+def SafeAbstractionWhenInitialized (store : ProgramStore) (env : Env) : Prop :=
+  (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+        ∃ envSlot, env.slotAt x = some envSlot) ∧
+  ∀ x envSlot,
+    env.slotAt x = some envSlot →
+    ∃ value,
+      store.slotAt (VariableProjection x) =
+        some (StoreSlot.mk value envSlot.lifetime) ∧
+      ValidPartialValueWhenInitialized env store value envSlot.ty
+
+theorem SafeAbstraction.whenInitialized {store : ProgramStore} {env : Env} :
+    store ∼ₛ env →
+    SafeAbstractionWhenInitialized store env := by
+  intro hsafe
+  constructor
+  · exact hsafe.1
+  · intro x envSlot hslot
+    rcases hsafe.2 x envSlot hslot with ⟨value, hstore, hvalid⟩
+    exact ⟨value, hstore, hvalid.whenInitialized⟩
 
 theorem SafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal}
@@ -626,6 +1250,20 @@ theorem safeAbstraction_of_domain_and_slots {store : ProgramStore} {env : Env} :
   intro hdomain hslots
   exact ⟨hdomain, hslots⟩
 
+theorem safeAbstractionWhenInitialized_of_domain_and_slots
+    {store : ProgramStore} {env : Env} :
+    (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+          ∃ envSlot, env.slotAt x = some envSlot) →
+    (∀ x envSlot,
+      env.slotAt x = some envSlot →
+      ∃ value,
+        store.slotAt (VariableProjection x) =
+          some { value := value, lifetime := envSlot.lifetime } ∧
+        ValidPartialValueWhenInitialized env store value envSlot.ty) →
+    SafeAbstractionWhenInitialized store env := by
+  intro hdomain hslots
+  exact ⟨hdomain, hslots⟩
+
 /--
 Transport safe abstraction across an environment shape/strengthening map when
 the runtime store itself is unchanged.
@@ -671,6 +1309,125 @@ theorem safeAbstraction_transport_sameShape {store : ProgramStore}
     refine ⟨value, ?_, ?_⟩
     · simpa [hlife] using hstore
     · exact validPartialValue_strengthen_sameShape hvalid hstrength hshape
+
+theorem safeAbstraction_transport_strengthening {store : ProgramStore}
+    {env result : Env} :
+    store ∼ₛ env →
+    EnvStrengthens env result →
+    store ∼ₛ result := by
+  intro hsafe hstrength
+  refine safeAbstraction_of_domain_and_slots ?domain ?slots
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases (hsafe.1 x).mp hstoreDomain with ⟨sourceSlot, hsource⟩
+      have hx := hstrength x
+      cases hresult : result.slotAt x with
+      | none =>
+          simp [hsource, hresult] at hx
+      | some resultSlot =>
+          exact ⟨resultSlot, by simpa using hresult⟩
+    · intro hresultDomain
+      rcases hresultDomain with ⟨resultSlot, hresult⟩
+      have hx := hstrength x
+      cases hsource : env.slotAt x with
+      | none =>
+          simp [hsource, hresult] at hx
+      | some sourceSlot =>
+          exact (hsafe.1 x).mpr ⟨sourceSlot, hsource⟩
+  · intro x resultSlot hresult
+    have hx := hstrength x
+    cases hsource : env.slotAt x with
+    | none =>
+        simp [hsource, hresult] at hx
+    | some sourceSlot =>
+        simp [hsource, hresult] at hx
+        rcases hsafe.2 x sourceSlot hsource with
+          ⟨value, hstore, hvalid⟩
+        exact ⟨value, by simpa [hx.1] using hstore,
+          validPartialValue_strengthen hvalid hx.2⟩
+
+theorem validPartialValueWhenInitialized_transport_env
+    {env result : Env} {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy} :
+    (∀ {targets : List LVal},
+      BorrowTargetsInitialized result targets →
+      BorrowTargetsInitialized env targets) →
+    ValidPartialValueWhenInitialized env store value ty →
+    ValidPartialValueWhenInitialized result store value ty := by
+  intro hinitBack hvalid
+  induction hvalid with
+  | unit =>
+      exact ValidPartialValueWhenInitialized.unit
+  | int =>
+      exact ValidPartialValueWhenInitialized.int
+  | bool =>
+      exact ValidPartialValueWhenInitialized.bool
+  | undef =>
+      exact ValidPartialValueWhenInitialized.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
+  | @borrowLive location mutable targets target _hinitialized hmem hloc =>
+      by_cases hresultInitialized : BorrowTargetsInitialized result targets
+      · exact ValidPartialValueWhenInitialized.borrowLive
+          hresultInitialized hmem hloc
+      · exact ValidPartialValueWhenInitialized.borrowStale
+          (location := location) (mutable := mutable) (targets := targets)
+          hresultInitialized
+  | @borrowStale location mutable targets hstale =>
+      have hresultStale : ¬ BorrowTargetsInitialized result targets := by
+        intro hresultInitialized
+        exact hstale (hinitBack hresultInitialized)
+      exact ValidPartialValueWhenInitialized.borrowStale
+        (location := location) (mutable := mutable) (targets := targets)
+        hresultStale
+  | box hslot _hinner ih =>
+      exact ValidPartialValueWhenInitialized.box hslot ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueWhenInitialized.boxFull hslot ih
+
+theorem safeAbstractionWhenInitialized_transport_strengthening
+    {store : ProgramStore} {env result : Env} :
+    (∀ {targets : List LVal},
+      BorrowTargetsInitialized result targets →
+      BorrowTargetsInitialized env targets) →
+    SafeAbstractionWhenInitialized store env →
+    EnvStrengthens env result →
+    SafeAbstractionWhenInitialized store result := by
+  intro hinitBack hsafe hstrength
+  refine safeAbstractionWhenInitialized_of_domain_and_slots ?domain ?slots
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases (hsafe.1 x).mp hstoreDomain with ⟨sourceSlot, hsource⟩
+      have hx := hstrength x
+      cases hresult : result.slotAt x with
+      | none =>
+          simp [hsource, hresult] at hx
+      | some resultSlot =>
+          exact ⟨resultSlot, by simpa using hresult⟩
+    · intro hresultDomain
+      rcases hresultDomain with ⟨resultSlot, hresult⟩
+      have hx := hstrength x
+      cases hsource : env.slotAt x with
+      | none =>
+          simp [hsource, hresult] at hx
+      | some sourceSlot =>
+          exact (hsafe.1 x).mpr ⟨sourceSlot, hsource⟩
+  · intro x resultSlot hresult
+    have hx := hstrength x
+    cases hsource : env.slotAt x with
+    | none =>
+        simp [hsource, hresult] at hx
+    | some sourceSlot =>
+        simp [hsource, hresult] at hx
+        rcases hsafe.2 x sourceSlot hsource with
+          ⟨value, hstore, hvalid⟩
+        have hvalidResultEnv :
+            ValidPartialValueWhenInitialized result store value sourceSlot.ty :=
+          validPartialValueWhenInitialized_transport_env hinitBack hvalid
+        exact ⟨value, by simpa [hx.1] using hstore,
+          validPartialValueWhenInitialized_strengthen hvalidResultEnv hx.2⟩
 
 theorem safeAbstraction_env_no_lifetime_of_store_no_lifetime {store : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
@@ -921,13 +1678,28 @@ theorem safeAbstraction_store_fresh_var {store : ProgramStore} {env : Env}
       rw [hfresh] at henvSlot
       cases henvSlot
 
+theorem safeAbstractionWhenInitialized_store_fresh_var
+    {store : ProgramStore} {env : Env} {x : Name} :
+    SafeAbstractionWhenInitialized store env →
+    env.fresh x →
+    store.fresh (VariableProjection x) := by
+  intro hsafe hfresh
+  unfold ProgramStore.fresh
+  cases hslot : store.slotAt (VariableProjection x) with
+  | none =>
+      rfl
+  | some slot =>
+      rcases (hsafe.1 x).mp ⟨slot, hslot⟩ with ⟨envSlot, henvSlot⟩
+      unfold Env.fresh at hfresh
+      rw [hfresh] at henvSlot
+      cases henvSlot
+
 theorem safeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
     {env : Env} {x : Name} {envSlot : EnvSlot} {oldSlot : StoreSlot} :
     store ∼ₛ env →
     env.slotAt x = some envSlot →
     store.read (.var x) = some oldSlot →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner oldSlot.value := by
   intro hsafe henv hread hshape
@@ -1058,6 +1830,58 @@ theorem safeAbstraction_update_var_partial_of_preserved {store' : ProgramStore}
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
     store' ∼ₛ env' := by
+  intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
+  subst henv'
+  constructor
+  · intro y
+    by_cases hyx : y = x
+    · subst hyx
+      constructor
+      · intro _hstoreDomain
+        exact ⟨{ envSlot with ty := newTy }, by simp [Env.update]⟩
+      · intro _henvDomain
+        exact ⟨{ value := value, lifetime := envSlot.lifetime }, hstoreX⟩
+    · constructor
+      · intro hstoreDomain
+        rcases (hdomainOther y hyx).mp hstoreDomain with ⟨otherEnvSlot, henv⟩
+        exact ⟨otherEnvSlot, by simpa [Env.update, hyx] using henv⟩
+      · intro henvDomain
+        rcases henvDomain with ⟨otherEnvSlot, henvUpdated⟩
+        have henv : env.slotAt y = some otherEnvSlot := by
+          simpa [Env.update, hyx] using henvUpdated
+        exact (hdomainOther y hyx).mpr ⟨otherEnvSlot, henv⟩
+  · intro y updatedSlot henvUpdated
+    by_cases hyx : y = x
+    · subst hyx
+      have hupdatedSlot :
+          updatedSlot = { envSlot with ty := newTy } := by
+        simpa [Env.update] using henvUpdated.symm
+      subst hupdatedSlot
+      exact ⟨value, hstoreX, hnewValid⟩
+    · have henv : env.slotAt y = some updatedSlot := by
+        simpa [Env.update, hyx] using henvUpdated
+      exact hpreserveOther y updatedSlot hyx henv
+
+theorem safeAbstractionWhenInitialized_update_var_partial_of_preserved
+    {store' : ProgramStore} {env env' : Env} {x : Name}
+    {envSlot : EnvSlot} {value : PartialValue} {newTy : PartialTy} :
+    env.slotAt x = some envSlot →
+    store'.slotAt (VariableProjection x) =
+      some { value := value, lifetime := envSlot.lifetime } →
+    ValidPartialValueWhenInitialized env' store' value newTy →
+    env' = env.update x { envSlot with ty := newTy } →
+    (∀ y,
+      y ≠ x →
+      ((∃ slot, store'.slotAt (VariableProjection y) = some slot) ↔
+        ∃ otherEnvSlot, env.slotAt y = some otherEnvSlot)) →
+    (∀ y otherEnvSlot,
+      y ≠ x →
+      env.slotAt y = some otherEnvSlot →
+      ∃ oldValue,
+        store'.slotAt (VariableProjection y) =
+          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
+        ValidPartialValueWhenInitialized env' store' oldValue otherEnvSlot.ty) →
+    SafeAbstractionWhenInitialized store' env' := by
   intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
   subst henv'
   constructor
@@ -1257,6 +2081,27 @@ theorem slotAt_update_of_slotAt {store : ProgramStore} {updatedLocation location
     contradiction
   simpa [ProgramStore.update, hlocationNe] using hslot
 
+/-- Updating a fresh location preserves existing owner-skeleton abstractions. -/
+theorem validPartialValueSkeleton_update_of_fresh {store : ProgramStore}
+    {updatedLocation : Location} {newSlot : StoreSlot}
+    {partialValue : PartialValue} {ty : PartialTy} :
+    store.fresh updatedLocation →
+    ValidPartialValueSkeleton store partialValue ty →
+    ValidPartialValueSkeleton (store.update updatedLocation newSlot) partialValue ty := by
+  intro hfresh hvalid
+  induction hvalid with
+  | unit => exact ValidPartialValueSkeleton.unit
+  | int => exact ValidPartialValueSkeleton.int
+  | bool => exact ValidPartialValueSkeleton.bool
+  | undef => exact ValidPartialValueSkeleton.undef
+  | borrow => exact ValidPartialValueSkeleton.borrow
+  | undefOf _hinner hstrength ih =>
+      exact ValidPartialValueSkeleton.undefOf ih hstrength
+  | box hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.box (slotAt_update_of_slotAt hfresh hslot) ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.boxFull (slotAt_update_of_slotAt hfresh hslot) ih
+
 /-- Updating a fresh location preserves existing partial-value abstractions. -/
 theorem validPartialValue_update_of_fresh {store : ProgramStore}
     {updatedLocation : Location} {newSlot : StoreSlot}
@@ -1274,12 +2119,48 @@ theorem validPartialValue_update_of_fresh {store : ProgramStore}
       exact ValidPartialValue.bool
   | undef =>
       exact ValidPartialValue.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValue.undefOf
+        (validPartialValueSkeleton_update_of_fresh hfresh hinner) hstrength
   | borrow hmem hloc =>
       exact ValidPartialValue.borrow hmem (loc_update_of_loc hfresh hloc)
   | box hslot _hinner ih =>
       exact ValidPartialValue.box (slotAt_update_of_slotAt hfresh hslot) ih
   | boxFull hslot _hinner ih =>
       exact ValidPartialValue.boxFull (slotAt_update_of_slotAt hfresh hslot) ih
+
+/-- Updating a fresh location preserves weak partial-value abstractions. -/
+theorem validPartialValueWhenInitialized_update_of_fresh {env : Env}
+    {store : ProgramStore} {updatedLocation : Location} {newSlot : StoreSlot}
+    {partialValue : PartialValue} {ty : PartialTy} :
+    store.fresh updatedLocation →
+    ValidPartialValueWhenInitialized env store partialValue ty →
+    ValidPartialValueWhenInitialized env (store.update updatedLocation newSlot)
+      partialValue ty := by
+  intro hfresh hvalid
+  induction hvalid with
+  | unit =>
+      exact ValidPartialValueWhenInitialized.unit
+  | int =>
+      exact ValidPartialValueWhenInitialized.int
+  | bool =>
+      exact ValidPartialValueWhenInitialized.bool
+  | undef =>
+      exact ValidPartialValueWhenInitialized.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValueWhenInitialized.undefOf
+        (validPartialValueSkeleton_update_of_fresh hfresh hinner) hstrength
+  | borrowLive hinitialized hmem hloc =>
+      exact ValidPartialValueWhenInitialized.borrowLive hinitialized hmem
+        (loc_update_of_loc hfresh hloc)
+  | borrowStale hstale =>
+      exact ValidPartialValueWhenInitialized.borrowStale hstale
+  | box hslot _hinner ih =>
+      exact ValidPartialValueWhenInitialized.box
+        (slotAt_update_of_slotAt hfresh hslot) ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueWhenInitialized.boxFull
+        (slotAt_update_of_slotAt hfresh hslot) ih
 
 /-- Declaring a fresh variable does not change an already-defined lval location. -/
 theorem loc_declare_of_loc {store : ProgramStore} {x : Name}
@@ -1343,6 +2224,27 @@ theorem slotAt_declare_of_slotAt {store : ProgramStore} {x : Name}
     contradiction
   simpa [ProgramStore.declare, ProgramStore.update, hlocationNe] using hslot
 
+/-- Declaring a fresh variable preserves existing owner-skeleton abstractions. -/
+theorem validPartialValueSkeleton_declare {store : ProgramStore} {x : Name}
+    {lifetime : Lifetime} {newValue : Value} {partialValue : PartialValue}
+    {ty : PartialTy} :
+    store.fresh (.var x) →
+    ValidPartialValueSkeleton store partialValue ty →
+    ValidPartialValueSkeleton (store.declare x lifetime newValue) partialValue ty := by
+  intro hfresh hvalid
+  induction hvalid with
+  | unit => exact ValidPartialValueSkeleton.unit
+  | int => exact ValidPartialValueSkeleton.int
+  | bool => exact ValidPartialValueSkeleton.bool
+  | undef => exact ValidPartialValueSkeleton.undef
+  | borrow => exact ValidPartialValueSkeleton.borrow
+  | undefOf _hinner hstrength ih =>
+      exact ValidPartialValueSkeleton.undefOf ih hstrength
+  | box hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.box (slotAt_declare_of_slotAt hfresh hslot) ih
+  | boxFull hslot _hinner ih =>
+      exact ValidPartialValueSkeleton.boxFull (slotAt_declare_of_slotAt hfresh hslot) ih
+
 /-- Declaring a fresh variable preserves existing partial-value abstractions. -/
 theorem validPartialValue_declare {store : ProgramStore} {x : Name}
     {lifetime : Lifetime} {newValue : Value} {partialValue : PartialValue}
@@ -1360,12 +2262,30 @@ theorem validPartialValue_declare {store : ProgramStore} {x : Name}
       exact ValidPartialValue.bool
   | undef =>
       exact ValidPartialValue.undef
+  | undefOf hinner hstrength =>
+      exact ValidPartialValue.undefOf
+        (validPartialValueSkeleton_declare hfresh hinner) hstrength
   | borrow hmem hloc =>
       exact ValidPartialValue.borrow hmem (loc_declare_of_loc hfresh hloc)
   | box hslot _hinner ih =>
       exact ValidPartialValue.box (slotAt_declare_of_slotAt hfresh hslot) ih
   | boxFull hslot _hinner ih =>
       exact ValidPartialValue.boxFull (slotAt_declare_of_slotAt hfresh hslot) ih
+
+/-- Declaring a fresh variable preserves existing initialized partial-value abstractions. -/
+theorem validPartialValueWhenInitialized_declare {store : ProgramStore}
+    {env : Env} {x : Name} {lifetime : Lifetime} {newValue : Value}
+    {partialValue : PartialValue} {ty : PartialTy} :
+    store.fresh (.var x) →
+    ValidPartialValueWhenInitialized env store partialValue ty →
+    ValidPartialValueWhenInitialized env (store.declare x lifetime newValue)
+      partialValue ty := by
+  intro hfresh hvalid
+  simpa [ProgramStore.declare] using
+    (validPartialValueWhenInitialized_update_of_fresh
+      (updatedLocation := .var x)
+      (newSlot := { value := .value newValue, lifetime := lifetime })
+      hfresh hvalid)
 
 /--
 Lemma 9.10 support, `R-Declare` safe-abstraction preservation.
@@ -1427,7 +2347,77 @@ theorem safeAbstraction_declare {store : ProgramStore} {env : Env}
     · have holdEnv : env.slotAt y = some envSlot := by
         simpa [Env.update, hyx] using henv
       rcases hsafe.2 y envSlot holdEnv with ⟨oldValue, hstoreSlot, _holdValid⟩
-      exact ⟨oldValue, by
+      exact ⟨oldValue,
+        by
+          simpa [ProgramStore.declare, ProgramStore.update, VariableProjection, hyx]
+            using hstoreSlot,
+        hpreserveOld y envSlot oldValue hyx holdEnv hstoreSlot⟩
+
+/--
+Weak declaration preservation for stores that abstract only initialized borrow
+targets.  The domain/lifetime argument is identical to `safeAbstraction_declare`;
+only the slot-value predicate is weakened.
+-/
+theorem safeAbstractionWhenInitialized_declare {store : ProgramStore} {env : Env}
+    {x : Name} {lifetime : Lifetime} {value : Value} {ty : Ty} :
+    SafeAbstractionWhenInitialized store env →
+    env.fresh x →
+    ValidPartialValueWhenInitialized
+      (env.update x { ty := .ty ty, lifetime := lifetime })
+      (store.declare x lifetime value) (.value value) (.ty ty) →
+    (∀ y envSlot oldValue,
+      y ≠ x →
+      env.slotAt y = some envSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := envSlot.lifetime } →
+      ValidPartialValueWhenInitialized
+        (env.update x { ty := .ty ty, lifetime := lifetime })
+        (store.declare x lifetime value) oldValue envSlot.ty) →
+    SafeAbstractionWhenInitialized (store.declare x lifetime value)
+      (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  intro hsafe hfresh hnewValid hpreserveOld
+  constructor
+  · intro y
+    constructor
+    · intro hstoreDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ ty := .ty ty, lifetime := lifetime }, by simp [Env.update]⟩
+      · rcases hstoreDomain with ⟨slot, hslot⟩
+        have holdStore : ∃ slot, store.slotAt (VariableProjection y) = some slot := by
+          rcases slot with ⟨slotValue, slotLifetime⟩
+          exact ⟨{ value := slotValue, lifetime := slotLifetime }, by
+            simpa [ProgramStore.declare, ProgramStore.update, VariableProjection, hyx]
+              using hslot⟩
+        rcases (hsafe.1 y).mp holdStore with ⟨envSlot, henvSlot⟩
+        exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+    · intro henvDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ value := .value value, lifetime := lifetime }, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection]⟩
+      · rcases henvDomain with ⟨envSlot, henvSlot⟩
+        have holdEnv : ∃ envSlot, env.slotAt y = some envSlot := by
+          exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+        rcases (hsafe.1 y).mpr holdEnv with ⟨storeSlot, hstoreSlot⟩
+        exact ⟨storeSlot, by
+          simpa [ProgramStore.declare, ProgramStore.update, VariableProjection, hyx]
+            using hstoreSlot⟩
+  · intro y envSlot henv
+    by_cases hyx : y = x
+    · subst hyx
+      have henvSlot :
+          envSlot = { ty := .ty ty, lifetime := lifetime } := by
+        simpa [Env.update] using henv.symm
+      subst henvSlot
+      exact ⟨.value value, by
+          simp [ProgramStore.declare, ProgramStore.update, VariableProjection],
+        hnewValid⟩
+    · have holdEnv : env.slotAt y = some envSlot := by
+        simpa [Env.update, hyx] using henv
+      rcases hsafe.2 y envSlot holdEnv with ⟨oldValue, hstoreSlot, _holdValid⟩
+      exact ⟨oldValue,
+        by
           simpa [ProgramStore.declare, ProgramStore.update, VariableProjection, hyx]
             using hstoreSlot,
         hpreserveOld y envSlot oldValue hyx holdEnv hstoreSlot⟩
@@ -1583,6 +2573,23 @@ theorem validValue_boxAt_ref {store : ProgramStore} {address : Nat}
       (newSlot := { value := .value value, lifetime := Lifetime.root })
       hfresh (show ValidPartialValue store (.value value) (.ty ty) from hvalidValue))
 
+/-- The owning reference returned by `boxAt` weakly abstracts `Box<T>`. -/
+theorem validValueWhenInitialized_boxAt_ref {env : Env} {store : ProgramStore}
+    {address : Nat} {value : Value} {ty : Ty} :
+    store.fresh (.heap address) →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    ValidPartialValueWhenInitialized env (store.boxAt address value).1
+      (.value (Value.ref (store.boxAt address value).2)) (.ty (.box ty)) := by
+  intro hfresh hvalidValue
+  exact ValidPartialValueWhenInitialized.boxFull
+    (location := .heap address)
+    (slot := { value := .value value, lifetime := Lifetime.root })
+    (by simp [ProgramStore.boxAt])
+    (validPartialValueWhenInitialized_update_of_fresh
+      (updatedLocation := .heap address)
+      (newSlot := { value := .value value, lifetime := Lifetime.root })
+      hfresh hvalidValue)
+
 /-- Lemma 9.10 support: heap allocation preserves safe abstraction of variables. -/
 theorem safeAbstraction_boxAt {store : ProgramStore} {env : Env}
     {address : Nat} {value : Value} :
@@ -1608,10 +2615,48 @@ theorem safeAbstraction_boxAt {store : ProgramStore} {env : Env}
           using hslot⟩
   · intro x envSlot henv
     rcases hsafe.2 x envSlot henv with ⟨oldValue, hslot, hvalid⟩
-    exact ⟨oldValue, by
+    have hslot' :
+        (store.boxAt address value).1.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } := by
+      simpa [ProgramStore.boxAt, ProgramStore.update, VariableProjection]
+        using hslot
+    exact ⟨oldValue, hslot', validPartialValue_boxAt hfresh hvalid⟩
+
+/-- Heap allocation preserves weak safe abstraction of variables. -/
+theorem safeAbstractionWhenInitialized_boxAt {store : ProgramStore} {env : Env}
+    {address : Nat} {value : Value} :
+    store.fresh (.heap address) →
+    SafeAbstractionWhenInitialized store env →
+    SafeAbstractionWhenInitialized (store.boxAt address value).1 env := by
+  intro hfresh hsafe
+  constructor
+  · intro x
+    constructor
+    · intro hdomain
+      rcases hdomain with ⟨slot, hslot⟩
+      have holdDomain : ∃ oldSlot, store.slotAt (VariableProjection x) = some oldSlot := by
+        rcases slot with ⟨slotValue, slotLifetime⟩
+        exact ⟨{ value := slotValue, lifetime := slotLifetime }, by
+          simpa [ProgramStore.boxAt, ProgramStore.update, VariableProjection]
+            using hslot⟩
+      exact (hsafe.1 x).mp holdDomain
+    · intro hdomain
+      rcases (hsafe.1 x).mpr hdomain with ⟨slot, hslot⟩
+      exact ⟨slot, by
         simpa [ProgramStore.boxAt, ProgramStore.update, VariableProjection]
-          using hslot,
-      validPartialValue_boxAt hfresh hvalid⟩
+          using hslot⟩
+  · intro x envSlot henv
+    rcases hsafe.2 x envSlot henv with ⟨oldValue, hslot, hvalid⟩
+    have hslot' :
+        (store.boxAt address value).1.slotAt (VariableProjection x) =
+          some { value := oldValue, lifetime := envSlot.lifetime } := by
+      simpa [ProgramStore.boxAt, ProgramStore.update, VariableProjection]
+        using hslot
+    exact ⟨oldValue, hslot',
+      validPartialValueWhenInitialized_update_of_fresh
+        (updatedLocation := .heap address)
+        (newSlot := { value := .value value, lifetime := Lifetime.root })
+        hfresh hvalid⟩
 
 end Paper
 end LwRust
