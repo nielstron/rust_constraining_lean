@@ -2252,10 +2252,9 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
         have holdSelectedValid :
             ValidPartialValue store oldSlot.value (.ty selectedTy) := by
           simpa [hselectedSlotEq] using hselectedValid
-        -- Remaining content: prove the selected branch write safe, using the
-        -- mutable-borrow authority as the frame exemption and borrow safety for
-        -- every other root, then transport through the `WriteBorrowTargets`
-        -- fan-out join.
+        -- Remaining content: prove the selected branch write safe using the
+        -- mutable-borrow authority as the frame exemption, then transport the
+        -- result through the `WriteBorrowTargets` fan-out join.
         rw [hwriteEq]
         refine safeAbstraction_of_domain_and_slots ?domain ?slots
         · intro x
@@ -3066,7 +3065,7 @@ theorem preservation_assign_deref_box_step_runtime_of_wellFormed
 /--
 Assignment through an owned box, without the runtime selected-borrow invariant.
 -/
-theorem preservation_assign_deref_box_step_borrowSafeFree_of_wellFormed
+theorem preservation_assign_deref_box_step_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
@@ -3233,13 +3232,12 @@ theorem preservation_assign_deref_step_runtime_of_wellFormed
 Runtime-selected safe-abstraction obligation for assignment through a borrow
 target.
 
-This is the honest lower graph lemma: it consumes the selected runtime
-abstraction package used by the existing frame proof.  The borrow-safety-free
-preservation frontier must derive this package from source reachability before
-calling this shape of lemma; it cannot reconstruct it from ordinary `store ∼ₛ
-env` alone.  See `Examples/TypeSafetyReject.lean` for checked stores where
-`store ∼ₛ env` holds but the selected-runtime frame conclusion fails after a
-stale `*a` borrow.
+This lower graph lemma consumes the selected runtime abstraction package used
+by the frame proof.  The ordinary preservation proof derives that package from
+source reachability before calling this shape of lemma; it is not reconstructed
+from `store ∼ₛ env` alone.  See `Examples/TypeSafetyReject.lean` for checked
+stores where `store ∼ₛ env` holds but the selected-runtime frame conclusion
+fails after a stale `*a` borrow.
 -/
 theorem safeAbstraction_assign_deref_borrow_drop_runtime_of_wellFormed
     {store writtenStore store' : ProgramStore} {env env' : Env}
@@ -3351,8 +3349,8 @@ theorem WriteBorrowTargets.effectiveWrite_of_selected_branch
 Immediate mutable-borrow update case for effective writes.
 
 This is the local node-level bridge used when an `UpdateAtPath` step reaches a
-mutable borrow and fans out over its targets.  It deliberately requires only the
-selected branch's ordinary `EnvWrite`; no borrow-safety invariant is involved.
+mutable borrow and fans out over its targets.  It requires the selected
+branch's ordinary `EnvWrite`.
 -/
 theorem UpdateAtPath.effectiveWrite_of_mutBorrow_selected_branch
     {rank : Nat} {env result : Env} {base : Name} {path : List Unit}
@@ -3499,9 +3497,8 @@ theorem StoreOwnerSpine.updateAtPathEffective_node_fanout_passthrough
 An ordinary owner-spine update has the owner-spine lvalue itself as an
 effective write.
 
-This is the structural, non-aliasing half needed by the relaxed preservation
-argument: it follows only from the box spine and the static `UpdateAtPath`
-derivation, and does not mention borrow safety.
+This is the structural, non-aliasing half of the preservation argument: it
+follows only from the box spine and the static `UpdateAtPath` derivation.
 -/
 theorem StoreOwnerSpine.updateAtPathEffective_leaf_self
     {store : ProgramStore} {env writeEnv : Env}
@@ -3589,10 +3586,10 @@ theorem EnvWrite.effectiveWrite_ownerSpine_self
 
 /--
 `EnvMayReadThrough` is stable under the same-shape strengthening used by the
-relaxed preservation proof.
+preservation proof.
 
 This is deliberately only a transport lemma for the local read-through relation:
-it does not assert or reconstruct `BorrowSafeEnv`.
+it does not assert any global environment invariant.
 -/
 theorem EnvMayReadThrough.strengthen_sameShape
     {source result : Env} {written target : LVal}
@@ -3732,7 +3729,7 @@ theorem StoreOwnerSpine.lval_eq_of_same_leaf
 Transport a read-through witness between two owner-spine lvalues that resolve
 to the same leaf.
 -/
-theorem EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_borrowSafeFree
+theorem EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf
     {store : ProgramStore} {env : Env}
     {written readPrefix target : LVal}
     {writtenRootSlot readRootSlot writtenLeafSlot readLeafSlot : StoreSlot}
@@ -3763,12 +3760,12 @@ typed lvalue resolves to the same `leaf` and is known to be on a static
 read-through path to `target`, then the owner-spine lvalue is also on a static
 read-through path to `target`.
 
-This is the owner-path half of the relaxed stale-borrow argument.  It has no
-borrow-safety premise; the eventual proof should recurse over the aliasing
-lvalue and use `store ∼ₛ env` to expose runtime-selected borrow targets, while
-`ValidStore` and `StoreOwnerTargetsHeap` rule out competing owner paths.
+This is the owner-path half of the stale-read argument.  It recurses over the
+aliasing lvalue and uses `store ∼ₛ env` to expose runtime-selected borrow
+targets, while `ValidStore` and `StoreOwnerTargetsHeap` rule out competing
+owner paths.
 -/
-theorem EnvMayReadThrough.ownerSpine_of_same_location_borrowSafeFree
+theorem EnvMayReadThrough.ownerSpine_of_same_location
     {store : ProgramStore} {env : Env}
     {lifetime writtenLifetime readPrefixLifetime : Lifetime}
     {written readPrefix target : LVal}
@@ -3793,7 +3790,7 @@ theorem EnvMayReadThrough.ownerSpine_of_same_location_borrowSafeFree
     hreadPrefixLoc hmayRead
   rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
   exact
-    EnvMayReadThrough.ownerSpine_of_same_location_borrowSafeFree.go
+    EnvMayReadThrough.ownerSpine_of_same_location.go
       hwellFormed hsafe hvalidStore hheap hφ hwrittenSpine
       hreadPrefixTyping hreadPrefixLoc hmayRead
 where
@@ -3840,7 +3837,7 @@ where
               simpa [LVal.base, LVal.path, hleafEq, hreadTy] using
                 (StoreOwnerSpine.nil hreadRootSlot hreadValid)
             exact
-              EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_borrowSafeFree
+              EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf
                 hvalidStore hheap hwrittenSpine hreadSpine
                 (EnvMayReadThrough.direct hprefix)
         | deref source =>
@@ -3880,7 +3877,7 @@ where
                       simpa [LVal.base, LVal.path_deref_cons, hleafEq]
                         using hsnoc
                     exact
-                      EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_borrowSafeFree
+                      EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf
                         hvalidStore hheap hwrittenSpine hreadSpine
                         (EnvMayReadThrough.direct hprefix)
             | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
@@ -3953,11 +3950,11 @@ where
 Owner-spine instance of the same-location effective-write bridge.
 
 All effective-write work here is structural.  The only remaining aliasing
-ingredient is `EnvMayReadThrough.ownerSpine_of_same_location_borrowSafeFree`,
+ingredient is `EnvMayReadThrough.ownerSpine_of_same_location`,
 which reconstructs the static read-through path for the owner-spine lvalue from
 ordinary runtime agreement.
 -/
-theorem envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_borrowSafeFree
+theorem envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
     {store : ProgramStore} {env result : Env}
     {lifetime writeLifetime readPrefixLifetime : Lifetime}
     {lv readPrefix dependencyTarget : LVal}
@@ -3984,7 +3981,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
     hwrite hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
   have hmayReadOwner :
       EnvMayReadThrough env lv dependencyTarget :=
-    EnvMayReadThrough.ownerSpine_of_same_location_borrowSafeFree
+    EnvMayReadThrough.ownerSpine_of_same_location
       hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
       hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
   have heffective :
@@ -4000,10 +3997,9 @@ The remaining recursive case of the same-location bridge: the written lvalue is
 `*source`, and `source` has borrow type.
 
 This is where the proof must use the concrete `EnvWrite` fan-out and the
-runtime-selected target exposed by `store.loc (.deref source)`, instead of any
-global `BorrowSafeEnv` or selected-runtime safety package.
+runtime-selected target exposed by `store.loc (.deref source)`.
 -/
-theorem envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location_borrowSafeFree
+theorem envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location
     {store : ProgramStore} {env result : Env}
     {lifetime borrowLifetime targetLifetime readPrefixLifetime : Lifetime}
     {source readPrefix dependencyTarget : LVal}
@@ -4028,7 +4024,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_locati
     hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
   rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
   exact
-    envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location_borrowSafeFree.go
+    envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location.go
       hwellFormed hsafe hvalidStore hheap hφ
       (LValTyping.borrow hsourceBorrow htargets) hwrite hreadPrefixTyping
       hlvLoc hreadPrefixLoc hmayRead
@@ -4074,7 +4070,7 @@ where
           simpa [hslotTy] using
             (StoreOwnerSpine.nil hrootSlot hrootValid)
         exact
-          envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_borrowSafeFree
+          envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
             hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot
             hspine hwrite hreadPrefixTyping hvarLoc hreadPrefixLoc hmayRead
     | deref source =>
@@ -4108,7 +4104,7 @@ where
                       hinnerValid
                   simpa [LVal.base, LVal.path_deref_cons] using hsnoc
                 exact
-                  envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_borrowSafeFree
+                  envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
                     hwellFormed hsafe hvalidStore hheap
                     (LValTyping.box hsource)
                     (by simpa [LVal.base] using henvBase)
@@ -4222,10 +4218,9 @@ If the source write and a typed read prefix resolve to the same runtime
 location, and that read prefix is on the static read-through path to a larger
 dependency target, the static `EnvWrite` has an effective write that reaches
 the larger target.  This is the precise point where the proof must reconstruct
-aliasing from the source typing and ordinary `store ∼ₛ env`; it deliberately
-has no `BorrowSafeEnv` or selected-runtime safety premise.
+aliasing from the source typing and ordinary `store ∼ₛ env`.
 -/
-theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_borrowSafeFree
+theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location
     {store : ProgramStore} {env result : Env}
     {lifetime writeLifetime readPrefixLifetime : Lifetime}
     {lv readPrefix dependencyTarget : LVal}
@@ -4267,7 +4262,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_borrowSafe
         simpa [hslotTy] using
           (StoreOwnerSpine.nil hrootSlot hrootValid)
       exact
-        envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_borrowSafeFree
+        envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
           hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
           hwrite hreadPrefixTyping hvarLoc hreadPrefixLoc hmayRead
   | deref source =>
@@ -4301,7 +4296,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_borrowSafe
                     hinnerValid
                 simpa [LVal.base, LVal.path_deref_cons] using hsnoc
               exact
-                envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_borrowSafeFree
+                envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
                   hwellFormed hsafe hvalidStore hheap (LValTyping.box hsource)
                   (by simpa [LVal.base] using henvBase)
                   (by simpa [LVal.base] using hrootSlot)
@@ -4310,7 +4305,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_borrowSafe
       | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
           hsource htargets =>
           exact
-            envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location_borrowSafeFree
+            envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location
               hwellFormed hsafe hvalidStore hheap hsource htargets hwrite
               hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
 
@@ -4322,7 +4317,7 @@ static write fan-out itself.  It deliberately lives in the source environment:
 the result-environment bridge below only transports the produced
 `EnvMayReadThrough` evidence across the already-proved same-shape map.
 -/
-theorem envWriteEffectiveWrite_mayReadThrough_source_of_locReads_borrowSafeFree
+theorem envWriteEffectiveWrite_mayReadThrough_source_of_locReads
     {store : ProgramStore} {env result : Env}
     {lifetime writeLifetime dependencyLifetime : Lifetime}
     {lv dependencyTarget : LVal}
@@ -4347,14 +4342,14 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_locReads_borrowSafeFree
     ⟨readPrefix, readPrefixTy, readPrefixLifetime, hreadPrefixTyping,
       hreadPrefixLoc, hmayReadTarget⟩
   rcases
-      envWriteEffectiveWrite_mayReadThrough_source_of_same_location_borrowSafeFree
+      envWriteEffectiveWrite_mayReadThrough_source_of_same_location
         hwellFormed hsafe hvalidStore hheap hLv hwrite hreadPrefixTyping
         hlvLoc hreadPrefixLoc hmayReadTarget with
     ⟨written, heffective, hmayRead⟩
   exact ⟨written, heffective, hmayRead⟩
 
 /--
-Effective-write/dependency bridge for the relaxed stale-borrow contradiction.
+Effective-write/dependency bridge for the stale-borrow contradiction.
 
 If a surviving borrow target resolves through the location selected by this
 mutable-borrow assignment, then some static effective write performed by the
@@ -4364,11 +4359,10 @@ runtime read prefix itself is an effective write: aliasing through another
 borrow root can make those lvalues syntactically different.
 
 This is the remaining non-trivial bridge between runtime selected resolution
-and the static write fan-out.  It has no `BorrowSafeEnv` or selected-runtime
-borrow-safety premise; it must ultimately follow from the source typing,
+and the static write fan-out.  It follows from the source typing,
 `store ∼ₛ env`, and the assignment write itself.
 -/
-theorem envWriteEffectiveWrite_mayReadThrough_of_deref_borrow_dependency_borrowSafeFree
+theorem envWriteEffectiveWrite_mayReadThrough_of_deref_borrow_dependency
     {store : ProgramStore} {env env' : Env}
     {lifetime borrowLifetime targetLifetime rhsWellLifetime : Lifetime}
     {source dependencyTarget : LVal}
@@ -4409,7 +4403,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_of_deref_borrow_dependency_borrowS
       LValTyping env (.deref source) (.ty lhsTy) targetLifetime :=
     LValTyping.borrow hsourceBorrow htargets
   rcases
-      envWriteEffectiveWrite_mayReadThrough_source_of_locReads_borrowSafeFree
+      envWriteEffectiveWrite_mayReadThrough_source_of_locReads
         hwellFormed hsafe (ValidRuntimeState.validStore hvalidRuntime)
         (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
         hLhsTyping hwrite hdepTargetTypingSource hlhsLoc hreads with
@@ -4422,12 +4416,10 @@ theorem envWriteEffectiveWrite_mayReadThrough_of_deref_borrow_dependency_borrowS
 The remaining non-owner dependency frame for a borrow-selected dereference
 assignment.
 
-This is the exact place where the strict proof previously collapsed a guarded
-path with a global selected-borrow invariant.  The relaxed proof must instead
-derive the contradiction from this assignment's write, the result environment,
-and the post-write `¬ WriteProhibited` premise.
+This is where the proof derives the contradiction from this assignment's write,
+the result environment, and the post-write `¬ WriteProhibited` premise.
 -/
-theorem evidenceBorrowDependency_avoids_deref_borrow_write_leaf_borrowSafeFree
+theorem evidenceBorrowDependency_avoids_deref_borrow_write_leaf
     {store : ProgramStore} {env env' : Env}
     {lifetime borrowLifetime targetLifetime rhsWellLifetime : Lifetime}
     {source : LVal} {mutable : Bool} {targets : List LVal}
@@ -4490,7 +4482,7 @@ theorem evidenceBorrowDependency_avoids_deref_borrow_write_leaf_borrowSafeFree
       hresultBorrow depTarget (hsubset hmem) with
     ⟨depTy, depLifetime, hdepTargetTyping, _hdepOutlives, _hdepBase⟩
   rcases
-      envWriteEffectiveWrite_mayReadThrough_of_deref_borrow_dependency_borrowSafeFree
+      envWriteEffectiveWrite_mayReadThrough_of_deref_borrow_dependency
       hwellFormed hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
       hvalidValue hwrite hranked hnotWrite hwellOut hglobalMap
       hdepTargetTypingSource hdepTargetTyping hlhsLoc hreads
@@ -4499,17 +4491,14 @@ theorem evidenceBorrowDependency_avoids_deref_borrow_write_leaf_borrowSafeFree
     heffective hresultSlot hresultBorrow (hsubset hmem) hmayRead
 
 /--
-The remaining borrow-safety-free write-frame obligation for assignment through
-a runtime-selected borrow target.
+Write-frame obligation for assignment through a runtime-selected borrow target.
 
 This stops before `drop`: it says the concrete store update produced by the
-assignment already abstracts the post-write environment.  Proving this is the
-real relaxed-preservation work; it must use the selected assignment target,
-`EnvWrite`, the RHS-target rank/conflict premise, and `¬ WriteProhibited env'
-(.deref source)` directly, without rebuilding any global borrow-safety or
-runtime-selected alias invariant.
+assignment already abstracts the post-write environment.  The proof uses the
+selected assignment target, `EnvWrite`, the RHS-target rank/conflict premise,
+and `¬ WriteProhibited env' (.deref source)` directly.
 -/
-theorem safeAbstraction_assign_deref_borrow_write_borrowSafeFree_of_wellFormed
+theorem safeAbstraction_assign_deref_borrow_write_of_wellFormed
     {store : ProgramStore} {env env' : Env}
     {lifetime borrowLifetime targetLifetime rhsWellLifetime : Lifetime}
     {source : LVal} {mutable : Bool} {targets : List LVal}
@@ -4917,7 +4906,7 @@ theorem safeAbstraction_assign_deref_borrow_write_borrowSafeFree_of_wellFormed
           intro location hdep heq
           subst heq
           exact
-            evidenceBorrowDependency_avoids_deref_borrow_write_leaf_borrowSafeFree
+            evidenceBorrowDependency_avoids_deref_borrow_write_leaf
               oldEvidence hwellFormed hsafe hvalidRuntime hsourceBorrow htargets
               hshape hwellTy hvalidValue hwrite hnoStale ⟨φ, hφ, hbelowRhs⟩
               hnotWrite hwellOut hglobalMap hsourceSlot hstoreSlot
@@ -4940,15 +4929,13 @@ theorem safeAbstraction_assign_deref_borrow_write_borrowSafeFree_of_wellFormed
           hstrength hsameShape
 
 /--
-The remaining borrow-safety-free graph obligation for assignment through a
-runtime-selected borrow target.
+Graph obligation for assignment through a runtime-selected borrow target.
 
 This is deliberately the exact safe-abstraction fact needed by preservation:
-there is no `BorrowSafeEnv`, no `RuntimeSafeAbstraction`, and no global selected
-alias package.  The proof must use the assignment/write premises and the
-well-formed relaxed environment directly.
+the proof uses the assignment/write premises and the well-formed environment
+directly.
 -/
-theorem safeAbstraction_assign_deref_borrow_drop_borrowSafeFree_of_wellFormed
+theorem safeAbstraction_assign_deref_borrow_drop_of_wellFormed
     {store writtenStore store' : ProgramStore} {env env' : Env}
     {lifetime borrowLifetime targetLifetime rhsWellLifetime : Lifetime}
     {source : LVal} {mutable : Bool} {targets : List LVal}
@@ -4985,7 +4972,7 @@ theorem safeAbstraction_assign_deref_borrow_drop_borrowSafeFree_of_wellFormed
     exact hwriteStore.symm
   have hsafeWrite : writtenStore ∼ₛ env' := by
     rw [hwriteEq]
-    exact safeAbstraction_assign_deref_borrow_write_borrowSafeFree_of_wellFormed
+    exact safeAbstraction_assign_deref_borrow_write_of_wellFormed
       hwellFormed hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
       hvalidValue hwrite hnoStale hranked hnotWrite hwellOut hlhsLoc hlhsSlot
       holdSlotValid
@@ -5021,14 +5008,13 @@ theorem safeAbstraction_assign_deref_borrow_drop_borrowSafeFree_of_wellFormed
     hdrops
 
 /--
-Borrow-safety-free target for assignment through a borrow-selected dereference.
+Assignment through a borrow-selected dereference.
 
-This is the core remaining relaxed-preservation graph obligation.  Unlike the
-strict helper, it cannot assume `BorrowSafeEnv` or package the same fact as
-`RuntimeSafeAbstraction`; the proof has to use the assignment/write premises,
-well-formedness, and the actual selected runtime target directly.
+This is the core graph obligation for this assignment shape: the proof uses the
+assignment/write premises, well-formedness, and the actual selected runtime
+target directly.
 -/
-theorem preservation_assign_deref_borrow_step_borrowSafeFree_of_wellFormed
+theorem preservation_assign_deref_borrow_step_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
     {lifetime borrowLifetime targetLifetime rhsWellLifetime : Lifetime}
     {source : LVal} {mutable : Bool} {targets : List LVal}
@@ -5109,7 +5095,7 @@ theorem preservation_assign_deref_borrow_step_borrowSafeFree_of_wellFormed
       (droppedValueOwnersOrphaned_assign_deref hwellFormed hsafe hvalidRuntime
         hlhsLoc hlhsSlot holdSlotValid hwriteStore)
   have hsafeFinal : store' ∼ₛ env' :=
-    safeAbstraction_assign_deref_borrow_drop_borrowSafeFree_of_wellFormed
+    safeAbstraction_assign_deref_borrow_drop_of_wellFormed
       hwellFormed hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
       hvalidValue hwrite hnoStale hranked hnotWrite hwellOut hlhsLoc hlhsSlot
       holdSlotValid hwriteStore hdrops
@@ -5152,13 +5138,12 @@ theorem preservation_assign_step_terminal_of_wellFormed
         hranked hnotWrite hwellOut hvalidValue hstep
 
 /--
-Borrow-safety-free dereference assignment target.
+Dereference assignment redex preservation.
 
-This is the first graph lemma that must be reproved for relaxed preservation.
-It has the paper-facing safe abstraction premise `store ∼ₛ env`, but no
-`BorrowSafeEnv`, no `RuntimeSafeAbstraction`, and no hook premise.
+This dispatches on whether the dereferenced source is an owned box or a
+borrow-selected target.
 -/
-theorem preservation_assign_deref_step_terminal_borrowSafeFree_of_wellFormed
+theorem preservation_assign_deref_step_terminal_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
@@ -5180,24 +5165,23 @@ theorem preservation_assign_deref_step_terminal_borrowSafeFree_of_wellFormed
     hranked hnotWrite hwellOut hvalidValue hstep
   cases hLhs with
   | box hsourceBox =>
-      exact preservation_assign_deref_box_step_borrowSafeFree_of_wellFormed
+      exact preservation_assign_deref_box_step_of_wellFormed
         hwellFormed hsafe hvalidRuntime hsourceBox hshape hwellTy hwrite
         hranked hnotWrite hwellOut hvalidValue hstep
   | borrow hsourceBorrow htargets =>
-      exact preservation_assign_deref_borrow_step_borrowSafeFree_of_wellFormed
+      exact preservation_assign_deref_borrow_step_of_wellFormed
         hwellFormed hsafe hvalidRuntime hsourceBorrow htargets hshape hwellTy
         hwrite hnoStale hranked hnotWrite hwellOut hvalidValue hstep
 
 /--
-Borrow-safety-free assignment redex target.
+Assignment redex preservation.
 
 The direct-variable case already follows from the existing frame lemma using only
 `store ∼ₛ env`.  The remaining proof obligation is precisely the dereference
 case: rebuilding the safe abstraction after writing through a runtime-selected
-borrow target without assuming global `BorrowSafeEnv` or reconstructing it via
-`RuntimeSafeAbstraction`.
+borrow target.
 -/
-theorem preservation_assign_step_terminal_borrowSafeFree_of_wellFormed
+theorem preservation_assign_step_terminal_safe_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {lhs : LVal}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
@@ -5223,7 +5207,7 @@ theorem preservation_assign_step_terminal_borrowSafeFree_of_wellFormed
         hwellFormed hsafe hvalidRuntime hLhs hshape hwellTy hwrite
         hnotWrite hwellOut hvalidValue hstep
   | deref source =>
-      exact preservation_assign_deref_step_terminal_borrowSafeFree_of_wellFormed
+      exact preservation_assign_deref_step_terminal_of_wellFormed
         hwellFormed hsafe hvalidRuntime hLhs hshape hwellTy hwrite
         hnoStale hranked hnotWrite hwellOut hvalidValue hstep
 
@@ -5683,11 +5667,11 @@ theorem runtimeSafeAbstraction_seq_value_drop
       hprotectedDependency
 
 /--
-Borrow-safety-free bounded preservation.
+Bounded preservation.
 
 This is the recursive preservation skeleton used by the paper-facing theorem.
-The induction hypotheses carry only the paper-facing safe abstraction
-`store ∼ₛ env`; no global `BorrowSafeEnv` is maintained or reconstructed.
+The induction follows the typing derivation and re-establishes terminal safety
+for the environment produced by the typing rule.
 -/
 theorem preservation_bounded
     (fuel : Nat) {store finalStore : ProgramStore} {env₁ env₂ : Env}
@@ -5942,7 +5926,7 @@ theorem preservation_bounded
         (ValidRuntimeState.validState hvalidRuntime)
         hwellFormed hsafe htermTyping).1
     have hterminal : TerminalStateSafe finalStore finalValue _env₃ .unit := by
-      exact preservation_assign_step_terminal_borrowSafeFree_of_wellFormed
+      exact preservation_assign_step_terminal_safe_of_wellFormed
         hwellInner
         hsafeInner
         (validRuntimeState_assign_value_of_value hvalidInner)
@@ -6271,9 +6255,7 @@ open LwRust.Paper LwRust.Core
 /--
 Lemma 4.11, Preservation.
 
-This is the paper-facing relaxed statement: it assumes the ordinary
-well-formedness and store abstraction facts, but no `BorrowSafeEnv` and no
-global borrow-safety preservation package.
+This is the paper-facing preservation statement.
 -/
 theorem lemma_4_11_preservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env}

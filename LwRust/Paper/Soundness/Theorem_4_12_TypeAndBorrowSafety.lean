@@ -145,16 +145,15 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
 Progress at every reachable state.
 
 This is the step-level invariant re-establishment missing from the
-terminal-only preservation statement: starting from a well-typed, well-formed,
-borrow-safe source state over a finite-support store, *every* state reachable
-by the reduction relation is either terminal or can take a further step.
+terminal-only preservation statement: starting from a well-typed, well-formed
+source state over a finite-support store, *every* state reachable by the
+reduction relation is either terminal or can take a further step.
 
 The proof mirrors the terminal preservation induction: it follows the typing
 derivation, decomposes the partial execution with the prefix-inversion lemmas,
 re-establishes the mid-state invariants for completed subterms from terminal
-preservation (Lemma 4.11), the well-formedness induction (Lemma 4.9), and the
-internal borrow-safety induction, and re-establishes the operational store facts
-from step-stable finite support.
+preservation (Lemma 4.11) and the well-formedness induction (Lemma 4.9), and
+re-establishes the operational store facts from step-stable finite support.
 -/
 theorem reachable_progress_bounded
     (hborrowTyping : BorrowSafeTypingPreservation) (fuel : Nat)
@@ -867,8 +866,7 @@ theorem reachable_progress {store store' : ProgramStore} {env₁ env₂ : Env}
 
 /--
 The step-stable soundness invariant: the state is a suffix of an execution
-from a well-typed, well-formed, borrow-safe source state over a finite-support
-store.
+from a well-typed, well-formed source state over a finite-support store.
 
 This is the invariant that the traditional single-step theorem
 (`SoundState.step`) re-establishes, and it is strong enough to apply both
@@ -967,9 +965,9 @@ theorem SoundState.preservation {store finalStore : ProgramStore}
       (multistep_append hreached hmulti)⟩
 
 /--
-No reachable state is stuck: from a well-typed, well-formed, borrow-safe
-source state over a finite-support store, every state reachable by the
-reduction relation is either terminal or can take a further step.
+No reachable state is stuck: from a well-typed, well-formed source state over a
+finite-support store, every state reachable by the reduction relation is either
+terminal or can take a further step.
 
 This is the composed soundness statement that the paper's Theorem 4.12
 implies; unlike the conditional terminal-safety form, it does not assume

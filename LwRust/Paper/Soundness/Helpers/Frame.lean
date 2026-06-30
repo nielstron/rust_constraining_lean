@@ -967,8 +967,8 @@ theorem SafeAbstractionEvidence.of_safe {store : ProgramStore} {env : Env} :
 Chosen runtime evidence for roots of an environment.
 
 This provider is intentionally evidence-indexed by the concrete store lookup
-proof.  It lets a relaxed preservation proof talk about the borrow target that
-the abstraction actually follows, rather than every possible proof of
+proof.  It lets the preservation proof talk about the borrow target that the
+abstraction actually follows, rather than every possible proof of
 `ValidPartialValue` for a widened joined type.
 -/
 def RuntimeEvidenceProvider (store : ProgramStore) (env : Env) : Type :=

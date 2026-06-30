@@ -1192,13 +1192,12 @@ theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
     hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
 
 /--
-Legacy compatibility property used by the strict top-level preservation
-wrappers.
+Compatibility property for proofs that explicitly preserve `BorrowSafeEnv`.
 
 This is no longer a theorem of `TermTyping`: relaxed `T-If` deliberately permits
-the joined approximation to fail `BorrowSafeEnv`.  A relaxed preservation proof
-must carry only the runtime-selected alias facts needed by the executed path,
-not reconstruct global borrow safety for the joined approximation.
+the joined approximation to fail `BorrowSafeEnv`.  Preservation must carry only
+the runtime-selected alias facts needed by the executed path, not reconstruct
+global borrow safety for the joined approximation.
 -/
 def BorrowSafeTypingPreservation : Prop :=
   ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}

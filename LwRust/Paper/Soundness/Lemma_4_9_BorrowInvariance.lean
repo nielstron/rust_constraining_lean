@@ -8514,10 +8514,9 @@ theorem RuntimeWriteGuarded.collapse_kill {store : ProgramStore} {env : Env}
 /--
 Provider-backed runtime write guard.
 
-This is the version needed by relaxed preservation: each mutable-borrow step is
-recorded specifically through the chosen runtime evidence provider, so collapse
-can consume `RuntimeSelectedBorrowSafeWith` instead of the old all-evidence
-`RuntimeSelectedBorrowSafe`.
+Each mutable-borrow step is recorded specifically through the chosen runtime
+evidence provider, so collapse can consume `RuntimeSelectedBorrowSafeWith`
+instead of the old all-evidence `RuntimeSelectedBorrowSafe`.
 -/
 inductive RuntimeWriteGuardedWith (store : ProgramStore) (env : Env)
     (evidenceOf : RuntimeFrame.RuntimeEvidenceProvider store env)

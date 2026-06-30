@@ -619,8 +619,7 @@ theorem staleFinalStore_not_safe :
       cases hlocNew
 
 /--
-A well-typed-shape stale-retarget configuration for the relaxed preservation
-frontier.
+A well-typed-shape stale-retarget configuration for the preservation frontier.
 
 The important shape is:
 
