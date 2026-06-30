@@ -2,33 +2,29 @@ import LwRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
 import LwRust.Paper.Soundness.Lemma_4_11_RelaxedPreservation
 
 /-!
-# Theorem 4.12, relaxed preservation-backed safety
+# Relaxed safety boundary
 
-This module keeps the relaxed preservation/safety wrappers separate from the
-legacy public soundness import path.  Import it explicitly when using the
-path-sensitive relaxed invariant.
+The previous relaxed Theorem 4.12 wrapper depended on a hook-based preservation
+statement that still assumed `BorrowSafeEnv` at the input.  That is not a valid
+soundness theorem for the relaxed `T-If` rule, because an input environment may
+itself be a joined approximation.
+
+This module is the explicit relaxed boundary: it derives the conditional
+Theorem 4.12 wrapper from the checked borrow-safety-free preservation theorem in
+`Lemma_4_11_RelaxedPreservation`.
 -/
 
-namespace LwRust
-namespace Paper
+namespace LwRust.Paper.Soundness
 
-open Core
+open LwRust.Paper LwRust.Core
 
-/--
-Theorem 4.12, conditional Type and Borrow Safety via relaxed preservation.
-
-This is the soundness-facing wrapper for the relaxed `T-If` rule.  Runtime
-safety after joins is carried by `RuntimeExactEnvWitness` inside Lemma 4.11,
-not by a global proof that typed terms preserve `BorrowSafeEnv`.
--/
-theorem typeAndBorrowSafety_relaxed {store : ProgramStore} {env₁ env₂ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-    RelaxedPreservationHooks →
+theorem theorem_4_12_relaxed_typeAndBorrowSafety
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
-    BorrowSafeEnv env₁ →
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -37,47 +33,14 @@ theorem typeAndBorrowSafety_relaxed {store : ProgramStore} {env₁ env₂ : Env}
       ∃ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hooks hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe
-    hsafe hstoreProgress htyping hterminates
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+    hstoreProgress htyping hterminates
   exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
     hwellFormed hsafe hstoreProgress htyping
     (by
       intro finalStore finalValue hmulti
-      exact Soundness.lemma_4_11_preservation hooks hsource hvalidRuntime
-        hvalidStoreTyping hwellFormed hborrowSafe hsafe htyping hmulti)
+      exact lemma_4_11_preservation hsource hvalidRuntime hvalidStoreTyping
+        hwellFormed hsafe htyping hmulti)
     hterminates
-
-end Paper
-end LwRust
-
-namespace LwRust.Paper.Soundness
-
-open LwRust.Paper LwRust.Core
-
-/--
-Theorem 4.12, relaxed conditional Type and Borrow Safety.
-
-This version uses the path-sensitive relaxed preservation invariant and does
-not assume `BorrowSafeTypingPreservation`.
--/
-theorem theorem_4_12_typeAndBorrowSafety_relaxed
-    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
-    {lifetime : Lifetime} {term : Term} {ty : Ty}
-    (hooks : RelaxedPreservationHooks)
-    (hsource : SourceTerm term)
-    (hvalid : ValidRuntimeState store term)
-    (hstoreTyping : ValidStoreTyping store term typing)
-    (hwellFormed : WellFormedEnv env₁ lifetime)
-    (hborrowSafe : BorrowSafeEnv env₁)
-    (hsafe : store ∼ₛ env₁)
-    (hstore : OperationalStoreProgress store)
-    (htyping : TermTyping env₁ typing lifetime term ty env₂)
-    (hterminates : TerminatesAsValue store lifetime term) :
-    ProgressResult store lifetime term ∧
-      ∃ finalStore finalValue,
-        MultiStep store lifetime term finalStore (.val finalValue) ∧
-        TerminalStateSafe finalStore finalValue env₂ ty :=
-  typeAndBorrowSafety_relaxed hooks hsource hvalid hstoreTyping hwellFormed
-    hborrowSafe hsafe hstore htyping hterminates
 
 end LwRust.Paper.Soundness

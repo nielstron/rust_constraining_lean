@@ -115,8 +115,8 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-      _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hranked
-      _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
+      _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hnoStale
+      _hranked _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs

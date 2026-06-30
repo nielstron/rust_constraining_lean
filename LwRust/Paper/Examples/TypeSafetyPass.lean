@@ -385,6 +385,63 @@ theorem pointerIf_retarget_write :
         simp [pointerIfEnv, pointerIfPXSlot, Env.update])
       UpdateAtPath.strong)
 
+theorem pointerIf_retarget_effective_write_written {result : Env}
+    {written : LVal} :
+    EnvWriteEffectiveWrite 0 pointerIfEnv (.var "p")
+      (.borrow true [.var "y"]) result written →
+    written = .var "p" := by
+  intro hwrite
+  cases hwrite with
+  | intro _hslot hupdate =>
+      cases hupdate with
+      | strong => rfl
+
+theorem pointerIf_retarget_noStale :
+    EnvWriteNoStaleBorrowTargets 0 pointerIfEnv (.var "p")
+      (.borrow true [.var "y"]) pointerIfRetargetEnv := by
+  intro written x slot mutable targets target hwrite hslot hcontains htarget
+    hprefix
+  have hwritten := pointerIf_retarget_effective_write_written hwrite
+  subst written
+  rcases hcontains with ⟨containsSlot, hcontainsSlot, hcontainsTy⟩
+  have hcontainsSlotEq : containsSlot = slot :=
+    Option.some.inj (hcontainsSlot.symm.trans hslot)
+  subst containsSlot
+  by_cases hp : x = "p"
+  · subst hp
+    have hslotTy : slot.ty = .ty (.borrow true [.var "y"]) := by
+      simpa [pointerIfRetargetEnv, pointerIfPYSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hcontainsTy
+    cases hcontainsTy with
+    | here =>
+        simp at htarget
+        subst htarget
+        simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path]
+          at hprefix
+  · by_cases hx : x = "x"
+    · subst hx
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
+          pointerIfYSlot, pointerIfPYSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hcontainsTy
+      cases hcontainsTy
+    · by_cases hy : x = "y"
+      · subst hy
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
+            pointerIfPYSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hcontainsTy
+        cases hcontainsTy
+      · have hnone : pointerIfRetargetEnv.slotAt x = none := by
+          simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
+            pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty, hp, hx,
+            hy]
+        rw [hslot] at hnone
+        cases hnone
+
 theorem pointerIf_retarget_ranked :
     ∃ φ, LinearizedBy φ pointerIfEnv ∧
       EnvWriteRhsBorrowTargetsBelow φ pointerIfRetargetEnv (.borrow true [.var "y"]) := by
@@ -840,6 +897,7 @@ theorem pointerRetargetBranch_typing :
     pointerIf_shape_px_py
     pointerIf_borrow_y_wellFormed
     pointerIf_retarget_write
+    pointerIf_retarget_noStale
     pointerIf_retarget_ranked
     pointerIfRetarget_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed pointerIfRetarget_contained)
@@ -874,6 +932,35 @@ theorem pointerIf_write_deref_p :
       (@UpdateAtPath.mutBorrow pointerIfEnv
         (pointerIfEnv.update "x" pointerIfXSlot) 0 [] [.var "x"] .int
         htargets))
+
+theorem pointerIf_write_effective_write_written {result : Env}
+    {written : LVal} :
+    EnvWriteEffectiveWrite 0 pointerIfEnv (.deref (.var "p")) .int result
+      written →
+    written = .var "x" := by
+  intro hwrite
+  cases hwrite with
+  | @intro _rank _env₁ _env₂ _lv _written sourceSlot _ty _updatedTy
+      hslot hupdate =>
+      have hslotEq : sourceSlot = pointerIfPXSlot := by
+        simpa [pointerIfEnv, pointerIfPXSlot, Env.update, LVal.base] using
+          hslot.symm
+      subst sourceSlot
+      cases hupdate with
+      | mutBorrow htargets =>
+          cases htargets with
+          | singleton htargetWrite =>
+              cases htargetWrite with
+              | intro _htargetSlot htargetUpdate =>
+                  cases htargetUpdate with
+                  | weak _hshape _hjoin => rfl
+          | consHead htargetWrite _hrest _hjoin =>
+              cases htargetWrite with
+              | intro _htargetSlot htargetUpdate =>
+                  cases htargetUpdate with
+                  | weak _hshape _hjoin => rfl
+          | consTail _htargetWrite hrest _hjoin =>
+              cases hrest
 
 /-- Regression for reborrow-chain writes after removing borrow target annotations:
 the outer borrow target list is preserved while the write is fanned out through
@@ -1124,6 +1211,51 @@ theorem pointerIf_not_writeProhibited_deref_p :
           rw [hslot] at hnone
           cases hnone
 
+theorem pointerIf_write_noStale :
+    EnvWriteNoStaleBorrowTargets 0 pointerIfEnv (.deref (.var "p"))
+      .int pointerIfWriteEnv := by
+  intro written x slot mutable targets target hwrite hslot hcontains htarget
+    hprefix
+  have hwritten := pointerIf_write_effective_write_written hwrite
+  subst written
+  rw [pointerIfWriteEnv_eq] at hslot hcontains
+  rcases hcontains with ⟨containsSlot, hcontainsSlot, hcontainsTy⟩
+  have hcontainsSlotEq : containsSlot = slot :=
+    Option.some.inj (hcontainsSlot.symm.trans hslot)
+  subst containsSlot
+  by_cases hp : x = "p"
+  · subst hp
+    have hslotTy : slot.ty = .ty (.borrow true [.var "x"]) := by
+      simpa [pointerIfEnv, pointerIfPXSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hcontainsTy
+    cases hcontainsTy with
+    | here =>
+        simp at htarget
+        subst htarget
+        simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path]
+          at hprefix
+  · by_cases hx : x = "x"
+    · subst hx
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+          Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hcontainsTy
+      cases hcontainsTy
+    · by_cases hy : x = "y"
+      · subst hy
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hcontainsTy
+        cases hcontainsTy
+      · have hnone : pointerIfEnv.slotAt x = none := by
+          simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
+            Env.update, Env.empty, hp, hx, hy]
+        rw [hslot] at hnone
+        cases hnone
+
 theorem pointerWriteBranch_typing :
     TermTyping pointerIfEnv StoreTyping.empty Lifetime.root
       pointerWriteBranch .unit pointerIfWriteEnv := by
@@ -1134,6 +1266,7 @@ theorem pointerWriteBranch_typing :
     ShapeCompatible.int
     WellFormedTy.int
     pointerIf_write_deref_p
+    pointerIf_write_noStale
     pointerIf_write_ranked
     pointerIf_write_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed

@@ -6,8 +6,4 @@ import LwRust.Extractor.Extractors.Empty
 import LwRust.Extractor.Extractors.NestedBlocks
 import LwRust.Extractor.RelaxedMergeCompleteness
 import LwRust.Extractor.RelaxedProgress
-import LwRust.Extractor.RelaxedPreservationFacts
 import LwRust.Extractor.RelaxedWellFormed
-import LwRust.Extractor.RelaxedPreservationCases
-import LwRust.Extractor.RelaxedPreservationFrontier
-import LwRust.Extractor.RelaxedPreservation

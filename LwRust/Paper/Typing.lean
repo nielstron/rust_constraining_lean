@@ -475,6 +475,101 @@ def LVal.path : LVal → Path
   | .var _ => []
   | .deref lv => LVal.path lv ++ [()]
 
+/--
+Strict prefix on dereference paths.  `[]` is a strict prefix of any non-empty
+path, and prefix comparison proceeds structurally through matching derefs.
+-/
+def StrictPathPrefix : Path → Path → Prop
+  | [], [] => False
+  | [], _ :: _ => True
+  | _ :: _, [] => False
+  | _ :: left, _ :: right => StrictPathPrefix left right
+
+/--
+The written lvalue is a strict resolution prefix of the target lvalue.
+
+If `written ≺ target`, then overwriting the location denoted by `written` can
+change the later dereference steps used to resolve `target`.  For example,
+`p ≺ *p` and `*p ≺ **p`, but `p` is not a strict prefix of `p`.
+-/
+def LVal.StrictPrefixOf (written target : LVal) : Prop :=
+  LVal.base written = LVal.base target ∧
+    StrictPathPrefix (LVal.path written) (LVal.path target)
+
+theorem StrictPathPrefix.self_append_singleton :
+    ∀ path : Path, StrictPathPrefix path (path ++ [()])
+  | [] => by simp [StrictPathPrefix]
+  | _ :: tail => by
+      simpa [StrictPathPrefix] using
+        StrictPathPrefix.self_append_singleton tail
+
+theorem StrictPathPrefix.append_right_singleton :
+    ∀ {left right : Path}, StrictPathPrefix left right →
+      StrictPathPrefix left (right ++ [()])
+  | [], [], hprefix => by cases hprefix
+  | [], _ :: _, _ => by simp [StrictPathPrefix]
+  | _ :: _, [], hprefix => by cases hprefix
+  | _ :: left, _ :: right, hprefix => by
+      simpa [StrictPathPrefix] using
+        StrictPathPrefix.append_right_singleton
+          (left := left) (right := right) hprefix
+
+theorem StrictPathPrefix.exists_suffix :
+    ∀ {left right : Path}, StrictPathPrefix left right →
+      ∃ suffix : Path, suffix ≠ [] ∧ right = left ++ suffix := by
+  intro left
+  induction left with
+  | nil =>
+      intro right hprefix
+      cases right with
+      | nil => cases hprefix
+      | cons head tail =>
+          cases head
+          exact ⟨() :: tail, by simp, rfl⟩
+  | cons head left ih =>
+      intro right hprefix
+      cases head
+      cases right with
+      | nil => cases hprefix
+      | cons headRight right =>
+          cases headRight
+          rcases ih hprefix with ⟨suffix, hnonempty, hright⟩
+          exact ⟨suffix, hnonempty, by simp [hright]⟩
+
+theorem LVal.StrictPrefixOf.self_deref (lv : LVal) :
+    LVal.StrictPrefixOf lv (.deref lv) := by
+  constructor
+  · simp [LVal.base]
+  · simpa [LVal.path] using
+      StrictPathPrefix.self_append_singleton (LVal.path lv)
+
+theorem LVal.StrictPrefixOf.deref_right {written target : LVal} :
+    LVal.StrictPrefixOf written target →
+    LVal.StrictPrefixOf written (.deref target) := by
+  intro hprefix
+  rcases hprefix with ⟨hbase, hpath⟩
+  constructor
+  · simpa [LVal.base] using hbase
+  · simpa [LVal.path] using
+      StrictPathPrefix.append_right_singleton hpath
+
+theorem LVal.eq_of_base_path :
+    ∀ {left right : LVal},
+      LVal.base left = LVal.base right →
+      LVal.path left = LVal.path right →
+      left = right
+  | .var x, .var y, hbase, _hpath => by
+      simp [LVal.base] at hbase
+      simp [hbase]
+  | .var _x, .deref _right, _hbase, hpath => by
+      simp [LVal.path] at hpath
+  | .deref _left, .var _y, _hbase, hpath => by
+      simp [LVal.path] at hpath
+  | .deref left, .deref right, hbase, hpath => by
+      have hpath' : LVal.path left = LVal.path right := by
+        simpa [LVal.path, List.append_cancel_right_eq] using hpath
+      exact congrArg LVal.deref (LVal.eq_of_base_path hbase hpath')
+
 /-- Syntactic occurrence of a variable name in an lvalue. -/
 def LVal.Mentions (x : Name) : LVal → Prop
   | .var y => y = x
@@ -1366,6 +1461,147 @@ def prependPath : List Unit → LVal → LVal
   | [], lv => lv
   | _ :: path, lv => .deref (prependPath path lv)
 
+theorem List.Unit_append_singleton_typing :
+    ∀ (path : List Unit), path ++ [()] = () :: path
+  | [] => rfl
+  | () :: path => by
+      rw [List.cons_append, List.Unit_append_singleton_typing path]
+
+@[simp] theorem LVal.base_prependPath (path : List Unit) (target : LVal) :
+    LVal.base (prependPath path target) = LVal.base target := by
+  induction path with
+  | nil => rfl
+  | cons _ tail ih => simp [prependPath, LVal.base, ih]
+
+@[simp] theorem LVal.path_prependPath (path : List Unit) (target : LVal) :
+    LVal.path (prependPath path target) = LVal.path target ++ path := by
+  induction path with
+  | nil => simp [prependPath]
+  | cons _ tail ih =>
+      simp only [prependPath, LVal.path, ih, List.append_assoc,
+        List.Unit_append_singleton_typing]
+
+/--
+Static approximation of lvalue-resolution dependencies.
+
+`EnvMayReadThrough env written target` means that resolving `target` may inspect
+the location denoted by `written` before reaching `target`'s final location.
+The direct case is the ordinary same-base strict-prefix dependency.  The borrow
+case accounts for aliases introduced by borrow targets: after one dereference
+of `source`, resolution may continue from any statically listed target.
+-/
+inductive EnvMayReadThrough (env : Env) (written : LVal) : LVal → Prop where
+  | direct {target : LVal} :
+      LVal.StrictPrefixOf written target →
+      EnvMayReadThrough env written target
+  | borrow {source selected : LVal} {suffix : List Unit}
+      {mutable : Bool} {targets : List LVal} {lifetime : Lifetime} :
+      LValTyping env source (.ty (.borrow mutable targets)) lifetime →
+      selected ∈ targets →
+      EnvMayReadThrough env written (prependPath suffix selected) →
+      EnvMayReadThrough env written (prependPath (() :: suffix) source)
+
+theorem EnvMayReadThrough.borrowTarget_deref_deref {env : Env}
+    {written source : LVal} {mutable : Bool} {targets : List LVal}
+    {lifetime : Lifetime} :
+    LValTyping env source (.ty (.borrow mutable targets)) lifetime →
+    written ∈ targets →
+    EnvMayReadThrough env written (.deref (.deref source)) := by
+  intro htyping hmem
+  exact EnvMayReadThrough.borrow (suffix := [()]) htyping hmem
+    (EnvMayReadThrough.direct (LVal.StrictPrefixOf.self_deref written))
+
+theorem EnvMayReadThrough.deref_right {env : Env} {written target : LVal} :
+    EnvMayReadThrough env written target →
+    EnvMayReadThrough env written (.deref target) := by
+  intro hread
+  induction hread with
+  | direct hprefix =>
+      exact EnvMayReadThrough.direct
+        (LVal.StrictPrefixOf.deref_right hprefix)
+  | @borrow source selected suffix mutable targets lifetime htyping hmem _ ih =>
+      simpa [prependPath] using
+        EnvMayReadThrough.borrow (source := source) (selected := selected)
+          (suffix := () :: suffix) htyping hmem ih
+
+theorem EnvMayReadThrough.prependPath_right {env : Env} {written target : LVal} :
+    ∀ suffix : List Unit,
+      EnvMayReadThrough env written target →
+      EnvMayReadThrough env written (prependPath suffix target)
+  | [], hread => hread
+  | _ :: suffix, hread =>
+      EnvMayReadThrough.deref_right
+        (EnvMayReadThrough.prependPath_right suffix hread)
+
+theorem EnvMayReadThrough.direct_prependPath_self_deref {env : Env}
+    {written : LVal} :
+    ∀ suffix : List Unit,
+      EnvMayReadThrough env written (prependPath (() :: suffix) written)
+  | [] =>
+      EnvMayReadThrough.direct (LVal.StrictPrefixOf.self_deref written)
+  | _ :: suffix =>
+      EnvMayReadThrough.deref_right
+        (EnvMayReadThrough.direct_prependPath_self_deref suffix)
+
+theorem EnvMayReadThrough.borrowTarget_deref_prepend {env : Env}
+    {written source : LVal} {mutable : Bool} {targets : List LVal}
+    {lifetime : Lifetime} :
+    LValTyping env source (.ty (.borrow mutable targets)) lifetime →
+    written ∈ targets →
+    ∀ suffix : List Unit,
+      EnvMayReadThrough env written
+        (prependPath (() :: (() :: suffix)) source) := by
+  intro htyping hmem suffix
+  exact EnvMayReadThrough.borrow (suffix := () :: suffix) htyping hmem
+    (EnvMayReadThrough.direct_prependPath_self_deref suffix)
+
+theorem EnvMayReadThrough.borrow_deref_step {env : Env}
+    {written source selected : LVal} {mutable : Bool} {targets : List LVal}
+    {lifetime : Lifetime} :
+    LValTyping env source (.ty (.borrow mutable targets)) lifetime →
+    selected ∈ targets →
+    EnvMayReadThrough env written (.deref selected) →
+    EnvMayReadThrough env written (.deref (.deref source)) := by
+  intro htyping hmem hread
+  exact EnvMayReadThrough.borrow (suffix := [()]) htyping hmem hread
+
+theorem LVal.StrictPrefixOf.eq_prependPath
+    {pref target : LVal} :
+    LVal.StrictPrefixOf pref target →
+    ∃ suffix : Path, suffix ≠ [] ∧ target = prependPath suffix pref := by
+  intro hprefix
+  rcases hprefix with ⟨hbase, hpath⟩
+  rcases StrictPathPrefix.exists_suffix hpath with
+    ⟨suffix, hnonempty, hpathEq⟩
+  refine ⟨suffix, hnonempty, ?_⟩
+  apply LVal.eq_of_base_path
+  · simpa [LVal.base_prependPath] using hbase.symm
+  · simpa [LVal.path_prependPath, hpathEq]
+
+theorem EnvMayReadThrough.strictPrefix_right {env : Env}
+    {written middle target : LVal} :
+    EnvMayReadThrough env written middle →
+    LVal.StrictPrefixOf middle target →
+    EnvMayReadThrough env written target := by
+  intro hread hprefix
+  rcases LVal.StrictPrefixOf.eq_prependPath hprefix with
+    ⟨suffix, _hnonempty, htarget⟩
+  rw [htarget]
+  exact EnvMayReadThrough.prependPath_right suffix hread
+
+theorem EnvMayReadThrough.trans {env : Env}
+    {written middle target : LVal} :
+    EnvMayReadThrough env written middle →
+    EnvMayReadThrough env middle target →
+    EnvMayReadThrough env written target := by
+  intro hleft hright
+  induction hright generalizing written with
+  | direct hprefix =>
+      exact EnvMayReadThrough.strictPrefix_right hleft hprefix
+  | @borrow source selected suffix mutable targets lifetime htyping hmem
+      _hinner ih =>
+      exact EnvMayReadThrough.borrow htyping hmem (ih hleft)
+
 mutual
   /-- Definition 3.23, `update_k(Γ, π | T̃, T)`. -/
   inductive UpdateAtPath : Nat → Env → List Unit → PartialTy → Ty → Env → PartialTy → Prop where
@@ -1422,6 +1658,108 @@ mutual
         EnvWrite rank env₁ lv ty
           (env₂.update (LVal.base lv) { slot with ty := updatedTy })
 end
+
+mutual
+  /--
+  Effective lvalues overwritten by an `UpdateAtPath`.
+
+  This mirrors `UpdateAtPath` but records the concrete static lvalue whose
+  stored value is replaced after following box paths or mutable-borrow fan-out.
+  In the mutable-borrow case the effective writes are the borrow targets, not
+  the source borrow slot.
+  -/
+  inductive UpdateAtPathEffectiveWrite :
+      Nat → Env → Name → List Unit → PartialTy → Ty → Env → PartialTy →
+        LVal → Prop where
+    | strong {env : Env} {base : Name} {old : PartialTy} {ty : Ty} :
+        UpdateAtPathEffectiveWrite 0 env base [] old ty env (.ty ty)
+          (.var base)
+    | weak {env : Env} {base : Name} {rank : Nat}
+        {old joined : PartialTy} {ty : Ty} :
+        ShapeCompatible env old (.ty ty) →
+        PartialTyJoin old (.ty ty) joined →
+        UpdateAtPathEffectiveWrite (rank + 1) env base [] old ty env joined
+          (.var base)
+    | box {env₁ env₂ : Env} {base : Name} {rank : Nat}
+        {path : List Unit} {inner updatedInner : PartialTy} {ty : Ty}
+        {written : LVal} :
+        UpdateAtPathEffectiveWrite rank env₁ base path inner ty env₂
+          updatedInner written →
+        UpdateAtPathEffectiveWrite rank env₁ base (() :: path) (.box inner) ty
+          env₂ (.box updatedInner) (.deref written)
+    | boxPassthrough {env₁ env₂ : Env} {base : Name} {rank : Nat}
+        {path : List Unit} {inner updatedInner : PartialTy} {ty : Ty}
+        {written : LVal} :
+        UpdateAtPathEffectiveWrite rank env₁ base path inner ty env₂
+          updatedInner written →
+        UpdateAtPathEffectiveWrite rank env₁ base (() :: path) (.box inner) ty
+          env₂ (.box updatedInner) written
+    | mutBorrow {env₁ env₂ : Env} {base : Name} {rank : Nat}
+        {path : List Unit} {targets : List LVal} {ty : Ty}
+        {written : LVal} :
+        WriteBorrowTargetsEffectiveWrite (rank + 1) env₁ path targets ty env₂
+          written →
+        UpdateAtPathEffectiveWrite rank env₁ base (() :: path)
+          (.ty (.borrow true targets)) ty env₂
+          (.ty (.borrow true targets)) written
+
+  /-- Effective writes performed by a borrow-target fan-out. -/
+  inductive WriteBorrowTargetsEffectiveWrite :
+      Nat → Env → List Unit → List LVal → Ty → Env → LVal → Prop where
+    | singleton {rank : Nat} {env updated : Env} {path : List Unit}
+        {target : LVal} {ty : Ty} {written : LVal} :
+        EnvWriteEffectiveWrite rank env (prependPath path target) ty updated
+          written →
+        WriteBorrowTargetsEffectiveWrite rank env path [target] ty updated
+          written
+    | consHead {rank : Nat} {env updated restEnv result : Env}
+        {path : List Unit} {target : LVal} {rest : List LVal} {ty : Ty}
+        {written : LVal} :
+        EnvWriteEffectiveWrite rank env (prependPath path target) ty updated
+          written →
+        WriteBorrowTargets rank env path rest ty restEnv →
+        EnvJoin updated restEnv result →
+        WriteBorrowTargetsEffectiveWrite rank env path (target :: rest) ty
+          result written
+    | consTail {rank : Nat} {env updated restEnv result : Env}
+        {path : List Unit} {target : LVal} {rest : List LVal} {ty : Ty}
+        {written : LVal} :
+        EnvWrite rank env (prependPath path target) ty updated →
+        WriteBorrowTargetsEffectiveWrite rank env path rest ty restEnv
+          written →
+        EnvJoin updated restEnv result →
+        WriteBorrowTargetsEffectiveWrite rank env path (target :: rest) ty
+          result written
+
+  /-- Effective writes performed by an environment write. -/
+  inductive EnvWriteEffectiveWrite :
+      Nat → Env → LVal → Ty → Env → LVal → Prop where
+    | intro {rank : Nat} {env₁ env₂ : Env} {lv written : LVal}
+        {slot : EnvSlot} {ty : Ty} {updatedTy : PartialTy} :
+        env₁.slotAt (LVal.base lv) = some slot →
+        UpdateAtPathEffectiveWrite rank env₁ (LVal.base lv) (LVal.path lv)
+          slot.ty ty env₂ updatedTy written →
+        EnvWriteEffectiveWrite rank env₁ lv ty
+          (env₂.update (LVal.base lv) { slot with ty := updatedTy }) written
+end
+
+/--
+No surviving borrow target may dereference through an effective write.
+
+This is a local assignment-side obligation, weaker than global `BorrowSafeEnv`:
+it only talks about old or newly surviving borrow targets in the write result,
+and only forbids the stale-resolution shape where an effective write is a
+strict prefix of a live borrow target.
+-/
+def EnvWriteNoStaleBorrowTargets
+    (rank : Nat) (env : Env) (lv : LVal) (rhsTy : Ty) (result : Env) : Prop :=
+  ∀ written x slot mutable targets target,
+    EnvWriteEffectiveWrite rank env lv rhsTy result written →
+    result.slotAt x = some slot →
+    result ⊢ x ↝ (.borrow mutable targets) →
+    target ∈ targets →
+    EnvMayReadThrough result written target →
+    False
 
 theorem EnvWrite.finiteSupport {rank : Nat} {env result : Env}
     {lv : LVal} {ty : Ty} :
@@ -1552,6 +1890,7 @@ mutual
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
+        EnvWriteNoStaleBorrowTargets 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
         Coherent env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
@@ -1678,7 +2017,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcoherence
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnoStale _hrank _hcoherence
         _hcontained _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs

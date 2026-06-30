@@ -1196,9 +1196,9 @@ Legacy compatibility property used by the strict top-level preservation
 wrappers.
 
 This is no longer a theorem of `TermTyping`: relaxed `T-If` deliberately permits
-the joined approximation to fail `BorrowSafeEnv`.  Runtime safety for relaxed
-joins is carried path-sensitively by `RuntimeExactEnvWitness` in the extractor
-proofs.
+the joined approximation to fail `BorrowSafeEnv`.  A relaxed preservation proof
+must carry only the runtime-selected alias facts needed by the executed path,
+not reconstruct global borrow safety for the joined approximation.
 -/
 def BorrowSafeTypingPreservation : Prop :=
   ∀ {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}

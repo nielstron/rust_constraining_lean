@@ -35,6 +35,19 @@ inductive LocReads (store : ProgramStore) : LVal → Location → Prop where
       LocReads store lv location →
       LocReads store (.deref lv) location
 
+theorem LocReads.strictPrefix {store : ProgramStore}
+    {lv : LVal} {location : Location} :
+    LocReads store lv location →
+    ∃ readPrefix, LVal.StrictPrefixOf readPrefix lv ∧
+      store.loc readPrefix = some location := by
+  intro hreads
+  induction hreads with
+  | here hloc =>
+      exact ⟨_, LVal.StrictPrefixOf.self_deref _, hloc⟩
+  | there _ ih =>
+      rcases ih with ⟨readPrefix, hprefix, hloc⟩
+      exact ⟨readPrefix, LVal.StrictPrefixOf.deref_right hprefix, hloc⟩
+
 /-- If an update misses every location read while resolving `lv`, resolution is unchanged. -/
 theorem loc_update_of_not_locReads {store : ProgramStore}
     {updated : Location} {slot : StoreSlot} :
@@ -524,13 +537,17 @@ inductive ValidPartialValueEvidence.StrengthensSameShape
       StrengthensSameShape
         (ValidPartialValueEvidence.undef (ty := oldTy))
         (ValidPartialValueEvidence.undef (ty := newTy))
-  | borrow {location : Location} {mutable : Bool} {leftTargets rightTargets : List LVal}
+  | borrow {location : Location} {oldMutable newMutable : Bool}
+      {leftTargets rightTargets : List LVal}
       {target : LVal} {hmem : target ∈ leftTargets}
       {hloc : store.loc target = some location}
+      (hmutable : oldMutable = newMutable)
       (hsubset : leftTargets.Subset rightTargets) :
       StrengthensSameShape
-        (ValidPartialValueEvidence.borrow target hmem hloc)
-        (ValidPartialValueEvidence.borrow target (hsubset hmem) hloc)
+        (ValidPartialValueEvidence.borrow (mutable := oldMutable)
+          target hmem hloc)
+        (ValidPartialValueEvidence.borrow (mutable := newMutable)
+          target (hsubset hmem) hloc)
   | box {location : Location} {slot : StoreSlot}
       {oldInner newInner : PartialTy}
       {oldEvidence : ValidPartialValueEvidence store slot.value oldInner}
@@ -561,8 +578,9 @@ theorem ValidPartialValueEvidence.StrengthensSameShape.refl
   | undef => exact ValidPartialValueEvidence.StrengthensSameShape.undef
   | @borrow location mutable targets target hmem hloc =>
       exact ValidPartialValueEvidence.StrengthensSameShape.borrow
-        (mutable := mutable) (target := target) (hmem := hmem) (hloc := hloc)
-        (List.Subset.refl _)
+        (oldMutable := mutable) (newMutable := mutable)
+        (target := target) (hmem := hmem) (hloc := hloc)
+        rfl (List.Subset.refl _)
   | box hslot hinner ih =>
       exact ValidPartialValueEvidence.StrengthensSameShape.box ih
   | boxFull hslot hinner ih =>
@@ -608,13 +626,15 @@ theorem ValidPartialValueEvidence.strengthen_sameShape_exists
       | reflex =>
           exact ⟨ValidPartialValueEvidence.borrow target hmem hloc,
             ValidPartialValueEvidence.StrengthensSameShape.borrow
-              (mutable := mutable) (target := target) (hmem := hmem)
-              (hloc := hloc) (List.Subset.refl _)⟩
+              (oldMutable := mutable) (newMutable := mutable)
+              (target := target) (hmem := hmem) (hloc := hloc)
+              rfl (List.Subset.refl _)⟩
       | borrow hsubset =>
           exact ⟨ValidPartialValueEvidence.borrow target (hsubset hmem) hloc,
             ValidPartialValueEvidence.StrengthensSameShape.borrow
-              (mutable := mutable) (target := target) (hmem := hmem)
-              (hloc := hloc) hsubset⟩
+              (oldMutable := mutable) (newMutable := mutable)
+              (target := target) (hmem := hmem) (hloc := hloc)
+              rfl hsubset⟩
       | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | box hslot hinner ih =>
       cases hstrength with
@@ -683,6 +703,28 @@ theorem EvidenceBorrowDependency.selected {store : ProgramStore}
   | @boxFullInner location slot innerTy hslot hinner dependency _hdependency ih =>
       exact SelectedBorrowDependency.boxFullInner (hslot := hslot) ih
 
+theorem SelectedBorrowDependency.evidenceBorrowDependency {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {hvalid : ValidPartialValue store value ty} {dependency : Location} :
+    SelectedBorrowDependency store hvalid dependency →
+    ∃ evidence : ValidPartialValueEvidence store value ty,
+      EvidenceBorrowDependency store evidence dependency := by
+  intro hdependency
+  induction hdependency with
+  | @borrow selectedMutable location _mutable targets target hmem hloc
+      dependency hreads =>
+      exact ⟨ValidPartialValueEvidence.borrow (mutable := selectedMutable)
+        target hmem hloc,
+        EvidenceBorrowDependency.borrow (mutable := selectedMutable) hreads⟩
+  | @boxInner location slot inner hslot hinner dependency _hdependency ih =>
+      rcases ih with ⟨innerEvidence, hinnerDependency⟩
+      exact ⟨ValidPartialValueEvidence.box hslot innerEvidence,
+        EvidenceBorrowDependency.boxInner hinnerDependency⟩
+  | @boxFullInner location slot innerTy hslot hinner dependency _hdependency ih =>
+      rcases ih with ⟨innerEvidence, hinnerDependency⟩
+      exact ⟨ValidPartialValueEvidence.boxFull hslot innerEvidence,
+        EvidenceBorrowDependency.boxFullInner hinnerDependency⟩
+
 theorem EvidenceBorrowDependency.of_strengthensSameShape
     {store : ProgramStore} {value : PartialValue}
     {oldTy newTy : PartialTy}
@@ -698,11 +740,12 @@ theorem EvidenceBorrowDependency.of_strengthensSameShape
   | int => exact hdependency
   | bool => exact hdependency
   | undef => cases hdependency
-  | borrow _hsubset =>
-      rename_i location mutable leftTargets rightTargets target hmem hloc
+  | @borrow location oldMutable _newMutable leftTargets _rightTargets target
+      hmem hloc hmutable _hsubset =>
+      cases hmutable
       cases hdependency with
       | borrow hreads =>
-          exact EvidenceBorrowDependency.borrow (mutable := mutable)
+          exact EvidenceBorrowDependency.borrow (mutable := oldMutable)
             (target := target) (hmem := hmem) (hloc := hloc) hreads
   | box hinnerRel ih =>
       cases hdependency with
@@ -712,6 +755,497 @@ theorem EvidenceBorrowDependency.of_strengthensSameShape
       cases hdependency with
       | boxFullInner hinnerDependency =>
           exact EvidenceBorrowDependency.boxFullInner (ih hinnerDependency)
+
+/--
+A borrow node selected by proof-carrying runtime evidence.
+
+This is the runtime analogue of `PartialTyContains ty (.borrow mutable targets)`
+plus a target membership proof.  Because it is indexed by
+`ValidPartialValueEvidence` rather than `ValidPartialValue`, the selected target
+is data, not a proof-irrelevant artifact.
+-/
+def EvidenceSelectedBorrow (store : ProgramStore) :
+    {value : PartialValue} → {ty : PartialTy} →
+      ValidPartialValueEvidence store value ty → Bool → List LVal → LVal →
+        Prop
+  | _, _, ValidPartialValueEvidence.unit, _, _, _ => False
+  | _, _, ValidPartialValueEvidence.int, _, _, _ => False
+  | _, _, ValidPartialValueEvidence.bool, _, _, _ => False
+  | _, _, ValidPartialValueEvidence.undef, _, _, _ => False
+  | _, _, ValidPartialValueEvidence.borrow (mutable := evidenceMutable)
+      (targets := evidenceTargets) evidenceTarget _hmem _hloc,
+      selectedMutable, selectedTargets, selectedTarget =>
+      evidenceMutable = selectedMutable ∧
+        evidenceTargets = selectedTargets ∧
+        evidenceTarget = selectedTarget
+  | _, _, ValidPartialValueEvidence.box _hslot hinner,
+      selectedMutable, selectedTargets, selectedTarget =>
+      EvidenceSelectedBorrow store hinner selectedMutable selectedTargets
+        selectedTarget
+  | _, _, ValidPartialValueEvidence.boxFull _hslot hinner,
+      selectedMutable, selectedTargets, selectedTarget =>
+      EvidenceSelectedBorrow store hinner selectedMutable selectedTargets
+        selectedTarget
+
+namespace EvidenceSelectedBorrow
+
+theorem borrow {store : ProgramStore} {location : Location}
+    {evidenceMutable selectedMutable : Bool} {targets : List LVal}
+    {target : LVal} {hmem : target ∈ targets}
+    {hloc : store.loc target = some location} :
+    evidenceMutable = selectedMutable →
+    EvidenceSelectedBorrow store
+      (ValidPartialValueEvidence.borrow (mutable := evidenceMutable)
+        (targets := targets) target hmem hloc)
+      selectedMutable targets target := by
+  intro hmutable
+  subst hmutable
+  simp [EvidenceSelectedBorrow]
+
+theorem boxInner {store : ProgramStore} {location : Location}
+    {slot : StoreSlot} {inner : PartialTy}
+    {hslot : store.slotAt location = some slot}
+    {hinner : ValidPartialValueEvidence store slot.value inner}
+    {mutable : Bool} {targets : List LVal} {target : LVal} :
+    EvidenceSelectedBorrow store hinner mutable targets target →
+    EvidenceSelectedBorrow store
+      (ValidPartialValueEvidence.box hslot hinner) mutable targets target := by
+  intro hselected
+  simpa [EvidenceSelectedBorrow] using hselected
+
+theorem boxFullInner {store : ProgramStore} {location : Location}
+    {slot : StoreSlot} {ty : Ty}
+    {hslot : store.slotAt location = some slot}
+    {hinner : ValidPartialValueEvidence store slot.value (.ty ty)}
+    {mutable : Bool} {targets : List LVal} {target : LVal} :
+    EvidenceSelectedBorrow store hinner mutable targets target →
+    EvidenceSelectedBorrow store
+      (ValidPartialValueEvidence.boxFull hslot hinner) mutable targets
+      target := by
+  intro hselected
+  simpa [EvidenceSelectedBorrow] using hselected
+
+theorem contains {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : ValidPartialValueEvidence store value ty}
+    {mutable : Bool} {targets : List LVal} {target : LVal} :
+    EvidenceSelectedBorrow store evidence mutable targets target →
+    PartialTyContains ty (.borrow mutable targets) ∧ target ∈ targets := by
+  intro hselected
+  induction evidence with
+  | unit =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | int =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | bool =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | undef =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | borrow evidenceTarget hmem _hloc =>
+      simp [EvidenceSelectedBorrow] at hselected
+      rcases hselected with ⟨hmutable, htargets, htarget⟩
+      cases hmutable
+      cases htargets
+      cases htarget
+      exact ⟨PartialTyContains.here, by assumption⟩
+  | box _hslot _hinner ih =>
+      exact ⟨PartialTyContains.box (ih hselected).1, (ih hselected).2⟩
+  | boxFull _hslot _hinner ih =>
+      exact ⟨PartialTyContains.tyBox (ih hselected).1, (ih hselected).2⟩
+
+theorem of_strengthensSameShape {store : ProgramStore}
+    {value : PartialValue} {oldTy newTy : PartialTy}
+    {oldEvidence : ValidPartialValueEvidence store value oldTy}
+    {newEvidence : ValidPartialValueEvidence store value newTy}
+    {mutable : Bool} {newTargets : List LVal} {target : LVal} :
+    ValidPartialValueEvidence.StrengthensSameShape oldEvidence newEvidence →
+    EvidenceSelectedBorrow store newEvidence mutable newTargets target →
+    ∃ oldTargets,
+      EvidenceSelectedBorrow store oldEvidence mutable oldTargets target := by
+  intro hrel hselected
+  induction hrel generalizing mutable newTargets target with
+  | unit =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | int =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | bool =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | undef =>
+      simp [EvidenceSelectedBorrow] at hselected
+  | @borrow location oldMutable _newMutable leftTargets _rightTargets
+      evidenceTarget hmem hloc hmutableRel _hsubset =>
+      simp [EvidenceSelectedBorrow] at hselected
+      rcases hselected with ⟨hselectedMutable, htargets, htarget⟩
+      cases htargets
+      cases htarget
+      exact ⟨leftTargets,
+        EvidenceSelectedBorrow.borrow (store := store)
+          (location := location)
+          (targets := leftTargets) (target := evidenceTarget)
+          (hmem := hmem) (hloc := hloc)
+          (hmutableRel.trans hselectedMutable)⟩
+  | box _hinnerRel ih =>
+      rcases ih hselected with ⟨oldTargets, holdSelected⟩
+      exact ⟨oldTargets, EvidenceSelectedBorrow.boxInner holdSelected⟩
+  | boxFull _hinnerRel ih =>
+      rcases ih hselected with ⟨oldTargets, holdSelected⟩
+      exact ⟨oldTargets, EvidenceSelectedBorrow.boxFullInner holdSelected⟩
+
+end EvidenceSelectedBorrow
+
+theorem EvidenceBorrowDependency.selectedBorrow {store : ProgramStore}
+    {value : PartialValue} {ty : PartialTy}
+    {evidence : ValidPartialValueEvidence store value ty}
+    {dependency : Location} :
+    EvidenceBorrowDependency store evidence dependency →
+    ∃ mutable targets target,
+      EvidenceSelectedBorrow store evidence mutable targets target ∧
+        LocReads store target dependency := by
+  intro hdependency
+  induction hdependency with
+  | borrow hreads =>
+      exact ⟨_, _, _, EvidenceSelectedBorrow.borrow rfl, hreads⟩
+  | boxInner _hdependency ih =>
+      rcases ih with ⟨mutable, targets, target, hselected, hreads⟩
+      exact ⟨mutable, targets, target,
+        EvidenceSelectedBorrow.boxInner hselected, hreads⟩
+  | boxFullInner _hdependency ih =>
+      rcases ih with ⟨mutable, targets, target, hselected, hreads⟩
+      exact ⟨mutable, targets, target,
+        EvidenceSelectedBorrow.boxFullInner hselected, hreads⟩
+
+theorem ValidPartialValueEvidence.borrow_selected {store : ProgramStore}
+    {location : Location} {mutable : Bool} {targets : List LVal}
+    (evidence : ValidPartialValueEvidence store
+      (.value (.ref { location := location, owner := false }))
+      (.ty (.borrow mutable targets))) :
+    ∃ target,
+      EvidenceSelectedBorrow store evidence mutable targets target ∧
+        target ∈ targets ∧ store.loc target = some location := by
+  cases evidence with
+  | borrow target hmem hloc =>
+      exact ⟨target, EvidenceSelectedBorrow.borrow rfl, hmem, hloc⟩
+
+/--
+Safe abstraction with concrete runtime evidence for each root slot.
+-/
+def SafeAbstractionEvidence (store : ProgramStore) (env : Env) : Prop :=
+  (∀ x,
+    (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
+      ∃ slot, env.slotAt x = some slot) ∧
+  ∀ x envSlot,
+    env.slotAt x = some envSlot →
+    ∃ value,
+      store.slotAt (VariableProjection x) =
+        some { value := value, lifetime := envSlot.lifetime } ∧
+      ∃ _evidence : ValidPartialValueEvidence store value envSlot.ty, True
+
+theorem SafeAbstractionEvidence.safe {store : ProgramStore} {env : Env} :
+    SafeAbstractionEvidence store env →
+    store ∼ₛ env := by
+  intro hsafe
+  constructor
+  · exact hsafe.1
+  · intro x envSlot hslot
+    rcases hsafe.2 x envSlot hslot with
+    ⟨value, hstore, hevidence, _⟩
+    exact ⟨value, hstore, hevidence.valid⟩
+
+theorem SafeAbstractionEvidence.of_safe {store : ProgramStore} {env : Env} :
+    store ∼ₛ env →
+    SafeAbstractionEvidence store env := by
+  intro hsafe
+  constructor
+  · exact hsafe.1
+  · intro x envSlot hslot
+    rcases hsafe.2 x envSlot hslot with ⟨value, hstore, hvalid⟩
+    rcases ValidPartialValueEvidence.exists_of_valid hvalid with
+      ⟨evidence, _⟩
+    exact ⟨value, hstore, evidence, trivial⟩
+
+/--
+Chosen runtime evidence for roots of an environment.
+
+This provider is intentionally evidence-indexed by the concrete store lookup
+proof.  It lets a relaxed preservation proof talk about the borrow target that
+the abstraction actually follows, rather than every possible proof of
+`ValidPartialValue` for a widened joined type.
+-/
+def RuntimeEvidenceProvider (store : ProgramStore) (env : Env) : Type :=
+  ∀ x envSlot value,
+    env.slotAt x = some envSlot →
+    store.slotAt (VariableProjection x) =
+      some { value := value, lifetime := envSlot.lifetime } →
+    ValidPartialValueEvidence store value envSlot.ty
+
+/--
+Selected borrow safety for a fixed runtime evidence provider.
+
+This is weaker than `RuntimeSelectedBorrowSafe`: it compares only the selected
+borrow nodes exposed by the chosen provider.  That is the invariant expected to
+transport through relaxed joins, where the joined static target list may contain
+branches that are not followed by the concrete runtime value.
+-/
+def RuntimeSelectedBorrowSafeWith (store : ProgramStore) (env : Env)
+    (evidenceOf : RuntimeEvidenceProvider store env) : Prop :=
+  ∀ x y xSlot ySlot xValue yValue
+    (hx : env.slotAt x = some xSlot)
+    (hy : env.slotAt y = some ySlot)
+    (hxStore : store.slotAt (VariableProjection x) =
+      some { value := xValue, lifetime := xSlot.lifetime })
+    (hyStore : store.slotAt (VariableProjection y) =
+      some { value := yValue, lifetime := ySlot.lifetime })
+    mutable targetsMutable targetsOther targetMutable targetOther,
+      EvidenceSelectedBorrow store
+        (evidenceOf x xSlot xValue hx hxStore)
+        true targetsMutable targetMutable →
+      EvidenceSelectedBorrow store
+        (evidenceOf y ySlot yValue hy hyStore)
+        mutable targetsOther targetOther →
+      targetMutable ⋈ targetOther →
+      x = y
+
+/--
+Selected-borrow safety for a terminal value against the current environment.
+
+This is the value-level half that assignment needs after its RHS has evaluated:
+`RuntimeSafeAbstraction store env` compares selected borrows between stored
+environment roots, while this invariant compares the selected borrow carried by
+the terminal RHS value with selected borrows in those roots.
+-/
+def RuntimeValueSelectedBorrowSafeWith (store : ProgramStore) (env : Env)
+    (evidenceOf : RuntimeEvidenceProvider store env)
+    {value : PartialValue} {ty : PartialTy}
+    (valueEvidence : ValidPartialValueEvidence store value ty) : Prop :=
+  (∀ y ySlot yValue
+    (hy : env.slotAt y = some ySlot)
+    (hyStore : store.slotAt (VariableProjection y) =
+      some { value := yValue, lifetime := ySlot.lifetime })
+    mutable targetsValue targetsOther targetValue targetOther,
+      EvidenceSelectedBorrow store valueEvidence true targetsValue targetValue →
+      EvidenceSelectedBorrow store
+        (evidenceOf y ySlot yValue hy hyStore)
+        mutable targetsOther targetOther →
+      targetValue ⋈ targetOther →
+      False) ∧
+  (∀ x xSlot xValue
+    (hx : env.slotAt x = some xSlot)
+    (hxStore : store.slotAt (VariableProjection x) =
+      some { value := xValue, lifetime := xSlot.lifetime })
+    mutable targetsMutable targetsValue targetMutable targetValue,
+      EvidenceSelectedBorrow store
+        (evidenceOf x xSlot xValue hx hxStore)
+        true targetsMutable targetMutable →
+      EvidenceSelectedBorrow store valueEvidence mutable targetsValue targetValue →
+      targetMutable ⋈ targetValue →
+      False)
+
+theorem RuntimeValueSelectedBorrowSafeWith.box {store : ProgramStore}
+    {env : Env} {evidenceOf : RuntimeEvidenceProvider store env}
+    {location : Location} {slot : StoreSlot} {inner : PartialTy}
+    {hslot : store.slotAt location = some slot}
+    {innerEvidence : ValidPartialValueEvidence store slot.value inner} :
+    RuntimeValueSelectedBorrowSafeWith store env evidenceOf innerEvidence →
+    RuntimeValueSelectedBorrowSafeWith store env evidenceOf
+      (ValidPartialValueEvidence.box hslot innerEvidence) := by
+  intro hsafe
+  constructor
+  · intro y ySlot yValue hy hyStore mutable targetsValue targetsOther
+      targetValue targetOther hselectedValue hselectedOther hconflict
+    exact hsafe.1 y ySlot yValue hy hyStore mutable targetsValue
+      targetsOther targetValue targetOther
+      (by simpa [EvidenceSelectedBorrow] using hselectedValue)
+      hselectedOther hconflict
+  · intro x xSlot xValue hx hxStore mutable targetsMutable targetsValue
+      targetMutable targetValue hselectedMutable hselectedValue hconflict
+    exact hsafe.2 x xSlot xValue hx hxStore mutable targetsMutable
+      targetsValue targetMutable targetValue hselectedMutable
+      (by simpa [EvidenceSelectedBorrow] using hselectedValue)
+      hconflict
+
+theorem RuntimeValueSelectedBorrowSafeWith.boxFull {store : ProgramStore}
+    {env : Env} {evidenceOf : RuntimeEvidenceProvider store env}
+    {location : Location} {slot : StoreSlot} {ty : Ty}
+    {hslot : store.slotAt location = some slot}
+    {innerEvidence : ValidPartialValueEvidence store slot.value (.ty ty)} :
+    RuntimeValueSelectedBorrowSafeWith store env evidenceOf innerEvidence →
+    RuntimeValueSelectedBorrowSafeWith store env evidenceOf
+      (ValidPartialValueEvidence.boxFull hslot innerEvidence) := by
+  intro hsafe
+  constructor
+  · intro y ySlot yValue hy hyStore mutable targetsValue targetsOther
+      targetValue targetOther hselectedValue hselectedOther hconflict
+    exact hsafe.1 y ySlot yValue hy hyStore mutable targetsValue
+      targetsOther targetValue targetOther
+      (by simpa [EvidenceSelectedBorrow] using hselectedValue)
+      hselectedOther hconflict
+  · intro x xSlot xValue hx hxStore mutable targetsMutable targetsValue
+      targetMutable targetValue hselectedMutable hselectedValue hconflict
+    exact hsafe.2 x xSlot xValue hx hxStore mutable targetsMutable
+      targetsValue targetMutable targetValue hselectedMutable
+      (by simpa [EvidenceSelectedBorrow] using hselectedValue)
+      hconflict
+
+theorem RuntimeValueSelectedBorrowSafeWith.singletonBorrow {store : ProgramStore}
+    {env : Env} {evidenceOf : RuntimeEvidenceProvider store env}
+    {location : Location} {mutable : Bool} {target : LVal}
+    {hloc : store.loc target = some location} :
+    (if mutable then ¬ WriteProhibited env target else ¬ ReadProhibited env target) →
+    RuntimeValueSelectedBorrowSafeWith store env evidenceOf
+      (ValidPartialValueEvidence.borrow (mutable := mutable)
+        (targets := [target]) target (by simp) hloc) := by
+  intro hnot
+  constructor
+  · intro y ySlot yValue hy hyStore otherMutable targetsValue targetsOther
+      targetValue targetOther hselectedValue hselectedOther hconflict
+    simp [EvidenceSelectedBorrow] at hselectedValue
+    rcases hselectedValue with ⟨hmutable, htargets, htarget⟩
+    cases htargets
+    cases htarget
+    cases mutable
+    · cases hmutable
+    · rcases EvidenceSelectedBorrow.contains hselectedOther with
+        ⟨hcontainsOther, htargetOther⟩
+      have hwrite : WriteProhibited env target := by
+        cases otherMutable with
+        | false =>
+            exact Or.inr ⟨y, targetsOther, targetOther,
+              ⟨ySlot, hy, hcontainsOther⟩, htargetOther,
+              PathConflicts.symm hconflict⟩
+        | true =>
+            exact Or.inl ⟨y, targetsOther, targetOther,
+              ⟨ySlot, hy, hcontainsOther⟩, htargetOther,
+              PathConflicts.symm hconflict⟩
+      exact hnot hwrite
+  · intro x xSlot xValue hx hxStore valueMutable targetsMutable targetsValue
+      targetMutable targetValue hselectedMutable hselectedValue hconflict
+    simp [EvidenceSelectedBorrow] at hselectedValue
+    rcases hselectedValue with ⟨hvalueMutable, htargets, htarget⟩
+    cases htargets
+    cases htarget
+    rcases EvidenceSelectedBorrow.contains hselectedMutable with
+      ⟨hcontainsMutable, htargetMutable⟩
+    cases mutable
+    · have hread : ReadProhibited env target :=
+        ⟨x, targetsMutable, targetMutable,
+          ⟨xSlot, hx, hcontainsMutable⟩, htargetMutable, hconflict⟩
+      exact hnot hread
+    · have hwrite : WriteProhibited env target :=
+        Or.inl ⟨x, targetsMutable, targetMutable,
+          ⟨xSlot, hx, hcontainsMutable⟩, htargetMutable, hconflict⟩
+      exact hnot hwrite
+
+/--
+Safe abstraction plus a selected runtime alias invariant for the abstraction's
+chosen evidence.
+-/
+def RuntimeSafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
+  SafeAbstractionEvidence store env ∧
+    ∃ evidenceOf : RuntimeEvidenceProvider store env,
+      RuntimeSelectedBorrowSafeWith store env evidenceOf
+
+theorem runtimeSafeAbstraction_empty :
+    RuntimeSafeAbstraction ProgramStore.empty Env.empty := by
+  classical
+  have hsafeEvidence : SafeAbstractionEvidence ProgramStore.empty Env.empty :=
+    SafeAbstractionEvidence.of_safe safeAbstraction_empty
+  let evidenceOf : RuntimeEvidenceProvider ProgramStore.empty Env.empty :=
+    fun _x _envSlot _value henv _hstore => by
+      simp [Env.empty] at henv
+  refine ⟨hsafeEvidence, evidenceOf, ?_⟩
+  intro _x _y _xSlot _ySlot _xValue _yValue hx _hy _hxStore _hyStore
+    _mutable _targetsMutable _targetsOther _targetMutable _targetOther
+    _hselectedMutable _hselectedOther _hconflict
+  simp [Env.empty] at hx
+
+theorem RuntimeSafeAbstraction.safe {store : ProgramStore} {env : Env} :
+    RuntimeSafeAbstraction store env →
+    store ∼ₛ env := by
+  intro hsafe
+  exact SafeAbstractionEvidence.safe hsafe.1
+
+/--
+Runtime-selected borrow safety.
+
+This is intentionally weaker than `BorrowSafeEnv`: it compares only borrow
+nodes selected by concrete runtime evidence for root slots.  Static target-list
+alternatives introduced by relaxed joins do not participate unless they are the
+target actually witnessing a runtime reference.
+-/
+def RuntimeSelectedBorrowSafe (store : ProgramStore) (env : Env) : Prop :=
+  ∀ x y xSlot ySlot xValue yValue,
+    env.slotAt x = some xSlot →
+    env.slotAt y = some ySlot →
+    store.slotAt (VariableProjection x) =
+      some { value := xValue, lifetime := xSlot.lifetime } →
+    store.slotAt (VariableProjection y) =
+      some { value := yValue, lifetime := ySlot.lifetime } →
+    ∀ (xEvidence : ValidPartialValueEvidence store xValue xSlot.ty)
+      (yEvidence : ValidPartialValueEvidence store yValue ySlot.ty)
+      mutable targetsMutable targetsOther targetMutable targetOther,
+      EvidenceSelectedBorrow store xEvidence true targetsMutable targetMutable →
+      EvidenceSelectedBorrow store yEvidence mutable targetsOther targetOther →
+      targetMutable ⋈ targetOther →
+      x = y
+
+theorem RuntimeSelectedBorrowSafe.withProvider {store : ProgramStore} {env : Env}
+    {evidenceOf : RuntimeEvidenceProvider store env} :
+    RuntimeSelectedBorrowSafe store env →
+    RuntimeSelectedBorrowSafeWith store env evidenceOf := by
+  intro hsafe
+  intro x y xSlot ySlot xValue yValue hx hy hxStore hyStore mutable
+    targetsMutable targetsOther targetMutable targetOther hselectedMutable
+    hselectedOther hconflict
+  exact hsafe x y xSlot ySlot xValue yValue hx hy hxStore hyStore
+    (evidenceOf x xSlot xValue hx hxStore)
+    (evidenceOf y ySlot yValue hy hyStore)
+    mutable targetsMutable targetsOther targetMutable targetOther
+    hselectedMutable hselectedOther hconflict
+
+theorem RuntimeSafeAbstraction.of_safeEvidence_and_selectedSafe
+    {store : ProgramStore} {env : Env} :
+    SafeAbstractionEvidence store env →
+    RuntimeSelectedBorrowSafe store env →
+    RuntimeSafeAbstraction store env := by
+  classical
+  intro hsafeEvidence hselectedSafe
+  let evidenceOf : RuntimeEvidenceProvider store env :=
+    fun x envSlot value henvSlot hstoreSlot =>
+      let chosenValue := Classical.choose (hsafeEvidence.2 x envSlot henvSlot)
+      have hchosenSpec :=
+        Classical.choose_spec (hsafeEvidence.2 x envSlot henvSlot)
+      let chosenEvidence := Classical.choose hchosenSpec.2
+      have hchosenStore :
+          store.slotAt (VariableProjection x) =
+            some { value := chosenValue, lifetime := envSlot.lifetime } :=
+        hchosenSpec.1
+      have hvalueEq : chosenValue = value := by
+        have hslotEq :
+            { value := chosenValue, lifetime := envSlot.lifetime } =
+              ({ value := value, lifetime := envSlot.lifetime } : StoreSlot) :=
+          Option.some.inj (hchosenStore.symm.trans hstoreSlot)
+        exact congrArg StoreSlot.value hslotEq
+      by
+        subst hvalueEq
+        exact chosenEvidence
+  exact ⟨hsafeEvidence, evidenceOf,
+    RuntimeSelectedBorrowSafe.withProvider hselectedSafe⟩
+
+theorem RuntimeSelectedBorrowSafe.of_borrowSafeEnv {store : ProgramStore}
+    {env : Env} :
+    BorrowSafeEnv env →
+    RuntimeSelectedBorrowSafe store env := by
+  intro hborrowSafe
+  intro x y xSlot ySlot xValue yValue hx hy _hxStore _hyStore
+    xEvidence yEvidence mutable targetsMutable targetsOther targetMutable
+    targetOther hselectedMutable hselectedOther hconflict
+  rcases EvidenceSelectedBorrow.contains hselectedMutable with
+    ⟨hcontainsMutable, hmemMutable⟩
+  rcases EvidenceSelectedBorrow.contains hselectedOther with
+    ⟨hcontainsOther, hmemOther⟩
+  exact hborrowSafe x y mutable targetsMutable targetsOther targetMutable
+    targetOther ⟨xSlot, hx, hcontainsMutable⟩
+    ⟨ySlot, hy, hcontainsOther⟩ hmemMutable hmemOther hconflict
 
 /-- Frame lemma for `ValidPartialValue`: updating an uninspected location preserves validity. -/
 theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
@@ -770,23 +1304,47 @@ theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
         location ≠ updated) →
       ∃ evidence' :
         ValidPartialValueEvidence (store.update updated newSlot) value ty,
-        ∀ location,
+        (∀ location,
           EvidenceBorrowDependency (store.update updated newSlot) evidence' location →
-          EvidenceBorrowDependency store evidence location := by
+          EvidenceBorrowDependency store evidence location) ∧
+        (∀ mutable targets target,
+          EvidenceSelectedBorrow (store.update updated newSlot) evidence'
+            mutable targets target →
+          EvidenceSelectedBorrow store evidence mutable targets target) := by
   intro value ty evidence
   induction evidence with
   | unit =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.unit, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.unit, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | int =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.int, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.int, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | bool =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.bool, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.bool, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | undef =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.undef, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.undef, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | @borrow location mutable targets target hmem hloc =>
       intro _howners hdeps
       have hloc' : (store.update updated newSlot).loc target = some location :=
@@ -798,22 +1356,31 @@ theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
               (targets := targets) (target := target)
               (hmem := hmem) (hloc := hloc) hreads))
       refine ⟨ValidPartialValueEvidence.borrow target hmem hloc', ?_⟩
-      intro dependency hdependency
-      cases hdependency with
-      | borrow hreads =>
-          exact EvidenceBorrowDependency.borrow
-            (store := store) (location := location) (mutable := mutable)
-            (targets := targets) (target := target)
-            (hmem := hmem) (hloc := hloc)
-            (locReads_update_to_store_of_not_locReads hloc
-              (by
-                intro mid hmid
-                exact hdeps mid
-                  (EvidenceBorrowDependency.borrow
-                    (store := store) (location := location) (mutable := mutable)
-                    (targets := targets) (target := target)
-                    (hmem := hmem) (hloc := hloc) hmid))
-              hreads)
+      constructor
+      · intro dependency hdependency
+        cases hdependency with
+        | borrow hreads =>
+            exact EvidenceBorrowDependency.borrow
+              (store := store) (location := location) (mutable := mutable)
+              (targets := targets) (target := target)
+              (hmem := hmem) (hloc := hloc)
+              (locReads_update_to_store_of_not_locReads hloc
+                (by
+                  intro mid hmid
+                  exact hdeps mid
+                    (EvidenceBorrowDependency.borrow
+                      (store := store) (location := location) (mutable := mutable)
+                      (targets := targets) (target := target)
+                      (hmem := hmem) (hloc := hloc) hmid))
+                hreads)
+      · intro selectedMutable selectedTargets selectedTarget hselected
+        simp [EvidenceSelectedBorrow] at hselected
+        rcases hselected with ⟨hmutable, htargets, htarget⟩
+        cases htargets
+        cases htarget
+        exact EvidenceSelectedBorrow.borrow (store := store)
+          (location := location) (targets := targets) (target := target)
+          (hmem := hmem) (hloc := hloc) hmutable
   | @box location slot inner hslot hinner ih =>
       intro howners hdeps
       have hlocationNe : location ≠ updated :=
@@ -833,15 +1400,20 @@ theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
                 (store := store) (location := location) (slot := slot)
                 (inner := inner) (hslot := hslot) (hinner := hinner)
                 hdependency)) with
-        ⟨innerEvidence', hinnerDeps⟩
+          ⟨innerEvidence', hinnerDeps, hinnerSelected⟩
       refine ⟨ValidPartialValueEvidence.box hslot' innerEvidence', ?_⟩
-      intro dependency hdependency
-      cases hdependency with
-      | boxInner hdependency' =>
-          exact EvidenceBorrowDependency.boxInner
-            (store := store) (location := location) (slot := slot)
-            (inner := inner) (hslot := hslot) (hinner := hinner)
-            (hinnerDeps dependency hdependency')
+      constructor
+      · intro dependency hdependency
+        cases hdependency with
+        | boxInner hdependency' =>
+            exact EvidenceBorrowDependency.boxInner
+              (store := store) (location := location) (slot := slot)
+              (inner := inner) (hslot := hslot) (hinner := hinner)
+              (hinnerDeps dependency hdependency')
+      · intro mutable targets target hselected
+        exact EvidenceSelectedBorrow.boxInner
+          (hinnerSelected mutable targets target
+            (by simpa [EvidenceSelectedBorrow] using hselected))
   | @boxFull location slot innerTy hslot hinner ih =>
       intro howners hdeps
       have hlocationNe : location ≠ updated :=
@@ -861,15 +1433,143 @@ theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
                 (store := store) (location := location) (slot := slot)
                 (ty := innerTy) (hslot := hslot) (hinner := hinner)
                 hdependency)) with
-        ⟨innerEvidence', hinnerDeps⟩
+          ⟨innerEvidence', hinnerDeps, hinnerSelected⟩
       refine ⟨ValidPartialValueEvidence.boxFull hslot' innerEvidence', ?_⟩
-      intro dependency hdependency
-      cases hdependency with
-      | boxFullInner hdependency' =>
-          exact EvidenceBorrowDependency.boxFullInner
-            (store := store) (location := location) (slot := slot)
-            (ty := innerTy) (hslot := hslot) (hinner := hinner)
-            (hinnerDeps dependency hdependency')
+      constructor
+      · intro dependency hdependency
+        cases hdependency with
+        | boxFullInner hdependency' =>
+            exact EvidenceBorrowDependency.boxFullInner
+              (store := store) (location := location) (slot := slot)
+              (ty := innerTy) (hslot := hslot) (hinner := hinner)
+              (hinnerDeps dependency hdependency')
+      · intro mutable targets target hselected
+        exact EvidenceSelectedBorrow.boxFullInner
+          (hinnerSelected mutable targets target
+            (by simpa [EvidenceSelectedBorrow] using hselected))
+
+/--
+Provider-backed runtime abstraction transport through a framed store update.
+
+This is the update analogue of
+`runtimeSafeAbstraction_drops_of_evidence_frames`: the concrete preservation case
+supplies the variable-domain/slot facts for the updated store and proves the
+write avoids every owned cell and borrow-resolution dependency of each chosen
+root evidence object.
+-/
+theorem runtimeSafeAbstraction_update_of_evidence_frames
+    {store : ProgramStore} {env : Env} {updated : Location}
+    {newSlot : StoreSlot}
+    (_hsafeEvidence : SafeAbstractionEvidence store env)
+    (evidenceOf : RuntimeEvidenceProvider store env)
+    (hselectedSafe : RuntimeSelectedBorrowSafeWith store env evidenceOf)
+    (hdomain :
+      ∀ x,
+        (∃ slot,
+          (store.update updated newSlot).slotAt (VariableProjection x) =
+            some slot) ↔
+          ∃ slot, env.slotAt x = some slot)
+    (hslotOfEnv :
+      ∀ x envSlot,
+        env.slotAt x = some envSlot →
+        ∃ value,
+          (store.update updated newSlot).slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime })
+    (hstoreBack :
+      ∀ x envSlot value,
+        env.slotAt x = some envSlot →
+        (store.update updated newSlot).slotAt (VariableProjection x) =
+          some { value := value, lifetime := envSlot.lifetime } →
+        store.slotAt (VariableProjection x) =
+          some { value := value, lifetime := envSlot.lifetime })
+    (howners :
+      ∀ x envSlot value
+        (_henv : env.slotAt x = some envSlot)
+        (_hstore :
+          store.slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime })
+        location,
+        OwnerReaches store value envSlot.ty location →
+        location ≠ updated)
+    (hdeps :
+      ∀ x envSlot value
+        (henv : env.slotAt x = some envSlot)
+        (hstore :
+          store.slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime })
+        location,
+        EvidenceBorrowDependency store
+          (evidenceOf x envSlot value henv hstore) location →
+        location ≠ updated) :
+    RuntimeSafeAbstraction (store.update updated newSlot) env := by
+  classical
+  have hframe :
+      ∀ x envSlot value
+        (henv : env.slotAt x = some envSlot)
+        (hstore' :
+          (store.update updated newSlot).slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime }),
+        ∃ evidence' :
+          ValidPartialValueEvidence (store.update updated newSlot) value
+            envSlot.ty,
+          (∀ location,
+            EvidenceBorrowDependency (store.update updated newSlot) evidence'
+              location →
+            EvidenceBorrowDependency store
+              (evidenceOf x envSlot value henv
+                (hstoreBack x envSlot value henv hstore')) location) ∧
+          (∀ mutable targets target,
+            EvidenceSelectedBorrow (store.update updated newSlot) evidence'
+              mutable targets target →
+            EvidenceSelectedBorrow store
+              (evidenceOf x envSlot value henv
+                (hstoreBack x envSlot value henv hstore'))
+              mutable targets target) := by
+    intro x envSlot value henv hstore'
+    exact validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
+      (evidenceOf x envSlot value henv
+        (hstoreBack x envSlot value henv hstore'))
+      (howners x envSlot value henv
+        (hstoreBack x envSlot value henv hstore'))
+      (hdeps x envSlot value henv
+        (hstoreBack x envSlot value henv hstore'))
+  let finalEvidenceOf :
+      RuntimeEvidenceProvider (store.update updated newSlot) env :=
+    fun x envSlot value henv hstore' =>
+      Classical.choose (hframe x envSlot value henv hstore')
+  have hsafeEvidence' :
+      SafeAbstractionEvidence (store.update updated newSlot) env := by
+    constructor
+    · exact hdomain
+    · intro x envSlot henv
+      rcases hslotOfEnv x envSlot henv with ⟨value, hstore'⟩
+      exact ⟨value, hstore', finalEvidenceOf x envSlot value henv hstore',
+        trivial⟩
+  refine ⟨hsafeEvidence', finalEvidenceOf, ?_⟩
+  intro x y xSlot ySlot xValue yValue hx hy hxStore hyStore mutable
+    targetsMutable targetsOther targetMutable targetOther hselectedMutable
+    hselectedOther hconflict
+  have hxStoreOld := hstoreBack x xSlot xValue hx hxStore
+  have hyStoreOld := hstoreBack y ySlot yValue hy hyStore
+  have hxSpec :=
+    Classical.choose_spec (hframe x xSlot xValue hx hxStore)
+  have hySpec :=
+    Classical.choose_spec (hframe y ySlot yValue hy hyStore)
+  have hxSelectedOld :
+      EvidenceSelectedBorrow store
+        (evidenceOf x xSlot xValue hx hxStoreOld)
+        true targetsMutable targetMutable :=
+    hxSpec.2 true targetsMutable targetMutable
+      (by simpa [finalEvidenceOf] using hselectedMutable)
+  have hySelectedOld :
+      EvidenceSelectedBorrow store
+        (evidenceOf y ySlot yValue hy hyStoreOld)
+        mutable targetsOther targetOther :=
+    hySpec.2 mutable targetsOther targetOther
+      (by simpa [finalEvidenceOf] using hselectedOther)
+  exact hselectedSafe x y xSlot ySlot xValue yValue hx hy hxStoreOld
+    hyStoreOld mutable targetsMutable targetsOther targetMutable targetOther
+    hxSelectedOld hySelectedOld hconflict
 
 /-- Frame lemma for `ValidPartialValue`: erasing an uninspected location preserves validity. -/
 theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
@@ -1199,23 +1899,46 @@ theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
         EvidenceBorrowDependency store evidence location →
         DropsAvoids store values location) →
       ∃ evidence' : ValidPartialValueEvidence store' value ty,
-        ∀ location,
+        (∀ location,
           EvidenceBorrowDependency store' evidence' location →
-          EvidenceBorrowDependency store evidence location := by
+          EvidenceBorrowDependency store evidence location) ∧
+        (∀ mutable targets target,
+          EvidenceSelectedBorrow store' evidence' mutable targets target →
+          EvidenceSelectedBorrow store evidence mutable targets target) := by
   intro hdrops value ty evidence
   induction evidence with
   | unit =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.unit, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.unit, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | int =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.int, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.int, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | bool =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.bool, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.bool, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | undef =>
       intro _howners _hdeps
-      exact ⟨ValidPartialValueEvidence.undef, by intro location hdep; cases hdep⟩
+      refine ⟨ValidPartialValueEvidence.undef, ?_⟩
+      constructor
+      · intro location hdep
+        cases hdep
+      · intro mutable targets target hselected
+        simp [EvidenceSelectedBorrow] at hselected
   | @borrow location mutable targets target hmem hloc =>
       intro _howners hdeps
       have hloc' : store'.loc target = some location :=
@@ -1227,14 +1950,23 @@ theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
               (targets := targets) (target := target)
               (hmem := hmem) (hloc := hloc) hreads))
       refine ⟨ValidPartialValueEvidence.borrow target hmem hloc', ?_⟩
-      intro dependency hdependency
-      cases hdependency with
-      | borrow hreads =>
-          exact EvidenceBorrowDependency.borrow
-            (store := store) (location := location) (mutable := mutable)
-            (targets := targets) (target := target)
-            (hmem := hmem) (hloc := hloc)
-            (locReads_drops_to_store hdrops hreads)
+      constructor
+      · intro dependency hdependency
+        cases hdependency with
+        | borrow hreads =>
+            exact EvidenceBorrowDependency.borrow
+              (store := store) (location := location) (mutable := mutable)
+              (targets := targets) (target := target)
+              (hmem := hmem) (hloc := hloc)
+              (locReads_drops_to_store hdrops hreads)
+      · intro selectedMutable selectedTargets selectedTarget hselected
+        simp [EvidenceSelectedBorrow] at hselected
+        rcases hselected with ⟨hmutable, htargets, htarget⟩
+        cases htargets
+        cases htarget
+        exact EvidenceSelectedBorrow.borrow (store := store)
+          (location := location) (targets := targets) (target := target)
+          (hmem := hmem) (hloc := hloc) hmutable
   | @box location slot inner hslot hinner ih =>
       intro howners hdeps
       have hlocationAvoid : DropsAvoids store values location :=
@@ -1252,15 +1984,20 @@ theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
                 (store := store) (location := location) (slot := slot)
                 (inner := inner) (hslot := hslot) (hinner := hinner)
                 hdependency)) with
-        ⟨innerEvidence', hinnerDeps⟩
+          ⟨innerEvidence', hinnerDeps, hinnerSelected⟩
       refine ⟨ValidPartialValueEvidence.box hslot' innerEvidence', ?_⟩
-      intro dependency hdependency
-      cases hdependency with
-      | boxInner hdependency' =>
-          exact EvidenceBorrowDependency.boxInner
-            (store := store) (location := location) (slot := slot)
-            (inner := inner) (hslot := hslot) (hinner := hinner)
-            (hinnerDeps dependency hdependency')
+      constructor
+      · intro dependency hdependency
+        cases hdependency with
+        | boxInner hdependency' =>
+            exact EvidenceBorrowDependency.boxInner
+              (store := store) (location := location) (slot := slot)
+              (inner := inner) (hslot := hslot) (hinner := hinner)
+              (hinnerDeps dependency hdependency')
+      · intro mutable targets target hselected
+        exact EvidenceSelectedBorrow.boxInner
+          (hinnerSelected mutable targets target
+            (by simpa [EvidenceSelectedBorrow] using hselected))
   | @boxFull location slot innerTy hslot hinner ih =>
       intro howners hdeps
       have hlocationAvoid : DropsAvoids store values location :=
@@ -1278,15 +2015,137 @@ theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
                 (store := store) (location := location) (slot := slot)
                 (ty := innerTy) (hslot := hslot) (hinner := hinner)
                 hdependency)) with
-        ⟨innerEvidence', hinnerDeps⟩
+          ⟨innerEvidence', hinnerDeps, hinnerSelected⟩
       refine ⟨ValidPartialValueEvidence.boxFull hslot' innerEvidence', ?_⟩
-      intro dependency hdependency
-      cases hdependency with
-      | boxFullInner hdependency' =>
-          exact EvidenceBorrowDependency.boxFullInner
-            (store := store) (location := location) (slot := slot)
-            (ty := innerTy) (hslot := hslot) (hinner := hinner)
-            (hinnerDeps dependency hdependency')
+      constructor
+      · intro dependency hdependency
+        cases hdependency with
+        | boxFullInner hdependency' =>
+            exact EvidenceBorrowDependency.boxFullInner
+              (store := store) (location := location) (slot := slot)
+              (ty := innerTy) (hslot := hslot) (hinner := hinner)
+              (hinnerDeps dependency hdependency')
+      · intro mutable targets target hselected
+        exact EvidenceSelectedBorrow.boxFullInner
+          (hinnerSelected mutable targets target
+            (by simpa [EvidenceSelectedBorrow] using hselected))
+
+/--
+Provider-backed runtime abstraction transport through recursive drops.
+
+The premises expose exactly the store-side facts a concrete preservation case
+must prove: surviving variable slots still line up with the environment, every
+root slot in the final store comes from the old store, and the drop avoids all
+owned cells and borrow-resolution dependencies of the chosen root evidence.
+The selected-borrow invariant is transported with the selected back-map returned
+by `validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame`.
+-/
+theorem runtimeSafeAbstraction_drops_of_evidence_frames
+    {store store' : ProgramStore} {env : Env} {values : List PartialValue}
+    (_hsafeEvidence : SafeAbstractionEvidence store env)
+    (evidenceOf : RuntimeEvidenceProvider store env)
+    (hselectedSafe : RuntimeSelectedBorrowSafeWith store env evidenceOf)
+    (hdrops : Drops store values store')
+    (hdomain :
+      ∀ x,
+        (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
+          ∃ slot, env.slotAt x = some slot)
+    (hslotOfEnv :
+      ∀ x envSlot,
+        env.slotAt x = some envSlot →
+        ∃ value,
+          store'.slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime })
+    (hstoreBack :
+      ∀ x envSlot value,
+        env.slotAt x = some envSlot →
+        store'.slotAt (VariableProjection x) =
+          some { value := value, lifetime := envSlot.lifetime } →
+        store.slotAt (VariableProjection x) =
+          some { value := value, lifetime := envSlot.lifetime })
+    (howners :
+      ∀ x envSlot value
+        (_henv : env.slotAt x = some envSlot)
+        (_hstore :
+          store.slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime })
+        location,
+        OwnerReaches store value envSlot.ty location →
+        DropsAvoids store values location)
+    (hdeps :
+      ∀ x envSlot value
+        (henv : env.slotAt x = some envSlot)
+        (hstore :
+          store.slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime })
+        location,
+        EvidenceBorrowDependency store
+          (evidenceOf x envSlot value henv hstore) location →
+        DropsAvoids store values location) :
+    RuntimeSafeAbstraction store' env := by
+  classical
+  have hframe :
+      ∀ x envSlot value
+        (henv : env.slotAt x = some envSlot)
+        (hstore' :
+          store'.slotAt (VariableProjection x) =
+            some { value := value, lifetime := envSlot.lifetime }),
+        ∃ evidence' : ValidPartialValueEvidence store' value envSlot.ty,
+          (∀ location,
+            EvidenceBorrowDependency store' evidence' location →
+            EvidenceBorrowDependency store
+              (evidenceOf x envSlot value henv
+                (hstoreBack x envSlot value henv hstore')) location) ∧
+          (∀ mutable targets target,
+            EvidenceSelectedBorrow store' evidence' mutable targets target →
+            EvidenceSelectedBorrow store
+              (evidenceOf x envSlot value henv
+                (hstoreBack x envSlot value henv hstore'))
+              mutable targets target) := by
+    intro x envSlot value henv hstore'
+    exact validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
+      hdrops
+      (evidenceOf x envSlot value henv
+        (hstoreBack x envSlot value henv hstore'))
+      (howners x envSlot value henv
+        (hstoreBack x envSlot value henv hstore'))
+      (hdeps x envSlot value henv
+        (hstoreBack x envSlot value henv hstore'))
+  let finalEvidenceOf : RuntimeEvidenceProvider store' env :=
+    fun x envSlot value henv hstore' =>
+      Classical.choose (hframe x envSlot value henv hstore')
+  have hsafeEvidence' : SafeAbstractionEvidence store' env := by
+    constructor
+    · exact hdomain
+    · intro x envSlot henv
+      rcases hslotOfEnv x envSlot henv with ⟨value, hstore'⟩
+      exact ⟨value, hstore', finalEvidenceOf x envSlot value henv hstore',
+        trivial⟩
+  refine ⟨hsafeEvidence', finalEvidenceOf, ?_⟩
+  intro x y xSlot ySlot xValue yValue hx hy hxStore hyStore mutable
+    targetsMutable targetsOther targetMutable targetOther hselectedMutable
+    hselectedOther hconflict
+  have hxStoreOld := hstoreBack x xSlot xValue hx hxStore
+  have hyStoreOld := hstoreBack y ySlot yValue hy hyStore
+  have hxSpec :=
+    Classical.choose_spec (hframe x xSlot xValue hx hxStore)
+  have hySpec :=
+    Classical.choose_spec (hframe y ySlot yValue hy hyStore)
+  have hxSelectedOld :
+      EvidenceSelectedBorrow store
+        (evidenceOf x xSlot xValue hx hxStoreOld)
+        true targetsMutable targetMutable :=
+    hxSpec.2 true targetsMutable targetMutable
+      (by simpa [finalEvidenceOf] using hselectedMutable)
+  have hySelectedOld :
+      EvidenceSelectedBorrow store
+        (evidenceOf y ySlot yValue hy hyStoreOld)
+        mutable targetsOther targetOther :=
+    hySpec.2 mutable targetsOther targetOther
+      (by simpa [finalEvidenceOf] using hselectedOther)
+  exact hselectedSafe x y xSlot ySlot xValue yValue hx hy hxStoreOld
+    hyStoreOld mutable targetsMutable targetsOther targetMutable targetOther
+    hxSelectedOld hySelectedOld hconflict
 
 theorem reaches_owner_source_of_validPartialValue {env : Env}
     {store : ProgramStore} {slotLifetime : Lifetime}
