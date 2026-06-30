@@ -44,13 +44,12 @@ theorem scalarCopyComparison_terminates :
   exact ⟨ProgramStore.empty, .bool true,
     MultiStep.trans Step.eqTrue MultiStep.refl⟩
 
-theorem scalarCopyComparison_typeSafety
-    (hborrowTyping : BorrowSafeTypingPreservation) :
+theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .bool :=
-  emptyInitial_typeAndBorrowSafety_total hborrowTyping scalarCopyComparison_typing
+  emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
     scalarCopyComparison_terminates
 
 /--
@@ -85,13 +84,12 @@ theorem ifThenElseInt_terminates :
   exact ⟨ProgramStore.empty, .int 1,
     MultiStep.trans Step.iteTrue MultiStep.refl⟩
 
-theorem ifThenElseInt_typeSafety
-    (hborrowTyping : BorrowSafeTypingPreservation) :
+theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total hborrowTyping ifThenElseInt_typing
+  emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
     ifThenElseInt_terminates
 
 /--
@@ -127,14 +125,675 @@ theorem ifEqThenElseInt_terminates :
     MultiStep.trans (Step.subIte Step.eqTrue)
       (MultiStep.trans Step.iteTrue MultiStep.refl)⟩
 
-theorem ifEqThenElseInt_typeSafety
-    (hborrowTyping : BorrowSafeTypingPreservation) :
+theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
-  emptyInitial_typeAndBorrowSafety_total hborrowTyping ifEqThenElseInt_typing
+  emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
     ifEqThenElseInt_terminates
+
+/--
+Regression outline for the relaxed `T-If` join.
+
+Rust-like code, starting from an empty environment:
+
+```rust
+let mut c = 0;
+let mut d = 0;
+let mut e = 0;
+let mut sth = true;
+let mut a = &mut c;
+
+if sth {
+    a = &mut d;
+} else {
+    a = &mut e;
+}
+*a = 0;
+```
+
+The intended typing-environment trace is:
+
+```text
+Env0 = empty
+Env1 = Env0, c  : int
+Env2 = Env1, d  : int
+Env3 = Env2, e  : int
+Env4 = Env3, sth : bool
+Env5 = Env4, a : &mut [c]
+
+true branch  Env6T = Env5[a := &mut [d]]
+false branch Env6F = Env5[a := &mut [e]]
+join         Env7  = Env5[a := &mut [d, e]]
+
+after *a = 0, the type environment is still Env7.
+```
+
+The key point is that `Env7` is a static control-flow approximation: the joined
+type of `a` remembers both branch targets, but at runtime only the selected
+branch's reference exists before the final `*a = 0` write.
+-/
+def retargetAfterIfIntSlot : EnvSlot :=
+  { ty := .ty .int, lifetime := Lifetime.root }
+
+def retargetAfterIfBoolSlot : EnvSlot :=
+  { ty := .ty .bool, lifetime := Lifetime.root }
+
+def retargetAfterIfACSlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "c"]), lifetime := Lifetime.root }
+
+def retargetAfterIfADSlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "d"]), lifetime := Lifetime.root }
+
+def retargetAfterIfAESlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "e"]), lifetime := Lifetime.root }
+
+def retargetAfterIfAJoinSlot : EnvSlot :=
+  { ty := .ty (.borrow true [.var "d", .var "e"]), lifetime := Lifetime.root }
+
+def retargetAfterIfEnv0 : Env :=
+  Env.empty
+
+def retargetAfterIfEnv1 : Env :=
+  retargetAfterIfEnv0.update "c" retargetAfterIfIntSlot
+
+def retargetAfterIfEnv2 : Env :=
+  retargetAfterIfEnv1.update "d" retargetAfterIfIntSlot
+
+def retargetAfterIfEnv3 : Env :=
+  retargetAfterIfEnv2.update "e" retargetAfterIfIntSlot
+
+def retargetAfterIfEnv4 : Env :=
+  retargetAfterIfEnv3.update "sth" retargetAfterIfBoolSlot
+
+def retargetAfterIfEnv5 : Env :=
+  retargetAfterIfEnv4.update "a" retargetAfterIfACSlot
+
+def retargetAfterIfTrueEnv : Env :=
+  retargetAfterIfEnv5.update "a" retargetAfterIfADSlot
+
+def retargetAfterIfFalseEnv : Env :=
+  retargetAfterIfEnv5.update "a" retargetAfterIfAESlot
+
+def retargetAfterIfJoinEnv : Env :=
+  retargetAfterIfEnv5.update "a" retargetAfterIfAJoinSlot
+
+def retargetAfterIfTerms : List Term :=
+  [.letMut "c" (.val (.int 0)),
+   .letMut "d" (.val (.int 0)),
+   .letMut "e" (.val (.int 0)),
+   .letMut "sth" (.val (.bool true)),
+   .letMut "a" (.borrow true (.var "c")),
+   .ite (.copy (.var "sth"))
+     (.assign (.var "a") (.borrow true (.var "d")))
+     (.assign (.var "a") (.borrow true (.var "e"))),
+   .assign (.deref (.var "a")) (.val (.int 0))]
+
+theorem lval_not_box_of_scalar_slots {env : Env}
+    (hscalar : ∀ {x slot}, env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
+    ∀ (lv : LVal) {inner lifetime},
+      ¬ LValTyping env lv (.box inner) lifetime
+  | .var _x, _inner, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, _hl⟩
+      rcases hscalar hslot with hslotTy | hslotTy <;>
+        rw [hslotTy] at hty <;> cases hty
+  | .deref lv, _inner, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact lval_not_box_of_scalar_slots hscalar lv hinner
+      | borrow _hborrow htargets =>
+          exact LValTargetsTyping.not_box htargets
+
+theorem lval_not_borrow_of_scalar_slots {env : Env}
+    (hscalar : ∀ {x slot}, env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      ¬ LValTyping env lv (.ty (.borrow mutable targets)) lifetime
+  | .var _x, _mutable, _targets, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, _hl⟩
+      rcases hscalar hslot with hslotTy | hslotTy <;>
+        rw [hslotTy] at hty <;> cases hty
+  | .deref lv, _mutable, _targets, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact lval_not_box_of_scalar_slots hscalar lv hinner
+      | borrow hinner _htargets =>
+          exact lval_not_borrow_of_scalar_slots hscalar lv hinner
+
+theorem freshUpdateCoherence_no_borrow {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime}
+    (hnoBorrow : ∀ lv mutable targets borrowLifetime,
+      ¬ LValTyping (env.update x { ty := .ty ty, lifetime := lifetime }) lv
+        (.ty (.borrow mutable targets)) borrowLifetime) :
+    FreshUpdateCoherenceObligations env x ty lifetime := by
+  constructor
+  · intro lv mutable targets borrowLifetime _hbase htyping
+    exact False.elim (hnoBorrow lv mutable targets borrowLifetime htyping)
+  · intro lv mutable targets borrowLifetime _hbase htyping
+    exact False.elim (hnoBorrow lv mutable targets borrowLifetime htyping)
+
+theorem env_not_contains_borrow_of_scalar_slots {env : Env}
+    (hscalar : ∀ {x slot}, env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
+    ∀ {x mutable targets}, ¬ env ⊢ x ↝ (.borrow mutable targets) := by
+  intro x mutable targets hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  rcases hscalar hslot with hslotTy | hslotTy <;>
+    rw [hslotTy] at hcontainsTy <;> cases hcontainsTy
+
+theorem not_readProhibited_of_no_borrows {env : Env}
+    (hnoBorrow : ∀ {x mutable targets}, ¬ env ⊢ x ↝ (.borrow mutable targets))
+    (lv : LVal) :
+    ¬ ReadProhibited env lv := by
+  intro hread
+  rcases hread with ⟨x, _targets, _target, hcontains, _htarget,
+    _hconflict⟩
+  exact hnoBorrow hcontains
+
+theorem not_writeProhibited_of_no_borrows {env : Env}
+    (hnoBorrow : ∀ {x mutable targets}, ¬ env ⊢ x ↝ (.borrow mutable targets))
+    (lv : LVal) :
+    ¬ WriteProhibited env lv := by
+  intro hwrite
+  rcases hwrite with hread | himm
+  · exact not_readProhibited_of_no_borrows hnoBorrow lv hread
+  · rcases himm with ⟨x, _targets, _target, hcontains, _htarget,
+      _hconflict⟩
+    exact hnoBorrow hcontains
+
+theorem not_readProhibited_of_oneBorrowSlot_disjoint {env : Env}
+    {slotTargets : List LVal} {lv : LVal}
+    (hinv : ∀ {x mutable targets}, env ⊢ x ↝ (.borrow mutable targets) →
+      x = "a" ∧ mutable = true ∧ targets = slotTargets)
+    (hdisjoint : ∀ target, target ∈ slotTargets →
+      LVal.base target ≠ LVal.base lv) :
+    ¬ ReadProhibited env lv := by
+  intro hread
+  rcases hread with ⟨_x, _targets, target, hcontains, htarget,
+    hconflict⟩
+  rcases hinv hcontains with ⟨_hx, _hmutable, htargets⟩
+  subst htargets
+  exact hdisjoint target htarget hconflict
+
+theorem not_writeProhibited_of_oneBorrowSlot_disjoint {env : Env}
+    {slotTargets : List LVal} {lv : LVal}
+    (hinv : ∀ {x mutable targets}, env ⊢ x ↝ (.borrow mutable targets) →
+      x = "a" ∧ mutable = true ∧ targets = slotTargets)
+    (hdisjoint : ∀ target, target ∈ slotTargets →
+      LVal.base target ≠ LVal.base lv) :
+    ¬ WriteProhibited env lv := by
+  intro hwrite
+  rcases hwrite with hread | himm
+  · exact not_readProhibited_of_oneBorrowSlot_disjoint hinv hdisjoint hread
+  · rcases himm with ⟨_x, _targets, _target, hcontains, _htarget,
+      _hconflict⟩
+    rcases hinv hcontains with ⟨_hx, hmutable, _htargets⟩
+    cases hmutable
+
+theorem oneBorrowSlot_no_box_lval {env : Env} {aSlot : EnvSlot}
+    {targets : List LVal}
+    (hslotA : env.slotAt "a" = some aSlot)
+    (haTy : aSlot.ty = .ty (.borrow true targets))
+    (hrest : ∀ {x slot}, x ≠ "a" → env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
+    ∀ (lv : LVal) {inner lifetime},
+      ¬ LValTyping env lv (.box inner) lifetime
+  | .var x, _inner, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, _hl⟩
+      by_cases ha : x = "a"
+      · subst ha
+        have hslotEq : slot = aSlot :=
+          Option.some.inj (hslot.symm.trans hslotA)
+        subst hslotEq
+        rw [haTy] at hty
+        cases hty
+      · rcases hrest ha hslot with hslotTy | hslotTy <;>
+          rw [hslotTy] at hty <;> cases hty
+  | .deref lv, _inner, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact oneBorrowSlot_no_box_lval hslotA haTy hrest lv hinner
+      | borrow _hborrow htargets =>
+          exact LValTargetsTyping.not_box htargets
+
+theorem oneBorrowSlot_borrow_lval_inv {env : Env} {aSlot : EnvSlot}
+    {slotTargets : List LVal}
+    (hslotA : env.slotAt "a" = some aSlot)
+    (haTy : aSlot.ty = .ty (.borrow true slotTargets))
+    (haLife : aSlot.lifetime = Lifetime.root)
+    (hrest : ∀ {x slot}, x ≠ "a" → env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool)
+    (htargetsNoBorrow : ∀ {mutable targets lifetime},
+      ¬ LValTargetsTyping env slotTargets (.ty (.borrow mutable targets))
+        lifetime) :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
+      lv = .var "a" ∧ mutable = true ∧ targets = slotTargets ∧
+        lifetime = Lifetime.root
+  | .var x, _mutable, _targets, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, hl⟩
+      by_cases ha : x = "a"
+      · subst ha
+        have hslotEq : slot = aSlot :=
+          Option.some.inj (hslot.symm.trans hslotA)
+        subst hslotEq
+        rw [haTy] at hty
+        cases hty
+        exact ⟨rfl, rfl, rfl, hl.symm.trans haLife⟩
+      · rcases hrest ha hslot with hslotTy | hslotTy <;>
+          rw [hslotTy] at hty <;> cases hty
+  | .deref lv, _mutable, _targets, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact False.elim
+            (oneBorrowSlot_no_box_lval hslotA haTy hrest lv hinner)
+      | borrow hinner htargets =>
+          rcases oneBorrowSlot_borrow_lval_inv hslotA haTy haLife hrest
+              htargetsNoBorrow lv hinner with
+            ⟨hsrc, _hmutable, hslotTargets, _hlife⟩
+          subst hsrc
+          subst hslotTargets
+          exact False.elim (htargetsNoBorrow htargets)
+
+theorem oneBorrowSlot_contains_inv {env : Env} {aSlot : EnvSlot}
+    {slotTargets : List LVal}
+    (hslotA : env.slotAt "a" = some aSlot)
+    (haTy : aSlot.ty = .ty (.borrow true slotTargets))
+    (hrest : ∀ {x slot}, x ≠ "a" → env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
+    ∀ {x mutable targets},
+      env ⊢ x ↝ (.borrow mutable targets) →
+      x = "a" ∧ mutable = true ∧ targets = slotTargets := by
+  intro x mutable targets hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  by_cases ha : x = "a"
+  · subst ha
+    have hslotEq : slot = aSlot := Option.some.inj (hslot.symm.trans hslotA)
+    subst hslotEq
+    rw [haTy] at hcontainsTy
+    cases hcontainsTy with
+    | here => exact ⟨rfl, rfl, rfl⟩
+  · rcases hrest ha hslot with hslotTy | hslotTy <;>
+      rw [hslotTy] at hcontainsTy <;> cases hcontainsTy
+
+theorem retargetAfterIfEnv1_scalar_slot {x : Name} {slot : EnvSlot} :
+    retargetAfterIfEnv1.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro hslot
+  by_cases hc : x = "c"
+  · subst hc
+    have hslotTy : slot.ty = .ty .int := by
+      simpa [retargetAfterIfEnv1, retargetAfterIfEnv0,
+        retargetAfterIfIntSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    exact Or.inl hslotTy
+  · have hnone : retargetAfterIfEnv1.slotAt x = none := by
+      simp [retargetAfterIfEnv1, retargetAfterIfEnv0,
+        retargetAfterIfIntSlot, Env.update, Env.empty, hc]
+    rw [hslot] at hnone
+    cases hnone
+
+theorem retargetAfterIfEnv2_scalar_slot {x : Name} {slot : EnvSlot} :
+    retargetAfterIfEnv2.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro hslot
+  by_cases hd : x = "d"
+  · subst hd
+    have hslotTy : slot.ty = .ty .int := by
+      simpa [retargetAfterIfEnv2, retargetAfterIfIntSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    exact Or.inl hslotTy
+  · by_cases hc : x = "c"
+    · subst hc
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [retargetAfterIfEnv2, retargetAfterIfEnv1,
+          retargetAfterIfEnv0, retargetAfterIfIntSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      exact Or.inl hslotTy
+    · have hnone : retargetAfterIfEnv2.slotAt x = none := by
+        simp [retargetAfterIfEnv2, retargetAfterIfEnv1,
+          retargetAfterIfEnv0, retargetAfterIfIntSlot, Env.update,
+          Env.empty, hd, hc]
+      rw [hslot] at hnone
+      cases hnone
+
+theorem retargetAfterIfEnv3_scalar_slot {x : Name} {slot : EnvSlot} :
+    retargetAfterIfEnv3.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro hslot
+  by_cases he : x = "e"
+  · subst he
+    have hslotTy : slot.ty = .ty .int := by
+      simpa [retargetAfterIfEnv3, retargetAfterIfIntSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    exact Or.inl hslotTy
+  · by_cases hd : x = "d"
+    · subst hd
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfIntSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      exact Or.inl hslotTy
+    · by_cases hc : x = "c"
+      · subst hc
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        exact Or.inl hslotTy
+      · have hnone : retargetAfterIfEnv3.slotAt x = none := by
+          simp [retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            Env.update, Env.empty, he, hd, hc]
+        rw [hslot] at hnone
+        cases hnone
+
+theorem retargetAfterIfEnv4_scalar_slot {x : Name} {slot : EnvSlot} :
+    retargetAfterIfEnv4.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro hslot
+  by_cases hsth : x = "sth"
+  · subst hsth
+    have hslotTy : slot.ty = .ty .bool := by
+      simpa [retargetAfterIfEnv4, retargetAfterIfBoolSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    exact Or.inr hslotTy
+  · by_cases he : x = "e"
+    · subst he
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [retargetAfterIfEnv4, retargetAfterIfEnv3,
+          retargetAfterIfIntSlot, retargetAfterIfBoolSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      exact Or.inl hslotTy
+    · by_cases hd : x = "d"
+      · subst hd
+        have hslotTy : slot.ty = .ty .int := by
+          simpa [retargetAfterIfEnv4, retargetAfterIfEnv3,
+            retargetAfterIfEnv2, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        exact Or.inl hslotTy
+      · by_cases hc : x = "c"
+        · subst hc
+          have hslotTy : slot.ty = .ty .int := by
+            simpa [retargetAfterIfEnv4, retargetAfterIfEnv3,
+              retargetAfterIfEnv2, retargetAfterIfEnv1,
+              retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+                hslot).symm
+          exact Or.inl hslotTy
+        · have hnone : retargetAfterIfEnv4.slotAt x = none := by
+            simp [retargetAfterIfEnv4, retargetAfterIfEnv3,
+              retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+              retargetAfterIfIntSlot, retargetAfterIfBoolSlot, Env.update,
+              Env.empty, hsth, he, hd, hc]
+          rw [hslot] at hnone
+          cases hnone
+
+theorem retargetAfterIfEnv1_not_borrow_lval :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      ¬ LValTyping retargetAfterIfEnv1 lv
+        (.ty (.borrow mutable targets)) lifetime :=
+  lval_not_borrow_of_scalar_slots retargetAfterIfEnv1_scalar_slot
+
+theorem retargetAfterIfEnv2_not_borrow_lval :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      ¬ LValTyping retargetAfterIfEnv2 lv
+        (.ty (.borrow mutable targets)) lifetime :=
+  lval_not_borrow_of_scalar_slots retargetAfterIfEnv2_scalar_slot
+
+theorem retargetAfterIfEnv3_not_borrow_lval :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      ¬ LValTyping retargetAfterIfEnv3 lv
+        (.ty (.borrow mutable targets)) lifetime :=
+  lval_not_borrow_of_scalar_slots retargetAfterIfEnv3_scalar_slot
+
+theorem retargetAfterIfEnv4_not_borrow_lval :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      ¬ LValTyping retargetAfterIfEnv4 lv
+        (.ty (.borrow mutable targets)) lifetime :=
+  lval_not_borrow_of_scalar_slots retargetAfterIfEnv4_scalar_slot
+
+theorem retargetAfterIf_c_declare_coherent :
+    FreshUpdateCoherenceObligations retargetAfterIfEnv0 "c" .int
+      Lifetime.root := by
+  exact freshUpdateCoherence_no_borrow (fun lv mutable targets borrowLifetime =>
+    by
+      intro htyping
+      exact retargetAfterIfEnv1_not_borrow_lval lv (by
+        simpa [retargetAfterIfEnv1, retargetAfterIfIntSlot] using htyping))
+
+theorem retargetAfterIf_d_declare_coherent :
+    FreshUpdateCoherenceObligations retargetAfterIfEnv1 "d" .int
+      Lifetime.root := by
+  exact freshUpdateCoherence_no_borrow (fun lv mutable targets borrowLifetime =>
+    by
+      intro htyping
+      exact retargetAfterIfEnv2_not_borrow_lval lv (by
+        simpa [retargetAfterIfEnv2, retargetAfterIfIntSlot] using htyping))
+
+theorem retargetAfterIf_e_declare_coherent :
+    FreshUpdateCoherenceObligations retargetAfterIfEnv2 "e" .int
+      Lifetime.root := by
+  exact freshUpdateCoherence_no_borrow (fun lv mutable targets borrowLifetime =>
+    by
+      intro htyping
+      exact retargetAfterIfEnv3_not_borrow_lval lv (by
+        simpa [retargetAfterIfEnv3, retargetAfterIfIntSlot] using htyping))
+
+theorem retargetAfterIf_sth_declare_coherent :
+    FreshUpdateCoherenceObligations retargetAfterIfEnv3 "sth" .bool
+      Lifetime.root := by
+  exact freshUpdateCoherence_no_borrow (fun lv mutable targets borrowLifetime =>
+    by
+      intro htyping
+      exact retargetAfterIfEnv4_not_borrow_lval lv (by
+        simpa [retargetAfterIfEnv4, retargetAfterIfBoolSlot] using htyping))
+
+theorem retargetAfterIfEnv4_c_typing :
+    LValTyping retargetAfterIfEnv4 (.var "c") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfEnv4 "c" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+      retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+      retargetAfterIfBoolSlot, Env.update])
+
+theorem retargetAfterIfEnv5_c_typing :
+    LValTyping retargetAfterIfEnv5 (.var "c") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfEnv5 "c" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      retargetAfterIfIntSlot, retargetAfterIfBoolSlot, retargetAfterIfACSlot,
+      Env.update])
+
+theorem retargetAfterIfEnv5_no_box_lval :
+    ∀ (lv : LVal) {inner lifetime},
+      ¬ LValTyping retargetAfterIfEnv5 lv (.box inner) lifetime
+  | .var x, _inner, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, _hl⟩
+      by_cases ha : x = "a"
+      · subst ha
+        have hslotTy : slot.ty = .ty (.borrow true [.var "c"]) := by
+          simpa [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+        rw [hslotTy] at hty
+        cases hty
+      · rcases retargetAfterIfEnv4_scalar_slot (by
+            simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
+          hslotTy | hslotTy <;> rw [hslotTy] at hty <;> cases hty
+  | .deref lv, _inner, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact retargetAfterIfEnv5_no_box_lval lv hinner
+      | borrow _hborrow htargets =>
+          exact LValTargetsTyping.not_box htargets
+
+theorem retargetAfterIfEnv5_borrow_lval_inv :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      LValTyping retargetAfterIfEnv5 lv (.ty (.borrow mutable targets))
+        lifetime →
+      lv = .var "a" ∧ mutable = true ∧ targets = [.var "c"] ∧
+        lifetime = Lifetime.root
+  | .var x, _mutable, _targets, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, hl⟩
+      by_cases ha : x = "a"
+      · subst ha
+        have hslotEq : slot = retargetAfterIfACSlot := by
+          have hslotExpected :
+              retargetAfterIfEnv5.slotAt "a" =
+                some retargetAfterIfACSlot := by
+            simp [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update]
+          exact Option.some.inj (hslot.symm.trans hslotExpected)
+        subst slot
+        cases hty
+        simp [retargetAfterIfACSlot] at hl
+        exact ⟨rfl, rfl, rfl, hl.symm⟩
+      · rcases retargetAfterIfEnv4_scalar_slot (by
+            simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
+          hslotTy | hslotTy <;> rw [hslotTy] at hty <;> cases hty
+  | .deref lv, _mutable, _targets, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact False.elim (retargetAfterIfEnv5_no_box_lval lv hinner)
+      | borrow hinner htargets =>
+          rcases retargetAfterIfEnv5_borrow_lval_inv lv hinner with
+            ⟨hsrc, hmutable, htargetsEq, _hlife⟩
+          subst hsrc
+          subst hmutable
+          subst htargetsEq
+          cases htargets with
+          | singleton htarget =>
+              rcases LValTyping.var_inv htarget with ⟨slot, hslot, hty, _hl⟩
+              have hslotTy : slot.ty = .ty .int := by
+                simpa [retargetAfterIfEnv5, retargetAfterIfEnv4,
+                  retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfACSlot, Env.update] using
+                  (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+                    hslot).symm
+              rw [hslotTy] at hty
+              cases hty
+          | cons _hhead hrest _hunion _hintersection =>
+              cases hrest
+
+theorem retargetAfterIf_a_declare_coherent :
+    FreshUpdateCoherenceObligations retargetAfterIfEnv4 "a"
+      (.borrow true [.var "c"]) Lifetime.root := by
+  constructor
+  · intro lv mutable targets borrowLifetime hbase htyping
+    rcases retargetAfterIfEnv5_borrow_lval_inv lv (by
+        simpa [retargetAfterIfEnv5, retargetAfterIfACSlot] using htyping) with
+      ⟨hlv, _hmutable, _htargets, _hlife⟩
+    subst hlv
+    exact False.elim (hbase rfl)
+  · intro lv mutable targets borrowLifetime _hbase htyping
+    rcases retargetAfterIfEnv5_borrow_lval_inv lv (by
+        simpa [retargetAfterIfEnv5, retargetAfterIfACSlot] using htyping) with
+      ⟨_hlv, _hmutable, htargets, _hlife⟩
+    subst htargets
+    exact ⟨.int, Lifetime.root,
+      LValTargetsTyping.singleton retargetAfterIfEnv5_c_typing⟩
+
+theorem retargetAfterIf_declare_c_typing :
+    TermTyping retargetAfterIfEnv0 StoreTyping.empty Lifetime.root
+      (.letMut "c" (.val (.int 0))) .unit retargetAfterIfEnv1 := by
+  exact TermTyping.declare
+    (by simp [retargetAfterIfEnv0, Env.fresh, Env.empty])
+    (TermTyping.const ValueTyping.int)
+    (by simp [retargetAfterIfEnv0, Env.fresh, Env.empty])
+    retargetAfterIf_c_declare_coherent
+    (by simp [retargetAfterIfEnv1, retargetAfterIfIntSlot])
+
+theorem retargetAfterIf_declare_d_typing :
+    TermTyping retargetAfterIfEnv1 StoreTyping.empty Lifetime.root
+      (.letMut "d" (.val (.int 0))) .unit retargetAfterIfEnv2 := by
+  exact TermTyping.declare
+    (by simp [retargetAfterIfEnv1, retargetAfterIfEnv0, Env.fresh,
+      Env.update, Env.empty])
+    (TermTyping.const ValueTyping.int)
+    (by simp [retargetAfterIfEnv1, retargetAfterIfEnv0, Env.fresh,
+      Env.update, Env.empty])
+    retargetAfterIf_d_declare_coherent
+    (by simp [retargetAfterIfEnv2, retargetAfterIfIntSlot])
+
+theorem retargetAfterIf_declare_e_typing :
+    TermTyping retargetAfterIfEnv2 StoreTyping.empty Lifetime.root
+      (.letMut "e" (.val (.int 0))) .unit retargetAfterIfEnv3 := by
+  exact TermTyping.declare
+    (by simp [retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, Env.fresh, Env.update, Env.empty])
+    (TermTyping.const ValueTyping.int)
+    (by simp [retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, Env.fresh, Env.update, Env.empty])
+    retargetAfterIf_e_declare_coherent
+    (by simp [retargetAfterIfEnv3, retargetAfterIfIntSlot])
+
+theorem retargetAfterIf_declare_sth_typing :
+    TermTyping retargetAfterIfEnv3 StoreTyping.empty Lifetime.root
+      (.letMut "sth" (.val (.bool true))) .unit retargetAfterIfEnv4 := by
+  exact TermTyping.declare
+    (by simp [retargetAfterIfEnv3, retargetAfterIfEnv2,
+      retargetAfterIfEnv1, retargetAfterIfEnv0, Env.fresh, Env.update,
+      Env.empty])
+    (TermTyping.const ValueTyping.bool)
+    (by simp [retargetAfterIfEnv3, retargetAfterIfEnv2,
+      retargetAfterIfEnv1, retargetAfterIfEnv0, Env.fresh, Env.update,
+      Env.empty])
+    retargetAfterIf_sth_declare_coherent
+    (by simp [retargetAfterIfEnv4, retargetAfterIfBoolSlot])
+
+theorem retargetAfterIf_declare_a_typing :
+    TermTyping retargetAfterIfEnv4 StoreTyping.empty Lifetime.root
+      (.letMut "a" (.borrow true (.var "c"))) .unit retargetAfterIfEnv5 := by
+  exact TermTyping.declare
+    (by simp [retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      Env.fresh, Env.update, Env.empty])
+    (TermTyping.mutBorrow retargetAfterIfEnv4_c_typing
+      (Mutable.var (by
+        show retargetAfterIfEnv4.slotAt "c" = some retargetAfterIfIntSlot
+        simp [retargetAfterIfEnv4, retargetAfterIfEnv3,
+          retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+          retargetAfterIfIntSlot, retargetAfterIfBoolSlot, Env.update]))
+      (not_writeProhibited_of_no_borrows
+        (env_not_contains_borrow_of_scalar_slots
+          retargetAfterIfEnv4_scalar_slot)
+        (.var "c")))
+    (by simp [retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      Env.fresh, Env.update, Env.empty])
+    retargetAfterIf_a_declare_coherent
+    (by simp [retargetAfterIfEnv5, retargetAfterIfACSlot])
+
+theorem retargetAfterIf_declarations_typing :
+    TermListTyping retargetAfterIfEnv0 StoreTyping.empty Lifetime.root
+      [.letMut "c" (.val (.int 0)),
+       .letMut "d" (.val (.int 0)),
+       .letMut "e" (.val (.int 0)),
+       .letMut "sth" (.val (.bool true)),
+       .letMut "a" (.borrow true (.var "c"))]
+      .unit retargetAfterIfEnv5 := by
+  exact TermListTyping.cons retargetAfterIf_declare_c_typing
+    (TermListTyping.cons retargetAfterIf_declare_d_typing
+      (TermListTyping.cons retargetAfterIf_declare_e_typing
+        (TermListTyping.cons retargetAfterIf_declare_sth_typing
+          (TermListTyping.singleton retargetAfterIf_declare_a_typing))))
 
 /--
 Accepted `if/else` with nontrivial pointer effects in the branches.
@@ -417,8 +1076,10 @@ theorem pointerIf_retarget_noStale :
     | here =>
         simp at htarget
         subst htarget
-        simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path]
-          at hprefix
+        cases hprefix with
+        | direct hprefix =>
+            simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base,
+              LVal.path] at hprefix
   · by_cases hx : x = "x"
     · subst hx
       have hslotTy : slot.ty = .ty .int := by
@@ -1233,8 +1894,10 @@ theorem pointerIf_write_noStale :
     | here =>
         simp at htarget
         subst htarget
-        simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path]
-          at hprefix
+        cases hprefix with
+        | direct hprefix =>
+            simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base,
+              LVal.path] at hprefix
   · by_cases hx : x = "x"
     · subst hx
       have hslotTy : slot.ty = .ty .int := by
@@ -1876,6 +2539,1478 @@ theorem ifPointerAssignment_typing :
     WellFormedTy.unit
     ifPointerAssignment_join_obligations.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.1
+
+/-! ### Checked relaxed-`T-If` retargeting example -/
+
+theorem retargetAfterIfEnv5_contains_inv {x mutable targets} :
+    retargetAfterIfEnv5 ⊢ x ↝ (.borrow mutable targets) →
+    x = "a" ∧ mutable = true ∧ targets = [.var "c"] :=
+  oneBorrowSlot_contains_inv
+    (env := retargetAfterIfEnv5) (aSlot := retargetAfterIfACSlot)
+    (slotTargets := [.var "c"])
+    (by simp [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update])
+    (by simp [retargetAfterIfACSlot])
+    (by
+      intro x slot ha hslot
+      exact retargetAfterIfEnv4_scalar_slot (by
+        simpa [retargetAfterIfEnv5, Env.update, ha] using hslot))
+
+theorem retargetAfterIfEnv5_d_typing :
+    LValTyping retargetAfterIfEnv5 (.var "d") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfEnv5 "d" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      retargetAfterIfIntSlot, retargetAfterIfBoolSlot, retargetAfterIfACSlot,
+      Env.update])
+
+theorem retargetAfterIfEnv5_e_typing :
+    LValTyping retargetAfterIfEnv5 (.var "e") (.ty .int) Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfEnv5 "e" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      retargetAfterIfIntSlot, retargetAfterIfBoolSlot, retargetAfterIfACSlot,
+      Env.update])
+
+theorem retargetAfterIfEnv5_sth_typing :
+    LValTyping retargetAfterIfEnv5 (.var "sth") (.ty .bool)
+      Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfEnv5 "sth" retargetAfterIfBoolSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      retargetAfterIfIntSlot, retargetAfterIfBoolSlot, retargetAfterIfACSlot,
+      Env.update])
+
+theorem retargetAfterIfEnv5_a_typing :
+    LValTyping retargetAfterIfEnv5 (.var "a")
+      (.ty (.borrow true [.var "c"])) Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfEnv5 "a" retargetAfterIfACSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update])
+
+theorem retargetAfterIfEnv5_not_readProhibited_sth :
+    ¬ ReadProhibited retargetAfterIfEnv5 (.var "sth") := by
+  exact not_readProhibited_of_oneBorrowSlot_disjoint
+    retargetAfterIfEnv5_contains_inv
+    (by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp [LVal.base])
+
+theorem retargetAfterIfCondition_typing :
+    TermTyping retargetAfterIfEnv5 StoreTyping.empty Lifetime.root
+      (.copy (.var "sth")) .bool retargetAfterIfEnv5 :=
+  TermTyping.copy retargetAfterIfEnv5_sth_typing CopyTy.bool
+    retargetAfterIfEnv5_not_readProhibited_sth
+
+theorem retargetAfterIfEnv5_not_writeProhibited_d :
+    ¬ WriteProhibited retargetAfterIfEnv5 (.var "d") := by
+  exact not_writeProhibited_of_oneBorrowSlot_disjoint
+    retargetAfterIfEnv5_contains_inv
+    (by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp [LVal.base])
+
+theorem retargetAfterIfEnv5_not_writeProhibited_e :
+    ¬ WriteProhibited retargetAfterIfEnv5 (.var "e") := by
+  exact not_writeProhibited_of_oneBorrowSlot_disjoint
+    retargetAfterIfEnv5_contains_inv
+    (by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp [LVal.base])
+
+theorem retargetAfterIfEnv5_d_mutable :
+    Mutable retargetAfterIfEnv5 (.var "d") :=
+  @Mutable.var retargetAfterIfEnv5 "d" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      retargetAfterIfIntSlot, retargetAfterIfBoolSlot, retargetAfterIfACSlot,
+      Env.update])
+
+theorem retargetAfterIfEnv5_e_mutable :
+    Mutable retargetAfterIfEnv5 (.var "e") :=
+  @Mutable.var retargetAfterIfEnv5 "e" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfEnv5, retargetAfterIfEnv4, retargetAfterIfEnv3,
+      retargetAfterIfEnv2, retargetAfterIfEnv1, retargetAfterIfEnv0,
+      retargetAfterIfIntSlot, retargetAfterIfBoolSlot, retargetAfterIfACSlot,
+      Env.update])
+
+theorem retargetAfterIf_shape_ac_ad :
+    ShapeCompatible retargetAfterIfEnv5
+      (.ty (.borrow true [.var "c"])) (.ty (.borrow true [.var "d"])) := by
+  exact ShapeCompatible.borrow
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, retargetAfterIfEnv5_c_typing⟩)
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, retargetAfterIfEnv5_d_typing⟩)
+    ShapeCompatible.int
+
+theorem retargetAfterIf_shape_ac_ae :
+    ShapeCompatible retargetAfterIfEnv5
+      (.ty (.borrow true [.var "c"])) (.ty (.borrow true [.var "e"])) := by
+  exact ShapeCompatible.borrow
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, retargetAfterIfEnv5_c_typing⟩)
+    (fun target htarget => by
+      simp at htarget
+      subst htarget
+      exact ⟨Lifetime.root, retargetAfterIfEnv5_e_typing⟩)
+    ShapeCompatible.int
+
+theorem retargetAfterIf_borrow_d_wellFormed :
+    WellFormedTy retargetAfterIfEnv5 (.borrow true [.var "d"])
+      Lifetime.root := by
+  exact WellFormedTy.borrow (BorrowTargetsWellFormed.intro (by
+    intro target htarget
+    simp at htarget
+    subst htarget
+    exact ⟨.int, Lifetime.root, retargetAfterIfEnv5_d_typing,
+      LifetimeOutlives.refl Lifetime.root,
+      ⟨retargetAfterIfIntSlot, by
+        simp [retargetAfterIfEnv5, retargetAfterIfEnv4,
+          retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+          retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfACSlot, Env.update,
+          LVal.base],
+        LifetimeOutlives.refl Lifetime.root⟩⟩))
+
+theorem retargetAfterIf_borrow_e_wellFormed :
+    WellFormedTy retargetAfterIfEnv5 (.borrow true [.var "e"])
+      Lifetime.root := by
+  exact WellFormedTy.borrow (BorrowTargetsWellFormed.intro (by
+    intro target htarget
+    simp at htarget
+    subst htarget
+    exact ⟨.int, Lifetime.root, retargetAfterIfEnv5_e_typing,
+      LifetimeOutlives.refl Lifetime.root,
+      ⟨retargetAfterIfIntSlot, by
+        simp [retargetAfterIfEnv5, retargetAfterIfEnv4,
+          retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+          retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfACSlot, Env.update,
+          LVal.base],
+        LifetimeOutlives.refl Lifetime.root⟩⟩))
+
+theorem retargetAfterIf_write_a_d :
+    EnvWrite 0 retargetAfterIfEnv5 (.var "a") (.borrow true [.var "d"])
+      retargetAfterIfTrueEnv := by
+  simpa [retargetAfterIfTrueEnv, retargetAfterIfADSlot,
+      retargetAfterIfACSlot, LVal.base] using
+    (@EnvWrite.intro 0 retargetAfterIfEnv5 retargetAfterIfEnv5 (.var "a")
+      retargetAfterIfACSlot (.borrow true [.var "d"])
+      (.ty (.borrow true [.var "d"]))
+      (by
+        show retargetAfterIfEnv5.slotAt "a" = some retargetAfterIfACSlot
+        simp [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update])
+      UpdateAtPath.strong)
+
+theorem retargetAfterIf_write_a_e :
+    EnvWrite 0 retargetAfterIfEnv5 (.var "a") (.borrow true [.var "e"])
+      retargetAfterIfFalseEnv := by
+  simpa [retargetAfterIfFalseEnv, retargetAfterIfAESlot,
+      retargetAfterIfACSlot, LVal.base] using
+    (@EnvWrite.intro 0 retargetAfterIfEnv5 retargetAfterIfEnv5 (.var "a")
+      retargetAfterIfACSlot (.borrow true [.var "e"])
+      (.ty (.borrow true [.var "e"]))
+      (by
+        show retargetAfterIfEnv5.slotAt "a" = some retargetAfterIfACSlot
+        simp [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update])
+      UpdateAtPath.strong)
+
+theorem retargetAfterIf_write_a_d_effective {result : Env} {written : LVal} :
+    EnvWriteEffectiveWrite 0 retargetAfterIfEnv5 (.var "a")
+      (.borrow true [.var "d"]) result written →
+    written = .var "a" := by
+  intro hwrite
+  cases hwrite with
+  | intro _hslot hupdate =>
+      cases hupdate with
+      | strong => rfl
+
+theorem retargetAfterIf_write_a_e_effective {result : Env} {written : LVal} :
+    EnvWriteEffectiveWrite 0 retargetAfterIfEnv5 (.var "a")
+      (.borrow true [.var "e"]) result written →
+    written = .var "a" := by
+  intro hwrite
+  cases hwrite with
+  | intro _hslot hupdate =>
+      cases hupdate with
+      | strong => rfl
+
+theorem retargetAfterIfTrue_rest_scalar {x : Name} {slot : EnvSlot} :
+    x ≠ "a" → retargetAfterIfTrueEnv.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro ha hslot
+  exact retargetAfterIfEnv4_scalar_slot (by
+    simpa [retargetAfterIfTrueEnv, retargetAfterIfEnv5, Env.update, ha] using
+      hslot)
+
+theorem retargetAfterIfTrue_d_typing :
+    LValTyping retargetAfterIfTrueEnv (.var "d") (.ty .int)
+      Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfTrueEnv "d" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfADSlot, Env.update])
+
+theorem retargetAfterIfTrue_targets_d_no_borrow {mutable targets lifetime} :
+    ¬ LValTargetsTyping retargetAfterIfTrueEnv [.var "d"]
+      (.ty (.borrow mutable targets)) lifetime := by
+  intro htargets
+  cases htargets with
+  | singleton htarget =>
+      rcases LValTyping.var_inv htarget with ⟨slot, hslot, hty, _hl⟩
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hty
+      cases hty
+  | cons _hhead hrest _hunion _hintersection =>
+      cases hrest
+
+theorem retargetAfterIfTrue_borrow_lval_inv :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      LValTyping retargetAfterIfTrueEnv lv (.ty (.borrow mutable targets))
+        lifetime →
+      lv = .var "a" ∧ mutable = true ∧ targets = [.var "d"] ∧
+        lifetime = Lifetime.root :=
+  oneBorrowSlot_borrow_lval_inv
+    (env := retargetAfterIfTrueEnv) (aSlot := retargetAfterIfADSlot)
+    (slotTargets := [.var "d"])
+    (by simp [retargetAfterIfTrueEnv, retargetAfterIfADSlot, Env.update])
+    (by simp [retargetAfterIfADSlot])
+    (by simp [retargetAfterIfADSlot])
+    retargetAfterIfTrue_rest_scalar
+    retargetAfterIfTrue_targets_d_no_borrow
+
+theorem retargetAfterIfTrue_contains_inv {x mutable targets} :
+    retargetAfterIfTrueEnv ⊢ x ↝ (.borrow mutable targets) →
+    x = "a" ∧ mutable = true ∧ targets = [.var "d"] :=
+  oneBorrowSlot_contains_inv
+    (env := retargetAfterIfTrueEnv) (aSlot := retargetAfterIfADSlot)
+    (slotTargets := [.var "d"])
+    (by simp [retargetAfterIfTrueEnv, retargetAfterIfADSlot, Env.update])
+    (by simp [retargetAfterIfADSlot])
+    retargetAfterIfTrue_rest_scalar
+
+theorem retargetAfterIfTrue_coherent : Coherent retargetAfterIfTrueEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases retargetAfterIfTrue_borrow_lval_inv lv htyping with
+    ⟨hlv, hmutable, htargets, _hl⟩
+  subst hlv
+  subst hmutable
+  subst htargets
+  exact ⟨.int, Lifetime.root,
+    LValTargetsTyping.singleton retargetAfterIfTrue_d_typing⟩
+
+theorem retargetAfterIfTrue_contained :
+    ContainedBorrowsWellFormed retargetAfterIfTrueEnv := by
+  intro x slot mutable targets hslot hcontains
+  rcases retargetAfterIfTrue_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+  have hslotEq : slot = retargetAfterIfADSlot := by
+    have hslotExpected :
+        retargetAfterIfTrueEnv.slotAt "a" = some retargetAfterIfADSlot := by
+      simp [retargetAfterIfTrueEnv, retargetAfterIfADSlot, Env.update]
+    exact Option.some.inj (hslot.symm.trans hslotExpected)
+  subst slot
+  intro target htarget
+  simp at htarget
+  subst htarget
+  exact ⟨.int, Lifetime.root, retargetAfterIfTrue_d_typing,
+    LifetimeOutlives.refl Lifetime.root,
+    ⟨retargetAfterIfIntSlot, by
+      simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+        retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+        retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+        retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update,
+        LVal.base],
+      LifetimeOutlives.refl Lifetime.root⟩⟩
+
+theorem retargetAfterIfTrue_not_writeProhibited_a :
+    ¬ WriteProhibited retargetAfterIfTrueEnv (.var "a") := by
+  exact not_writeProhibited_of_oneBorrowSlot_disjoint
+    retargetAfterIfTrue_contains_inv
+    (by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp [LVal.base])
+
+theorem retargetAfterIfFalse_rest_scalar {x : Name} {slot : EnvSlot} :
+    x ≠ "a" → retargetAfterIfFalseEnv.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro ha hslot
+  exact retargetAfterIfEnv4_scalar_slot (by
+    simpa [retargetAfterIfFalseEnv, retargetAfterIfEnv5, Env.update, ha] using
+      hslot)
+
+theorem retargetAfterIfFalse_e_typing :
+    LValTyping retargetAfterIfFalseEnv (.var "e") (.ty .int)
+      Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfFalseEnv "e" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfAESlot, Env.update])
+
+theorem retargetAfterIfFalse_targets_e_no_borrow {mutable targets lifetime} :
+    ¬ LValTargetsTyping retargetAfterIfFalseEnv [.var "e"]
+      (.ty (.borrow mutable targets)) lifetime := by
+  intro htargets
+  cases htargets with
+  | singleton htarget =>
+      rcases LValTyping.var_inv htarget with ⟨slot, hslot, hty, _hl⟩
+      have hslotTy : slot.ty = .ty .int := by
+        simpa [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hty
+      cases hty
+  | cons _hhead hrest _hunion _hintersection =>
+      cases hrest
+
+theorem retargetAfterIfFalse_borrow_lval_inv :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      LValTyping retargetAfterIfFalseEnv lv (.ty (.borrow mutable targets))
+        lifetime →
+      lv = .var "a" ∧ mutable = true ∧ targets = [.var "e"] ∧
+        lifetime = Lifetime.root :=
+  oneBorrowSlot_borrow_lval_inv
+    (env := retargetAfterIfFalseEnv) (aSlot := retargetAfterIfAESlot)
+    (slotTargets := [.var "e"])
+    (by simp [retargetAfterIfFalseEnv, retargetAfterIfAESlot, Env.update])
+    (by simp [retargetAfterIfAESlot])
+    (by simp [retargetAfterIfAESlot])
+    retargetAfterIfFalse_rest_scalar
+    retargetAfterIfFalse_targets_e_no_borrow
+
+theorem retargetAfterIfFalse_contains_inv {x mutable targets} :
+    retargetAfterIfFalseEnv ⊢ x ↝ (.borrow mutable targets) →
+    x = "a" ∧ mutable = true ∧ targets = [.var "e"] :=
+  oneBorrowSlot_contains_inv
+    (env := retargetAfterIfFalseEnv) (aSlot := retargetAfterIfAESlot)
+    (slotTargets := [.var "e"])
+    (by simp [retargetAfterIfFalseEnv, retargetAfterIfAESlot, Env.update])
+    (by simp [retargetAfterIfAESlot])
+    retargetAfterIfFalse_rest_scalar
+
+theorem retargetAfterIfFalse_coherent : Coherent retargetAfterIfFalseEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases retargetAfterIfFalse_borrow_lval_inv lv htyping with
+    ⟨hlv, hmutable, htargets, _hl⟩
+  subst hlv
+  subst hmutable
+  subst htargets
+  exact ⟨.int, Lifetime.root,
+    LValTargetsTyping.singleton retargetAfterIfFalse_e_typing⟩
+
+theorem retargetAfterIfFalse_contained :
+    ContainedBorrowsWellFormed retargetAfterIfFalseEnv := by
+  intro x slot mutable targets hslot hcontains
+  rcases retargetAfterIfFalse_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+  have hslotEq : slot = retargetAfterIfAESlot := by
+    have hslotExpected :
+        retargetAfterIfFalseEnv.slotAt "a" = some retargetAfterIfAESlot := by
+      simp [retargetAfterIfFalseEnv, retargetAfterIfAESlot, Env.update]
+    exact Option.some.inj (hslot.symm.trans hslotExpected)
+  subst slot
+  intro target htarget
+  simp at htarget
+  subst htarget
+  exact ⟨.int, Lifetime.root, retargetAfterIfFalse_e_typing,
+    LifetimeOutlives.refl Lifetime.root,
+    ⟨retargetAfterIfIntSlot, by
+      simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+        retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+        retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+        retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update,
+        LVal.base],
+      LifetimeOutlives.refl Lifetime.root⟩⟩
+
+theorem retargetAfterIfFalse_not_writeProhibited_a :
+    ¬ WriteProhibited retargetAfterIfFalseEnv (.var "a") := by
+  exact not_writeProhibited_of_oneBorrowSlot_disjoint
+    retargetAfterIfFalse_contains_inv
+    (by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp [LVal.base])
+
+theorem retargetAfterIf_retarget_d_noStale :
+    EnvWriteNoStaleBorrowTargets 0 retargetAfterIfEnv5 (.var "a")
+      (.borrow true [.var "d"]) retargetAfterIfTrueEnv := by
+  intro written x slot mutable targets target hwrite hslot hcontains htarget
+    hmayRead
+  have hwritten := retargetAfterIf_write_a_d_effective hwrite
+  subst written
+  rcases retargetAfterIfTrue_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+  simp at htarget
+  subst htarget
+  cases hmayRead with
+  | direct hprefix =>
+      simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path] at hprefix
+
+theorem retargetAfterIf_retarget_e_noStale :
+    EnvWriteNoStaleBorrowTargets 0 retargetAfterIfEnv5 (.var "a")
+      (.borrow true [.var "e"]) retargetAfterIfFalseEnv := by
+  intro written x slot mutable targets target hwrite hslot hcontains htarget
+    hmayRead
+  have hwritten := retargetAfterIf_write_a_e_effective hwrite
+  subst written
+  rcases retargetAfterIfFalse_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+  simp at htarget
+  subst htarget
+  cases hmayRead with
+  | direct hprefix =>
+      simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path] at hprefix
+
+theorem retargetAfterIf_retarget_d_ranked :
+    ∃ φ, LinearizedBy φ retargetAfterIfEnv5 ∧
+      EnvWriteRhsBorrowTargetsBelow φ retargetAfterIfTrueEnv
+        (.borrow true [.var "d"]) := by
+  let φ : Name → Nat := fun name => if name = "a" then 1 else 0
+  refine ⟨φ, ?linearized, ?below⟩
+  · intro root slot hslot v hv
+    by_cases ha : root = "a"
+    · subst ha
+      have hslotTy : slot.ty = .ty (.borrow true [.var "c"]) := by
+        simpa [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+      subst v
+      simp [φ, LVal.base]
+    · rcases retargetAfterIfEnv4_scalar_slot (by
+          simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
+        hslotTy | hslotTy <;> rw [hslotTy] at hv <;>
+        simp [PartialTy.vars, Ty.vars] at hv
+  · constructor
+    · intro root slot mutable targets target hslot hcontains htarget hrhs
+      rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains,
+        hrhsTarget⟩
+      cases hrhsContains with
+      | here =>
+          rcases retargetAfterIfTrue_contains_inv
+              ⟨slot, hslot, hcontains⟩ with
+            ⟨hroot, hmutable, htargets⟩
+          subst hroot
+          subst hmutable
+          subst htargets
+          simp at htarget hrhsTarget
+          subst htarget
+          simp [φ, LVal.base]
+    · intro root other mutable targetsMutable targetsOther targetMutable
+        targetOther hcontainsMutable hcontainsOther _htargetMutable
+        _htargetOther _hconflict _hrhsMutable _hrhsOther
+      rcases retargetAfterIfTrue_contains_inv hcontainsMutable with
+        ⟨hroot, _hmutable, _htargets⟩
+      rcases retargetAfterIfTrue_contains_inv hcontainsOther with
+        ⟨hother, _hmutableOther, _htargetsOther⟩
+      subst hroot
+      subst hother
+      rfl
+
+theorem retargetAfterIf_retarget_e_ranked :
+    ∃ φ, LinearizedBy φ retargetAfterIfEnv5 ∧
+      EnvWriteRhsBorrowTargetsBelow φ retargetAfterIfFalseEnv
+        (.borrow true [.var "e"]) := by
+  let φ : Name → Nat := fun name => if name = "a" then 1 else 0
+  refine ⟨φ, ?linearized, ?below⟩
+  · intro root slot hslot v hv
+    by_cases ha : root = "a"
+    · subst ha
+      have hslotTy : slot.ty = .ty (.borrow true [.var "c"]) := by
+        simpa [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+      rw [hslotTy] at hv
+      simp [PartialTy.vars, Ty.vars] at hv
+      subst v
+      simp [φ, LVal.base]
+    · rcases retargetAfterIfEnv4_scalar_slot (by
+          simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
+        hslotTy | hslotTy <;> rw [hslotTy] at hv <;>
+        simp [PartialTy.vars, Ty.vars] at hv
+  · constructor
+    · intro root slot mutable targets target hslot hcontains htarget hrhs
+      rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains,
+        hrhsTarget⟩
+      cases hrhsContains with
+      | here =>
+          rcases retargetAfterIfFalse_contains_inv
+              ⟨slot, hslot, hcontains⟩ with
+            ⟨hroot, hmutable, htargets⟩
+          subst hroot
+          subst hmutable
+          subst htargets
+          simp at htarget hrhsTarget
+          subst htarget
+          simp [φ, LVal.base]
+    · intro root other mutable targetsMutable targetsOther targetMutable
+        targetOther hcontainsMutable hcontainsOther _htargetMutable
+        _htargetOther _hconflict _hrhsMutable _hrhsOther
+      rcases retargetAfterIfFalse_contains_inv hcontainsMutable with
+        ⟨hroot, _hmutable, _htargets⟩
+      rcases retargetAfterIfFalse_contains_inv hcontainsOther with
+        ⟨hother, _hmutableOther, _htargetsOther⟩
+      subst hroot
+      subst hother
+      rfl
+
+theorem retargetAfterIf_trueBranch_typing :
+    TermTyping retargetAfterIfEnv5 StoreTyping.empty Lifetime.root
+      (.assign (.var "a") (.borrow true (.var "d"))) .unit
+      retargetAfterIfTrueEnv := by
+  exact TermTyping.assign
+    (TermTyping.mutBorrow retargetAfterIfEnv5_d_typing
+      retargetAfterIfEnv5_d_mutable
+      retargetAfterIfEnv5_not_writeProhibited_d)
+    retargetAfterIfEnv5_a_typing
+    retargetAfterIf_shape_ac_ad
+    retargetAfterIf_borrow_d_wellFormed
+    retargetAfterIf_write_a_d
+    retargetAfterIf_retarget_d_noStale
+    retargetAfterIf_retarget_d_ranked
+    retargetAfterIfTrue_coherent
+    (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
+      retargetAfterIfTrue_contained)
+    retargetAfterIfTrue_not_writeProhibited_a
+
+theorem retargetAfterIf_falseBranch_typing :
+    TermTyping retargetAfterIfEnv5 StoreTyping.empty Lifetime.root
+      (.assign (.var "a") (.borrow true (.var "e"))) .unit
+      retargetAfterIfFalseEnv := by
+  exact TermTyping.assign
+    (TermTyping.mutBorrow retargetAfterIfEnv5_e_typing
+      retargetAfterIfEnv5_e_mutable
+      retargetAfterIfEnv5_not_writeProhibited_e)
+    retargetAfterIfEnv5_a_typing
+    retargetAfterIf_shape_ac_ae
+    retargetAfterIf_borrow_e_wellFormed
+    retargetAfterIf_write_a_e
+    retargetAfterIf_retarget_e_noStale
+    retargetAfterIf_retarget_e_ranked
+    retargetAfterIfFalse_coherent
+    (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
+      retargetAfterIfFalse_contained)
+    retargetAfterIfFalse_not_writeProhibited_a
+
+theorem retargetAfterIfJoin_rest_scalar {x : Name} {slot : EnvSlot} :
+    x ≠ "a" → retargetAfterIfJoinEnv.slotAt x = some slot →
+    slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
+  intro ha hslot
+  exact retargetAfterIfEnv4_scalar_slot (by
+    simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5, Env.update, ha] using
+      hslot)
+
+theorem retargetAfterIfJoin_d_typing :
+    LValTyping retargetAfterIfJoinEnv (.var "d") (.ty .int)
+      Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfJoinEnv "d" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfAJoinSlot, Env.update])
+
+theorem retargetAfterIfJoin_e_typing :
+    LValTyping retargetAfterIfJoinEnv (.var "e") (.ty .int)
+      Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfJoinEnv "e" retargetAfterIfIntSlot (by
+    simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfAJoinSlot, Env.update])
+
+theorem retargetAfterIfJoin_a_typing :
+    LValTyping retargetAfterIfJoinEnv (.var "a")
+      (.ty (.borrow true [.var "d", .var "e"])) Lifetime.root := by
+  exact @LValTyping.var retargetAfterIfJoinEnv "a" retargetAfterIfAJoinSlot (by
+    simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update])
+
+theorem retargetAfterIfJoin_targets_de_no_borrow {mutable targets lifetime} :
+    ¬ LValTargetsTyping retargetAfterIfJoinEnv [.var "d", .var "e"]
+      (.ty (.borrow mutable targets)) lifetime := by
+  intro htargets
+  cases htargets with
+  | cons hhead hrest hunion _hintersection =>
+      rcases LValTyping.var_inv hhead with ⟨slotD, hslotD, htyD, _⟩
+      have hslotDTy : slotD.ty = .ty .int := by
+        simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslotD).symm
+      rw [hslotDTy] at htyD
+      cases htyD
+      cases hrest with
+      | singleton htail =>
+          rcases LValTyping.var_inv htail with ⟨slotE, hslotE, htyE, _⟩
+          have hslotETy : slotE.ty = .ty .int := by
+            simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslotE).symm
+          rw [hslotETy] at htyE
+          cases htyE
+          have hleft := PartialTyUnion.left_strengthens hunion
+          cases hleft
+      | cons _hhead2 hrest2 _hunion2 _hintersection2 =>
+          cases hrest2
+
+theorem retargetAfterIfJoin_borrow_lval_inv :
+    ∀ (lv : LVal) {mutable targets lifetime},
+      LValTyping retargetAfterIfJoinEnv lv (.ty (.borrow mutable targets))
+        lifetime →
+      lv = .var "a" ∧ mutable = true ∧ targets = [.var "d", .var "e"] ∧
+        lifetime = Lifetime.root :=
+  oneBorrowSlot_borrow_lval_inv
+    (env := retargetAfterIfJoinEnv) (aSlot := retargetAfterIfAJoinSlot)
+    (slotTargets := [.var "d", .var "e"])
+    (by simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update])
+    (by simp [retargetAfterIfAJoinSlot])
+    (by simp [retargetAfterIfAJoinSlot])
+    retargetAfterIfJoin_rest_scalar
+    retargetAfterIfJoin_targets_de_no_borrow
+
+theorem retargetAfterIfJoin_contains_inv {x mutable targets} :
+    retargetAfterIfJoinEnv ⊢ x ↝ (.borrow mutable targets) →
+    x = "a" ∧ mutable = true ∧ targets = [.var "d", .var "e"] :=
+  oneBorrowSlot_contains_inv
+    (env := retargetAfterIfJoinEnv) (aSlot := retargetAfterIfAJoinSlot)
+    (slotTargets := [.var "d", .var "e"])
+    (by simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update])
+    (by simp [retargetAfterIfAJoinSlot])
+    retargetAfterIfJoin_rest_scalar
+
+theorem retargetAfterIfJoin_coherent : Coherent retargetAfterIfJoinEnv := by
+  intro lv mutable targets borrowLifetime htyping
+  rcases retargetAfterIfJoin_borrow_lval_inv lv htyping with
+    ⟨hlv, hmutable, htargets, _hl⟩
+  subst hlv
+  subst hmutable
+  subst htargets
+  exact ⟨.int, Lifetime.root,
+    LValTargetsTyping.cons retargetAfterIfJoin_d_typing
+      (LValTargetsTyping.singleton retargetAfterIfJoin_e_typing)
+      (PartialTyUnion.self (.ty .int))
+      (LifetimeIntersection.self Lifetime.root)⟩
+
+theorem retargetAfterIfJoin_contained :
+    ContainedBorrowsWellFormed retargetAfterIfJoinEnv := by
+  intro x slot mutable targets hslot hcontains
+  rcases retargetAfterIfJoin_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+  have hslotEq : slot = retargetAfterIfAJoinSlot := by
+    have hslotExpected :
+        retargetAfterIfJoinEnv.slotAt "a" = some retargetAfterIfAJoinSlot := by
+      simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update]
+    exact Option.some.inj (hslot.symm.trans hslotExpected)
+  subst slot
+  intro target htarget
+  simp at htarget
+  rcases htarget with rfl | rfl
+  · exact ⟨.int, Lifetime.root, retargetAfterIfJoin_d_typing,
+      LifetimeOutlives.refl Lifetime.root,
+      ⟨retargetAfterIfIntSlot, by
+        simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update,
+          LVal.base],
+        LifetimeOutlives.refl Lifetime.root⟩⟩
+  · exact ⟨.int, Lifetime.root, retargetAfterIfJoin_e_typing,
+      LifetimeOutlives.refl Lifetime.root,
+      ⟨retargetAfterIfIntSlot, by
+        simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update,
+          LVal.base],
+        LifetimeOutlives.refl Lifetime.root⟩⟩
+
+theorem retargetAfterIfJoin_linearizable : Linearizable retargetAfterIfJoinEnv := by
+  refine ⟨fun name => if name = "a" then 1 else 0, ?_⟩
+  intro root slot hslot v hv
+  by_cases ha : root = "a"
+  · subst ha
+    have hslotTy : slot.ty = .ty (.borrow true [.var "d", .var "e"]) := by
+      simpa [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+    rw [hslotTy] at hv
+    simp [PartialTy.vars, Ty.vars, LVal.base] at hv
+    rcases hv with rfl | rfl <;> simp
+  · rcases retargetAfterIfJoin_rest_scalar ha hslot with hslotTy | hslotTy <;>
+      rw [hslotTy] at hv <;> simp [PartialTy.vars, Ty.vars] at hv
+
+theorem retargetAfterIfTrue_le_join :
+    EnvStrengthens retargetAfterIfTrueEnv retargetAfterIfJoinEnv := by
+  intro name
+  by_cases ha : name = "a"
+  · subst ha
+    rw [show retargetAfterIfTrueEnv.slotAt "a" =
+          some retargetAfterIfADSlot by
+        simp [retargetAfterIfTrueEnv, retargetAfterIfADSlot, Env.update],
+      show retargetAfterIfJoinEnv.slotAt "a" =
+          some retargetAfterIfAJoinSlot by
+        simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update]]
+    have hsub : List.Subset [LVal.var "d"] [LVal.var "d", LVal.var "e"] := by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
+  · by_cases hsth : name = "sth"
+    · subst hsth
+      rw [show retargetAfterIfTrueEnv.slotAt "sth" =
+            some retargetAfterIfBoolSlot by
+          simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update],
+        show retargetAfterIfJoinEnv.slotAt "sth" =
+            some retargetAfterIfBoolSlot by
+          simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update]]
+      exact ⟨rfl, PartialTyStrengthens.reflex⟩
+    · by_cases he : name = "e"
+      · subst he
+        rw [show retargetAfterIfTrueEnv.slotAt "e" =
+              some retargetAfterIfIntSlot by
+            simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update],
+          show retargetAfterIfJoinEnv.slotAt "e" =
+              some retargetAfterIfIntSlot by
+            simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update]]
+        exact ⟨rfl, PartialTyStrengthens.reflex⟩
+      · by_cases hd : name = "d"
+        · subst hd
+          rw [show retargetAfterIfTrueEnv.slotAt "d" =
+                some retargetAfterIfIntSlot by
+              simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update],
+            show retargetAfterIfJoinEnv.slotAt "d" =
+                some retargetAfterIfIntSlot by
+              simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update]]
+          exact ⟨rfl, PartialTyStrengthens.reflex⟩
+        · by_cases hc : name = "c"
+          · subst hc
+            rw [show retargetAfterIfTrueEnv.slotAt "c" =
+                  some retargetAfterIfIntSlot by
+                simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfADSlot, Env.update],
+              show retargetAfterIfJoinEnv.slotAt "c" =
+                  some retargetAfterIfIntSlot by
+                simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfAJoinSlot, Env.update]]
+            exact ⟨rfl, PartialTyStrengthens.reflex⟩
+          · rw [show retargetAfterIfTrueEnv.slotAt name = none by
+                simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfADSlot, Env.update, Env.empty, ha, hsth, he,
+                  hd, hc],
+              show retargetAfterIfJoinEnv.slotAt name = none by
+                simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfAJoinSlot, Env.update, Env.empty, ha, hsth,
+                  he, hd, hc]]
+            trivial
+
+theorem retargetAfterIfFalse_le_join :
+    EnvStrengthens retargetAfterIfFalseEnv retargetAfterIfJoinEnv := by
+  intro name
+  by_cases ha : name = "a"
+  · subst ha
+    rw [show retargetAfterIfFalseEnv.slotAt "a" =
+          some retargetAfterIfAESlot by
+        simp [retargetAfterIfFalseEnv, retargetAfterIfAESlot, Env.update],
+      show retargetAfterIfJoinEnv.slotAt "a" =
+          some retargetAfterIfAJoinSlot by
+        simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update]]
+    have hsub : List.Subset [LVal.var "e"] [LVal.var "d", LVal.var "e"] := by
+      intro target htarget
+      simp at htarget
+      subst htarget
+      simp
+    exact ⟨rfl, PartialTyStrengthens.borrow hsub⟩
+  · by_cases hsth : name = "sth"
+    · subst hsth
+      rw [show retargetAfterIfFalseEnv.slotAt "sth" =
+            some retargetAfterIfBoolSlot by
+          simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update],
+        show retargetAfterIfJoinEnv.slotAt "sth" =
+            some retargetAfterIfBoolSlot by
+          simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update]]
+      exact ⟨rfl, PartialTyStrengthens.reflex⟩
+    · by_cases he : name = "e"
+      · subst he
+        rw [show retargetAfterIfFalseEnv.slotAt "e" =
+              some retargetAfterIfIntSlot by
+            simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update],
+          show retargetAfterIfJoinEnv.slotAt "e" =
+              some retargetAfterIfIntSlot by
+            simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update]]
+        exact ⟨rfl, PartialTyStrengthens.reflex⟩
+      · by_cases hd : name = "d"
+        · subst hd
+          rw [show retargetAfterIfFalseEnv.slotAt "d" =
+                some retargetAfterIfIntSlot by
+              simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update],
+            show retargetAfterIfJoinEnv.slotAt "d" =
+                some retargetAfterIfIntSlot by
+              simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update]]
+          exact ⟨rfl, PartialTyStrengthens.reflex⟩
+        · by_cases hc : name = "c"
+          · subst hc
+            rw [show retargetAfterIfFalseEnv.slotAt "c" =
+                  some retargetAfterIfIntSlot by
+                simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfAESlot, Env.update],
+              show retargetAfterIfJoinEnv.slotAt "c" =
+                  some retargetAfterIfIntSlot by
+                simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfAJoinSlot, Env.update]]
+            exact ⟨rfl, PartialTyStrengthens.reflex⟩
+          · rw [show retargetAfterIfFalseEnv.slotAt name = none by
+                simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfAESlot, Env.update, Env.empty, ha, hsth, he,
+                  hd, hc],
+              show retargetAfterIfJoinEnv.slotAt name = none by
+                simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                  retargetAfterIfEnv1, retargetAfterIfEnv0,
+                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                  retargetAfterIfAJoinSlot, Env.update, Env.empty, ha, hsth,
+                  he, hd, hc]]
+            trivial
+
+theorem retargetAfterIfJoin_least {env' : Env}
+    (htrue : EnvStrengthens retargetAfterIfTrueEnv env')
+    (hfalse : EnvStrengthens retargetAfterIfFalseEnv env') :
+    EnvStrengthens retargetAfterIfJoinEnv env' := by
+  intro name
+  by_cases ha : name = "a"
+  · subst ha
+    rcases EnvStrengthens.slot_forward htrue (show
+        retargetAfterIfTrueEnv.slotAt "a" = some retargetAfterIfADSlot by
+          simp [retargetAfterIfTrueEnv, retargetAfterIfADSlot, Env.update]) with
+      ⟨slotD, hslotD, hlifeD, hstrD⟩
+    rcases EnvStrengthens.slot_forward hfalse (show
+        retargetAfterIfFalseEnv.slotAt "a" = some retargetAfterIfAESlot by
+          simp [retargetAfterIfFalseEnv, retargetAfterIfAESlot, Env.update]) with
+      ⟨slotE, hslotE, _hlifeE, hstrE⟩
+    have hslotEq : slotE = slotD := Option.some.inj (hslotE.symm.trans hslotD)
+    subst hslotEq
+    rw [show retargetAfterIfJoinEnv.slotAt "a" =
+          some retargetAfterIfAJoinSlot by
+        simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update],
+      hslotE]
+    have hD : PartialTyStrengthens (.ty (.borrow true [.var "d"])) slotE.ty :=
+      hstrD
+    have hE : PartialTyStrengthens (.ty (.borrow true [.var "e"])) slotE.ty :=
+      hstrE
+    have hDE : PartialTyStrengthens
+        (.ty (.borrow true ([.var "d"] ++ [.var "e"]))) slotE.ty :=
+      partialTyStrengthens_borrow_append hD hE
+    exact ⟨hlifeD, by simpa [retargetAfterIfAJoinSlot] using hDE⟩
+  · by_cases hsth : name = "sth"
+    · subst hsth
+      rcases EnvStrengthens.slot_forward htrue (show
+          retargetAfterIfTrueEnv.slotAt "sth" =
+            some retargetAfterIfBoolSlot by
+            simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0,
+              retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+              retargetAfterIfADSlot, Env.update]) with
+        ⟨slot', hslot', hlife, hstr⟩
+      rw [show retargetAfterIfJoinEnv.slotAt "sth" =
+            some retargetAfterIfBoolSlot by
+          simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update],
+        hslot']
+      exact ⟨hlife, hstr⟩
+    · by_cases he : name = "e"
+      · subst he
+        rcases EnvStrengthens.slot_forward htrue (show
+            retargetAfterIfTrueEnv.slotAt "e" =
+              some retargetAfterIfIntSlot by
+              simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0,
+                retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                retargetAfterIfADSlot, Env.update]) with
+          ⟨slot', hslot', hlife, hstr⟩
+        rw [show retargetAfterIfJoinEnv.slotAt "e" =
+              some retargetAfterIfIntSlot by
+            simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0,
+              retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+              retargetAfterIfAJoinSlot, Env.update],
+          hslot']
+        exact ⟨hlife, hstr⟩
+      · by_cases hd : name = "d"
+        · subst hd
+          rcases EnvStrengthens.slot_forward htrue (show
+              retargetAfterIfTrueEnv.slotAt "d" =
+                some retargetAfterIfIntSlot by
+                simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3,
+                  retargetAfterIfEnv2, retargetAfterIfEnv1,
+                  retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                  retargetAfterIfBoolSlot, retargetAfterIfADSlot,
+                  Env.update]) with
+            ⟨slot', hslot', hlife, hstr⟩
+          rw [show retargetAfterIfJoinEnv.slotAt "d" =
+                some retargetAfterIfIntSlot by
+              simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0,
+                retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                retargetAfterIfAJoinSlot, Env.update],
+            hslot']
+          exact ⟨hlife, hstr⟩
+        · by_cases hc : name = "c"
+          · subst hc
+            rcases EnvStrengthens.slot_forward htrue (show
+                retargetAfterIfTrueEnv.slotAt "c" =
+                  some retargetAfterIfIntSlot by
+                  simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                    retargetAfterIfEnv4, retargetAfterIfEnv3,
+                    retargetAfterIfEnv2, retargetAfterIfEnv1,
+                    retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                    retargetAfterIfBoolSlot, retargetAfterIfADSlot,
+                    Env.update]) with
+              ⟨slot', hslot', hlife, hstr⟩
+            rw [show retargetAfterIfJoinEnv.slotAt "c" =
+                  some retargetAfterIfIntSlot by
+                simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                  retargetAfterIfEnv4, retargetAfterIfEnv3,
+                  retargetAfterIfEnv2, retargetAfterIfEnv1,
+                  retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                  retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot,
+                  Env.update],
+              hslot']
+            exact ⟨hlife, hstr⟩
+          · have htrueNone : retargetAfterIfTrueEnv.slotAt name = none := by
+              simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0,
+                retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                retargetAfterIfADSlot, Env.update, Env.empty, ha, hsth, he,
+                hd, hc]
+            have hjoinNone : retargetAfterIfJoinEnv.slotAt name = none := by
+              simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0,
+                retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+                retargetAfterIfAJoinSlot, Env.update, Env.empty, ha, hsth, he,
+                hd, hc]
+            have h := htrue name
+            rw [htrueNone] at h
+            rw [hjoinNone]
+            cases henvSlot : env'.slotAt name with
+            | none => trivial
+            | some envSlot =>
+                rw [henvSlot] at h
+                cases h
+
+theorem retargetAfterIf_envJoin :
+    EnvJoin retargetAfterIfTrueEnv retargetAfterIfFalseEnv
+      retargetAfterIfJoinEnv := by
+  constructor
+  · intro env henv
+    simp only [Set.mem_insert_iff, Set.mem_singleton_iff] at henv
+    rcases henv with rfl | rfl
+    · exact retargetAfterIfTrue_le_join
+    · exact retargetAfterIfFalse_le_join
+  · intro env' henv'
+    exact retargetAfterIfJoin_least
+      (henv' retargetAfterIfTrueEnv (by simp))
+      (henv' retargetAfterIfFalseEnv (by simp))
+
+theorem retargetAfterIfTrue_join_sameShape :
+    EnvJoinSameShape retargetAfterIfTrueEnv retargetAfterIfJoinEnv := by
+  intro name branchSlot joinSlot hbranch hjoin
+  by_cases ha : name = "a"
+  · subst ha
+    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "d"]) := by
+      simpa [retargetAfterIfTrueEnv, retargetAfterIfADSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+    have hjoinTy :
+        joinSlot.ty = .ty (.borrow true [.var "d", .var "e"]) := by
+      simpa [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+    simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+  · by_cases hsth : name = "sth"
+    · subst hsth
+      have hbranchTy : branchSlot.ty = .ty .bool := by
+        simpa [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+      have hjoinTy : joinSlot.ty = .ty .bool := by
+        simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+      simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+    · by_cases he : name = "e"
+      · subst he
+        have hbranchTy : branchSlot.ty = .ty .int := by
+          simpa [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+        have hjoinTy : joinSlot.ty = .ty .int := by
+          simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+        simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+      · by_cases hd : name = "d"
+        · subst hd
+          have hbranchTy : branchSlot.ty = .ty .int := by
+            simpa [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+          have hjoinTy : joinSlot.ty = .ty .int := by
+            simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+          simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+        · by_cases hc : name = "c"
+          · subst hc
+            have hbranchTy : branchSlot.ty = .ty .int := by
+              simpa [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+            have hjoinTy : joinSlot.ty = .ty .int := by
+              simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+            simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+          · have hnone : retargetAfterIfTrueEnv.slotAt name = none := by
+              simp [retargetAfterIfTrueEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfADSlot, Env.update,
+                Env.empty, ha, hsth, he, hd, hc]
+            rw [hbranch] at hnone
+            cases hnone
+
+theorem retargetAfterIfFalse_join_sameShape :
+    EnvJoinSameShape retargetAfterIfFalseEnv retargetAfterIfJoinEnv := by
+  intro name branchSlot joinSlot hbranch hjoin
+  by_cases ha : name = "a"
+  · subst ha
+    have hbranchTy : branchSlot.ty = .ty (.borrow true [.var "e"]) := by
+      simpa [retargetAfterIfFalseEnv, retargetAfterIfAESlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+    have hjoinTy :
+        joinSlot.ty = .ty (.borrow true [.var "d", .var "e"]) := by
+      simpa [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update] using
+        (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+    simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+  · by_cases hsth : name = "sth"
+    · subst hsth
+      have hbranchTy : branchSlot.ty = .ty .bool := by
+        simpa [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+      have hjoinTy : joinSlot.ty = .ty .bool := by
+        simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+          retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+          retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+          retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+      simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+    · by_cases he : name = "e"
+      · subst he
+        have hbranchTy : branchSlot.ty = .ty .int := by
+          simpa [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+        have hjoinTy : joinSlot.ty = .ty .int := by
+          simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+            (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+        simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+      · by_cases hd : name = "d"
+        · subst hd
+          have hbranchTy : branchSlot.ty = .ty .int := by
+            simpa [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+          have hjoinTy : joinSlot.ty = .ty .int := by
+            simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+              retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+              retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+              retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+          simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+        · by_cases hc : name = "c"
+          · subst hc
+            have hbranchTy : branchSlot.ty = .ty .int := by
+              simpa [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hbranch).symm
+            have hjoinTy : joinSlot.ty = .ty .int := by
+              simpa [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update] using
+                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hjoin).symm
+            simp [hbranchTy, hjoinTy, PartialTy.sameShape, Ty.sameShape]
+          · have hnone : retargetAfterIfFalseEnv.slotAt name = none := by
+              simp [retargetAfterIfFalseEnv, retargetAfterIfEnv5,
+                retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+                retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+                retargetAfterIfBoolSlot, retargetAfterIfAESlot, Env.update,
+                Env.empty, ha, hsth, he, hd, hc]
+            rw [hbranch] at hnone
+            cases hnone
+
+theorem retargetAfterIf_if_typing :
+    TermTyping retargetAfterIfEnv5 StoreTyping.empty Lifetime.root
+      (.ite (.copy (.var "sth"))
+        (.assign (.var "a") (.borrow true (.var "d")))
+        (.assign (.var "a") (.borrow true (.var "e"))))
+      .unit retargetAfterIfJoinEnv := by
+  exact TermTyping.ite
+    retargetAfterIfCondition_typing
+    retargetAfterIf_trueBranch_typing
+    retargetAfterIf_falseBranch_typing
+    (PartialTyJoin.self (.ty .unit))
+    retargetAfterIf_envJoin
+    retargetAfterIfTrue_join_sameShape
+    retargetAfterIfFalse_join_sameShape
+    WellFormedTy.unit
+    retargetAfterIfJoin_coherent
+    retargetAfterIfJoin_linearizable
+
+theorem retargetAfterIfJoin_deref_a_typing :
+    LValTyping retargetAfterIfJoinEnv (.deref (.var "a")) (.ty .int)
+      Lifetime.root := by
+  exact LValTyping.borrow retargetAfterIfJoin_a_typing
+    (LValTargetsTyping.cons retargetAfterIfJoin_d_typing
+      (LValTargetsTyping.singleton retargetAfterIfJoin_e_typing)
+      (PartialTyUnion.self (.ty .int))
+      (LifetimeIntersection.self Lifetime.root))
+
+theorem retargetAfterIfJoin_not_writeProhibited_deref_a :
+    ¬ WriteProhibited retargetAfterIfJoinEnv (.deref (.var "a")) := by
+  exact not_writeProhibited_of_oneBorrowSlot_disjoint
+    retargetAfterIfJoin_contains_inv
+    (by
+      intro target htarget
+      simp at htarget
+      rcases htarget with rfl | rfl <;> simp [LVal.base])
+
+theorem retargetAfterIfJoin_update_d_eq :
+    retargetAfterIfJoinEnv.update "d" retargetAfterIfIntSlot =
+      retargetAfterIfJoinEnv := by
+  apply env_ext_local
+  intro name
+  by_cases ha : name = "a" <;> by_cases hsth : name = "sth" <;>
+    by_cases he : name = "e" <;> by_cases hd : name = "d" <;>
+    by_cases hc : name = "c" <;>
+    simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfAJoinSlot, Env.update, Env.empty, ha, hsth, he, hd, hc]
+
+theorem retargetAfterIfJoin_update_e_eq :
+    retargetAfterIfJoinEnv.update "e" retargetAfterIfIntSlot =
+      retargetAfterIfJoinEnv := by
+  apply env_ext_local
+  intro name
+  by_cases ha : name = "a" <;> by_cases hsth : name = "sth" <;>
+    by_cases he : name = "e" <;> by_cases hd : name = "d" <;>
+    by_cases hc : name = "c" <;>
+    simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfAJoinSlot, Env.update, Env.empty, ha, hsth, he, hd, hc]
+
+theorem retargetAfterIfJoin_update_a_eq :
+    retargetAfterIfJoinEnv.update "a" retargetAfterIfAJoinSlot =
+      retargetAfterIfJoinEnv := by
+  apply env_ext_local
+  intro name
+  by_cases ha : name = "a" <;> by_cases hsth : name = "sth" <;>
+    by_cases he : name = "e" <;> by_cases hd : name = "d" <;>
+    by_cases hc : name = "c" <;>
+    simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5, retargetAfterIfEnv4,
+      retargetAfterIfEnv3, retargetAfterIfEnv2, retargetAfterIfEnv1,
+      retargetAfterIfEnv0, retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
+      retargetAfterIfAJoinSlot, Env.update, Env.empty, ha, hsth, he, hd, hc]
+
+theorem retargetAfterIf_write_d :
+    EnvWrite 1 retargetAfterIfJoinEnv (.var "d") .int
+      retargetAfterIfJoinEnv := by
+  have hwrite : EnvWrite 1 retargetAfterIfJoinEnv (.var "d") .int
+      (retargetAfterIfJoinEnv.update "d" retargetAfterIfIntSlot) := by
+    simpa [retargetAfterIfIntSlot, LVal.base] using
+      (@EnvWrite.intro 1 retargetAfterIfJoinEnv retargetAfterIfJoinEnv
+        (.var "d") retargetAfterIfIntSlot .int (.ty .int)
+        (by
+          show retargetAfterIfJoinEnv.slotAt "d" =
+            some retargetAfterIfIntSlot
+          simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update])
+        (UpdateAtPath.weak ShapeCompatible.int
+          (PartialTyJoin.self (.ty .int))))
+  simpa [retargetAfterIfJoin_update_d_eq] using hwrite
+
+theorem retargetAfterIf_write_e :
+    EnvWrite 1 retargetAfterIfJoinEnv (.var "e") .int
+      retargetAfterIfJoinEnv := by
+  have hwrite : EnvWrite 1 retargetAfterIfJoinEnv (.var "e") .int
+      (retargetAfterIfJoinEnv.update "e" retargetAfterIfIntSlot) := by
+    simpa [retargetAfterIfIntSlot, LVal.base] using
+      (@EnvWrite.intro 1 retargetAfterIfJoinEnv retargetAfterIfJoinEnv
+        (.var "e") retargetAfterIfIntSlot .int (.ty .int)
+        (by
+          show retargetAfterIfJoinEnv.slotAt "e" =
+            some retargetAfterIfIntSlot
+          simp [retargetAfterIfJoinEnv, retargetAfterIfEnv5,
+            retargetAfterIfEnv4, retargetAfterIfEnv3, retargetAfterIfEnv2,
+            retargetAfterIfEnv1, retargetAfterIfEnv0, retargetAfterIfIntSlot,
+            retargetAfterIfBoolSlot, retargetAfterIfAJoinSlot, Env.update])
+        (UpdateAtPath.weak ShapeCompatible.int
+          (PartialTyJoin.self (.ty .int))))
+  simpa [retargetAfterIfJoin_update_e_eq] using hwrite
+
+theorem retargetAfterIfJoin_envJoin_self :
+    EnvJoin retargetAfterIfJoinEnv retargetAfterIfJoinEnv
+      retargetAfterIfJoinEnv := by
+  simp [EnvJoin]
+
+theorem retargetAfterIf_write_deref_a :
+    EnvWrite 0 retargetAfterIfJoinEnv (.deref (.var "a")) .int
+      retargetAfterIfJoinEnv := by
+  have htargets : WriteBorrowTargets 1 retargetAfterIfJoinEnv []
+      [.var "d", .var "e"] .int retargetAfterIfJoinEnv := by
+    exact WriteBorrowTargets.cons retargetAfterIf_write_d
+      ⟨.int, Lifetime.root, retargetAfterIfJoin_d_typing⟩
+      (WriteBorrowTargets.singleton retargetAfterIf_write_e
+        ⟨.int, Lifetime.root, retargetAfterIfJoin_e_typing⟩)
+      retargetAfterIfJoin_envJoin_self
+  have hwrite : EnvWrite 0 retargetAfterIfJoinEnv (.deref (.var "a")) .int
+      (retargetAfterIfJoinEnv.update "a" retargetAfterIfAJoinSlot) := by
+    simpa [retargetAfterIfAJoinSlot, LVal.base, LVal.path] using
+      (@EnvWrite.intro 0 retargetAfterIfJoinEnv retargetAfterIfJoinEnv
+        (.deref (.var "a")) retargetAfterIfAJoinSlot .int
+        (.ty (.borrow true [.var "d", .var "e"]))
+        (by
+          show retargetAfterIfJoinEnv.slotAt "a" =
+            some retargetAfterIfAJoinSlot
+          simp [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update])
+        (@UpdateAtPath.mutBorrow retargetAfterIfJoinEnv
+          retargetAfterIfJoinEnv 0 [] [.var "d", .var "e"] .int htargets))
+  simpa [retargetAfterIfJoin_update_a_eq] using hwrite
+
+theorem retargetAfterIf_write_deref_a_effective {result : Env}
+    {written : LVal} :
+    EnvWriteEffectiveWrite 0 retargetAfterIfJoinEnv (.deref (.var "a"))
+      .int result written →
+    written = .var "d" ∨ written = .var "e" := by
+  intro hwrite
+  cases hwrite with
+  | @intro _rank _env₁ _env₂ _lv _written sourceSlot _ty _updatedTy
+      hslot hupdate =>
+      have hslotEq : sourceSlot = retargetAfterIfAJoinSlot := by
+        simpa [retargetAfterIfJoinEnv, retargetAfterIfAJoinSlot, Env.update,
+          LVal.base] using hslot.symm
+      subst sourceSlot
+      cases hupdate with
+      | mutBorrow htargets =>
+          cases htargets with
+          | consHead htargetWrite _hrest _hjoin =>
+              cases htargetWrite with
+              | intro _htargetSlot htargetUpdate =>
+                  cases htargetUpdate with
+                  | weak _hshape _hjoin => exact Or.inl rfl
+          | consTail _htargetWrite hrest _hjoin =>
+              cases hrest with
+              | singleton htargetWrite =>
+                  cases htargetWrite with
+                  | intro _htargetSlot htargetUpdate =>
+                      cases htargetUpdate with
+                      | weak _hshape _hjoin => exact Or.inr rfl
+              | consHead htargetWrite _hrest _hjoin =>
+                  cases htargetWrite with
+                  | intro _htargetSlot htargetUpdate =>
+                      cases htargetUpdate with
+                      | weak _hshape _hjoin => exact Or.inr rfl
+              | consTail _htargetWrite hrest _hjoin =>
+                  cases hrest
+
+theorem retargetAfterIf_write_deref_a_noStale :
+    EnvWriteNoStaleBorrowTargets 0 retargetAfterIfJoinEnv
+      (.deref (.var "a")) .int retargetAfterIfJoinEnv := by
+  intro written x slot mutable targets target hwrite hslot hcontains htarget
+    hmayRead
+  rcases retargetAfterIf_write_deref_a_effective hwrite with
+    hwritten | hwritten
+  · subst hwritten
+    rcases retargetAfterIfJoin_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+    simp at htarget
+    rcases htarget with rfl | rfl
+    · cases hmayRead with
+      | direct hprefix =>
+          simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path] at hprefix
+    · cases hmayRead with
+      | direct hprefix =>
+          simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path] at hprefix
+  · subst hwritten
+    rcases retargetAfterIfJoin_contains_inv hcontains with ⟨rfl, rfl, rfl⟩
+    simp at htarget
+    rcases htarget with rfl | rfl
+    · cases hmayRead with
+      | direct hprefix =>
+          simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path] at hprefix
+    · cases hmayRead with
+      | direct hprefix =>
+          simp [LVal.StrictPrefixOf, StrictPathPrefix, LVal.base, LVal.path] at hprefix
+
+theorem retargetAfterIf_write_int_ranked :
+    ∃ φ, LinearizedBy φ retargetAfterIfJoinEnv ∧
+      EnvWriteRhsBorrowTargetsBelow φ retargetAfterIfJoinEnv .int := by
+  rcases retargetAfterIfJoin_linearizable with ⟨φ, hlinearized⟩
+  refine ⟨φ, hlinearized, ?_⟩
+  constructor
+  · intro _root _slot _mutable _targets _target _hslot _hcontains _htarget
+      hrhs
+    rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains, _hrhsTarget⟩
+    cases hrhsContains
+  · intro _root _other _mutable _targetsMutable _targetsOther _targetMutable
+      _targetOther _hcontainsMutable _hcontainsOther _htargetMutable
+      _htargetOther _hconflict hrhsMutable _hrhsOther
+    rcases hrhsMutable with
+      ⟨_rhsMutable, _rhsTargets, hrhsContains, _hrhsTarget⟩
+    cases hrhsContains
+
+theorem retargetAfterIf_final_write_typing :
+    TermTyping retargetAfterIfJoinEnv StoreTyping.empty Lifetime.root
+      (.assign (.deref (.var "a")) (.val (.int 0))) .unit
+      retargetAfterIfJoinEnv := by
+  exact TermTyping.assign
+    (TermTyping.const ValueTyping.int)
+    retargetAfterIfJoin_deref_a_typing
+    ShapeCompatible.int
+    WellFormedTy.int
+    retargetAfterIf_write_deref_a
+    retargetAfterIf_write_deref_a_noStale
+    retargetAfterIf_write_int_ranked
+    retargetAfterIfJoin_coherent
+    (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
+      retargetAfterIfJoin_contained)
+    retargetAfterIfJoin_not_writeProhibited_deref_a
+
+theorem retargetAfterIf_terms_typing :
+    TermListTyping retargetAfterIfEnv0 StoreTyping.empty Lifetime.root
+      retargetAfterIfTerms .unit retargetAfterIfJoinEnv := by
+  unfold retargetAfterIfTerms
+  exact TermListTyping.cons retargetAfterIf_declare_c_typing
+    (TermListTyping.cons retargetAfterIf_declare_d_typing
+      (TermListTyping.cons retargetAfterIf_declare_e_typing
+        (TermListTyping.cons retargetAfterIf_declare_sth_typing
+          (TermListTyping.cons retargetAfterIf_declare_a_typing
+            (TermListTyping.cons retargetAfterIf_if_typing
+              (TermListTyping.singleton
+                retargetAfterIf_final_write_typing))))))
 
 end Paper
 end LwRust
