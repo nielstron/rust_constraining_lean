@@ -1089,10 +1089,10 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     (fun hfresh _hterm hfreshOut hcoh henv ih hsource =>
       TermTyping.declare hfresh (ih (SourceTerm.declare_inner hsource))
         hfreshOut hcoh henv)
-    (fun _hRhs hLhsPost hshape hwf hwrite hnoStale hranked hcoh hcontained
-        hnotWrite ih hsource =>
+    (fun _hRhs hLhsPost hshape hwf hwrite hranked hcoh hcontained hnotWrite
+        ih hsource =>
       TermTyping.assign (ih (SourceTerm.assign_inner hsource)) hLhsPost
-        hshape hwf hwrite hnoStale hranked hcoh hcontained hnotWrite)
+        hshape hwf hwrite hranked hcoh hcontained hnotWrite)
     (fun _hLhs hfresh htypeFresh htyFresh _hstoreFresh _hghostRhs hnotMention henvEq
         hcopyL hcopyR hshape ihL ihGhost hsource =>
       TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
@@ -3625,8 +3625,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
               result.1 result.2 hfreshOut hcohObligations)
         (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs
               _oldTy _rhs _rhsTy}
-            hRhs _hLhsPost hshape hwellRhs hwrite _hnoStale hranked
-            hwriteCoh hcontained hnotWrite ih hsize htypingEq hwellFormed =>
+            hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh
+            hcontained hnotWrite ih hsize htypingEq hwellFormed =>
           by
             let result := ih
               (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
@@ -3798,8 +3798,8 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations
         exact WellFormedEnv.update_fresh_ty_of_coherenceObligations
           result.1 result.2 hfreshOut hcohObligations)
     (fun {_env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy}
-        hRhs _hLhsPost hshape hwellRhs hwrite _hnoStale hranked hwriteCoh
-        hcontained hnotWrite ih
+        hRhs _hLhsPost hshape hwellRhs hwrite hranked hwriteCoh hcontained
+        hnotWrite ih
         htypingEq hwellFormed =>
       by
         let result := ih htypingEq hwellFormed

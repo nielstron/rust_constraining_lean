@@ -1703,22 +1703,13 @@ theorem EnvWriteRhsBorrowTargetsBelow.erase_ghost {φ : Name → Nat}
     {result : Env} {rhsTy : Ty} {ghost : Name} :
     EnvWriteRhsBorrowTargetsBelow φ result rhsTy →
     EnvWriteRhsBorrowTargetsBelow φ (result.erase ghost) rhsTy := by
-  rintro ⟨hrank, hconflicts⟩
-  constructor
-  · intro x slot mutable targets target hslot hcontains htarget hrhs
-    have hslotOrig : result.slotAt x = some slot := by
-      by_cases hx : x = ghost
-      · subst hx
-        simp [Env.erase] at hslot
-      · simpa [Env.erase, hx] using hslot
-    exact hrank x slot mutable targets target hslotOrig hcontains htarget hrhs
-  · intro x y mutable targetsMutable targetsOther
-      targetMutable targetOther hx hy htargetMutable htargetOther hconflict
-      hrhsMutable hrhsOther
-    exact hconflicts x y mutable targetsMutable targetsOther
-      targetMutable targetOther (EnvContains.erase_to_env hx)
-      (EnvContains.erase_to_env hy) htargetMutable htargetOther hconflict
-      hrhsMutable hrhsOther
+  intro hrank x slot mutable targets target hslot hcontains htarget hrhs
+  have hslotOrig : result.slotAt x = some slot := by
+    by_cases hx : x = ghost
+    · subst hx
+      simp [Env.erase] at hslot
+    · simpa [Env.erase, hx] using hslot
+  exact hrank x slot mutable targets target hslotOrig hcontains htarget hrhs
 
 private theorem prependPath_not_mentions {path : List Unit} {target : LVal}
     {ghost : Name} :
@@ -3708,8 +3699,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
                 by simp [Ty.allVars]⟩)
     (by
       intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs
-        rhsTy hRhs hLhs hshape hwell hwrite hnoStale hranked hcoh
-        hcontained hnotWrite ih hfresh hstore hnot
+        rhsTy hRhs hLhs hshape hwell hwrite hranked hcoh hcontained
+        hnotWrite ih hfresh hstore hnot
       have hnotRhs : ¬ Term.Mentions ghost rhs := by
         intro hmention
         exact hnot (by simp [Term.Mentions, hmention])
@@ -3734,8 +3725,6 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
           (by simpa [PartialTy.allVars] using hrhsFresh))
         (WellFormedTy.erase_ghost hwell hfreshRhs hrhsFresh)
         hwriteErased
-        (EnvWriteNoStaleBorrowTargets.erase_ghost_of_write hnoStale hwrite
-          hfreshRhs hnotLhs hrhsFresh)
         ⟨φ, LinearizedBy.erase_ghost hlinear,
           EnvWriteRhsBorrowTargetsBelow.erase_ghost hrhsBelow⟩
         (Coherent.erase_ghost hcoh hfreshWrite)

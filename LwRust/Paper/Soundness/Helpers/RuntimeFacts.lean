@@ -814,7 +814,7 @@ theorem EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all {rank : Nat
         ⟨mutable, oldTargets, target, holdContains, holdTarget, hbase⟩
     exact hlin x oldSlot holdSlot v hvOld
   · have htargetBelow : φ (LVal.base target) < φ x :=
-      hbelow.1 x slot mutable targets target hslot hcontains htarget
+      hbelow x slot mutable targets target hslot hcontains htarget
         (by
           rcases hfromRhs with ⟨rhsTargets, hrhsContains, hrhsTarget⟩
           exact ⟨mutable, rhsTargets, hrhsContains, hrhsTarget⟩)

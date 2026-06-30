@@ -1029,36 +1029,20 @@ structure FreshUpdateCoherenceObligations
         targets (.ty targetTy) targetLifetime
 
 /--
-Rank and RHS-fan-out safety obligation for assignment writes.
+Rank obligation for assignment writes.
 
 Every borrow edge installed from the RHS type must point to a lower-ranked base
-in the pre-write environment.  Additionally, if a write fan-out duplicates RHS
-borrow targets into two result roots, any resulting mutable-borrow conflict must
-be within one root.  This is the explicit rule-side replacement for assuming
-that all environment writes preserve linearizability and borrow safety.
+in the pre-write environment.
 -/
 def EnvWriteRhsBorrowTargetsBelow (φ : Name → Nat) (result : Env) (rhsTy : Ty) : Prop :=
-  (∀ x slot mutable targets target,
+  ∀ x slot mutable targets target,
       result.slotAt x = some slot →
       PartialTyContains slot.ty (.borrow mutable targets) →
       target ∈ targets →
       (∃ rhsMutable rhsTargets,
         PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
           target ∈ rhsTargets) →
-      φ (LVal.base target) < φ x) ∧
-  (∀ x y mutable targetsMutable targetsOther targetMutable targetOther,
-      result ⊢ x ↝ (.borrow true targetsMutable) →
-      result ⊢ y ↝ (.borrow mutable targetsOther) →
-      targetMutable ∈ targetsMutable →
-      targetOther ∈ targetsOther →
-      targetMutable ⋈ targetOther →
-      (∃ rhsMutable rhsTargets,
-        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
-          targetMutable ∈ rhsTargets) →
-      (∃ rhsMutable rhsTargets,
-        PartialTyContains (.ty rhsTy) (.borrow rhsMutable rhsTargets) ∧
-          targetOther ∈ rhsTargets) →
-      x = y)
+      φ (LVal.base target) < φ x
 
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
@@ -1205,7 +1189,7 @@ a multi-target borrow `&mut[x,z]` whose targets have different lifetimes fans th
 RHS into both slots, but `targetLifetime` is only the *intersection* of the
 targets' lifetimes, so it cannot bound the RHS by the longer-lived slot's
 lifetime — see the deviation note in the README and the `example` below the rule.
-This mirrors `EnvWriteRhsBorrowTargetsBelow`'s first conjunct, with a lifetime
+This mirrors `EnvWriteRhsBorrowTargetsBelow`, with a lifetime
 conclusion in place of the rank one. -/
 def EnvWriteRhsTargetsWellFormed (result : Env) (rhsTy : Ty) : Prop :=
   ∀ x slot mutable targets target,
@@ -1890,7 +1874,6 @@ mutual
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
-        EnvWriteNoStaleBorrowTargets 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
         Coherent env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
@@ -2029,7 +2012,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnoStale _hrank _hcoherence
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcoherence
         _hcontained _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs

@@ -1138,101 +1138,43 @@ theorem pointerIf_retarget_ranked :
               Env.update, Env.empty, hp, hy, hx]
           rw [hslot] at hnone
           cases hnone
-  · constructor
-    · intro root slot mutable targets target hslot hcontains htarget hrhs
-      rcases hrhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
-      cases hrhsContains with
-      | here =>
-          by_cases hp : root = "p"
-          · subst hp
-            have hslotTy : slot.ty = .ty (.borrow true [.var "y"]) := by
-              simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfPYSlot,
-                Env.update] using
-                (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-            rw [hslotTy] at hcontains
-            cases hcontains with
-            | here =>
-                simp at htarget
-                subst htarget
-                simp [φ, LVal.base]
-          · by_cases hy : root = "y"
-            · subst hy
-              have hslotTy : slot.ty = .ty .int := by
-                simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
-                  pointerIfPYSlot, Env.update] using
-                  (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-              rw [hslotTy] at hcontains
-              cases hcontains
-            · by_cases hx : root = "x"
-              · subst hx
-                have hslotTy : slot.ty = .ty .int := by
-                  simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-                    pointerIfYSlot, pointerIfPYSlot, Env.update] using
-                    (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-                rw [hslotTy] at hcontains
-                cases hcontains
-              · have hnone : pointerIfRetargetEnv.slotAt root = none := by
-                  simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-                    pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty, hp, hy, hx]
-                rw [hslot] at hnone
-                cases hnone
-    · intro root other mutable targetsMutable targetsOther targetMutable targetOther
-        hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
-        _hrhsMutable _hrhsOther
-      rcases hcontainsMutable with ⟨slot, hslot, hcontainsTy⟩
-      rcases hcontainsOther with ⟨otherSlot, hotherSlot, hotherContainsTy⟩
-      by_cases hp : root = "p"
-      · subst hp
-        by_cases hother : other = "p"
-        · exact hother.symm
-        · have hotherNoBorrow : False := by
-            by_cases hy : other = "y"
-            · subst hy
-              have hty : otherSlot.ty = .ty .int := by
-                simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
-                  pointerIfPYSlot, Env.update] using
-                  (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-                    hotherSlot).symm
-              rw [hty] at hotherContainsTy
-              cases hotherContainsTy
-            · by_cases hx : other = "x"
-              · subst hx
-                have hty : otherSlot.ty = .ty .int := by
-                  simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-                    pointerIfYSlot, pointerIfPYSlot, Env.update] using
-                    (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-                      hotherSlot).symm
-                rw [hty] at hotherContainsTy
-                cases hotherContainsTy
-              · have hnone : pointerIfRetargetEnv.slotAt other = none := by
-                  simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-                    pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty, hother, hy, hx]
-                rw [hotherSlot] at hnone
-                cases hnone
-          exact False.elim hotherNoBorrow
-      · have hrootNoBorrow : False := by
-          by_cases hy : root = "y"
+  · intro root slot mutable targets target hslot hcontains htarget hrhs
+    rcases hrhs with ⟨rhsMutable, rhsTargets, hrhsContains, hrhsTarget⟩
+    cases hrhsContains with
+    | here =>
+        by_cases hp : root = "p"
+        · subst hp
+          have hslotTy : slot.ty = .ty (.borrow true [.var "y"]) := by
+            simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfPYSlot,
+              Env.update] using
+              (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
+          rw [hslotTy] at hcontains
+          cases hcontains with
+          | here =>
+              simp at htarget
+              subst htarget
+              simp [φ, LVal.base]
+        · by_cases hy : root = "y"
           · subst hy
-            have hty : slot.ty = .ty .int := by
+            have hslotTy : slot.ty = .ty .int := by
               simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
                 pointerIfPYSlot, Env.update] using
                 (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-            rw [hty] at hcontainsTy
-            cases hcontainsTy
+            rw [hslotTy] at hcontains
+            cases hcontains
           · by_cases hx : root = "x"
             · subst hx
-              have hty : slot.ty = .ty .int := by
+              have hslotTy : slot.ty = .ty .int := by
                 simpa [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
                   pointerIfYSlot, pointerIfPYSlot, Env.update] using
                   (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt) hslot).symm
-              rw [hty] at hcontainsTy
-              cases hcontainsTy
+              rw [hslotTy] at hcontains
+              cases hcontains
             · have hnone : pointerIfRetargetEnv.slotAt root = none := by
                 simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
                   pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty, hp, hy, hx]
               rw [hslot] at hnone
               cases hnone
-        exact False.elim hrootNoBorrow
 
 theorem pointerIfRetarget_not_writeProhibited_p :
     ¬ WriteProhibited pointerIfRetargetEnv (.var "p") := by
@@ -1558,7 +1500,6 @@ theorem pointerRetargetBranch_typing :
     pointerIf_shape_px_py
     pointerIf_borrow_y_wellFormed
     pointerIf_retarget_write
-    pointerIf_retarget_noStale
     pointerIf_retarget_ranked
     pointerIfRetarget_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed pointerIfRetarget_contained)
@@ -1641,15 +1582,9 @@ theorem pointerIf_write_ranked :
       EnvWriteRhsBorrowTargetsBelow φ pointerIfWriteEnv .int := by
   refine ⟨pointerIf_retarget_ranked.choose,
     pointerIf_retarget_ranked.choose_spec.1, ?below⟩
-  · constructor
-    · intro root slot mutable targets target hslot hcontains _htarget hrhs
-      rcases hrhs with ⟨rhsMutable, rhsTargets, hrhsContains, _hrhsTarget⟩
-      cases hrhsContains
-    · intro root other mutable targetsMutable targetsOther targetMutable targetOther
-        hcontainsMutable hcontainsOther htargetMutable htargetOther hconflict
-        hrhsMutable _hrhsOther
-      rcases hrhsMutable with ⟨rhsMutable, rhsTargets, hrhsContains, _hrhsTarget⟩
-      cases hrhsContains
+  · intro root slot mutable targets target hslot hcontains _htarget hrhs
+    rcases hrhs with ⟨rhsMutable, rhsTargets, hrhsContains, _hrhsTarget⟩
+    cases hrhsContains
 
 theorem pointerIf_old_root_int : ∀ {lv partialTy lifetime},
     LVal.base lv ≠ "p" →
@@ -1929,7 +1864,6 @@ theorem pointerWriteBranch_typing :
     ShapeCompatible.int
     WellFormedTy.int
     pointerIf_write_deref_p
-    pointerIf_write_noStale
     pointerIf_write_ranked
     pointerIf_write_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
@@ -3000,31 +2934,20 @@ theorem retargetAfterIf_retarget_d_ranked :
           simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
         hslotTy | hslotTy <;> rw [hslotTy] at hv <;>
         simp [PartialTy.vars, Ty.vars] at hv
-  · constructor
-    · intro root slot mutable targets target hslot hcontains htarget hrhs
-      rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains,
-        hrhsTarget⟩
-      cases hrhsContains with
-      | here =>
-          rcases retargetAfterIfTrue_contains_inv
-              ⟨slot, hslot, hcontains⟩ with
-            ⟨hroot, hmutable, htargets⟩
-          subst hroot
-          subst hmutable
-          subst htargets
-          simp at htarget hrhsTarget
-          subst htarget
-          simp [φ, LVal.base]
-    · intro root other mutable targetsMutable targetsOther targetMutable
-        targetOther hcontainsMutable hcontainsOther _htargetMutable
-        _htargetOther _hconflict _hrhsMutable _hrhsOther
-      rcases retargetAfterIfTrue_contains_inv hcontainsMutable with
-        ⟨hroot, _hmutable, _htargets⟩
-      rcases retargetAfterIfTrue_contains_inv hcontainsOther with
-        ⟨hother, _hmutableOther, _htargetsOther⟩
-      subst hroot
-      subst hother
-      rfl
+  · intro root slot mutable targets target hslot hcontains htarget hrhs
+    rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains,
+      hrhsTarget⟩
+    cases hrhsContains with
+    | here =>
+        rcases retargetAfterIfTrue_contains_inv
+            ⟨slot, hslot, hcontains⟩ with
+          ⟨hroot, hmutable, htargets⟩
+        subst hroot
+        subst hmutable
+        subst htargets
+        simp at htarget hrhsTarget
+        subst htarget
+        simp [φ, LVal.base]
 
 theorem retargetAfterIf_retarget_e_ranked :
     ∃ φ, LinearizedBy φ retargetAfterIfEnv5 ∧
@@ -3046,31 +2969,20 @@ theorem retargetAfterIf_retarget_e_ranked :
           simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
         hslotTy | hslotTy <;> rw [hslotTy] at hv <;>
         simp [PartialTy.vars, Ty.vars] at hv
-  · constructor
-    · intro root slot mutable targets target hslot hcontains htarget hrhs
-      rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains,
-        hrhsTarget⟩
-      cases hrhsContains with
-      | here =>
-          rcases retargetAfterIfFalse_contains_inv
-              ⟨slot, hslot, hcontains⟩ with
-            ⟨hroot, hmutable, htargets⟩
-          subst hroot
-          subst hmutable
-          subst htargets
-          simp at htarget hrhsTarget
-          subst htarget
-          simp [φ, LVal.base]
-    · intro root other mutable targetsMutable targetsOther targetMutable
-        targetOther hcontainsMutable hcontainsOther _htargetMutable
-        _htargetOther _hconflict _hrhsMutable _hrhsOther
-      rcases retargetAfterIfFalse_contains_inv hcontainsMutable with
-        ⟨hroot, _hmutable, _htargets⟩
-      rcases retargetAfterIfFalse_contains_inv hcontainsOther with
-        ⟨hother, _hmutableOther, _htargetsOther⟩
-      subst hroot
-      subst hother
-      rfl
+  · intro root slot mutable targets target hslot hcontains htarget hrhs
+    rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains,
+      hrhsTarget⟩
+    cases hrhsContains with
+    | here =>
+        rcases retargetAfterIfFalse_contains_inv
+            ⟨slot, hslot, hcontains⟩ with
+          ⟨hroot, hmutable, htargets⟩
+        subst hroot
+        subst hmutable
+        subst htargets
+        simp at htarget hrhsTarget
+        subst htarget
+        simp [φ, LVal.base]
 
 theorem retargetAfterIf_trueBranch_typing :
     TermTyping retargetAfterIfEnv5 StoreTyping.empty Lifetime.root
@@ -3084,7 +2996,6 @@ theorem retargetAfterIf_trueBranch_typing :
     retargetAfterIf_shape_ac_ad
     retargetAfterIf_borrow_d_wellFormed
     retargetAfterIf_write_a_d
-    retargetAfterIf_retarget_d_noStale
     retargetAfterIf_retarget_d_ranked
     retargetAfterIfTrue_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
@@ -3103,7 +3014,6 @@ theorem retargetAfterIf_falseBranch_typing :
     retargetAfterIf_shape_ac_ae
     retargetAfterIf_borrow_e_wellFormed
     retargetAfterIf_write_a_e
-    retargetAfterIf_retarget_e_noStale
     retargetAfterIf_retarget_e_ranked
     retargetAfterIfFalse_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
@@ -3970,17 +3880,10 @@ theorem retargetAfterIf_write_int_ranked :
       EnvWriteRhsBorrowTargetsBelow φ retargetAfterIfJoinEnv .int := by
   rcases retargetAfterIfJoin_linearizable with ⟨φ, hlinearized⟩
   refine ⟨φ, hlinearized, ?_⟩
-  constructor
-  · intro _root _slot _mutable _targets _target _hslot _hcontains _htarget
-      hrhs
-    rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains, _hrhsTarget⟩
-    cases hrhsContains
-  · intro _root _other _mutable _targetsMutable _targetsOther _targetMutable
-      _targetOther _hcontainsMutable _hcontainsOther _htargetMutable
-      _htargetOther _hconflict hrhsMutable _hrhsOther
-    rcases hrhsMutable with
-      ⟨_rhsMutable, _rhsTargets, hrhsContains, _hrhsTarget⟩
-    cases hrhsContains
+  intro _root _slot _mutable _targets _target _hslot _hcontains _htarget
+    hrhs
+  rcases hrhs with ⟨_rhsMutable, _rhsTargets, hrhsContains, _hrhsTarget⟩
+  cases hrhsContains
 
 theorem retargetAfterIf_final_write_typing :
     TermTyping retargetAfterIfJoinEnv StoreTyping.empty Lifetime.root
@@ -3992,7 +3895,6 @@ theorem retargetAfterIf_final_write_typing :
     ShapeCompatible.int
     WellFormedTy.int
     retargetAfterIf_write_deref_a
-    retargetAfterIf_write_deref_a_noStale
     retargetAfterIf_write_int_ranked
     retargetAfterIfJoin_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed

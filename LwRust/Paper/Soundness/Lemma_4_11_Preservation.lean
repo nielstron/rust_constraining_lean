@@ -2568,7 +2568,7 @@ theorem safeAbstraction_assign_deref_drop_of_wellFormed
                     hcontainsStrong hstrengthensXr hshapeXr with
                   ⟨ts', hcontains', hsubset⟩
                 have hstrict : φ (LVal.base t) < φ xRoot :=
-                  hbelowRhs.1 xRoot resultSlotXr m ts' t hresultXr hcontains'
+                  hbelowRhs xRoot resultSlotXr m ts' t hresultXr hcontains'
                     (hsubset hmem) ⟨m, ts, hcontains, hmem⟩
                 exact Nat.lt_irrefl _ (lt_of_le_of_lt hrankW hstrict)
               have hnewValid :
@@ -4856,7 +4856,7 @@ theorem safeAbstraction_assign_deref_borrow_write_of_wellFormed
               hcontainsStrong hstrengthensXr hshapeXr with
             ⟨ts', hcontains', hsubset⟩
           have hstrict : φ (LVal.base t) < φ xRoot :=
-            hbelowRhs.1 xRoot resultSlotXr m ts' t hresultXr hcontains'
+            hbelowRhs xRoot resultSlotXr m ts' t hresultXr hcontains'
               (hsubset hmem) ⟨m, ts, hcontains, hmem⟩
           exact Nat.lt_irrefl _ (lt_of_le_of_lt hrankW hstrict)
         have hnewValid :
@@ -5904,8 +5904,8 @@ theorem preservation_bounded
   -- T-Assign
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hnoStale hranked hcoh
-      hcontained hnotWrite _ih hsize htypingEq hsource store finalStore finalValue
+      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hranked hcoh hcontained
+      hnotWrite _ih hsize htypingEq hsource store finalStore finalValue
       hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
     cases htypingEq
     rcases multistep_assign_to_value_inv hmulti with
@@ -5920,7 +5920,7 @@ theorem preservation_bounded
       ⟨hvalidInner, hsafeInner, hvalidValue⟩
     have htermTyping :=
       TermTyping.assign hRhs hLhsPost hshape hwellTy hwrite
-        hnoStale hranked hcoh hcontained hnotWrite
+        hranked hcoh hcontained hnotWrite
     have hwellOut :=
       (typingPreservesWellFormed_of_sourceTerm hsource
         (ValidRuntimeState.validState hvalidRuntime)
@@ -5930,7 +5930,7 @@ theorem preservation_bounded
         hwellInner
         hsafeInner
         (validRuntimeState_assign_value_of_value hvalidInner)
-        hLhsPost hshape hwellTy hwrite hnoStale hranked hnotWrite hwellOut
+        hLhsPost hshape hwellTy hwrite ?noStale hranked hnotWrite hwellOut
         hvalidValue hassignStep
     exact ⟨hwellOut, hterminal⟩
   -- T-Eq
