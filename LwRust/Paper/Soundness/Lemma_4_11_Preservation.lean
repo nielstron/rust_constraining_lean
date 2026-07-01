@@ -3380,6 +3380,396 @@ theorem RuntimePathSelected.updateAtPathEffective_ranked_passthrough
       intros
       trivial
 
+mutual
+  /--
+  Runtime-selected path evidence parameterized by the concrete location reached.
+
+  This is the common core of the variable and heap selected-path witnesses above.
+  It deliberately has no pure full-box "here" case: selection still starts only at
+  a runtime-live borrow target, and box constructors merely transport an already
+  selected path structurally.
+  -/
+  inductive RuntimeLocationPathSelected (store : ProgramStore) (env : Env) :
+      PartialTy → List Unit → Location → Prop where
+    | borrowHere {mutable : Bool} {targets : List LVal}
+        {selectedTarget : LVal} {selectedTargetTy : Ty}
+        {selectedTargetLifetime : Lifetime} {location : Location} :
+        selectedTarget ∈ targets →
+        LValTyping env selectedTarget (.ty selectedTargetTy)
+          selectedTargetLifetime →
+        store.loc selectedTarget = some location →
+        RuntimeLocationPathSelected store env (.ty (.borrow mutable targets))
+          [()] location
+    | box {inner : PartialTy} {path : List Unit} {location : Location} :
+        RuntimeLocationPathSelected store env inner path location →
+        RuntimeLocationPathSelected store env (.box inner) (() :: path)
+          location
+    | boxFull {inner : Ty} {path : List Unit} {location : Location} :
+        RuntimeLocationPathSelected store env (.ty inner) path location →
+        RuntimeLocationPathSelected store env (.ty (.box inner)) (() :: path)
+          location
+    | borrowStep {mutable : Bool} {targets : List LVal} {path : List Unit}
+        {location : Location} :
+        RuntimeLocationTargetsSelected store env targets path location →
+        RuntimeLocationPathSelected store env (.ty (.borrow mutable targets))
+          (() :: path) location
+
+  inductive RuntimeLocationTargetsSelected (store : ProgramStore) (env : Env) :
+      List LVal → List Unit → Location → Prop where
+    | target {targets : List LVal} {target : LVal} {pt : PartialTy}
+        {lifetime : Lifetime} {path : List Unit} {location : Location} :
+        target ∈ targets →
+        LValTyping env target pt lifetime →
+        RuntimeLocationPathSelected store env pt path location →
+        RuntimeLocationTargetsSelected store env targets path location
+end
+
+theorem RuntimeLocationPathSelected.of_partialTyUnion {store : ProgramStore}
+    {env : Env} {left right union : PartialTy} {path : List Unit}
+    {location : Location} :
+    PartialTyUnion left right union →
+    RuntimeLocationPathSelected store env union path location →
+    RuntimeLocationPathSelected store env left path location ∨
+      RuntimeLocationPathSelected store env right path location := by
+  intro hunion hselected
+  refine RuntimeLocationPathSelected.rec
+    (motive_1 := fun union path location _ =>
+      ∀ left right,
+        PartialTyUnion left right union →
+        RuntimeLocationPathSelected store env left path location ∨
+          RuntimeLocationPathSelected store env right path location)
+    (motive_2 := fun _targets _path _location _ => True)
+    ?borrowHere ?box ?boxFull ?borrowStep ?target hselected left right hunion
+  case borrowHere =>
+    intro mutable targets selectedTarget selectedTargetTy
+      selectedTargetLifetime location hmem htyping hloc left right hunion
+    rcases PartialTyStrengthens.to_borrow_right
+        (PartialTyUnion.left_strengthens hunion) with
+      ⟨leftTargets, hleftEq, _hleftSubset⟩
+    rcases PartialTyStrengthens.to_borrow_right
+        (PartialTyUnion.right_strengthens hunion) with
+      ⟨rightTargets, hrightEq, _hrightSubset⟩
+    subst hleftEq
+    subst hrightEq
+    rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
+    · exact Or.inl
+        (RuntimeLocationPathSelected.borrowHere hleft htyping hloc)
+    · exact Or.inr
+        (RuntimeLocationPathSelected.borrowHere hright htyping hloc)
+  case box =>
+    intro inner path location hinner ih left right hunion
+    have hleftStrength := PartialTyUnion.left_strengthens hunion
+    cases hleftStrength with
+    | reflex =>
+        exact Or.inl (RuntimeLocationPathSelected.box hinner)
+    | box hleftInner =>
+        have hrightStrength := PartialTyUnion.right_strengthens hunion
+        cases hrightStrength with
+        | reflex =>
+            exact Or.inr (RuntimeLocationPathSelected.box hinner)
+        | box hrightInner =>
+            rcases ih _ _ (PartialTyUnion.box_inv hunion) with hleft | hright
+            · exact Or.inl (RuntimeLocationPathSelected.box hleft)
+            · exact Or.inr (RuntimeLocationPathSelected.box hright)
+  case boxFull =>
+    intro inner path location hinner ih left right hunion
+    have hleftStrength := PartialTyUnion.left_strengthens hunion
+    cases hleftStrength with
+    | reflex =>
+        exact Or.inl (RuntimeLocationPathSelected.boxFull hinner)
+    | tyBox hleftInner =>
+        have hrightStrength := PartialTyUnion.right_strengthens hunion
+        cases hrightStrength with
+        | reflex =>
+            exact Or.inr (RuntimeLocationPathSelected.boxFull hinner)
+        | tyBox hrightInner =>
+            rcases ih _ _ (PartialTyUnion.tyBox_inv hunion) with hleft | hright
+            · exact Or.inl (RuntimeLocationPathSelected.boxFull hleft)
+            · exact Or.inr (RuntimeLocationPathSelected.boxFull hright)
+  case borrowStep =>
+    intro mutable targets path location htargets _ih left right hunion
+    cases htargets with
+    | target hmem htargetTyping hpath =>
+        rcases PartialTyStrengthens.to_borrow_right
+            (PartialTyUnion.left_strengthens hunion) with
+          ⟨leftTargets, hleftEq, _hleftSubset⟩
+        rcases PartialTyStrengthens.to_borrow_right
+            (PartialTyUnion.right_strengthens hunion) with
+          ⟨rightTargets, hrightEq, _hrightSubset⟩
+        subst hleftEq
+        subst hrightEq
+        rcases PartialTyUnion.borrow_member hunion hmem with hleft | hright
+        · exact Or.inl (RuntimeLocationPathSelected.borrowStep
+            (RuntimeLocationTargetsSelected.target hleft htargetTyping hpath))
+        · exact Or.inr (RuntimeLocationPathSelected.borrowStep
+            (RuntimeLocationTargetsSelected.target hright htargetTyping hpath))
+  case target =>
+    intros
+    trivial
+
+theorem RuntimeLocationTargetsSelected.of_lvalTargetsTyping
+    {store : ProgramStore} {env : Env} {targets : List LVal}
+    {pt : PartialTy} {lifetime : Lifetime} {path : List Unit}
+    {location : Location} :
+    LValTargetsTyping env targets pt lifetime →
+    RuntimeLocationPathSelected store env pt path location →
+    RuntimeLocationTargetsSelected store env targets path location := by
+  intro htargets hselected
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _target _ty _lifetime _htyping => True)
+    (motive_2 := fun targets pt lifetime _htyping =>
+      ∀ {path : List Unit} {location : Location},
+        RuntimeLocationPathSelected store env pt path location →
+        RuntimeLocationTargetsSelected store env targets path location)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htargets hselected
+  case var | box | boxFull | borrow => intros; trivial
+  case singleton =>
+      intro target ty lifetime htarget _ih path location hselected
+      exact RuntimeLocationTargetsSelected.target (by simp) htarget hselected
+  case cons =>
+      intro target rest headTy headLifetime restLifetime lifetime restTy
+        unionTy hhead _hrest hunion _hintersection _ihHead ihRest
+        path location hselected
+      rcases RuntimeLocationPathSelected.of_partialTyUnion hunion hselected with
+        hheadSelected | hrestSelected
+      · exact RuntimeLocationTargetsSelected.target (by simp) hhead hheadSelected
+      · cases ihRest hrestSelected with
+        | target hmem htargetTyping hpath =>
+            exact RuntimeLocationTargetsSelected.target
+              (List.mem_cons_of_mem _ hmem) htargetTyping hpath
+
+theorem RuntimeLocationPathSelected.prepend_of_lvalTyping
+    {store : ProgramStore} {env : Env} {lv : LVal} {pt : PartialTy}
+    {lifetime : Lifetime} {location : Location}
+    (htyping : LValTyping env lv pt lifetime) :
+    ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+    ∀ (path : List Unit),
+      RuntimeLocationPathSelected store env pt path location →
+      RuntimeLocationPathSelected store env slot.ty (LVal.path lv ++ path)
+        location := by
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lifetime _htyping =>
+      ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+      ∀ (path : List Unit),
+        RuntimeLocationPathSelected store env pt path location →
+        RuntimeLocationPathSelected store env slot.ty (LVal.path lv ++ path)
+          location)
+    (motive_2 := fun _targets _pt _lifetime _htyping => True)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htyping
+  · intro x typedSlot htypedSlot slot hslot path hselected
+    have hslotEq : slot = typedSlot :=
+      Option.some.inj (hslot.symm.trans htypedSlot)
+    subst hslotEq
+    simpa [LVal.path] using hselected
+  · intro source inner sourceLifetime _hsource ih slot hslot path hselected
+    have hsourceSelected :
+        RuntimeLocationPathSelected store env (.box inner) (() :: path)
+          location :=
+      RuntimeLocationPathSelected.box hselected
+    have hbase := ih hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intro source inner sourceLifetime _hsource ih slot hslot path hselected
+    have hsourceSelected :
+        RuntimeLocationPathSelected store env (.ty (.box inner)) (() :: path)
+          location :=
+      RuntimeLocationPathSelected.boxFull hselected
+    have hbase := ih hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intro source mutable targets borrowLifetime targetLifetime targetTy
+      _hsource htargets ihSource _ihTargets slot hslot path hselected
+    have htargetsSelected :
+        RuntimeLocationTargetsSelected store env targets path location :=
+      RuntimeLocationTargetsSelected.of_lvalTargetsTyping htargets hselected
+    have hsourceSelected :
+        RuntimeLocationPathSelected store env (.ty (.borrow mutable targets))
+          (() :: path) location :=
+      RuntimeLocationPathSelected.borrowStep htargetsSelected
+    have hbase := ihSource hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intros
+    trivial
+  · intros
+    trivial
+
+theorem RuntimeLocationPathSelected.updateAtPathEffective_ranked_passthrough
+    {store : ProgramStore} {env writeEnv : Env}
+    {oldTy updatedTy : PartialTy} {path : List Unit} {rank : Nat}
+    {rhsTy : Ty} {location : Location} {base : Name} {P : LVal → Prop}
+    {φ : Name → Nat} {rootRank : Nat} :
+    (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+    RuntimeLocationPathSelected store env oldTy path location →
+    UpdateAtPath rank env path oldTy rhsTy writeEnv updatedTy →
+    (∀ {branchRank : Nat} {target : LVal} {targetTy : Ty}
+      {lifetime : Lifetime} {branchResult : Env},
+      0 < branchRank →
+      φ (LVal.base target) < rootRank →
+      LValTyping env target (.ty targetTy) lifetime →
+      store.loc target = some location →
+      EnvWrite branchRank env target rhsTy branchResult →
+      ∃ written,
+        EnvWriteEffectiveWrite branchRank env target rhsTy branchResult
+          written ∧
+          P written) →
+    (∀ {branchRank : Nat} {target : LVal} {pt : PartialTy}
+      {lifetime : Lifetime} {branchPath : List Unit} {branchResult : Env},
+      0 < branchRank →
+      φ (LVal.base target) < rootRank →
+      LValTyping env target pt lifetime →
+      RuntimeLocationPathSelected store env pt branchPath location →
+      EnvWrite branchRank env (prependPath branchPath target) rhsTy
+        branchResult →
+      ∃ written,
+        EnvWriteEffectiveWrite branchRank env (prependPath branchPath target)
+          rhsTy branchResult written ∧
+          P written) →
+    ∃ written,
+      UpdateAtPathEffectiveWrite rank env base path oldTy rhsTy writeEnv
+        updatedTy written ∧
+        P written := by
+  intro hbelow hselected hupdate hdirect hindirect
+  refine (RuntimeLocationPathSelected.rec
+    (motive_1 := fun oldTy path location _hselected =>
+      ∀ {rank : Nat} {updatedTy : PartialTy} {writeEnv : Env},
+        (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+        UpdateAtPath rank env path oldTy rhsTy writeEnv updatedTy →
+        (∀ {branchRank : Nat} {target : LVal} {targetTy : Ty}
+          {lifetime : Lifetime} {branchResult : Env},
+          0 < branchRank →
+          φ (LVal.base target) < rootRank →
+          LValTyping env target (.ty targetTy) lifetime →
+          store.loc target = some location →
+          EnvWrite branchRank env target rhsTy branchResult →
+          ∃ written,
+            EnvWriteEffectiveWrite branchRank env target rhsTy branchResult
+              written ∧
+              P written) →
+        (∀ {branchRank : Nat} {target : LVal} {pt : PartialTy}
+          {lifetime : Lifetime} {branchPath : List Unit}
+          {branchResult : Env},
+          0 < branchRank →
+          φ (LVal.base target) < rootRank →
+          LValTyping env target pt lifetime →
+          RuntimeLocationPathSelected store env pt branchPath location →
+          EnvWrite branchRank env (prependPath branchPath target) rhsTy
+            branchResult →
+          ∃ written,
+            EnvWriteEffectiveWrite branchRank env (prependPath branchPath target)
+              rhsTy branchResult written ∧
+              P written) →
+        ∃ written,
+          UpdateAtPathEffectiveWrite rank env base path oldTy rhsTy writeEnv
+            updatedTy written ∧
+            P written)
+    (motive_2 := fun _targets _path _location _ => True)
+    ?borrowHere ?box ?boxFull ?borrowStep ?target hselected)
+    hbelow hupdate hdirect hindirect
+  case borrowHere =>
+      intro mutable targets selectedTarget selectedTargetTy
+        selectedTargetLifetime location hmem htargetTyping htargetLoc rank
+        updatedTy writeEnv hbelow hupdate hdirect _hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        have htargetRank :
+            φ (LVal.base selectedTarget) < rootRank :=
+          hbelow (LVal.base selectedTarget)
+            (mem_partialTy_vars_iff.mpr
+              ⟨true, _, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
+        rcases WriteBorrowTargets.effectiveWrite_of_selected_branch hwrites hmem
+            (fun branchResult hbranchWrite =>
+              hdirect (Nat.succ_pos rank) htargetRank htargetTyping htargetLoc
+                (by simpa [prependPath] using hbranchWrite)) with
+          ⟨written, heffective, hP⟩
+        exact ⟨written, UpdateAtPathEffectiveWrite.mutBorrow heffective, hP⟩
+  case box =>
+      intro inner path location hinner ih rank updatedTy writeEnv hbelow hupdate
+        hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinnerUpdate⟩
+          cases htyEq
+          cases hupdatedEq
+          have hbelowInner :
+              ∀ v, v ∈ PartialTy.vars inner → φ v < rootRank := by
+            intro v hv
+            exact hbelow v (by simpa [PartialTy.vars] using hv)
+          rcases ih hbelowInner hinnerUpdate hdirect hindirect with
+            ⟨written, heffective, hP⟩
+          exact ⟨written, UpdateAtPathEffectiveWrite.boxPassthrough heffective,
+            hP⟩
+        · rcases hboxFull with
+            ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinnerUpdate⟩
+          cases htyEq
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case boxFull =>
+      intro inner path location hinner ih rank updatedTy writeEnv hbelow hupdate
+        hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinnerUpdate⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinnerUpdate⟩
+          cases htyEq
+          cases hupdatedEq
+          have hbelowInner :
+              ∀ v, v ∈ PartialTy.vars (.ty inner) → φ v < rootRank := by
+            intro v hv
+            exact hbelow v (by simpa [PartialTy.vars, Ty.vars] using hv)
+          rcases ih hbelowInner hinnerUpdate hdirect hindirect with
+            ⟨written, heffective, hP⟩
+          exact ⟨written,
+            UpdateAtPathEffectiveWrite.boxFullPassthrough heffective, hP⟩
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case borrowStep =>
+      intro mutable targets path location htargetsSelected _ih rank updatedTy
+        writeEnv hbelow hupdate _hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        cases htargetsSelected with
+        | target htargetMem htargetTyping htargetSelected =>
+            rename_i branchTarget branchPt branchLifetime
+            have htargetRank :
+                φ (LVal.base branchTarget) < rootRank :=
+              hbelow (LVal.base branchTarget)
+                (mem_partialTy_vars_iff.mpr
+                  ⟨true, _, branchTarget, PartialTyContains.here,
+                    htargetMem, rfl⟩)
+            rcases WriteBorrowTargets.effectiveWrite_of_selected_branch
+                hwrites htargetMem
+                (fun branchResult hbranchWrite =>
+                  hindirect (Nat.succ_pos rank) htargetRank htargetTyping
+                    htargetSelected hbranchWrite) with
+              ⟨written, heffective, hP⟩
+            exact ⟨written, UpdateAtPathEffectiveWrite.mutBorrow heffective, hP⟩
+  case target =>
+      intros
+      trivial
+
 theorem LocationBelow.irrefl_whenInitialized {env : Env}
     {store : ProgramStore} {φ : Name → Nat}
     {location : Location} {slot : StoreSlot} {ty : PartialTy} :
@@ -4985,9 +5375,170 @@ where
                     hreadPrefixLocOwner hmayRead
         | @boxFull _ inner sourceLifetime hsource =>
             sorry
-        | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
-            hsourceBorrow htargets =>
-            sorry
+          | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
+              hsourceBorrow htargets =>
+              have hsourceAbs :
+                  LValLocationAbstractionWhenInitialized env store source
+                    (.ty (.borrow mutable targets)) :=
+                lvalTyping_defined_location_whenInitialized hsafe hsourceBorrow
+              rcases hsourceAbs with
+                ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+                  hsourceValid⟩
+              rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
+              cases hsourceValid with
+              | @borrowLive selectedLocation _mutable _targets selected
+                  _hinitialized hmemSelected hselectedLoc =>
+                  have hderefLoc :
+                      store.loc (.deref source) = some selectedLocation := by
+                    simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+                  have hselectedLocationEq :
+                      selectedLocation = writtenLocation := by
+                    rw [hlvLoc] at hderefLoc
+                    exact (Option.some.inj hderefLoc).symm
+                  have hselectedLocWritten :
+                      store.loc selected = some writtenLocation := by
+                    simpa [hselectedLocationEq] using hselectedLoc
+                  rcases lvalTargetsTyping_member_strengthens htargets selected
+                      hmemSelected with
+                    ⟨selectedTy, selectedLifetime, hselectedTyping,
+                      _hselectedStrengthens⟩
+                  have hselectedHead :
+                      RuntimeLocationPathSelected store env
+                        (.ty (.borrow mutable targets)) [()] writtenLocation :=
+                    RuntimeLocationPathSelected.borrowHere hmemSelected
+                      hselectedTyping hselectedLocWritten
+                  let sourceRank := φ (LVal.base source)
+                  let PathEff : Nat → Prop := fun rootRank =>
+                    rootRank ≤ sourceRank →
+                    ∀ {target : LVal} {pt : PartialTy}
+                      {targetLifetime : Lifetime} {path : List Unit}
+                      {branchResult : Env} {branchRank : Nat},
+                      φ (LVal.base target) = rootRank →
+                      LValTyping env target pt targetLifetime →
+                      RuntimeLocationPathSelected store env pt path
+                        writtenLocation →
+                      EnvWrite branchRank env (prependPath path target) rhsTy
+                        branchResult →
+                      ∃ written,
+                        EnvWriteEffectiveWrite branchRank env
+                          (prependPath path target) rhsTy branchResult written ∧
+                          EnvMayReadThrough env written dependencyTarget
+                  let DirectEff : Nat → Prop := fun rootRank =>
+                    rootRank < sourceRank →
+                    ∀ {target : LVal} {targetTy : Ty}
+                      {targetLifetime : Lifetime} {branchResult : Env}
+                      {branchRank : Nat},
+                      φ (LVal.base target) = rootRank →
+                      LValTyping env target (.ty targetTy) targetLifetime →
+                      store.loc target = some writtenLocation →
+                      EnvWrite branchRank env target rhsTy branchResult →
+                      ∃ written,
+                        EnvWriteEffectiveWrite branchRank env target rhsTy
+                          branchResult written ∧
+                          EnvMayReadThrough env written dependencyTarget
+                  have hall : ∀ rootRank, PathEff rootRank ∧ DirectEff rootRank := by
+                    intro rootRank
+                    refine Nat.strong_induction_on rootRank ?_
+                    intro rootRank ih
+                    have hpath : PathEff rootRank := by
+                      intro hrootLe target pt targetLifetime path branchResult branchRank
+                        hrootEq htargetTyping hselectedPath hbranchWrite
+                      cases hbranchWrite with
+                      | @intro _rank _env₁ writeEnv writeLv writeSlot _ty
+                          updatedTy hwriteSlot hupdate =>
+                          have hwriteSlotBase :
+                              env.slotAt (LVal.base target) =
+                                some writeSlot := by
+                            simpa [LVal.base_prependPath] using hwriteSlot
+                          have hupdatePath :
+                              UpdateAtPath branchRank env
+                                (LVal.path target ++ path) writeSlot.ty rhsTy
+                                writeEnv updatedTy := by
+                            simpa [LVal.path_prependPath] using hupdate
+                          have hselectedFull :
+                              RuntimeLocationPathSelected store env
+                                writeSlot.ty (LVal.path target ++ path)
+                                writtenLocation :=
+                            RuntimeLocationPathSelected.prepend_of_lvalTyping
+                              htargetTyping hwriteSlotBase path hselectedPath
+                          have hbelow :
+                              ∀ v, v ∈ PartialTy.vars writeSlot.ty →
+                                φ v < φ (LVal.base target) :=
+                            hφ (LVal.base target) writeSlot hwriteSlotBase
+                          rcases
+                              RuntimeLocationPathSelected.updateAtPathEffective_ranked_passthrough
+                                (base := LVal.base target)
+                                (rootRank := φ (LVal.base target))
+                                hbelow hselectedFull hupdatePath
+                                (fun {branchRank recursiveTarget recursiveTy
+                                    recursiveLifetime recursiveResult}
+                                    _hpositive htargetRank hrecursiveTyping
+                                    hrecursiveLoc hrecursiveWrite =>
+                                  have hlt :
+                                      φ (LVal.base recursiveTarget) <
+                                        rootRank := by
+                                    simpa [hrootEq] using htargetRank
+                                  have hrecursiveLtSource :
+                                      φ (LVal.base recursiveTarget) <
+                                        sourceRank :=
+                                    lt_of_lt_of_le hlt hrootLe
+                                  (ih (φ (LVal.base recursiveTarget)) hlt).2
+                                    hrecursiveLtSource rfl hrecursiveTyping hrecursiveLoc
+                                    hrecursiveWrite)
+                                  (fun {branchRank recursiveTarget recursivePt
+                                      recursiveLifetime recursivePath
+                                      recursiveResult}
+                                      _hpositive htargetRank hrecursiveTyping
+                                      hrecursiveSelected hrecursiveWrite =>
+                                  have hlt :
+                                      φ (LVal.base recursiveTarget) <
+                                        rootRank := by
+                                    simpa [hrootEq] using htargetRank
+                                  have hrecursiveLeSource :
+                                      φ (LVal.base recursiveTarget) ≤
+                                        sourceRank :=
+                                    le_of_lt (lt_of_lt_of_le hlt hrootLe)
+                                  (ih (φ (LVal.base recursiveTarget)) hlt).1
+                                      hrecursiveLeSource rfl hrecursiveTyping hrecursiveSelected
+                                      hrecursiveWrite) with
+                            ⟨written, heffective, hmayReadWritten⟩
+                          have heffectivePrep :
+                              UpdateAtPathEffectiveWrite branchRank env
+                                (LVal.base (prependPath path target))
+                                (LVal.path (prependPath path target))
+                                writeSlot.ty rhsTy writeEnv updatedTy
+                                written := by
+                            simpa [LVal.base_prependPath,
+                              LVal.path_prependPath] using heffective
+                          exact ⟨written,
+                            EnvWriteEffectiveWrite.intro hwriteSlot
+                              heffectivePrep,
+                            hmayReadWritten⟩
+                    have hdirect : DirectEff rootRank := by
+                      intro hrootLt target targetTy targetLifetime branchResult
+                        branchRank hrootEq htargetTyping htargetLoc
+                        hbranchWrite
+                      have hcallRank :
+                          φ (LVal.base target) <
+                            φ (LVal.base (.deref source)) := by
+                        simpa [sourceRank, LVal.base, hrootEq] using hrootLt
+                      exact
+                        go hwellFormed hsafe hvalidStore hheap hφ
+                          htargetTyping hbranchWrite hreadPrefixTyping
+                          htargetLoc hreadPrefixLoc hmayRead
+                    exact ⟨hpath, hdirect⟩
+                  exact
+                    (hall (φ (LVal.base source))).1 le_rfl rfl hsourceBorrow
+                      hselectedHead (by simpa [prependPath] using hwrite)
+              | @borrowStale _location _mutable _targets hstale =>
+                  have hinitialized : BorrowTargetsInitialized env targets := by
+                    intro target hmem
+                    rcases lvalTargetsTyping_member_strengthens htargets target
+                        hmem with
+                      ⟨selectedTy, selectedLifetime, hselectedTyping,
+                        _hstrength⟩
+                    exact ⟨selectedTy, selectedLifetime, hselectedTyping⟩
+                  exact False.elim (hstale hinitialized)
   termination_by (φ (LVal.base lv), sizeOf lv)
   decreasing_by
     all_goals
