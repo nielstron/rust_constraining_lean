@@ -1696,6 +1696,43 @@ theorem EnvMayReadThrough.borrowTarget_deref_prepend {env : Env}
   exact EnvMayReadThrough.borrow (suffix := () :: suffix) htyping hmem
     (EnvMayReadThrough.direct_prependPath_self_deref suffix)
 
+theorem EnvMayReadThrough.borrowTarget_deref_from_deref_prepend {env : Env}
+    {source selected : LVal} {mutable : Bool} {targets : List LVal}
+    {lifetime : Lifetime} :
+    LValTyping env source (.ty (.borrow mutable targets)) lifetime →
+    selected ∈ targets →
+    ∀ suffix : List Unit, suffix ≠ [] →
+      EnvMayReadThrough env (.deref selected)
+        (prependPath (() :: (() :: suffix)) source) := by
+  intro htyping hmem suffix hnonempty
+  cases suffix with
+  | nil =>
+      exact False.elim (hnonempty rfl)
+  | cons _ tail =>
+      have hderef_prepend :
+          ∀ tail : List Unit,
+            (prependPath tail selected).deref =
+              prependPath tail (.deref selected) := by
+        intro tail
+        induction tail with
+        | nil => rfl
+        | cons head tail ih =>
+            cases head
+            simp [prependPath, ih]
+      have htargetEq :
+          prependPath (() :: () :: tail) selected =
+            prependPath (() :: tail) (.deref selected) := by
+        simp [prependPath, hderef_prepend]
+      have hinner :
+          EnvMayReadThrough env (.deref selected)
+            (prependPath (() :: () :: tail) selected) := by
+        rw [htargetEq]
+        exact
+          (EnvMayReadThrough.direct_prependPath_self_deref
+            (env := env) (written := .deref selected) tail)
+      exact EnvMayReadThrough.borrow (suffix := () :: () :: tail) htyping hmem
+        hinner
+
 theorem EnvMayReadThrough.borrow_deref_step {env : Env}
     {written source selected : LVal} {mutable : Bool} {targets : List LVal}
     {lifetime : Lifetime} :
