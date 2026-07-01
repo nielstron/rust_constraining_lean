@@ -1525,7 +1525,154 @@ theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
     EnvSameShapeStrengthening selectedSource writeEnv ∧
       PartialTyStrengthens oldTy updatedTy ∧
       PartialTy.sameShape oldTy updatedTy := by
-  sorry
+  intro hbelow hselected hupdate hdirect hindirect
+  refine (RuntimePathSelected.rec
+    (motive_1 := fun oldTy path selectedName selectedSlot selectedSlotTy
+      _hselected =>
+      ∀ {rank : Nat} {updatedTy : PartialTy} {writeEnv : Env},
+        (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+        UpdateAtPath rank env path oldTy rhsTy writeEnv updatedTy →
+        (∀ {branchRank : Nat} {target : LVal} {targetTy : Ty}
+          {lifetime : Lifetime} {branchResult : Env},
+          0 < branchRank →
+          φ (LVal.base target) < rootRank →
+          LValTyping env target (.ty targetTy) lifetime →
+          store.loc target = some (VariableProjection selectedName) →
+          EnvWrite branchRank env target rhsTy branchResult →
+          EnvSameShapeStrengthening selectedSource branchResult) →
+        (∀ {branchRank : Nat} {target : LVal} {pt : PartialTy}
+          {lifetime : Lifetime} {branchPath : List Unit}
+          {branchResult : Env},
+          0 < branchRank →
+          φ (LVal.base target) < rootRank →
+          LValTyping env target pt lifetime →
+          RuntimePathSelected store env pt branchPath selectedName
+            selectedSlot selectedSlotTy →
+          EnvWrite branchRank env (prependPath branchPath target) rhsTy
+            branchResult →
+          EnvSameShapeStrengthening selectedSource branchResult) →
+        EnvSameShapeStrengthening selectedSource writeEnv ∧
+          PartialTyStrengthens oldTy updatedTy ∧
+          PartialTy.sameShape oldTy updatedTy)
+    (motive_2 := fun _targets _path _selectedName _selectedSlot
+      _selectedSlotTy _ => True)
+    ?borrowHere ?box ?boxFull ?borrowStep ?target hselected)
+    hbelow hupdate hdirect hindirect
+  case borrowHere =>
+      intro mutable targets selectedTarget selectedTargetTy
+        selectedTargetLifetime selectedName selectedSlot selectedSlotTy hmem
+        htargetTyping htargetLoc _hslot _hty rank updatedTy writeEnv hbelow
+        hupdate hdirect _hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        have htargetRank :
+            φ (LVal.base selectedTarget) < rootRank :=
+          hbelow (LVal.base selectedTarget)
+            (mem_partialTy_vars_iff.mpr
+              ⟨true, _, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
+        have hleaves :=
+          WriteBorrowTargets.initialized_leaves_of_typed hwrites
+        have hmap : EnvSameShapeStrengthening selectedSource writeEnv :=
+          WriteBorrowTargets.selected_branch_to_result_map
+            (Nat.succ_pos rank) hwrites hleaves hmem
+            (fun branchResult hbranchWrite =>
+              hdirect (Nat.succ_pos rank) htargetRank htargetTyping
+                htargetLoc (by simpa [prependPath] using hbranchWrite))
+        exact ⟨hmap, PartialTyStrengthens.reflex,
+          PartialTy.sameShape_refl _⟩
+  case box =>
+      intro inner path selectedName selectedSlot selectedSlotTy hinner ih
+        rank updatedTy writeEnv hbelow hupdate hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinnerUpdate⟩
+          cases htyEq
+          cases hupdatedEq
+          have hbelowInner :
+              ∀ v, v ∈ PartialTy.vars inner → φ v < rootRank := by
+            intro v hv
+            exact hbelow v (by simpa [PartialTy.vars] using hv)
+          rcases ih hbelowInner hinnerUpdate hdirect hindirect with
+            ⟨hmap, hstrength, hshape⟩
+          exact ⟨hmap, PartialTyStrengthens.box hstrength,
+            by simpa [PartialTy.sameShape] using hshape⟩
+        · rcases hboxFull with
+            ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinnerUpdate⟩
+          cases htyEq
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case boxFull =>
+      intro inner path selectedName selectedSlot selectedSlotTy hinner ih
+        rank updatedTy writeEnv hbelow hupdate hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinnerUpdate⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinnerUpdate⟩
+          cases htyEq
+          cases hupdatedEq
+          have hbelowInner :
+              ∀ v, v ∈ PartialTy.vars (.ty inner) → φ v < rootRank := by
+            intro v hv
+            exact hbelow v (by simpa [PartialTy.vars, Ty.vars] using hv)
+          rcases ih hbelowInner hinnerUpdate hdirect hindirect with
+            ⟨hmap, hstrength, hshape⟩
+          exact ⟨hmap, PartialTyStrengthens.tyBox_rebox hstrength hshape,
+            by
+              cases updatedInner <;>
+                simp [partialTyRebox, PartialTy.sameShape, Ty.sameShape] at hshape ⊢
+              exact hshape⟩
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case borrowStep =>
+      intro mutable targets path selectedName selectedSlot selectedSlotTy
+        htargetsSelected _ih rank updatedTy writeEnv hbelow hupdate _hdirect
+        hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        cases htargetsSelected with
+        | target htargetMem htargetTyping htargetSelected =>
+            rename_i branchTarget branchPt branchLifetime
+            have htargetRank :
+                φ (LVal.base branchTarget) < rootRank :=
+              hbelow (LVal.base branchTarget)
+                (mem_partialTy_vars_iff.mpr
+                  ⟨true, _, branchTarget, PartialTyContains.here,
+                    htargetMem, rfl⟩)
+            have hleaves :=
+              WriteBorrowTargets.initialized_leaves_of_typed hwrites
+            have hmap : EnvSameShapeStrengthening selectedSource writeEnv :=
+              WriteBorrowTargets.selected_branch_to_result_map
+                (Nat.succ_pos rank) hwrites hleaves htargetMem
+                (fun branchResult hbranchWrite =>
+                  hindirect (Nat.succ_pos rank) htargetRank htargetTyping
+                    htargetSelected hbranchWrite)
+            exact ⟨hmap, PartialTyStrengthens.reflex,
+              PartialTy.sameShape_refl _⟩
+  case target =>
+      intros
+      trivial
 theorem EnvWrite.runtime_selected_lval_map {store : ProgramStore}
     {env result : Env} {current lifetime : Lifetime} {lv : LVal}
     {lvTy rhsTy selectedSlotTy : Ty} {selectedName : Name}
@@ -2042,7 +2189,149 @@ theorem RuntimeSpinePathSelected.updateAtPath_map {store : ProgramStore}
     EnvSameShapeStrengthening selectedSource writeEnv ∧
       PartialTyStrengthens oldTy updatedTy ∧
       PartialTy.sameShape oldTy updatedTy := by
-  sorry
+  intro hbelow hselected hupdate hdirect hindirect
+  refine (RuntimeSpinePathSelected.rec
+    (motive_1 := fun oldTy path address _hselected =>
+      ∀ {rank : Nat} {updatedTy : PartialTy} {writeEnv : Env},
+        (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+        UpdateAtPath rank env path oldTy rhsTy writeEnv updatedTy →
+        (∀ {branchRank : Nat} {target : LVal} {targetTy : Ty}
+          {lifetime : Lifetime} {branchResult : Env},
+          0 < branchRank →
+          φ (LVal.base target) < rootRank →
+          LValTyping env target (.ty targetTy) lifetime →
+          store.loc target = some (.heap address) →
+          EnvWrite branchRank env target rhsTy branchResult →
+          EnvSameShapeStrengthening selectedSource branchResult) →
+        (∀ {branchRank : Nat} {target : LVal} {pt : PartialTy}
+          {lifetime : Lifetime} {branchPath : List Unit}
+          {branchResult : Env},
+          0 < branchRank →
+          φ (LVal.base target) < rootRank →
+          LValTyping env target pt lifetime →
+          RuntimeSpinePathSelected store env pt branchPath address →
+          EnvWrite branchRank env (prependPath branchPath target) rhsTy
+            branchResult →
+          EnvSameShapeStrengthening selectedSource branchResult) →
+        EnvSameShapeStrengthening selectedSource writeEnv ∧
+          PartialTyStrengthens oldTy updatedTy ∧
+          PartialTy.sameShape oldTy updatedTy)
+    (motive_2 := fun _targets _path _address _ => True)
+    ?borrowHere ?box ?boxFull ?borrowStep ?target hselected)
+    hbelow hupdate hdirect hindirect
+  case borrowHere =>
+      intro mutable targets selectedTarget selectedTargetTy
+        selectedTargetLifetime address hmem htargetTyping htargetLoc rank
+        updatedTy writeEnv hbelow hupdate hdirect _hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        have htargetRank :
+            φ (LVal.base selectedTarget) < rootRank :=
+          hbelow (LVal.base selectedTarget)
+            (mem_partialTy_vars_iff.mpr
+              ⟨true, _, selectedTarget, PartialTyContains.here, hmem, rfl⟩)
+        have hleaves :=
+          WriteBorrowTargets.initialized_leaves_of_typed hwrites
+        have hmap : EnvSameShapeStrengthening selectedSource writeEnv :=
+          WriteBorrowTargets.selected_branch_to_result_map
+            (Nat.succ_pos rank) hwrites hleaves hmem
+            (fun branchResult hbranchWrite =>
+              hdirect (Nat.succ_pos rank) htargetRank htargetTyping
+                htargetLoc (by simpa [prependPath] using hbranchWrite))
+        exact ⟨hmap, PartialTyStrengthens.reflex,
+          PartialTy.sameShape_refl _⟩
+  case box =>
+      intro inner path address hinner ih rank updatedTy writeEnv hbelow
+        hupdate hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinnerUpdate⟩
+          cases htyEq
+          cases hupdatedEq
+          have hbelowInner :
+              ∀ v, v ∈ PartialTy.vars inner → φ v < rootRank := by
+            intro v hv
+            exact hbelow v (by simpa [PartialTy.vars] using hv)
+          rcases ih hbelowInner hinnerUpdate hdirect hindirect with
+            ⟨hmap, hstrength, hshape⟩
+          exact ⟨hmap, PartialTyStrengthens.box hstrength,
+            by simpa [PartialTy.sameShape] using hshape⟩
+        · rcases hboxFull with
+            ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinnerUpdate⟩
+          cases htyEq
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case boxFull =>
+      intro inner path address hinner ih rank updatedTy writeEnv hbelow
+        hupdate hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinnerUpdate⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinnerUpdate⟩
+          cases htyEq
+          cases hupdatedEq
+          have hbelowInner :
+              ∀ v, v ∈ PartialTy.vars (.ty inner) → φ v < rootRank := by
+            intro v hv
+            exact hbelow v (by simpa [PartialTy.vars, Ty.vars] using hv)
+          rcases ih hbelowInner hinnerUpdate hdirect hindirect with
+            ⟨hmap, hstrength, hshape⟩
+          exact ⟨hmap, PartialTyStrengthens.tyBox_rebox hstrength hshape,
+            by
+              cases updatedInner <;>
+                simp [partialTyRebox, PartialTy.sameShape, Ty.sameShape] at hshape ⊢
+              exact hshape⟩
+      · rcases hborrow with ⟨targets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  case borrowStep =>
+      intro mutable targets path address htargetsSelected _ih rank updatedTy
+        writeEnv hbelow hupdate _hdirect hindirect
+      rcases UpdateAtPath.cons_inv hupdate with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        cases htargetsSelected with
+        | target htargetMem htargetTyping htargetSelected =>
+            rename_i branchTarget branchPt branchLifetime
+            have htargetRank :
+                φ (LVal.base branchTarget) < rootRank :=
+              hbelow (LVal.base branchTarget)
+                (mem_partialTy_vars_iff.mpr
+                  ⟨true, _, branchTarget, PartialTyContains.here,
+                    htargetMem, rfl⟩)
+            have hleaves :=
+              WriteBorrowTargets.initialized_leaves_of_typed hwrites
+            have hmap : EnvSameShapeStrengthening selectedSource writeEnv :=
+              WriteBorrowTargets.selected_branch_to_result_map
+                (Nat.succ_pos rank) hwrites hleaves htargetMem
+                (fun branchResult hbranchWrite =>
+                  hindirect (Nat.succ_pos rank) htargetRank htargetTyping
+                    htargetSelected hbranchWrite)
+            exact ⟨hmap, PartialTyStrengthens.reflex,
+              PartialTy.sameShape_refl _⟩
+  case target =>
+      intros
+      trivial
 /--
 Heap mirror of `EnvWrite.runtime_selected_lval_map`: writing through an lvalue
 that resolves to an owned heap cell transports the strongly-updated owner root
