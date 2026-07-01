@@ -6667,6 +6667,44 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
       hdrops,
     hsafeFinal, ValidPartialValueWhenInitialized.unit⟩
 
+/-- Stale-aware full-box dereference `move` multistep preservation. -/
+theorem preservation_move_deref_boxFull_multistep_runtime_whenInitialized_of_wellFormed
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
+    {source : LVal} {finalValue : Value} {ty : Ty} :
+    WellFormedEnvWhenInitialized env₁ lifetime →
+    SafeAbstractionWhenInitialized store env₁ →
+    ValidRuntimeState store (.move source.deref) →
+    LValTyping env₁ source (.ty (.box ty)) valueLifetime →
+    ¬ WriteProhibited env₁ source.deref →
+    EnvMove env₁ source.deref env₂ →
+    TermTyping env₁ typing lifetime (.move source.deref) ty env₂ →
+    MultiStep store lifetime (.move source.deref) finalStore (.val finalValue) →
+    TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty := by
+  sorry
+
+/-- Stale-aware full-box dereference assignment preservation. -/
+theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed
+    {store store' : ProgramStore} {env env' : Env}
+    {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
+    {oldTy : Ty} {value finalValue : Value} {rhsTy : Ty} :
+    WellFormedEnvWhenInitialized env lifetime →
+    SafeAbstractionWhenInitialized store env →
+    ValidRuntimeState store (.assign (.deref source) (.val value)) →
+    LValTyping env source (.ty (.box oldTy)) targetLifetime →
+    ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
+    WellFormedTyWhenInitialized env rhsTy rhsWellLifetime →
+    EnvWrite 0 env (.deref source) rhsTy env' →
+    EnvWriteNoStaleBorrowTargets 0 env (.deref source) rhsTy env' →
+    (∃ φ, LinearizedBy φ env ∧ EnvWriteRhsBorrowTargetsBelow φ env' rhsTy) →
+    ¬ WriteProhibited env' (.deref source) →
+    WellFormedEnvWhenInitialized env' lifetime →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
+    Step store lifetime (.assign (.deref source) (.val value)) store'
+      (.val finalValue) →
+    TerminalStateSafeWhenInitialized store' finalValue env' .unit := by
+  sorry
+
 /-- Singleton value block preservation for `R-BlockB` using recursive drop preservation. -/
 theorem preservation_blockB_value_multistep_runtime_of_runtimeDrop
     {store finalStore : ProgramStore} {env : Env}
@@ -7768,27 +7806,29 @@ theorem preservation_bounded
                 cases hlifetimeEq
                 exact preservation_move_var_multistep_runtime_whenInitialized_of_wellFormed
                   hwellFormed hsafe hvalidRuntime hslot hmove htermTyping hmulti
-          | deref lv =>
-              cases hLv with
-              | box hsourceBox =>
-                  exact preservation_move_deref_box_multistep_runtime_whenInitialized_of_wellFormed
-                    hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove
-                    htermTyping hmulti
-              | boxFull hsourceFull =>
-                  sorry
-              | borrow hsourceBorrow htargets =>
-                  exact False.elim (by
-                    rcases hmove with ⟨moveSlot, struck, hslot, hstrike, henv₂⟩
-                    have hsourceSlot : _env₁.slotAt (LVal.base lv) = some moveSlot := by
-                      simpa [LVal.base] using hslot
-                    have hstrikeAtBorrow :
-                        Strike (LVal.path lv ++ [()]) moveSlot.ty struck := by
-                      simpa [LVal.path_deref_cons,
-                        List.Unit_cons_append_eq_append_cons] using hstrike
-                    rcases (LValTyping.strike_suffix_at_type.1 hsourceBorrow
-                        hsourceSlot hstrikeAtBorrow) with
-                      ⟨borrowStruck, hborrowStruck⟩
-                    simp [Strike] at hborrowStruck)
+        | deref lv =>
+            cases hLv with
+            | box hsourceBox =>
+                exact preservation_move_deref_box_multistep_runtime_whenInitialized_of_wellFormed
+                  hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove
+                  htermTyping hmulti
+            | boxFull hsourceFull =>
+                exact preservation_move_deref_boxFull_multistep_runtime_whenInitialized_of_wellFormed
+                  hwellFormed hsafe hvalidRuntime hsourceFull hnotWrite hmove
+                  htermTyping hmulti
+            | borrow hsourceBorrow htargets =>
+                exfalso
+                rcases hmove with ⟨moveSlot, struck, hslot, hstrike, henv₂⟩
+                have hsourceSlot : _env₁.slotAt (LVal.base lv) = some moveSlot := by
+                  simpa [LVal.base] using hslot
+                have hstrikeAtBorrow :
+                    Strike (LVal.path lv ++ [()]) moveSlot.ty struck := by
+                  simpa [LVal.path_deref_cons,
+                    List.Unit_cons_append_eq_append_cons] using hstrike
+                rcases (LValTyping.strike_suffix_at_type.1 hsourceBorrow
+                    hsourceSlot hstrikeAtBorrow) with
+                  ⟨borrowStruck, hborrowStruck⟩
+                simp [Strike] at hborrowStruck
     exact And.intro hwellOut hterminal
   -- T-MutBorrow
   case mutBorrow =>
@@ -8028,7 +8068,12 @@ theorem preservation_bounded
                 hsourceBox hshape hwellTy.whenInitialized hwrite hranked
                 hnotWrite hwellOut hvalidValue hassignStep
           | boxFull hsourceFull =>
-              sorry
+              exact preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed
+                hwellInner
+                hsafeInner
+                (validRuntimeState_assign_value_of_value hvalidInner)
+                hsourceFull hshape hwellTy.whenInitialized hwrite hnoStale
+                hranked hnotWrite hwellOut hvalidValue hassignStep
           | borrow hsourceBorrow htargets =>
               exact preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFormed
                 hwellInner
