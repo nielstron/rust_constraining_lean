@@ -4914,7 +4914,35 @@ theorem updateAtPath_node_fanout {env writeEnv : Env}
       updatedTy →
     mutable = true ∧
       ∃ env₂, WriteBorrowTargets (rank + 1) env suffix targets rhsTy env₂ := by
-  sorry
+  intro hspine
+  induction hspine generalizing rank writeEnv updatedTy mutable targets with
+  | nil _hslot _hvalid =>
+      intro hleafTy hupdate
+      subst hleafTy
+      rcases UpdateAtPath.cons_inv (by simpa using hupdate) with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, hwrites⟩
+        cases htyEq
+        exact ⟨rfl, ⟨writeEnv, hwrites⟩⟩
+  | box _hslot _howner _htail ih =>
+      intro hleafTy hupdate
+      rcases UpdateAtPath.cons_inv (by simpa [List.cons_append] using hupdate) with
+        hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            hinner⟩
+          cases htyEq
+          exact ih hleafTy hinner
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
 theorem updateAtPathEffective_node_fanout_passthrough {env writeEnv : Env}
     {store : ProgramStore}
     {storage leaf : Location} {slot leafSlot : StoreSlot}
@@ -4936,7 +4964,41 @@ theorem updateAtPathEffective_node_fanout_passthrough {env writeEnv : Env}
       UpdateAtPathEffectiveWrite rank env base
         (spinePath ++ (() :: suffix)) ty rhsTy writeEnv updatedTy written ∧
         P written := by
-  sorry
+  intro hspine
+  induction hspine generalizing rank writeEnv updatedTy targets with
+  | nil _hslot _hvalid =>
+      intro hleafTy hupdate hfanout
+      subst hleafTy
+      rcases UpdateAtPath.cons_inv (by simpa using hupdate) with hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq, _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, hupdatedEq, hwrites⟩
+        cases htyEq
+        cases hupdatedEq
+        rcases hfanout writeEnv hwrites with ⟨written, heffective, hP⟩
+        exact ⟨written, UpdateAtPathEffectiveWrite.mutBorrow heffective, hP⟩
+  | box _hslot _howner _htail ih =>
+      intro hleafTy hupdate hfanout
+      rcases UpdateAtPath.cons_inv (by simpa [List.cons_append] using hupdate) with
+        hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinner⟩
+          cases htyEq
+          cases hupdatedEq
+          rcases ih hleafTy hinner hfanout with
+            ⟨written, heffective, hP⟩
+          exact ⟨written, UpdateAtPathEffectiveWrite.boxPassthrough heffective,
+            hP⟩
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
 theorem updateAtPathEffective_leaf_self {env writeEnv : Env}
     {store : ProgramStore}
     {storage leaf : Location} {slot leafSlot : StoreSlot}
