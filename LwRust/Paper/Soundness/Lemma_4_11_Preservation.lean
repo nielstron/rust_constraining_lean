@@ -5586,7 +5586,226 @@ theorem EnvWrite.runtime_selected_lval_map_whenInitialized
     EnvWrite rank env lv rhsTy result →
     EnvSameShapeStrengthening
       (env.update selectedName { selectedSlot with ty := .ty rhsTy }) result := by
-  sorry
+  intro hφ hsafe hheap htyping hloc hselectedSlot hselectedSlotTy hwrite
+  let selectedSource : Env :=
+    env.update selectedName { selectedSlot with ty := .ty rhsTy }
+  let PathMap : Nat → Prop := fun rootRank =>
+    ∀ {target : LVal} {pt : PartialTy} {targetLifetime : Lifetime}
+      {path : List Unit} {branchResult : Env} {branchRank : Nat},
+      φ (LVal.base target) = rootRank →
+      LValTyping env target pt targetLifetime →
+      RuntimePathSelected store env pt path selectedName selectedSlot
+        selectedSlotTy →
+      env.slotAt selectedName = some selectedSlot →
+      selectedSlot.ty = .ty selectedSlotTy →
+      EnvWrite branchRank env (prependPath path target) rhsTy branchResult →
+      EnvSameShapeStrengthening selectedSource branchResult
+  let DirectMap : Nat → Prop := fun rootRank =>
+    ∀ {target : LVal} {targetTy : Ty} {targetLifetime : Lifetime}
+      {branchResult : Env} {branchRank : Nat},
+      φ (LVal.base target) = rootRank →
+      LValTyping env target (.ty targetTy) targetLifetime →
+      store.loc target = some (VariableProjection selectedName) →
+      env.slotAt selectedName = some selectedSlot →
+      selectedSlot.ty = .ty selectedSlotTy →
+      EnvWrite branchRank env target rhsTy branchResult →
+      EnvSameShapeStrengthening selectedSource branchResult
+  have hall : ∀ rootRank, PathMap rootRank ∧ DirectMap rootRank := by
+    intro rootRank
+    refine Nat.strong_induction_on rootRank ?_
+    intro rootRank ih
+    have hpath : PathMap rootRank := by
+      intro target pt targetLifetime path branchResult branchRank hrootEq
+        htargetTyping hselected hselectedSlotAt hselectedTy hbranchWrite
+      cases hbranchWrite with
+      | @intro _rank _env₁ writeEnv writeLv writeSlot _ty updatedTy
+          hwriteSlot hupdate =>
+          have hwriteSlotBase :
+              env.slotAt (LVal.base target) = some writeSlot := by
+            simpa [LVal.base_prependPath] using hwriteSlot
+          have hupdatePath :
+              UpdateAtPath branchRank env (LVal.path target ++ path)
+                writeSlot.ty rhsTy writeEnv updatedTy := by
+            simpa [LVal.path_prependPath] using hupdate
+          have hselectedFull :
+              RuntimePathSelected store env writeSlot.ty
+                (LVal.path target ++ path) selectedName selectedSlot
+                selectedSlotTy :=
+            RuntimePathSelected.prepend_of_lvalTyping htargetTyping
+              hwriteSlotBase path hselected
+          have hbelow :
+              ∀ v, v ∈ PartialTy.vars writeSlot.ty →
+                φ v < φ (LVal.base target) :=
+            hφ (LVal.base target) writeSlot hwriteSlotBase
+          rcases RuntimePathSelected.updateAtPath_map
+              (rootRank := φ (LVal.base target))
+              (selectedSource := selectedSource)
+              hbelow hselectedFull hupdatePath
+                  (fun {branchRank : Nat} {recursiveTarget : LVal}
+                    {recursiveTy : Ty} {recursiveLifetime : Lifetime}
+                    {recursiveResult : Env}
+                    hpositive htargetRank hrecursiveTyping hrecursiveLoc
+                    hrecursiveWrite =>
+                have hlt : φ (LVal.base recursiveTarget) < rootRank := by
+                  simpa [hrootEq] using htargetRank
+                (ih (φ (LVal.base recursiveTarget)) hlt).2 rfl
+                  hrecursiveTyping hrecursiveLoc hselectedSlotAt
+                  hselectedTy hrecursiveWrite)
+                  (fun {branchRank : Nat} {recursiveTarget : LVal}
+                    {recursivePt : PartialTy} {recursiveLifetime : Lifetime}
+                    {recursivePath : List Unit} {recursiveResult : Env}
+                    hpositive htargetRank hrecursiveTyping hrecursiveSelected
+                    hrecursiveWrite =>
+                have hlt : φ (LVal.base recursiveTarget) < rootRank := by
+                  simpa [hrootEq] using htargetRank
+                (ih (φ (LVal.base recursiveTarget)) hlt).1 rfl
+                  hrecursiveTyping hrecursiveSelected hselectedSlotAt
+                  hselectedTy hrecursiveWrite) with
+            ⟨hinnerMap, hstrength, hshape⟩
+          have hselectedLtBase :
+              φ selectedName < φ (LVal.base target) :=
+            RuntimePathSelected.rank_lt_of_lvalTyping_whenInitialized
+              hφ hsafe hheap hselected htargetTyping
+          have hbaseNe : LVal.base target ≠ selectedName := by
+            intro hbaseEq
+            have hbad : φ selectedName < φ selectedName := by
+              simpa [hbaseEq] using hselectedLtBase
+            exact Nat.lt_irrefl _ hbad
+          have hselectedSourceBase :
+              selectedSource.slotAt (LVal.base target) = some writeSlot := by
+            dsimp [selectedSource]
+            rw [Env.update_slotAt_ne]
+            · exact hwriteSlotBase
+            · exact hbaseNe
+          have hfinal :
+              EnvSameShapeStrengthening selectedSource
+                (writeEnv.update (LVal.base target)
+                  { writeSlot with ty := updatedTy }) :=
+            EnvSameShapeStrengthening.update_result_strengthening
+              hinnerMap hselectedSourceBase rfl hstrength hshape
+          simpa [LVal.base_prependPath] using hfinal
+    have hdirect : DirectMap rootRank := by
+      intro target targetTy targetLifetime branchResult branchRank hrootEq
+        htargetTyping htargetLoc hselectedSlotAt hselectedTy hbranchWrite
+      cases target with
+      | var x =>
+          rcases LValTyping.var_inv htargetTyping with
+            ⟨targetSlot, htargetSlot, _htargetSlotTy, _htargetLifetime⟩
+          simp [ProgramStore.loc, VariableProjection] at htargetLoc
+          cases htargetLoc
+          have hslotEq : selectedSlot = targetSlot :=
+            Option.some.inj (hselectedSlotAt.symm.trans htargetSlot)
+          subst hslotEq
+          exact EnvWrite.var_rhs_to_result_map htargetSlot hselectedTy
+            hbranchWrite
+      | deref source =>
+          cases htargetTyping with
+          | box hsource =>
+              have hsourceAbs :
+                  LValLocationAbstractionWhenInitialized env store source
+                    (.box (.ty targetTy)) :=
+                lvalTyping_defined_location_whenInitialized hsafe hsource
+              rcases hsourceAbs with
+                ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+                  hsourceValid⟩
+              rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+              cases hsourceValid with
+              | @box ownerLocation ownerSlot _ hownerSlot _hinnerValid =>
+                  have hderefLoc :
+                      store.loc source.deref = some ownerLocation := by
+                    simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+                  have hownerEq :
+                      ownerLocation = VariableProjection selectedName := by
+                    rw [htargetLoc] at hderefLoc
+                    exact (Option.some.inj hderefLoc).symm
+                  subst hownerEq
+                  have howns : ProgramStore.Owns store
+                      (VariableProjection selectedName) :=
+                    ⟨sourceLocation, sourceSlotLifetime, by
+                      simpa [owningRef] using hsourceSlot⟩
+                  exact False.elim
+                    ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
+          | boxFull hsource =>
+              have hsourceAbs :
+                  LValLocationAbstractionWhenInitialized env store source
+                    (.ty (.box targetTy)) :=
+                lvalTyping_defined_location_whenInitialized hsafe hsource
+              rcases hsourceAbs with
+                ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+                  hsourceValid⟩
+              rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+              cases hsourceValid with
+              | @boxFull ownerLocation ownerSlot _ hownerSlot _hinnerValid =>
+                  have hderefLoc :
+                      store.loc source.deref = some ownerLocation := by
+                    simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+                  have hownerEq :
+                      ownerLocation = VariableProjection selectedName := by
+                    rw [htargetLoc] at hderefLoc
+                    exact (Option.some.inj hderefLoc).symm
+                  subst hownerEq
+                  have howns : ProgramStore.Owns store
+                      (VariableProjection selectedName) :=
+                    ⟨sourceLocation, sourceSlotLifetime, by
+                      simpa [owningRef] using hsourceSlot⟩
+                  exact False.elim
+                    ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
+          | borrow hsource htargets =>
+              rename_i mutable targets borrowLifetime
+              have hsourceAbs :
+                  LValLocationAbstractionWhenInitialized env store source
+                    (.ty (.borrow mutable targets)) :=
+                lvalTyping_defined_location_whenInitialized hsafe hsource
+              rcases hsourceAbs with
+                ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+                  hsourceValid⟩
+              rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+              cases hsourceValid with
+              | @borrowLive selectedLocation _mutable _targets selected
+                  _hinit hmem hselectedLoc =>
+                  have hderefLoc :
+                      store.loc source.deref = some selectedLocation := by
+                    simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+                  have hselectedLocationEq :
+                      selectedLocation = VariableProjection selectedName := by
+                    rw [htargetLoc] at hderefLoc
+                    exact (Option.some.inj hderefLoc).symm
+                  have hselectedLocVar :
+                      store.loc selected =
+                        some (VariableProjection selectedName) := by
+                    simpa [hselectedLocationEq] using hselectedLoc
+                  rcases lvalTargetsTyping_member_strengthens htargets
+                      selected hmem with
+                    ⟨selectedTy, selectedLifetime, hselectedTyping,
+                      _hselectedStrengthens⟩
+                  have hselectedHead :
+                      RuntimePathSelected store env
+                        (.ty (.borrow mutable targets)) [()] selectedName
+                        selectedSlot selectedSlotTy :=
+                    RuntimePathSelected.borrowHere hmem hselectedTyping
+                      hselectedLocVar hselectedSlotAt hselectedTy
+                  have hsourceRoot :
+                      φ (LVal.base source) = rootRank := by
+                    simpa [LVal.base] using hrootEq
+                  have hwritePath :
+                      EnvWrite branchRank env (prependPath [()] source)
+                        rhsTy branchResult := by
+                    simpa [prependPath] using hbranchWrite
+                  exact hpath hsourceRoot hsource hselectedHead
+                    hselectedSlotAt hselectedTy hwritePath
+              | @borrowStale _location _mutable _targets hstale =>
+                  have hinitialized :
+                      BorrowTargetsInitialized env targets := by
+                    intro target hmem
+                    rcases lvalTargetsTyping_member_strengthens htargets
+                        target hmem with
+                      ⟨selectedTy, selectedLifetime, hselectedTyping,
+                        _hstrength⟩
+                    exact ⟨selectedTy, selectedLifetime, hselectedTyping⟩
+                  exact False.elim (hstale hinitialized)
+    exact ⟨hpath, hdirect⟩
+  exact (hall (φ (LVal.base lv))).2 rfl htyping hloc hselectedSlot
+    hselectedSlotTy hwrite
 theorem EnvWrite.runtime_selected_spine_map_whenInitialized
     {store : ProgramStore}
     {env result : Env} {current lifetime : Lifetime} {lv : LVal}
