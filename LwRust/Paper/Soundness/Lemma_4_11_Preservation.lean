@@ -5025,6 +5025,41 @@ theorem EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_whenInitialized
       hwrittenSpine hreadSpine
   simpa [heq] using hmayRead
 
+/--
+Full-box dereference alias transfer.
+
+If `written` is the concrete owner path to the location reached by `*source`,
+then any read-through dependency below `*source` can be re-expressed below
+`written`.  The interesting case is when `source` itself was reached through a
+runtime-selected borrow target: the proof must reselect that target and keep the
+remaining dereference suffix.
+-/
+theorem EnvMayReadThrough.ownerSpine_of_boxFull_deref_same_location_whenInitialized
+    {store : ProgramStore} {env : Env}
+    {lifetime sourceLifetime : Lifetime}
+    {written source target : LVal}
+    {writtenTy inner : Ty}
+    {envSlot : EnvSlot} {rootSlot leafSlot : StoreSlot} {leaf : Location} :
+    WellFormedEnvWhenInitialized env lifetime →
+    SafeAbstractionWhenInitialized store env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    StoreOwnerSpineWhenInitialized env store
+      (VariableProjection (LVal.base written)) rootSlot
+      envSlot.ty (LVal.path written) leaf leafSlot (.ty writtenTy) →
+    LValTyping env source (.ty (.box inner)) sourceLifetime →
+    store.loc (.deref source) = some leaf →
+    EnvMayReadThrough env (.deref source) target →
+    EnvMayReadThrough env written target := by
+  intro hwellFormed hsafe hvalidStore hheap hwrittenSpine hsource
+    hsourceDerefLoc hmayRead
+  induction hmayRead with
+  | direct hprefix =>
+      sorry
+  | @borrow borrowSource selected suffix mutable targets borrowLifetime
+      hborrowSource hmem _hinner ih =>
+      exact EnvMayReadThrough.borrow hborrowSource hmem ih
+
 theorem EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized
     {store : ProgramStore} {env : Env}
     {lifetime writtenLifetime readPrefixLifetime : Lifetime}
@@ -5142,10 +5177,13 @@ where
                       EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_whenInitialized
                         hvalidStore hheap hwrittenSpine hreadSpine
                         (EnvMayReadThrough.direct hprefix)
-            | @boxFull _ inner sourceLifetime hsource =>
-                sorry
-            | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
-                hsourceBorrow htargets =>
+              | @boxFull _ inner sourceLifetime hsource =>
+                  exact
+                    EnvMayReadThrough.ownerSpine_of_boxFull_deref_same_location_whenInitialized
+                      hwellFormed hsafe hvalidStore hheap hwrittenSpine
+                      hsource hreadPrefixLoc (EnvMayReadThrough.direct hprefix)
+              | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
+                  hsourceBorrow htargets =>
                 rcases LVal.StrictPrefixOf.eq_prependPath hprefix with
                   ⟨suffix, hsuffixNonempty, htargetEq⟩
                 cases suffix with
