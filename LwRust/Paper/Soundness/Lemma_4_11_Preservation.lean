@@ -3441,7 +3441,39 @@ theorem RuntimeFrame.LocReads.typed_envMayReadThrough_prefix
       LValTyping env readPrefix prefixTy prefixLifetime ∧
         store.loc readPrefix = some location ∧
         EnvMayReadThrough env readPrefix target := by
-  sorry
+  intro htyping hreads
+  induction hreads generalizing pt lifetime with
+  | here hloc =>
+      cases htyping with
+      | box hsource =>
+          exact ⟨_, _, _, hsource, hloc,
+            EnvMayReadThrough.direct (LVal.StrictPrefixOf.self_deref _)⟩
+      | boxFull hsource =>
+          exact ⟨_, _, _, hsource, hloc,
+            EnvMayReadThrough.direct (LVal.StrictPrefixOf.self_deref _)⟩
+      | borrow hsource _htargets =>
+          exact ⟨_, _, _, hsource, hloc,
+            EnvMayReadThrough.direct (LVal.StrictPrefixOf.self_deref _)⟩
+  | there _hreads ih =>
+      cases htyping with
+      | box hsource =>
+          rcases ih hsource with
+            ⟨readPrefix, prefixTy, prefixLifetime, hprefixTyping,
+              hprefixLoc, hmayRead⟩
+          exact ⟨readPrefix, prefixTy, prefixLifetime, hprefixTyping,
+            hprefixLoc, EnvMayReadThrough.deref_right hmayRead⟩
+      | boxFull hsource =>
+          rcases ih hsource with
+            ⟨readPrefix, prefixTy, prefixLifetime, hprefixTyping,
+              hprefixLoc, hmayRead⟩
+          exact ⟨readPrefix, prefixTy, prefixLifetime, hprefixTyping,
+            hprefixLoc, EnvMayReadThrough.deref_right hmayRead⟩
+      | borrow hsource _htargets =>
+          rcases ih hsource with
+            ⟨readPrefix, prefixTy, prefixLifetime, hprefixTyping,
+              hprefixLoc, hmayRead⟩
+          exact ⟨readPrefix, prefixTy, prefixLifetime, hprefixTyping,
+            hprefixLoc, EnvMayReadThrough.deref_right hmayRead⟩
 /--
 Two statically selected owner spines that reach the same runtime leaf describe
 the same lvalue.
