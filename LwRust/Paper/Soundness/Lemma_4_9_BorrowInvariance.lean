@@ -14997,6 +14997,40 @@ theorem StoreOwnerSpine.reachesSlot_of_spine {store : ProgramStore}
           simpa [owningRef] using
             RuntimeFrame.ReachesSlot.boxFullInner hownedSlotAt (ih (by simp))
 
+/-- A slot-typed value descent can be viewed as an owner spine from the storage
+slot whose value starts the descent. -/
+theorem StoreOwnerSpine.of_reachesSlot {store : ProgramStore}
+    {storage leaf : Location} {slot leafSlot : StoreSlot}
+    {value : PartialValue} {ty leafTy : PartialTy} :
+    store.slotAt storage = some slot →
+    slot.value = value →
+    RuntimeFrame.ReachesSlot store value ty leaf leafSlot leafTy →
+    ∃ path,
+      StoreOwnerSpine store storage slot ty path leaf leafSlot leafTy ∧
+        path ≠ [] := by
+  intro hslot hvalue hreach
+  induction hreach generalizing storage slot with
+  | @boxHere location leafSlot inner hleafSlot hleafValid =>
+      refine ⟨[()], ?_, by simp⟩
+      exact StoreOwnerSpine.box hslot (by simpa [owningRef] using hvalue)
+        (StoreOwnerSpine.nil hleafSlot hleafValid)
+  | @boxInner location reached firstSlot reachedSlot inner reachedTy hfirstSlot
+      _hinner ih =>
+      rcases ih hfirstSlot rfl with ⟨path, htail, _hnonempty⟩
+      refine ⟨() :: path, ?_, by simp⟩
+      exact StoreOwnerSpine.box hslot (by simpa [owningRef] using hvalue)
+        htail
+  | @boxFullHere location leafSlot innerTy hleafSlot hleafValid =>
+      refine ⟨[()], ?_, by simp⟩
+      exact StoreOwnerSpine.boxFull hslot (by simpa [owningRef] using hvalue)
+        (StoreOwnerSpine.nil hleafSlot hleafValid)
+  | @boxFullInner location reached firstSlot reachedSlot innerTy reachedTy
+      hfirstSlot _hinner ih =>
+      rcases ih hfirstSlot rfl with ⟨path, htail, _hnonempty⟩
+      refine ⟨() :: path, ?_, by simp⟩
+      exact StoreOwnerSpine.boxFull hslot (by simpa [owningRef] using hvalue)
+        htail
+
 /-- The write's walk crosses the spine's borrow node: the node is mutable and
 the walk fans out over its targets. -/
 theorem StoreOwnerSpine.updateAtPath_node_fanout {store : ProgramStore}
@@ -15048,816 +15082,6 @@ theorem StoreOwnerSpine.updateAtPath_node_fanout {store : ProgramStore}
           exact ih hleafTy hinner
       · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
-
-/--
-The first borrow node crossed by a deref-of-borrow resolution: the node's cell
-sits at the end of an all-box owner spine from the base variable, its stored
-reference points at the continuation location `L`, and `L` is the resolution
-result or read by it.  The syntactic decomposition pins the crossing deref.
--/
-theorem firstNodePack {store : ProgramStore} {env : Env} {current : Lifetime}
-    {source : LVal} {mutable : Bool} {targets : List LVal}
-    {sourceLifetime : Lifetime} {res : Location} :
-    WellFormedEnv env current →
-    store ∼ₛ env →
-    LValTyping env source (.ty (.borrow mutable targets)) sourceLifetime →
-    store.loc (.deref source) = some res →
-    ∃ envSlot rootValue cell cellSlot L m ts spinePath suffix u₀,
-      env.slotAt (LVal.base source) = some envSlot ∧
-      store.slotAt (VariableProjection (LVal.base source)) =
-        some { value := rootValue, lifetime := envSlot.lifetime } ∧
-      store.slotAt cell = some cellSlot ∧
-      cellSlot.value = .value (.ref { location := L, owner := false }) ∧
-      ValidPartialValue store cellSlot.value (.ty (.borrow m ts)) ∧
-      StoreOwnerSpine store (VariableProjection (LVal.base source))
-        { value := rootValue, lifetime := envSlot.lifetime } envSlot.ty
-        spinePath cell cellSlot (.ty (.borrow m ts)) ∧
-      LVal.deref source = prependPath suffix (.deref u₀) ∧
-      store.loc (.deref u₀) = some L ∧
-      LVal.path u₀ = spinePath ∧
-      (res = L ∨ RuntimeFrame.LocReads store (.deref source) L) := by
-  intro hwellFormed hsafe htyping hloc
-  induction source generalizing mutable targets sourceLifetime res with
-  | var b =>
-      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hslotTy, _hlife⟩
-      rcases hsafe.2 b slot hslot with ⟨rootValue, hstoreSlot, hvalid⟩
-      have hvalidB := hvalid
-      rw [hslotTy] at hvalidB
-      cases hvalidB with
-      | @borrow L _m _ts w hmemW hlocW =>
-          have hlocDeref :
-              store.loc (.deref (.var b)) = some L := by
-            simp [ProgramStore.loc, VariableProjection] at hstoreSlot ⊢
-            simp [hstoreSlot]
-          have hresEq : res = L :=
-            Option.some.inj (hloc.symm.trans hlocDeref)
-          have hspine :
-              StoreOwnerSpine store (VariableProjection b)
-                { value :=
-                    PartialValue.value
-                      (Value.ref { location := L, owner := false }),
-                  lifetime := slot.lifetime } slot.ty []
-                (VariableProjection b)
-                { value :=
-                    PartialValue.value
-                      (Value.ref { location := L, owner := false }),
-                  lifetime := slot.lifetime }
-                (.ty (.borrow mutable targets)) := by
-            rw [← hslotTy]
-            exact StoreOwnerSpine.nil hstoreSlot hvalid
-          refine ⟨slot,
-            PartialValue.value (Value.ref { location := L, owner := false }),
-            VariableProjection b,
-            { value :=
-                PartialValue.value
-                  (Value.ref { location := L, owner := false }),
-              lifetime := slot.lifetime }, L, mutable,
-            targets, [], [], .var b, hslot, hstoreSlot, hstoreSlot, rfl,
-            ?_, hspine, rfl, hlocDeref, rfl, Or.inl hresEq⟩
-          exact ValidPartialValue.borrow hmemW hlocW
-  | deref u' ih =>
-      cases htyping with
-      | @box _ _ _ hsource' =>
-          rcases StoreOwnerSpine.of_lvalTyping_box hwellFormed hsafe
-              hsource' with
-            ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
-              hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot, hsourceSpine⟩
-          have hsourceValid := StoreOwnerSpine.leaf_valid hsourceSpine
-          rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
-          cases hsourceValid with
-          | @box cell cellSlot _ hcellSlot hinnerValid =>
-              have hinnerValid' := hinnerValid
-              rcases cellSlot with ⟨cellValue, cellLifetime⟩
-              cases hinnerValid with
-              | @borrow L _m _ts w hmemW hlocW =>
-                  have hsnoc :=
-                    StoreOwnerSpine.snoc_box hsourceSpine rfl rfl hcellSlot
-                      hinnerValid'
-                  have hrootSlotEq :
-                      rootSlot =
-                        { value := rootSlot.value,
-                          lifetime := envSlot.lifetime } := by
-                    rw [← hrootLifetime]
-                  rw [hrootSlotEq] at hsnoc hrootSlot
-                  have hlocU :
-                      store.loc (.deref u') = some cell := by
-                    simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-                  have hlocDeref :
-                      store.loc (.deref (.deref u')) = some L := by
-                    generalize hgen : LVal.deref u' = du at hlocU ⊢
-                    simp [ProgramStore.loc, hlocU, hcellSlot]
-                  have hresEq : res = L :=
-                    Option.some.inj (hloc.symm.trans hlocDeref)
-                  refine ⟨envSlot, rootSlot.value, cell,
-                    { value :=
-                        PartialValue.value
-                          (Value.ref { location := L, owner := false }),
-                      lifetime := cellLifetime }, L,
-                    mutable, targets, () :: LVal.path u', [], .deref u',
-                    henvBase, hrootSlot, hcellSlot, rfl, hinnerValid', ?_,
-                    rfl, hlocDeref, by simp [LVal.path], Or.inl hresEq⟩
-                  exact hsnoc
-        | @boxFull _ _ _ hsource' =>
-            -- TODO(type-full-box): this helper currently promises a pure owner
-            -- spine from the syntactic base.  For full boxes reached through a
-            -- borrow, the first borrow node is earlier than the box edge, so the
-            -- statement needs to be generalized instead of manufacturing a spine.
-            sorry
-        | @borrow _ mutable' targets' borrowLifetime' targetLifetime' targetTy'
-            hsource' htargets' =>
-          have hM₀ : ∃ M₀, store.loc (.deref u') = some M₀ := by
-            cases hM : store.loc (.deref u') with
-            | none =>
-                exfalso
-                generalize hgen : LVal.deref u' = du at hM hloc
-                simp [ProgramStore.loc, hM] at hloc
-            | some M₀ => exact ⟨M₀, rfl⟩
-          rcases hM₀ with ⟨M₀, hM₀loc⟩
-          rcases ih hsource' hM₀loc with
-            ⟨envSlot, rootValue, cell, cellSlot, L, m, ts, spinePath, suffix,
-              u₀, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10⟩
-          refine ⟨envSlot, rootValue, cell, cellSlot, L, m, ts, spinePath,
-            () :: suffix, u₀, h1, h2, h3, h4, h5, h6, ?_, h8, h9, ?_⟩
-          · show LVal.deref (LVal.deref u') = .deref (prependPath suffix
-              (.deref u₀))
-            rw [← h7]
-          · right
-            rcases h10 with hM₀eq | hreads
-            · exact RuntimeFrame.LocReads.here (by rw [hM₀loc, hM₀eq])
-            · exact RuntimeFrame.LocReads.there hreads
-
-theorem StoreOwnerSpine.nil_inv {store : ProgramStore}
-    {storage leaf : Location} {slot leafSlot : StoreSlot}
-    {ty leafTy : PartialTy} :
-    StoreOwnerSpine store storage slot ty [] leaf leafSlot leafTy →
-    storage = leaf ∧ slot = leafSlot ∧ ty = leafTy := by
-  intro h
-  cases h with
-  | nil _ _ => exact ⟨rfl, rfl, rfl⟩
-
-/--
-Dependency kill for the base of a deref-of-borrow resolution: the first
-crossed borrow node's stored reference resolves at-or-below the written
-location, so a dependency of the base's value on the written location closes a
-cycle in the location order.
--/
-theorem slotDepKill_of_firstNode {store : ProgramStore} {env : Env}
-    {current : Lifetime} {φ : Name → Nat} {source : LVal} {mutable : Bool}
-    {targets : List LVal} {sourceLifetime : Lifetime} {derefTy : PartialTy}
-    {derefLifetime : Lifetime} {leaf : Location} {leafSlot : StoreSlot}
-    {leafView : PartialTy} :
-    LinearizedBy φ env →
-    WellFormedEnv env current →
-    store ∼ₛ env →
-    ValidStore store →
-    StoreOwnerTargetsHeap store →
-    LValTyping env source (.ty (.borrow mutable targets)) sourceLifetime →
-    LValTyping env (.deref source) derefTy derefLifetime →
-    store.loc (.deref source) = some leaf →
-    store.slotAt leaf = some leafSlot →
-    ValidPartialValue store leafSlot.value leafView →
-    SlotDepKill store env leaf (LVal.base source) := by
-  intro hφ hwellFormed hsafe hvalidStore hheap htyping hderefTyping hloc
-    hleafSlot hleafValid
-  rcases firstNodePack hwellFormed hsafe htyping hloc with
-    ⟨envSlot, rootValue, cell, cellSlot, L, m, ts, spinePath, suffix, u₀,
-      h1, h2, h3, h4, h5, h6, _h7, _h8, _h9, h10⟩
-  intro zslot value hzslot hzstore hdep
-  have hzslotEq : envSlot = zslot :=
-    Option.some.inj (h1.symm.trans hzslot)
-  subst hzslotEq
-  have hvalueEq : rootValue = value := by
-    have := Option.some.inj (h2.symm.trans hzstore)
-    exact congrArg StoreSlot.value this
-  subst hvalueEq
-  have hnodeDep :
-      RuntimeFrame.BorrowDependency store cellSlot.value
-        (.ty (.borrow m ts)) leaf := by
-    by_cases hpath : spinePath = []
-    · subst hpath
-      rcases StoreOwnerSpine.nil_inv h6 with ⟨_hcellEq, hcellSlotEq, htyEq⟩
-      rw [htyEq] at hdep
-      rw [← hcellSlotEq]
-      exact hdep
-    · have hreach :=
-        StoreOwnerSpine.reachesSlot_of_spine h6 hpath
-      exact RuntimeFrame.borrowDependency_through_reachesSlot hreach rfl hdep
-  rw [h4] at hnodeDep
-  cases hnodeDep with
-  | @borrow _ _ _ _ target hmem' hloc' hreads' =>
-      have hcontains : PartialTyContains envSlot.ty (.borrow m ts) :=
-        StoreOwnerSpine.contains_leafTy h6 rfl
-      rcases hwellFormed.1 (LVal.base source) envSlot m ts h1
-          ⟨envSlot, h1, hcontains⟩ target hmem' with
-        ⟨targetTy, targetLifetime, htargetTyping, _houtlives, _hbase⟩
-      have hbelowDown : LocationBelow store φ L leaf :=
-        RuntimeFrame.locReads_below hφ hwellFormed hsafe hvalidStore hheap
-          htargetTyping hreads' hloc'
-      rcases h10 with hleafEq | hreads
-      · rw [← hleafEq] at hbelowDown
-        exact LocationBelow.irrefl hvalidStore hheap hleafSlot hleafValid
-          hbelowDown
-      · have hbelowUp : LocationBelow store φ leaf L :=
-          RuntimeFrame.locReads_below hφ hwellFormed hsafe hvalidStore hheap
-          hderefTyping hreads hloc
-        exact LocationBelow.irrefl hvalidStore hheap hleafSlot hleafValid
-          (LocationBelow.trans hvalidStore hheap hbelowUp hbelowDown)
-
-/-- Resolution only depends on the start location. -/
-theorem ProgramStore.loc_congr_prependPath {store : ProgramStore}
-    {a b : LVal} (h : store.loc a = store.loc b) :
-    ∀ p : List Unit,
-      store.loc (prependPath p a) = store.loc (prependPath p b) := by
-  intro p
-  induction p with
-  | nil => exact h
-  | cons head tail ih =>
-      cases head
-      show store.loc (.deref (prependPath tail a)) =
-        store.loc (.deref (prependPath tail b))
-      simp [ProgramStore.loc, ih]
-
-/-- Every fan-out member is fully typed. -/
-theorem WriteBorrowTargets.typed_of_mem {rank : Nat} {env result : Env}
-    {path : Path} {targets : List LVal} {rhsTy : Ty} :
-    WriteBorrowTargets rank env path targets rhsTy result →
-    ∀ target, target ∈ targets →
-      ∃ leafTy leafLifetime,
-        LValTyping env (prependPath path target) (.ty leafTy) leafLifetime := by
-  intro hwrites
-  refine WriteBorrowTargets.rec
-    (motive_1 := fun _ _ _ _ _ _ _ _ => True)
-    (motive_2 := fun _rank env path targets rhsTy _result _ =>
-      ∀ target, target ∈ targets →
-        ∃ leafTy leafLifetime,
-          LValTyping env (prependPath path target) (.ty leafTy) leafLifetime)
-    (motive_3 := fun _ _ _ _ _ _ => True)
-      ?strong ?weak ?box ?boxFull ?mutBorrow ?nil ?singleton ?cons ?intro hwrites
-  case strong | weak | box | boxFull | mutBorrow => intros; trivial
-  case nil =>
-    intro _rank _env _path _ty target htarget
-    simp at htarget
-  case singleton =>
-    intro _rank _env _updated _path target _ty _hwrite htyped _ih selected
-      hselected
-    rw [List.mem_singleton] at hselected
-    subst hselected
-    exact htyped
-  case cons =>
-    intro _rank _env _updated _restEnv _result _path target rest _ty _hwrite
-      htyped _hwrites _hjoin _ihWrite ihRest selected hselected
-    rcases List.mem_cons.mp hselected with hhead | htail
-    · subst hhead
-      exact htyped
-    · exact ihRest selected htail
-  case intro => intros; trivial
-
-set_option maxRecDepth 4096 in
-/--
-The write's authority guard reaches a protector of the written location: the
-resolution's chain of first-crossed mutable-borrow nodes steps the guard from
-the written base down to the owner root (or the variable itself) of the
-written cell.
--/
-theorem writeGuarded_of_resolution {store : ProgramStore} {env : Env}
-    {current : Lifetime} {φ : Name → Nat} {rhsTy : Ty} {base₀ : Name}
-    {leaf : Location} {leafSlot : StoreSlot} {leafView : PartialTy}
-    {lv : LVal} {lvTy : Ty} {lifetime : Lifetime} {rank : Nat}
-    {result : Env} :
-    LinearizedBy φ env →
-    WellFormedEnv env current →
-    store ∼ₛ env →
-    ValidStore store →
-    StoreOwnerTargetsHeap store →
-    store.slotAt leaf = some leafSlot →
-    ValidPartialValue store leafSlot.value leafView →
-    LValTyping env lv (.ty lvTy) lifetime →
-    store.loc lv = some leaf →
-    EnvWrite rank env lv rhsTy result →
-    WriteGuarded store env leaf base₀ (LVal.base lv) →
-    ∃ r, ProtectedByBase store r leaf ∧ WriteGuarded store env leaf base₀ r := by
-  intro hφ hwellFormed hsafe hvalidStore hheap hleafSlot hleafValid htyping
-    hloc hwrite hGbase
-  exact go hφ hwellFormed hsafe hvalidStore hheap hleafSlot hleafValid htyping
-    hloc hwrite hGbase
-where
-  go {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
-      {rhsTy : Ty} {base₀ : Name} {leaf : Location} {leafSlot : StoreSlot}
-      {leafView : PartialTy} {lv : LVal} {lvTy : Ty} {lifetime : Lifetime}
-      {rank : Nat} {result : Env}
-      (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env) (hvalidStore : ValidStore store)
-      (hheap : StoreOwnerTargetsHeap store)
-      (hleafSlot : store.slotAt leaf = some leafSlot)
-      (hleafValid : ValidPartialValue store leafSlot.value leafView)
-      (htyping : LValTyping env lv (.ty lvTy) lifetime)
-      (hloc : store.loc lv = some leaf)
-      (hwrite : EnvWrite rank env lv rhsTy result)
-      (hGbase : WriteGuarded store env leaf base₀ (LVal.base lv)) :
-      ∃ r, ProtectedByBase store r leaf ∧
-        WriteGuarded store env leaf base₀ r := by
-    cases lv with
-    | var b =>
-        have hleafEq : leaf = VariableProjection b := by
-          simp [ProgramStore.loc] at hloc
-          exact hloc.symm
-        exact ⟨b, Or.inl hleafEq, hGbase⟩
-    | deref u =>
-        cases htyping with
-        | @box _ _ sourceLifetime hsource =>
-            rcases StoreOwnerSpine.of_lvalTyping_box hwellFormed hsafe
-                hsource with
-              ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
-                hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot,
-                hsourceSpine⟩
-            have hsourceValid := StoreOwnerSpine.leaf_valid hsourceSpine
-            rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
-            cases hsourceValid with
-            | @box owned ownedSlot _ hownedSlot hinnerValid =>
-                have hderefLoc :
-                    store.loc (.deref u) = some owned := by
-                  simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-                have hleafEq : leaf = owned :=
-                  Option.some.inj (hloc.symm.trans hderefLoc)
-                have hsnoc :=
-                  StoreOwnerSpine.snoc_box hsourceSpine rfl rfl hownedSlot
-                    hinnerValid
-                rw [← hleafEq] at hsnoc
-                exact ⟨LVal.base u,
-                    Or.inr (StoreOwnerSpine.ownsTransitively_of_nonempty hsnoc
-                      (by simp)),
-                    hGbase⟩
-          | @boxFull _ _ _ hsource =>
-              -- TODO(type-full-box): same issue as `firstNodePack`; full boxes
-              -- reached through borrows need a decomposition that can step the
-              -- guard through the earlier borrow before following the box edge.
-              sorry
-          | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
-              hsource htargets =>
-            have hkill : SlotDepKill store env leaf (LVal.base u) :=
-              slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore hheap
-                hsource (LValTyping.borrow hsource htargets) hloc hleafSlot
-                hleafValid
-            rcases firstNodePack hwellFormed hsafe hsource hloc with
-              ⟨envSlot, rootValue, cell, cellSlot, L, m, ts, spinePath,
-                suffix, u₀, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10⟩
-            cases hwrite with
-            | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
-                hwriteSlot hupdate =>
-                have hwriteSlotEq : writeSlot = envSlot := by
-                  have hwriteSlotBase :
-                      env.slotAt (LVal.base u) = some writeSlot := by
-                    simpa [LVal.base] using hwriteSlot
-                  exact Option.some.inj (hwriteSlotBase.symm.trans h1)
-                have hpathEq :
-                    LVal.path (.deref u) = spinePath ++ (() :: suffix) := by
-                  rw [h7]
-                  simp [path_prependPath, ← h9, LVal.path]
-                have hupdate' :
-                    UpdateAtPath rank env (spinePath ++ (() :: suffix))
-                      envSlot.ty rhsTy writeEnv updatedTy := by
-                  rw [← hpathEq, ← hwriteSlotEq]
-                  exact hupdate
-                rcases StoreOwnerSpine.updateAtPath_node_fanout h6 rfl
-                    hupdate' with
-                  ⟨hmut, env₂, hfanout⟩
-                subst hmut
-                rcases cellSlot with ⟨cellValue, cellLifetime⟩
-                simp at h4
-                subst cellValue
-                have hvalidCell := h5
-                cases hvalidCell with
-                | @borrow _ _ _ tSel hmemSel hlocSel =>
-                    have hcontains : PartialTyContains envSlot.ty
-                        (.borrow true ts) :=
-                      StoreOwnerSpine.contains_leafTy h6 rfl
-                    have hGtarget :
-                        WriteGuarded store env leaf base₀ (LVal.base tSel) :=
-                      WriteGuarded.step hGbase ⟨envSlot, h1, hcontains⟩
-                        hmemSel rfl hkill
-                    rcases WriteBorrowTargets.selected_branch_to_result_exists
-                        (Nat.succ_pos rank) hfanout
-                        (WriteBorrowTargets.initialized_leaves_of_typed
-                          hfanout)
-                        hmemSel with
-                      ⟨branchResult, hbranchWrite, _hbranchMap⟩
-                    rcases WriteBorrowTargets.typed_of_mem hfanout tSel
-                        hmemSel with
-                      ⟨branchTy, branchLifetime, hbranchTyping⟩
-                    have hbranchLoc :
-                        store.loc (prependPath suffix tSel) = some leaf := by
-                      have hcongr :=
-                        ProgramStore.loc_congr_prependPath
-                          (hlocSel.trans h8.symm) suffix
-                      rw [hcongr, ← h7]
-                      exact hloc
-                    have hcallRank :
-                        φ (LVal.base tSel) < φ (LVal.base u) :=
-                      hφ (LVal.base u) envSlot h1 (LVal.base tSel)
-                        (mem_partialTy_vars_iff.mpr
-                          ⟨true, ts, tSel, hcontains, hmemSel, rfl⟩)
-                    have hres :=
-                      go hφ hwellFormed hsafe hvalidStore hheap hleafSlot
-                        hleafValid hbranchTyping hbranchLoc hbranchWrite
-                        (by simpa [base_prependPath] using hGtarget)
-                    exact hres
-  termination_by (φ (LVal.base lv), sizeOf lv)
-  decreasing_by
-    all_goals
-      simp_wf
-      try subst_vars
-      try simp [LVal.base, base_prependPath]
-      first
-      | exact Prod.Lex.right _ (by simp)
-      | exact Prod.Lex.left _ _ (by assumption)
-
-set_option maxRecDepth 4096 in
-/--
-Runtime-selected version of `writeGuarded_of_resolution`.
-
-The proof follows the same selected write branch as the old guard construction,
-but records the concrete runtime evidence for every mutable-borrow step.  This
-is what lets later assignment framing use `RuntimeSelectedBorrowSafe` instead of
-global `BorrowSafeEnv`.
--/
-theorem runtimeWriteGuarded_of_resolution {store : ProgramStore} {env : Env}
-    {current : Lifetime} {φ : Name → Nat} {rhsTy : Ty} {base₀ : Name}
-    {leaf : Location} {leafSlot : StoreSlot} {leafView : PartialTy}
-    {lv : LVal} {lvTy : Ty} {lifetime : Lifetime} {rank : Nat}
-    {result : Env} :
-    LinearizedBy φ env →
-    WellFormedEnv env current →
-    store ∼ₛ env →
-    ValidStore store →
-    StoreOwnerTargetsHeap store →
-    store.slotAt leaf = some leafSlot →
-    ValidPartialValue store leafSlot.value leafView →
-    LValTyping env lv (.ty lvTy) lifetime →
-    store.loc lv = some leaf →
-    EnvWrite rank env lv rhsTy result →
-    RuntimeWriteGuarded store env leaf base₀ (LVal.base lv) →
-    ∃ r, ProtectedByBase store r leaf ∧
-      RuntimeWriteGuarded store env leaf base₀ r := by
-  intro hφ hwellFormed hsafe hvalidStore hheap hleafSlot hleafValid htyping
-    hloc hwrite hGbase
-  exact go hφ hwellFormed hsafe hvalidStore hheap hleafSlot hleafValid
-    htyping hloc hwrite hGbase
-where
-  go {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
-      {rhsTy : Ty} {base₀ : Name} {leaf : Location} {leafSlot : StoreSlot}
-      {leafView : PartialTy} {lv : LVal} {lvTy : Ty}
-      {lifetime : Lifetime} {rank : Nat} {result : Env}
-      (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env) (hvalidStore : ValidStore store)
-      (hheap : StoreOwnerTargetsHeap store)
-      (hleafSlot : store.slotAt leaf = some leafSlot)
-      (hleafValid : ValidPartialValue store leafSlot.value leafView)
-      (htyping : LValTyping env lv (.ty lvTy) lifetime)
-      (hloc : store.loc lv = some leaf)
-      (hwrite : EnvWrite rank env lv rhsTy result)
-      (hGbase : RuntimeWriteGuarded store env leaf base₀ (LVal.base lv)) :
-      ∃ r, ProtectedByBase store r leaf ∧
-        RuntimeWriteGuarded store env leaf base₀ r := by
-    cases lv with
-    | var b =>
-        have hleafEq : leaf = VariableProjection b := by
-          simp [ProgramStore.loc] at hloc
-          exact hloc.symm
-        exact ⟨b, Or.inl hleafEq, hGbase⟩
-    | deref u =>
-        cases htyping with
-        | @box _ _ sourceLifetime hsource =>
-            rcases StoreOwnerSpine.of_lvalTyping_box hwellFormed hsafe
-                hsource with
-              ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
-                hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot,
-                hsourceSpine⟩
-            have hsourceValid := StoreOwnerSpine.leaf_valid hsourceSpine
-            rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
-            cases hsourceValid with
-            | @box owned ownedSlot _ hownedSlot hinnerValid =>
-                have hderefLoc :
-                    store.loc (.deref u) = some owned := by
-                  simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-                have hleafEq : leaf = owned :=
-                  Option.some.inj (hloc.symm.trans hderefLoc)
-                have hsnoc :=
-                  StoreOwnerSpine.snoc_box hsourceSpine rfl rfl hownedSlot
-                    hinnerValid
-                rw [← hleafEq] at hsnoc
-                exact ⟨LVal.base u,
-                    Or.inr (StoreOwnerSpine.ownsTransitively_of_nonempty hsnoc
-                      (by simp)),
-                    hGbase⟩
-          | @boxFull _ _ _ hsource =>
-              -- TODO(type-full-box): same issue as `firstNodePack`; full boxes
-              -- reached through borrows need a decomposition that can step the
-              -- guard through the earlier borrow before following the box edge.
-              sorry
-          | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
-              hsource htargets =>
-            have hkill : SlotDepKill store env leaf (LVal.base u) :=
-              slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore hheap
-                hsource (LValTyping.borrow hsource htargets) hloc hleafSlot
-                hleafValid
-            rcases firstNodePack hwellFormed hsafe hsource hloc with
-              ⟨envSlot, rootValue, cell, cellSlot, L, m, ts, spinePath,
-                suffix, u₀, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10⟩
-            cases hwrite with
-            | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
-                hwriteSlot hupdate =>
-                have hwriteSlotEq : writeSlot = envSlot := by
-                  have hwriteSlotBase :
-                      env.slotAt (LVal.base u) = some writeSlot := by
-                    simpa [LVal.base] using hwriteSlot
-                  exact Option.some.inj (hwriteSlotBase.symm.trans h1)
-                have hpathEq :
-                    LVal.path (.deref u) = spinePath ++ (() :: suffix) := by
-                  rw [h7]
-                  simp [path_prependPath, ← h9, LVal.path]
-                have hupdate' :
-                    UpdateAtPath rank env (spinePath ++ (() :: suffix))
-                      envSlot.ty rhsTy writeEnv updatedTy := by
-                  rw [← hpathEq, ← hwriteSlotEq]
-                  exact hupdate
-                rcases StoreOwnerSpine.updateAtPath_node_fanout h6 rfl
-                    hupdate' with
-                  ⟨hmut, env₂, hfanout⟩
-                subst hmut
-                rcases cellSlot with ⟨cellValue, cellLifetime⟩
-                simp at h4
-                subst cellValue
-                have hvalidCell := h5
-                cases hvalidCell with
-                | @borrow _ _ _ tSel hmemSel hlocSel =>
-                    have hcontains : PartialTyContains envSlot.ty
-                        (.borrow true ts) :=
-                      StoreOwnerSpine.contains_leafTy h6 rfl
-                    let cellEvidence :
-                        RuntimeFrame.ValidPartialValueEvidence store
-                          (.value (.ref { location := L, owner := false }))
-                          (.ty (.borrow true ts)) :=
-                      RuntimeFrame.ValidPartialValueEvidence.borrow tSel
-                        hmemSel hlocSel
-                    have hcellSelected :
-                        RuntimeFrame.EvidenceSelectedBorrow store cellEvidence
-                          true ts tSel :=
-                      RuntimeFrame.EvidenceSelectedBorrow.borrow rfl
-                    have hrootSelected :
-                        ∃ rootEvidence :
-                            RuntimeFrame.ValidPartialValueEvidence store
-                              rootValue envSlot.ty,
-                          RuntimeFrame.EvidenceSelectedBorrow store
-                            rootEvidence true ts tSel := by
-                      by_cases hpath : spinePath = []
-                      · subst hpath
-                        rcases StoreOwnerSpine.nil_inv h6 with
-                          ⟨_hcellEq, hcellSlotEq, htyEq⟩
-                        have hvalueEq :
-                            rootValue =
-                              .value (.ref { location := L, owner := false }) :=
-                          congrArg StoreSlot.value hcellSlotEq
-                        rw [hvalueEq, htyEq]
-                        exact ⟨cellEvidence, hcellSelected⟩
-                      · exact
-                          RuntimeFrame.ReachesSlot.evidenceSelectedBorrow_lift
-                            (StoreOwnerSpine.reachesSlot_of_spine h6 hpath)
-                            cellEvidence hcellSelected
-                    rcases hrootSelected with ⟨rootEvidence, hrootSelected⟩
-                    have hGtarget :
-                        RuntimeWriteGuarded store env leaf base₀
-                          (LVal.base tSel) :=
-                      RuntimeWriteGuarded.step hGbase h1 h2 hrootSelected rfl
-                        hkill
-                    rcases WriteBorrowTargets.selected_branch_to_result_exists
-                        (Nat.succ_pos rank) hfanout
-                        (WriteBorrowTargets.initialized_leaves_of_typed
-                          hfanout)
-                        hmemSel with
-                      ⟨branchResult, hbranchWrite, _hbranchMap⟩
-                    rcases WriteBorrowTargets.typed_of_mem hfanout tSel
-                        hmemSel with
-                      ⟨branchTy, branchLifetime, hbranchTyping⟩
-                    have hbranchLoc :
-                        store.loc (prependPath suffix tSel) = some leaf := by
-                      have hcongr :=
-                        ProgramStore.loc_congr_prependPath
-                          (hlocSel.trans h8.symm) suffix
-                      rw [hcongr, ← h7]
-                      exact hloc
-                    have hcallRank :
-                        φ (LVal.base tSel) < φ (LVal.base u) :=
-                      hφ (LVal.base u) envSlot h1 (LVal.base tSel)
-                        (mem_partialTy_vars_iff.mpr
-                          ⟨true, ts, tSel, hcontains, hmemSel, rfl⟩)
-                    have hres :=
-                      go hφ hwellFormed hsafe hvalidStore hheap hleafSlot
-                        hleafValid hbranchTyping hbranchLoc hbranchWrite
-                        (by simpa [base_prependPath] using hGtarget)
-                    exact hres
-  termination_by (φ (LVal.base lv), sizeOf lv)
-  decreasing_by
-    all_goals
-      simp_wf
-      try subst_vars
-      try simp [LVal.base, base_prependPath]
-      first
-      | exact Prod.Lex.right _ (by simp)
-      | exact Prod.Lex.left _ _ (by assumption)
-
-set_option maxRecDepth 4096 in
-/--
-Provider-backed version of `runtimeWriteGuarded_of_resolution`.
-
-Every guard step records the borrow selected by the runtime evidence provider for
-the corresponding environment slot.  This is the guard shape needed by relaxed
-preservation, where global `BorrowSafeEnv` is intentionally unavailable.
--/
-theorem runtimeWriteGuardedWith_of_resolution {store : ProgramStore}
-    {env : Env} {evidenceOf : RuntimeFrame.RuntimeEvidenceProvider store env}
-    {current : Lifetime} {φ : Name → Nat} {rhsTy : Ty} {base₀ : Name}
-    {leaf : Location} {leafSlot : StoreSlot} {leafView : PartialTy}
-    {lv : LVal} {lvTy : Ty} {lifetime : Lifetime} {rank : Nat}
-    {result : Env} :
-    LinearizedBy φ env →
-    WellFormedEnv env current →
-    store ∼ₛ env →
-    ValidStore store →
-    StoreOwnerTargetsHeap store →
-    store.slotAt leaf = some leafSlot →
-    ValidPartialValue store leafSlot.value leafView →
-    LValTyping env lv (.ty lvTy) lifetime →
-    store.loc lv = some leaf →
-    EnvWrite rank env lv rhsTy result →
-    RuntimeWriteGuardedWith store env evidenceOf leaf base₀ (LVal.base lv) →
-    ∃ r, ProtectedByBase store r leaf ∧
-      RuntimeWriteGuardedWith store env evidenceOf leaf base₀ r := by
-  intro hφ hwellFormed hsafe hvalidStore hheap hleafSlot hleafValid htyping
-    hloc hwrite hGbase
-  exact go hφ hwellFormed hsafe hvalidStore hheap hleafSlot hleafValid
-    htyping hloc hwrite hGbase
-where
-  go {store : ProgramStore} {env : Env}
-      {evidenceOf : RuntimeFrame.RuntimeEvidenceProvider store env}
-      {current : Lifetime} {φ : Name → Nat}
-      {rhsTy : Ty} {base₀ : Name} {leaf : Location} {leafSlot : StoreSlot}
-      {leafView : PartialTy} {lv : LVal} {lvTy : Ty}
-      {lifetime : Lifetime} {rank : Nat} {result : Env}
-      (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env) (hvalidStore : ValidStore store)
-      (hheap : StoreOwnerTargetsHeap store)
-      (hleafSlot : store.slotAt leaf = some leafSlot)
-      (hleafValid : ValidPartialValue store leafSlot.value leafView)
-      (htyping : LValTyping env lv (.ty lvTy) lifetime)
-      (hloc : store.loc lv = some leaf)
-      (hwrite : EnvWrite rank env lv rhsTy result)
-      (hGbase : RuntimeWriteGuardedWith store env evidenceOf leaf base₀
-        (LVal.base lv)) :
-      ∃ r, ProtectedByBase store r leaf ∧
-        RuntimeWriteGuardedWith store env evidenceOf leaf base₀ r := by
-    cases lv with
-    | var b =>
-        have hleafEq : leaf = VariableProjection b := by
-          simp [ProgramStore.loc] at hloc
-          exact hloc.symm
-        exact ⟨b, Or.inl hleafEq, hGbase⟩
-    | deref u =>
-        cases htyping with
-        | @box _ _ sourceLifetime hsource =>
-            rcases StoreOwnerSpine.of_lvalTyping_box hwellFormed hsafe
-                hsource with
-              ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
-                hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot,
-                hsourceSpine⟩
-            have hsourceValid := StoreOwnerSpine.leaf_valid hsourceSpine
-            rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
-            cases hsourceValid with
-            | @box owned ownedSlot _ hownedSlot hinnerValid =>
-                have hderefLoc :
-                    store.loc (.deref u) = some owned := by
-                  simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-                have hleafEq : leaf = owned :=
-                  Option.some.inj (hloc.symm.trans hderefLoc)
-                have hsnoc :=
-                  StoreOwnerSpine.snoc_box hsourceSpine rfl rfl hownedSlot
-                    hinnerValid
-                rw [← hleafEq] at hsnoc
-                exact ⟨LVal.base u,
-                    Or.inr (StoreOwnerSpine.ownsTransitively_of_nonempty hsnoc
-                      (by simp)),
-                    hGbase⟩
-          | @boxFull _ _ _ hsource =>
-              -- TODO(type-full-box): same issue as `firstNodePack`; full boxes
-              -- reached through borrows need a decomposition that can step the
-              -- guard through the earlier borrow before following the box edge.
-              sorry
-          | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
-              hsource htargets =>
-            have hkill : SlotDepKill store env leaf (LVal.base u) :=
-              slotDepKill_of_firstNode hφ hwellFormed hsafe hvalidStore hheap
-                hsource (LValTyping.borrow hsource htargets) hloc hleafSlot
-                hleafValid
-            rcases firstNodePack hwellFormed hsafe hsource hloc with
-              ⟨envSlot, rootValue, cell, cellSlot, L, m, ts, spinePath,
-                suffix, u₀, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10⟩
-            let rootEvidence :=
-              evidenceOf (LVal.base u) envSlot rootValue h1 h2
-            cases hwrite with
-            | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
-                hwriteSlot hupdate =>
-                have hwriteSlotEq : writeSlot = envSlot := by
-                  have hwriteSlotBase :
-                      env.slotAt (LVal.base u) = some writeSlot := by
-                    simpa [LVal.base] using hwriteSlot
-                  exact Option.some.inj (hwriteSlotBase.symm.trans h1)
-                have hpathEq :
-                    LVal.path (.deref u) = spinePath ++ (() :: suffix) := by
-                  rw [h7]
-                  simp [path_prependPath, ← h9, LVal.path]
-                have hupdate' :
-                    UpdateAtPath rank env (spinePath ++ (() :: suffix))
-                      envSlot.ty rhsTy writeEnv updatedTy := by
-                  rw [← hpathEq, ← hwriteSlotEq]
-                  exact hupdate
-                rcases StoreOwnerSpine.updateAtPath_node_fanout h6 rfl
-                    hupdate' with
-                  ⟨hmut, env₂, hfanout⟩
-                subst hmut
-                rcases cellSlot with ⟨cellValue, cellLifetime⟩
-                simp at h4
-                subst cellValue
-                have hcontains : PartialTyContains envSlot.ty
-                    (.borrow true ts) :=
-                  StoreOwnerSpine.contains_leafTy h6 rfl
-                have hproviderSelected :
-                    ∃ tSel,
-                      RuntimeFrame.EvidenceSelectedBorrow store rootEvidence
-                        true ts tSel ∧
-                        tSel ∈ ts ∧ store.loc tSel = some L := by
-                  by_cases hpath : spinePath = []
-                  · subst hpath
-                    rcases envSlot with ⟨envTy, envLifetime⟩
-                    rcases StoreOwnerSpine.nil_inv h6 with
-                      ⟨_hcellEq, hcellSlotEq, htyEq⟩
-                    have hvalueEq :
-                        rootValue =
-                          .value (.ref { location := L, owner := false }) :=
-                      congrArg StoreSlot.value hcellSlotEq
-                    cases hvalueEq
-                    cases htyEq
-                    rcases RuntimeFrame.ValidPartialValueEvidence.borrow_selected
-                        rootEvidence with
-                      ⟨tSel, hselected, hmem, hlocSel⟩
-                    exact ⟨tSel, hselected, hmem, hlocSel⟩
-                  · have hreach :=
-                      StoreOwnerSpine.reachesSlot_of_spine h6 hpath
-                    rcases RuntimeFrame.ReachesSlot.evidence_at hreach
-                        rootEvidence with
-                      ⟨slotEvidence, hlift⟩
-                    rcases RuntimeFrame.ValidPartialValueEvidence.borrow_selected
-                        slotEvidence with
-                      ⟨tSel, hselected, hmem, hlocSel⟩
-                    exact ⟨tSel, hlift hselected, hmem, hlocSel⟩
-                rcases hproviderSelected with
-                  ⟨tSel, hrootSelected, hmemSel, hlocSel⟩
-                have hGtarget :
-                    RuntimeWriteGuardedWith store env evidenceOf leaf base₀
-                      (LVal.base tSel) :=
-                  RuntimeWriteGuardedWith.step hGbase h1 h2 hrootSelected rfl
-                    hkill
-                rcases WriteBorrowTargets.selected_branch_to_result_exists
-                    (Nat.succ_pos rank) hfanout
-                    (WriteBorrowTargets.initialized_leaves_of_typed hfanout)
-                    hmemSel with
-                  ⟨branchResult, hbranchWrite, _hbranchMap⟩
-                rcases WriteBorrowTargets.typed_of_mem hfanout tSel hmemSel with
-                  ⟨branchTy, branchLifetime, hbranchTyping⟩
-                have hbranchLoc :
-                    store.loc (prependPath suffix tSel) = some leaf := by
-                  have hcongr :=
-                    ProgramStore.loc_congr_prependPath
-                      (hlocSel.trans h8.symm) suffix
-                  rw [hcongr, ← h7]
-                  exact hloc
-                have hcallRank :
-                    φ (LVal.base tSel) < φ (LVal.base u) :=
-                  hφ (LVal.base u) envSlot h1 (LVal.base tSel)
-                    (mem_partialTy_vars_iff.mpr
-                      ⟨true, ts, tSel, hcontains, hmemSel, rfl⟩)
-                have hres :=
-                  go hφ hwellFormed hsafe hvalidStore hheap hleafSlot
-                    hleafValid hbranchTyping hbranchLoc hbranchWrite
-                    (by simpa [base_prependPath] using hGtarget)
-                exact hres
-  termination_by (φ (LVal.base lv), sizeOf lv)
-  decreasing_by
-    all_goals
-      simp_wf
-      try subst_vars
-      try simp [LVal.base, base_prependPath]
-      first
-      | exact Prod.Lex.right _ (by simp)
-      | exact Prod.Lex.left _ _ (by assumption)
 
 /-! ### Strong spine updates (Appendix 9.6 deref-assign support) -/
 
@@ -16399,9 +15623,76 @@ where
                   ownerSlot, lvTy, henvBase, hrootSlot, hrootLifetime, hsnoc,
                   by simp⟩
           | @boxFull _ _ _ hsource =>
-              -- TODO(type-full-box): this pure owner-spine statement must be
-              -- generalized for heaps reached by dereferencing a borrowed box.
-              sorry
+              have hsourceAbs :
+                  LValLocationAbstraction store u (.ty (.box lvTy)) :=
+                lvalTyping_defined_location hwellFormed hsafe hsource
+              rcases hsourceAbs with
+                ⟨middle, middleSlot, hmiddleLoc, hmiddleSlot, _hmiddleValid⟩
+              rcases RuntimeFrame.loc_intrinsicRootView hφ hwellFormed hsafe
+                  hsource hmiddleLoc with
+                ⟨root, slotM, viewTyM, slotLt, hprotM, hrankM, hslotM,
+                  hvalidM, hstrengthM, hboundM, hborrowsM, hcontainsM,
+                  rootEnvSlot, rootValue, hrootEnvSlot, hrootValue,
+                  hdescent⟩
+              rcases middleSlot with ⟨middleValue, middleLifetime⟩
+              have hslotMEq :
+                  slotM = ⟨middleValue, middleLifetime⟩ :=
+                Option.some.inj (hslotM.symm.trans hmiddleSlot)
+              subst hslotMEq
+              cases hvalidM with
+              | @boxFull ownerLocation ownerSlot innerView hownedSlot hinnerValid =>
+                  have hderefLoc :
+                      store.loc (.deref u) = some ownerLocation := by
+                    simp [ProgramStore.loc, hmiddleLoc, hslotM]
+                  have hlocEq : Location.heap address = ownerLocation := by
+                    rw [hloc] at hderefLoc
+                    exact Option.some.inj hderefLoc
+                  rcases hdescent with hroot | hreach
+                  · rcases hroot with ⟨hrootLocation, hviewRoot, hvalueRoot⟩
+                    have hspine :
+                        StoreOwnerSpine store (VariableProjection root)
+                          { value := rootValue,
+                            lifetime := rootEnvSlot.lifetime }
+                          rootEnvSlot.ty [()] (.heap address) ownerSlot
+                          (.ty innerView) := by
+                      rw [← hviewRoot]
+                      refine StoreOwnerSpine.boxFull
+                        (owned := .heap address) (ownedSlot := ownerSlot)
+                        hrootValue ?_ ?_
+                      · have hownerValue :
+                            rootValue = .value (owningRef ownerLocation) := by
+                          rw [← hvalueRoot]
+                          rfl
+                        simpa [owningRef, hlocEq] using hownerValue
+                      · exact StoreOwnerSpine.nil
+                          (by simpa [hlocEq] using hownedSlot) hinnerValid
+                    exact ⟨root, rootEnvSlot,
+                      { value := rootValue, lifetime := rootEnvSlot.lifetime },
+                      [()], ownerSlot, innerView, hrootEnvSlot, hrootValue, rfl,
+                      hspine, by simp⟩
+                  · rcases StoreOwnerSpine.of_reachesSlot hrootValue rfl hreach
+                      with ⟨spinePath, hspineToMiddle, _hspineNonempty⟩
+                    have hspine :
+                        StoreOwnerSpine store (VariableProjection root)
+                          { value := rootValue,
+                            lifetime := rootEnvSlot.lifetime }
+                          rootEnvSlot.ty (() :: spinePath) (.heap address)
+                          ownerSlot (.ty innerView) := by
+                      exact StoreOwnerSpine.snoc_boxFull hspineToMiddle rfl
+                        (by simpa [owningRef, hlocEq])
+                        (by simpa [hlocEq] using hownedSlot) hinnerValid
+                    exact ⟨root, rootEnvSlot,
+                      { value := rootValue, lifetime := rootEnvSlot.lifetime },
+                      () :: spinePath, ownerSlot, innerView, hrootEnvSlot,
+                      hrootValue, rfl, hspine, by simp⟩
+              | unit | int | bool | undef =>
+                  cases hstrengthM
+              | @borrow targetLoc mutable' targets' witness hmemW hlocW =>
+                  cases hstrengthM
+              | @box ownerLocation ownerSlot innerView hownedSlot hinnerValid =>
+                  cases hstrengthM
+              | @undefOf _ _ hiddenOuter hskel hstrength =>
+                  cases hstrengthM
           | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
               hsource htargets =>
             have hsourceAbs :
