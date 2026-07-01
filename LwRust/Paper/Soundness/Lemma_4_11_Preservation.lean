@@ -4199,19 +4199,18 @@ theorem StoreOwnerSpineWhenInitialized.leaf_slot {env : Env}
   | box _hslot _howner _htail ih => exact ih
   | boxFull _hslot _howner _htail ih => exact ih
 
-theorem StoreOwnerSpineWhenInitialized.extend_boxedSuffix_whenInitialized
+theorem StoreOwnerSpineWhenInitialized.extend_boxedSuffix_location_whenInitialized
     {env : Env} {store : ProgramStore} {source : LVal}
-    {root sourceLocation : Location}
+    {root sourceLocation leaf : Location}
     {rootSlot sourceSlot : StoreSlot} {rootTy : PartialTy}
-    {path suffix : List Unit} {leafTy : Ty} {address : Nat} :
+    {path suffix : List Unit} {leafTy : Ty} :
     StoreOwnerSpineWhenInitialized env store root rootSlot rootTy path
       sourceLocation sourceSlot (.ty (.box (boxedSuffixTy suffix leafTy))) →
     store.loc source = some sourceLocation →
-    store.loc (prependPath (() :: suffix) source) = some (.heap address) →
+    store.loc (prependPath (() :: suffix) source) = some leaf →
     ∃ leafSlot actualLeafTy,
       StoreOwnerSpineWhenInitialized env store root rootSlot rootTy
-        (path ++ (() :: suffix)) (.heap address) leafSlot
-        (.ty actualLeafTy) ∧
+        (path ++ (() :: suffix)) leaf leafSlot (.ty actualLeafTy) ∧
       PartialTyStrengthens (.ty actualLeafTy) (.ty leafTy) := by
   intro hspine hsourceLoc hfinalLoc
   induction suffix generalizing source sourceLocation sourceSlot path with
@@ -4230,14 +4229,14 @@ theorem StoreOwnerSpineWhenInitialized.extend_boxedSuffix_whenInitialized
           have hderefLoc :
               store.loc (.deref source) = some ownedLocation := by
             simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
-          have hownedEq : ownedLocation = .heap address := by
+          have hownedEq : ownedLocation = leaf := by
             simpa [prependPath] using
               (Option.some.inj (hderefLoc.symm.trans hfinalLoc))
-          subst hownedEq
+          subst leaf
           refine ⟨ownedSlot, leafTy, ?_, PartialTyStrengthens.reflex⟩
           have hsnoc :
               StoreOwnerSpineWhenInitialized env store root rootSlot rootTy
-                (() :: path) (.heap address) ownedSlot (.ty leafTy) :=
+                (() :: path) ownedLocation ownedSlot (.ty leafTy) :=
             StoreOwnerSpineWhenInitialized.snoc_boxFull hspine rfl rfl
               hownedSlot hinnerValid
           simpa [List.Unit_append_cons] using hsnoc
@@ -4265,12 +4264,31 @@ theorem StoreOwnerSpineWhenInitialized.extend_boxedSuffix_whenInitialized
               hownedSlot hinnerValid
           have htailLoc :
               store.loc (prependPath (() :: suffix) (.deref source)) =
-                some (.heap address) := by
+                some leaf := by
             simpa [prependPath] using hfinalLoc
           rcases ih hsnoc hderefLoc htailLoc with
             ⟨leafSlot, actualLeafTy, htailSpine, hstrength⟩
           refine ⟨leafSlot, actualLeafTy, ?_, hstrength⟩
           simpa [List.Unit_append_cons, List.append_assoc] using htailSpine
+
+theorem StoreOwnerSpineWhenInitialized.extend_boxedSuffix_whenInitialized
+    {env : Env} {store : ProgramStore} {source : LVal}
+    {root sourceLocation : Location}
+    {rootSlot sourceSlot : StoreSlot} {rootTy : PartialTy}
+    {path suffix : List Unit} {leafTy : Ty} {address : Nat} :
+    StoreOwnerSpineWhenInitialized env store root rootSlot rootTy path
+      sourceLocation sourceSlot (.ty (.box (boxedSuffixTy suffix leafTy))) →
+    store.loc source = some sourceLocation →
+    store.loc (prependPath (() :: suffix) source) = some (.heap address) →
+    ∃ leafSlot actualLeafTy,
+      StoreOwnerSpineWhenInitialized env store root rootSlot rootTy
+        (path ++ (() :: suffix)) (.heap address) leafSlot
+        (.ty actualLeafTy) ∧
+      PartialTyStrengthens (.ty actualLeafTy) (.ty leafTy) := by
+  intro hspine hsourceLoc hfinalLoc
+  exact
+    StoreOwnerSpineWhenInitialized.extend_boxedSuffix_location_whenInitialized
+      hspine hsourceLoc hfinalLoc
 
 theorem LValTyping.ownerSpine_or_runtimeSelected_boxedSuffix_whenInitialized
     {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
@@ -4444,6 +4462,194 @@ theorem LValTyping.ownerSpine_or_runtimeSelected_boxedSuffix_whenInitialized
                   RuntimeSpinePathSelected store env slot.ty
                     (LVal.path parent ++ (() :: (() :: suffix))) address :=
                 RuntimeSpinePathSelected.prepend_of_lvalTyping hborrow
+                  (by simpa [LVal.base] using hslot)
+                  (() :: (() :: suffix)) hborrowSelected
+              exact Or.inr
+                (by
+                  simpa [LVal.base, LVal.path_deref_cons,
+                    List.Unit_append_cons, List.append_assoc]
+                    using hbaseSelected)
+          | @borrowStale _location _mutable _targets hstale =>
+              have hinitialized : BorrowTargetsInitialized env targets := by
+                intro target htarget
+                rcases lvalTargetsTyping_member_strengthens htargets target
+                    htarget with
+                  ⟨targetTy, targetLifetime, htargetTyping, _hstrength⟩
+                exact ⟨targetTy, targetLifetime, htargetTyping⟩
+              exact False.elim (hstale hinitialized)
+
+theorem LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
+    {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
+    {source : LVal} {suffix : List Unit} {leafTy : Ty}
+    {sourceLifetime : Lifetime} {location : Location} {slot : EnvSlot} :
+    LinearizedBy φ env →
+    WellFormedEnvWhenInitialized env current →
+    SafeAbstractionWhenInitialized store env →
+    StoreOwnerTargetsHeap store →
+    LValTyping env source (.ty (.box (boxedSuffixTy suffix leafTy)))
+      sourceLifetime →
+    env.slotAt (LVal.base source) = some slot →
+    store.loc (prependPath (() :: suffix) source) = some location →
+    (∃ rootSlot leafSlot actualLeafTy,
+      store.slotAt (VariableProjection (LVal.base source)) = some rootSlot ∧
+      StoreOwnerSpineWhenInitialized env store
+        (VariableProjection (LVal.base source)) rootSlot slot.ty
+        (LVal.path source ++ (() :: suffix)) location leafSlot
+        (.ty actualLeafTy) ∧
+      PartialTyStrengthens (.ty actualLeafTy) (.ty leafTy) ∧
+      LVal.path source ++ (() :: suffix) ≠ []) ∨
+    RuntimeLocationPathSelected store env slot.ty
+      (LVal.path source ++ (() :: suffix)) location := by
+  intro hφ hwellFormed hsafe hheap htyping hslot hloc
+  induction source generalizing suffix leafTy sourceLifetime location slot with
+  | var x =>
+      rcases LValTyping.var_inv htyping with
+        ⟨typedSlot, htypedSlot, hslotTy, _hlifetime⟩
+      have hslotEq : slot = typedSlot :=
+        Option.some.inj (hslot.symm.trans htypedSlot)
+      subst slot
+      rcases hsafe.2 x typedSlot htypedSlot with
+        ⟨rootValue, hrootStore, hrootValid⟩
+      have hrootSpine :
+          StoreOwnerSpineWhenInitialized env store (VariableProjection x)
+            { value := rootValue, lifetime := typedSlot.lifetime }
+            (.ty (.box (boxedSuffixTy suffix leafTy))) []
+            (VariableProjection x)
+            { value := rootValue, lifetime := typedSlot.lifetime }
+            (.ty (.box (boxedSuffixTy suffix leafTy))) := by
+        simpa [hslotTy] using
+          (StoreOwnerSpineWhenInitialized.nil hrootStore hrootValid)
+      rcases
+          StoreOwnerSpineWhenInitialized.extend_boxedSuffix_location_whenInitialized
+            hrootSpine (by simp [ProgramStore.loc, VariableProjection]) hloc with
+        ⟨leafSlot, actualLeafTy, hspine, hstrength⟩
+      exact Or.inl
+        ⟨{ value := rootValue, lifetime := typedSlot.lifetime }, leafSlot,
+          actualLeafTy, hrootStore,
+          by simpa [LVal.base, LVal.path, hslotTy] using hspine,
+          hstrength, by simp⟩
+  | deref parent ih =>
+      cases htyping with
+      | @box _ _ sourceLifetime hparent =>
+          rcases StoreOwnerSpineWhenInitialized.of_lvalTyping_box
+              hwellFormed hsafe hparent with
+            ⟨envSlot, rootSlot, parentLocation, parentSlot, henvBase,
+              hrootSlot, _hrootLifetime, hparentLoc, hparentSlot,
+              hparentSpine⟩
+          have hslotEq : slot = envSlot := by
+            rw [LVal.base] at hslot
+            exact Option.some.inj (hslot.symm.trans henvBase)
+          subst slot
+          have hparentValid :
+              ValidPartialValueWhenInitialized env store parentSlot.value
+                (.box (.ty (.box (boxedSuffixTy suffix leafTy)))) :=
+            StoreOwnerSpineWhenInitialized.leaf_valid hparentSpine
+          rcases parentSlot with ⟨parentValue, parentLifetime'⟩
+          cases hparentValid with
+          | @box sourceLocation sourceSlot _ hsourceSlot hsourceValid =>
+              have hsourceLoc :
+                  store.loc (.deref parent) = some sourceLocation := by
+                simp [ProgramStore.loc, hparentLoc, hparentSlot]
+              have hsourceSpine :
+                  StoreOwnerSpineWhenInitialized env store
+                    (VariableProjection (LVal.base parent)) rootSlot
+                    envSlot.ty (() :: LVal.path parent) sourceLocation
+                    sourceSlot (.ty (.box (boxedSuffixTy suffix leafTy))) :=
+                StoreOwnerSpineWhenInitialized.snoc_box hparentSpine rfl rfl
+                  hsourceSlot hsourceValid
+              rcases
+                  StoreOwnerSpineWhenInitialized.extend_boxedSuffix_location_whenInitialized
+                    hsourceSpine hsourceLoc hloc with
+                ⟨leafSlot, actualLeafTy, hspine, hstrength⟩
+              exact Or.inl
+                ⟨rootSlot, leafSlot, actualLeafTy,
+                  by simpa [LVal.base] using hrootSlot,
+                  by
+                    simpa [LVal.base, LVal.path_deref_cons,
+                      List.Unit_append_cons, List.append_assoc] using hspine,
+                  hstrength, by simp [LVal.path_deref_cons]⟩
+      | @boxFull _ inner sourceLifetime hparent =>
+          have hparentLoc :
+              store.loc (prependPath (() :: (() :: suffix)) parent) =
+                some location := by
+            simpa [prependPath] using hloc
+          have hparentTyping :
+              LValTyping env parent
+                (.ty (.box (boxedSuffixTy (() :: suffix) leafTy)))
+                sourceLifetime := by
+            simpa [boxedSuffixTy] using hparent
+          rcases ih hparentTyping
+              (by simpa [LVal.base] using hslot) hparentLoc with
+            howner | hselected
+          · rcases howner with
+              ⟨rootSlot, leafSlot, actualLeafTy, hrootSlot, hspine,
+                hstrength, hnonempty⟩
+            exact Or.inl
+              ⟨rootSlot, leafSlot, actualLeafTy,
+                by simpa [LVal.base] using hrootSlot,
+                by
+                  simpa [LVal.base, LVal.path_deref_cons,
+                    List.Unit_append_cons, List.append_assoc] using hspine,
+                hstrength,
+                by simp [LVal.path_deref_cons]⟩
+          · exact Or.inr
+              (by
+                simpa [LVal.base, LVal.path_deref_cons,
+                  List.Unit_append_cons, List.append_assoc] using hselected)
+      | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
+          hborrow htargets =>
+          have hsourceAbs :
+              LValLocationAbstractionWhenInitialized env store parent
+                (.ty (.borrow mutable targets)) :=
+            lvalTyping_defined_location_whenInitialized hsafe hborrow
+          rcases hsourceAbs with
+            ⟨borrowLocation, borrowSlot, hborrowLoc, hborrowSlot,
+              hborrowValid⟩
+          rcases borrowSlot with ⟨borrowValue, borrowSlotLifetime⟩
+          cases hborrowValid with
+          | @borrowLive selectedLocation _mutable _targets selectedTarget
+              _hinit hmem hselectedLoc =>
+              have hsourceLoc :
+                  store.loc (.deref parent) = some selectedLocation := by
+                simp [ProgramStore.loc, hborrowLoc, hborrowSlot]
+              have hlocEq :
+                  store.loc (.deref parent) = store.loc selectedTarget := by
+                rw [hsourceLoc, hselectedLoc]
+              have hselectedFinalLoc :
+                  store.loc (prependPath (() :: suffix) selectedTarget) =
+                    some location := by
+                have hcongr :=
+                  ProgramStore.loc_congr_prependPath
+                    (store := store) (left := .deref parent)
+                    (right := selectedTarget) hlocEq (() :: suffix)
+                exact hcongr ▸ hloc
+              rcases lvalTargetsTyping_member_strengthens htargets
+                  selectedTarget hmem with
+                ⟨selectedTy, selectedLifetime, hselectedTyping,
+                  hselectedStrengthens⟩
+              rcases PartialTyStrengthens.to_box_ty_inv
+                  hselectedStrengthens with
+                ⟨selectedInner, hselectedTyEq, hinnerStrength⟩
+              subst hselectedTyEq
+              rcases PartialTyStrengthens.boxedSuffix_inv suffix
+                  hinnerStrength with
+                ⟨selectedLeafTy, hselectedInnerEq, _hleafStrength⟩
+              subst hselectedInnerEq
+              have hselectedFinalTyping :
+                  LValTyping env
+                    (prependPath (() :: suffix) selectedTarget)
+                    (.ty selectedLeafTy) selectedLifetime :=
+                LValTyping.prependPath_boxedSuffix hselectedTyping
+              have hborrowSelected :
+                  RuntimeLocationPathSelected store env
+                    (.ty (.borrow mutable targets)) (() :: (() :: suffix))
+                    location :=
+                RuntimeLocationPathSelected.borrowPath hmem
+                  hselectedFinalTyping hselectedFinalLoc
+              have hbaseSelected :
+                  RuntimeLocationPathSelected store env slot.ty
+                    (LVal.path parent ++ (() :: (() :: suffix))) location :=
+                RuntimeLocationPathSelected.prepend_of_lvalTyping hborrow
                   (by simpa [LVal.base] using hslot)
                   (() :: (() :: suffix)) hborrowSelected
               exact Or.inr
@@ -6071,11 +6277,216 @@ where
                     (by simpa [LVal.base] using henvBase)
                     (by simpa [LVal.base] using hrootSlot)
                     hspineDeref hwrite hreadPrefixTyping hderefLoc
-                    hreadPrefixLocOwner hmayRead
-        | @boxFull _ inner sourceLifetime hsource =>
-            sorry
-          | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
-              hsourceBorrow htargets =>
+                      hreadPrefixLocOwner hmayRead
+          | @boxFull _ inner sourceLifetime hsource =>
+              rcases LValTyping.base_slot_exists hsource with
+                ⟨sourceEnvSlot, hsourceEnvSlot⟩
+              have hderefLoc :
+                  store.loc (prependPath (() :: []) source) =
+                    some writtenLocation := by
+                simpa [prependPath] using hlvLoc
+              rcases
+                  LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
+                    hφ hwellFormed hsafe hheap hsource hsourceEnvSlot
+                    hderefLoc with
+                howner | hselected
+              · rcases howner with
+                  ⟨rootSlot, leafSlot, actualLeafTy, hrootSlot, hspine,
+                    _hstrength, _hnonempty⟩
+                have hspineDeref :
+                    StoreOwnerSpineWhenInitialized env store
+                      (VariableProjection (LVal.base (.deref source)))
+                      rootSlot sourceEnvSlot.ty (LVal.path (.deref source))
+                      writtenLocation leafSlot (.ty actualLeafTy) := by
+                  simpa [LVal.base, LVal.path_deref_cons,
+                    List.Unit_append_cons] using hspine
+                have hmayReadOwner :
+                    EnvMayReadThrough env (.deref source)
+                      dependencyTarget :=
+                  EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized.go
+                    hwellFormed hsafe hvalidStore hheap hφ hspineDeref
+                    hreadPrefixTyping hreadPrefixLoc hmayRead
+                cases hwrite with
+                | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty
+                    updatedTy hwriteSlot hupdate =>
+                    have hsourceEnvSlotDeref :
+                        env.slotAt (LVal.base (.deref source)) =
+                          some sourceEnvSlot := by
+                      simpa [LVal.base] using hsourceEnvSlot
+                    have hslotEq : writeSlot = sourceEnvSlot :=
+                      Option.some.inj
+                        (hwriteSlot.symm.trans hsourceEnvSlotDeref)
+                    subst writeSlot
+                    have heffective :
+                        UpdateAtPathEffectiveWrite rank env
+                          (LVal.base (.deref source))
+                          (LVal.path (.deref source)) sourceEnvSlot.ty rhsTy
+                          writeEnv updatedTy
+                          (prependPath (LVal.path (.deref source))
+                            (.var (LVal.base (.deref source)))) :=
+                      StoreOwnerSpineWhenInitialized.updateAtPathEffective_leaf_self
+                        (base := LVal.base (.deref source)) hspineDeref
+                        hupdate
+                    have hlvEq :
+                        prependPath (LVal.path (.deref source))
+                            (.var (LVal.base (.deref source))) =
+                          .deref source := by
+                      apply LVal.eq_of_base_path
+                      · simp [LVal.base]
+                      · simp [LVal.path]
+                    rw [hlvEq] at heffective
+                    exact ⟨.deref source,
+                      EnvWriteEffectiveWrite.intro hsourceEnvSlotDeref
+                        heffective,
+                      hmayReadOwner⟩
+              · let sourceRank := φ (LVal.base source)
+                let PathEff : Nat → Prop := fun rootRank =>
+                  rootRank ≤ sourceRank →
+                  ∀ {target : LVal} {pt : PartialTy}
+                    {targetLifetime : Lifetime} {path : List Unit}
+                    {branchResult : Env} {branchRank : Nat},
+                    φ (LVal.base target) = rootRank →
+                    LValTyping env target pt targetLifetime →
+                    RuntimeLocationPathSelected store env pt path
+                      writtenLocation →
+                    EnvWrite branchRank env (prependPath path target) rhsTy
+                      branchResult →
+                    ∃ written,
+                      EnvWriteEffectiveWrite branchRank env
+                        (prependPath path target) rhsTy branchResult written ∧
+                        EnvMayReadThrough env written dependencyTarget
+                let DirectEff : Nat → Prop := fun rootRank =>
+                  rootRank < sourceRank →
+                  ∀ {target : LVal} {targetTy : Ty}
+                    {targetLifetime : Lifetime} {branchResult : Env}
+                    {branchRank : Nat},
+                    φ (LVal.base target) = rootRank →
+                    LValTyping env target (.ty targetTy) targetLifetime →
+                    store.loc target = some writtenLocation →
+                    EnvWrite branchRank env target rhsTy branchResult →
+                    ∃ written,
+                      EnvWriteEffectiveWrite branchRank env target rhsTy
+                        branchResult written ∧
+                        EnvMayReadThrough env written dependencyTarget
+                have hall : ∀ rootRank, PathEff rootRank ∧ DirectEff rootRank := by
+                  intro rootRank
+                  refine Nat.strong_induction_on rootRank ?_
+                  intro rootRank ih
+                  have hpath : PathEff rootRank := by
+                    intro hrootLe target pt targetLifetime path branchResult branchRank
+                      hrootEq htargetTyping hselectedPath hbranchWrite
+                    cases hbranchWrite with
+                    | @intro _rank _env₁ writeEnv writeLv writeSlot _ty
+                        updatedTy hwriteSlot hupdate =>
+                        have hwriteSlotBase :
+                            env.slotAt (LVal.base target) =
+                              some writeSlot := by
+                          simpa [LVal.base_prependPath] using hwriteSlot
+                        have hupdatePath :
+                            UpdateAtPath branchRank env
+                              (LVal.path target ++ path) writeSlot.ty rhsTy
+                              writeEnv updatedTy := by
+                          simpa [LVal.path_prependPath] using hupdate
+                        have hselectedFull :
+                            RuntimeLocationPathSelected store env
+                              writeSlot.ty (LVal.path target ++ path)
+                              writtenLocation :=
+                          RuntimeLocationPathSelected.prepend_of_lvalTyping
+                            htargetTyping hwriteSlotBase path hselectedPath
+                        have hbelow :
+                            ∀ v, v ∈ PartialTy.vars writeSlot.ty →
+                              φ v < φ (LVal.base target) :=
+                          hφ (LVal.base target) writeSlot hwriteSlotBase
+                        rcases
+                            RuntimeLocationPathSelected.updateAtPathEffective_ranked_passthrough
+                              (base := LVal.base target)
+                              (rootRank := φ (LVal.base target))
+                              hbelow hselectedFull hupdatePath
+                              (fun {branchRank recursiveTarget recursiveTy
+                                  recursiveLifetime recursiveResult}
+                                  _hpositive htargetRank hrecursiveTyping
+                                  hrecursiveLoc hrecursiveWrite =>
+                                have hlt :
+                                    φ (LVal.base recursiveTarget) <
+                                      rootRank := by
+                                  simpa [hrootEq] using htargetRank
+                                have hrecursiveLtSource :
+                                    φ (LVal.base recursiveTarget) <
+                                      sourceRank :=
+                                  lt_of_lt_of_le hlt hrootLe
+                                (ih (φ (LVal.base recursiveTarget)) hlt).2
+                                  hrecursiveLtSource rfl hrecursiveTyping
+                                  hrecursiveLoc hrecursiveWrite)
+                                (fun {branchRank recursiveTarget recursivePt
+                                    recursiveLifetime recursivePath
+                                    recursiveResult}
+                                    _hpositive htargetRank hrecursiveTyping
+                                    hrecursiveSelected hrecursiveWrite =>
+                                have hlt :
+                                    φ (LVal.base recursiveTarget) <
+                                      rootRank := by
+                                  simpa [hrootEq] using htargetRank
+                                have hrecursiveLeSource :
+                                    φ (LVal.base recursiveTarget) ≤
+                                      sourceRank :=
+                                  le_of_lt (lt_of_lt_of_le hlt hrootLe)
+                                (ih (φ (LVal.base recursiveTarget)) hlt).1
+                                    hrecursiveLeSource rfl hrecursiveTyping
+                                    hrecursiveSelected hrecursiveWrite) with
+                          ⟨written, heffective, hmayReadWritten⟩
+                        have heffectivePrep :
+                            UpdateAtPathEffectiveWrite branchRank env
+                              (LVal.base (prependPath path target))
+                              (LVal.path (prependPath path target))
+                              writeSlot.ty rhsTy writeEnv updatedTy
+                              written := by
+                          simpa [LVal.base_prependPath,
+                            LVal.path_prependPath] using heffective
+                        exact ⟨written,
+                          EnvWriteEffectiveWrite.intro hwriteSlot
+                            heffectivePrep,
+                          hmayReadWritten⟩
+                  have hdirect : DirectEff rootRank := by
+                    intro hrootLt target targetTy targetLifetime branchResult
+                      branchRank hrootEq htargetTyping htargetLoc
+                      hbranchWrite
+                    have hcallRank :
+                        φ (LVal.base target) <
+                          φ (LVal.base (.deref source)) := by
+                      simpa [sourceRank, LVal.base, hrootEq] using hrootLt
+                    exact
+                      go hwellFormed hsafe hvalidStore hheap hφ
+                        htargetTyping hbranchWrite hreadPrefixTyping
+                        htargetLoc hreadPrefixLoc hmayRead
+                  exact ⟨hpath, hdirect⟩
+                have hselectedBase :
+                    RuntimeLocationPathSelected store env sourceEnvSlot.ty
+                      (() :: LVal.path source) writtenLocation := by
+                  simpa [List.Unit_append_cons] using hselected
+                have hbaseWrittenEq :
+                    prependPath (() :: LVal.path source)
+                        (.var (LVal.base source)) =
+                      .deref source := by
+                  apply LVal.eq_of_base_path
+                  · simp [LVal.base]
+                  · simp [LVal.path_prependPath, LVal.path]
+                have hwriteBase :
+                    EnvWrite rank env
+                      (prependPath (() :: LVal.path source)
+                        (.var (LVal.base source))) rhsTy result := by
+                  simpa [hbaseWrittenEq] using hwrite
+                simpa [hbaseWrittenEq] using
+                  (hall (φ (LVal.base source))).1 le_rfl
+                    (target := .var (LVal.base source))
+                    (pt := sourceEnvSlot.ty)
+                    (targetLifetime := sourceEnvSlot.lifetime)
+                    (path := () :: LVal.path source)
+                    (branchResult := result)
+                    (branchRank := rank)
+                    rfl (LValTyping.var hsourceEnvSlot) hselectedBase
+                    hwriteBase
+            | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
+                hsourceBorrow htargets =>
               have hsourceAbs :
                   LValLocationAbstractionWhenInitialized env store source
                     (.ty (.borrow mutable targets)) :=
