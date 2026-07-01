@@ -1128,6 +1128,12 @@ mutual
           selectedSlotTy →
         RuntimePathSelected store env (.box inner) (() :: path) selectedName
           selectedSlot selectedSlotTy
+    | boxFull {inner : Ty} {path : List Unit} {selectedName : Name}
+        {selectedSlot : EnvSlot} {selectedSlotTy : Ty} :
+        RuntimePathSelected store env (.ty inner) path selectedName selectedSlot
+          selectedSlotTy →
+        RuntimePathSelected store env (.ty (.box inner)) (() :: path)
+          selectedName selectedSlot selectedSlotTy
     | borrowStep {mutable : Bool} {targets : List LVal} {path : List Unit}
         {selectedName : Name} {selectedSlot : EnvSlot} {selectedSlotTy : Ty} :
         RuntimeTargetsPathSelected store env targets path selectedName
@@ -1180,6 +1186,14 @@ mutual
       RuntimePathSelected.box hinner, lv, lifetime, htyping => by
         have hderef : LValTyping env (.deref lv) inner lifetime :=
           LValTyping.box htyping
+        simpa [LVal.base] using
+          RuntimePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
+            hheap hinner hderef
+    | .ty (.box inner), () :: path, selectedName, selectedSlot,
+      selectedSlotTy, RuntimePathSelected.boxFull hinner, lv, lifetime,
+      htyping => by
+        have hderef : LValTyping env (.deref lv) (.ty inner) lifetime :=
+          LValTyping.boxFull htyping
         simpa [LVal.base] using
           RuntimePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
             hheap hinner hderef
@@ -1253,6 +1267,14 @@ mutual
         simpa [LVal.base] using
           RuntimePathSelected.rank_lt_of_lvalTyping_whenInitialized hφ hsafe
             hheap hinner hderef
+    | .ty (.box inner), () :: path, selectedName, selectedSlot,
+      selectedSlotTy, RuntimePathSelected.boxFull hinner, lv, lifetime,
+      htyping => by
+        have hderef : LValTyping env (.deref lv) (.ty inner) lifetime :=
+          LValTyping.boxFull htyping
+        simpa [LVal.base] using
+          RuntimePathSelected.rank_lt_of_lvalTyping_whenInitialized hφ hsafe
+            hheap hinner hderef
     | .ty (.borrow mutable targets), () :: path, selectedName, selectedSlot,
       selectedSlotTy, RuntimePathSelected.borrowStep htargets, lv, lifetime,
       htyping => by
@@ -1309,7 +1331,7 @@ theorem RuntimePathSelected.of_partialTyUnion {store : ProgramStore} {env : Env}
             selectedSlotTy)
     (motive_2 := fun _targets _path _selectedName _selectedSlot
       _selectedSlotTy _ => True)
-    ?borrowHere ?box ?borrowStep ?target hselected left right hunion
+    ?borrowHere ?box ?boxFull ?borrowStep ?target hselected left right hunion
   case borrowHere =>
     intro mutable targets selectedTarget selectedTargetTy selectedTargetLifetime
       selectedName selectedSlot selectedSlotTy hmem htyping hloc hslot hty
@@ -1341,6 +1363,22 @@ theorem RuntimePathSelected.of_partialTyUnion {store : ProgramStore} {env : Env}
             rcases ih _ _ (PartialTyUnion.box_inv hunion) with hleft | hright
             · exact Or.inl (RuntimePathSelected.box hleft)
             · exact Or.inr (RuntimePathSelected.box hright)
+  case boxFull =>
+    intro inner path selectedName selectedSlot selectedSlotTy hinner ih
+      left right hunion
+    have hleftStrength := PartialTyUnion.left_strengthens hunion
+    cases hleftStrength with
+    | reflex =>
+        exact Or.inl (RuntimePathSelected.boxFull hinner)
+    | tyBox hleftInner =>
+        have hrightStrength := PartialTyUnion.right_strengthens hunion
+        cases hrightStrength with
+        | reflex =>
+            exact Or.inr (RuntimePathSelected.boxFull hinner)
+        | tyBox hrightInner =>
+            rcases ih _ _ (PartialTyUnion.tyBox_inv hunion) with hleft | hright
+            · exact Or.inl (RuntimePathSelected.boxFull hleft)
+            · exact Or.inr (RuntimePathSelected.boxFull hright)
   case borrowStep =>
     intro mutable targets path selectedName selectedSlot selectedSlotTy
       htargets _ih left right hunion
@@ -1410,7 +1448,54 @@ theorem RuntimePathSelected.prepend_of_lvalTyping {store : ProgramStore}
         selectedSlotTy →
       RuntimePathSelected store env slot.ty (LVal.path lv ++ path)
         selectedName selectedSlot selectedSlotTy := by
-  sorry
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lifetime _htyping =>
+      ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+      ∀ (path : List Unit),
+        RuntimePathSelected store env pt path selectedName selectedSlot
+          selectedSlotTy →
+        RuntimePathSelected store env slot.ty (LVal.path lv ++ path)
+          selectedName selectedSlot selectedSlotTy)
+    (motive_2 := fun _targets _pt _lifetime _htyping => True)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htyping
+  · intro x typedSlot htypedSlot slot hslot path hselected
+    have hslotEq : slot = typedSlot :=
+      Option.some.inj (hslot.symm.trans htypedSlot)
+    subst hslotEq
+    simpa [LVal.path] using hselected
+  · intro source inner sourceLifetime _hsource ih slot hslot path hselected
+    have hsourceSelected :
+        RuntimePathSelected store env (.box inner) (() :: path) selectedName
+          selectedSlot selectedSlotTy :=
+      RuntimePathSelected.box hselected
+    have hbase := ih hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intro source inner sourceLifetime _hsource ih slot hslot path hselected
+    have hsourceSelected :
+        RuntimePathSelected store env (.ty (.box inner)) (() :: path)
+          selectedName selectedSlot selectedSlotTy :=
+      RuntimePathSelected.boxFull hselected
+    have hbase := ih hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intro source mutable targets borrowLifetime targetLifetime targetTy
+      _hsource htargets ihSource _ihTargets slot hslot path hselected
+    have htargetsSelected :
+        RuntimeTargetsPathSelected store env targets path selectedName
+          selectedSlot selectedSlotTy :=
+      RuntimeTargetsPathSelected.of_lvalTargetsTyping htargets hselected
+    have hsourceSelected :
+        RuntimePathSelected store env (.ty (.borrow mutable targets))
+          (() :: path) selectedName selectedSlot selectedSlotTy :=
+      RuntimePathSelected.borrowStep htargetsSelected
+    have hbase := ihSource hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intros
+    trivial
+  · intros
+    trivial
 theorem RuntimePathSelected.updateAtPath_map {store : ProgramStore}
     {env selectedSource writeEnv : Env}
     {oldTy updatedTy : PartialTy} {path : List Unit} {rank : Nat}
@@ -1581,6 +1666,10 @@ mutual
     | box {inner : PartialTy} {path : List Unit} {address : Nat} :
         RuntimeSpinePathSelected store env inner path address →
         RuntimeSpinePathSelected store env (.box inner) (() :: path) address
+    | boxFull {inner : Ty} {path : List Unit} {address : Nat} :
+        RuntimeSpinePathSelected store env (.ty inner) path address →
+        RuntimeSpinePathSelected store env (.ty (.box inner)) (() :: path)
+          address
     | borrowStep {mutable : Bool} {targets : List LVal} {path : List Unit}
         {address : Nat} :
         RuntimeSpineTargetsSelected store env targets path address →
@@ -1612,7 +1701,7 @@ theorem RuntimeSpinePathSelected.of_partialTyUnion {store : ProgramStore}
         RuntimeSpinePathSelected store env left path address ∨
           RuntimeSpinePathSelected store env right path address)
     (motive_2 := fun _targets _path _address _ => True)
-    ?borrowHere ?box ?borrowStep ?target hselected left right hunion
+    ?borrowHere ?box ?boxFull ?borrowStep ?target hselected left right hunion
   case borrowHere =>
     intro mutable targets selectedTarget selectedTargetTy
       selectedTargetLifetime address hmem htyping hloc left right hunion
@@ -1644,6 +1733,21 @@ theorem RuntimeSpinePathSelected.of_partialTyUnion {store : ProgramStore}
             rcases ih _ _ (PartialTyUnion.box_inv hunion) with hleft | hright
             · exact Or.inl (RuntimeSpinePathSelected.box hleft)
             · exact Or.inr (RuntimeSpinePathSelected.box hright)
+  case boxFull =>
+    intro inner path address hinner ih left right hunion
+    have hleftStrength := PartialTyUnion.left_strengthens hunion
+    cases hleftStrength with
+    | reflex =>
+        exact Or.inl (RuntimeSpinePathSelected.boxFull hinner)
+    | tyBox hleftInner =>
+        have hrightStrength := PartialTyUnion.right_strengthens hunion
+        cases hrightStrength with
+        | reflex =>
+            exact Or.inr (RuntimeSpinePathSelected.boxFull hinner)
+        | tyBox hrightInner =>
+            rcases ih _ _ (PartialTyUnion.tyBox_inv hunion) with hleft | hright
+            · exact Or.inl (RuntimeSpinePathSelected.boxFull hleft)
+            · exact Or.inr (RuntimeSpinePathSelected.boxFull hright)
   case borrowStep =>
     intro mutable targets path address htargets _ih left right hunion
     cases htargets with
@@ -1704,7 +1808,52 @@ theorem RuntimeSpinePathSelected.prepend_of_lvalTyping {store : ProgramStore}
       RuntimeSpinePathSelected store env pt path address →
       RuntimeSpinePathSelected store env slot.ty (LVal.path lv ++ path)
         address := by
-  sorry
+  refine LValTyping.rec
+    (motive_1 := fun lv pt _lifetime _htyping =>
+      ∀ {slot : EnvSlot}, env.slotAt (LVal.base lv) = some slot →
+      ∀ (path : List Unit),
+        RuntimeSpinePathSelected store env pt path address →
+        RuntimeSpinePathSelected store env slot.ty (LVal.path lv ++ path)
+          address)
+    (motive_2 := fun _targets _pt _lifetime _htyping => True)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htyping
+  · intro x typedSlot htypedSlot slot hslot path hselected
+    have hslotEq : slot = typedSlot :=
+      Option.some.inj (hslot.symm.trans htypedSlot)
+    subst hslotEq
+    simpa [LVal.path] using hselected
+  · intro source inner sourceLifetime _hsource ih slot hslot path hselected
+    have hsourceSelected :
+        RuntimeSpinePathSelected store env (.box inner) (() :: path)
+          address :=
+      RuntimeSpinePathSelected.box hselected
+    have hbase := ih hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intro source inner sourceLifetime _hsource ih slot hslot path hselected
+    have hsourceSelected :
+        RuntimeSpinePathSelected store env (.ty (.box inner)) (() :: path)
+          address :=
+      RuntimeSpinePathSelected.boxFull hselected
+    have hbase := ih hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intro source mutable targets borrowLifetime targetLifetime targetTy
+      _hsource htargets ihSource _ihTargets slot hslot path hselected
+    have htargetsSelected :
+        RuntimeSpineTargetsSelected store env targets path address :=
+      RuntimeSpineTargetsSelected.of_lvalTargetsTyping htargets hselected
+    have hsourceSelected :
+        RuntimeSpinePathSelected store env (.ty (.borrow mutable targets))
+          (() :: path) address :=
+      RuntimeSpinePathSelected.borrowStep htargetsSelected
+    have hbase := ihSource hslot (() :: path) hsourceSelected
+    simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+      using hbase
+  · intros
+    trivial
+  · intros
+    trivial
 mutual
   theorem RuntimeSpinePathSelected.rank_lt_of_lvalTyping
       {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
@@ -1739,6 +1888,14 @@ mutual
       RuntimeSpinePathSelected.box hinner, hprot, lv, lifetime, htyping => by
         have hderef : LValTyping env (.deref lv) inner lifetime :=
           LValTyping.box htyping
+        simpa [LVal.base] using
+          RuntimeSpinePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
+            hvalidStore hheap hinner hprot hderef
+    | .ty (.box inner), () :: path, address,
+      RuntimeSpinePathSelected.boxFull hinner, hprot, lv, lifetime,
+      htyping => by
+        have hderef : LValTyping env (.deref lv) (.ty inner) lifetime :=
+          LValTyping.boxFull htyping
         simpa [LVal.base] using
           RuntimeSpinePathSelected.rank_lt_of_lvalTyping hφ hwellFormed hsafe
             hvalidStore hheap hinner hprot hderef
@@ -1810,6 +1967,14 @@ mutual
       RuntimeSpinePathSelected.box hinner, hprot, lv, lifetime, htyping => by
         have hderef : LValTyping env (.deref lv) inner lifetime :=
           LValTyping.box htyping
+        simpa [LVal.base] using
+          RuntimeSpinePathSelected.rank_lt_of_lvalTyping_whenInitialized
+            hφ hwellFormed hsafe hvalidStore hheap hinner hprot hderef
+    | .ty (.box inner), () :: path, address,
+      RuntimeSpinePathSelected.boxFull hinner, hprot, lv, lifetime,
+      htyping => by
+        have hderef : LValTyping env (.deref lv) (.ty inner) lifetime :=
+          LValTyping.boxFull htyping
         simpa [LVal.base] using
           RuntimeSpinePathSelected.rank_lt_of_lvalTyping_whenInitialized
             hφ hwellFormed hsafe hvalidStore hheap hinner hprot hderef
