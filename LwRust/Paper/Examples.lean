@@ -4,6 +4,7 @@ import LwRust.Paper.Examples.TypeSafetyPass
 import LwRust.Paper.Examples.TypeSafetyReject
 import LwRust.Paper.Examples.ThinningFalse
 import LwRust.Paper.Examples.StaleBoxedBorrow
+import LwRust.Paper.Examples.BoxDerefPending
 
 /-!
 Build-checked paper examples.
@@ -15,4 +16,6 @@ Build-checked paper examples.
 * `TypeSafetyReject` contains rejected examples and the specific failed premise.
 * `StaleBoxedBorrow` records why stale loan annotations are conservative
   protection tokens, not necessarily live dereferenceable borrows.
+* `BoxDerefPending` records declared-box lvalue examples for full box lvalue
+  projection.
 -/

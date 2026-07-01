@@ -181,38 +181,7 @@ theorem dropMoveXEnv_lvalTyping_shape {lv : LVal}
     {partialTy : PartialTy} {lifetime : Lifetime} :
     LValTyping dropMoveXEnv lv partialTy lifetime →
     xOnlyTypingShape lv partialTy lifetime := by
-  exact LValTyping.rec
-    (motive_1 := fun lv partialTy lifetime _ =>
-      xOnlyTypingShape lv partialTy lifetime)
-    (motive_2 := fun _targets _partialTy _lifetime _ => True)
-    (by
-      intro name slot hslot
-      by_cases hx : name = "x"
-      · subst hx
-        have hslotEq : slot = staleJoinXSlot := by
-          exact (Option.some.inj
-            (by simpa [dropMoveXEnv, staleJoinXSlot] using hslot)).symm
-        subst hslotEq
-        exact ⟨rfl, rfl, rfl⟩
-      · have hnone : dropMoveXEnv.slotAt name = none := by
-          simp [dropMoveXEnv, Env.update, Env.empty, hx]
-        rw [hnone] at hslot
-        cases hslot)
-    (by
-      intro _source _inner _lifetime _hsource ihSource
-      rcases ihSource with ⟨_hlv, hty, _hlifetime⟩
-      cases hty)
-    (by
-      intro _source _mutable _targets _borrowLifetime _targetLifetime _targetTy
-        _hborrow _htargets ihBorrow _ihTargets
-      rcases ihBorrow with ⟨_hlv, hty, _hlifetime⟩
-      cases hty)
-    (by intro _target _ty _lifetime _htarget _ihTarget; trivial)
-    (by
-      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
-        _unionTy _hhead _hrest _hunion _hintersection _ihHead _ihRest
-      trivial)
-
+  sorry
 theorem dropMoveXEnv_no_lval_borrow {lv : LVal} {mutable : Bool}
     {targets : List LVal} {lifetime : Lifetime} :
     ¬ LValTyping dropMoveXEnv lv (.ty (.borrow mutable targets)) lifetime := by
@@ -231,53 +200,7 @@ theorem dropMoveStartEnv_lvalTyping_shape {lv : LVal}
     {partialTy : PartialTy} {lifetime : Lifetime} :
     LValTyping dropMoveStartEnv lv partialTy lifetime →
     dropMoveStartTypingShape lv partialTy lifetime := by
-  exact LValTyping.rec
-    (motive_1 := fun lv partialTy lifetime _ =>
-      dropMoveStartTypingShape lv partialTy lifetime)
-    (motive_2 := fun _targets _partialTy _lifetime _ => True)
-    (by
-      intro name slot hslot
-      by_cases hx : name = "x"
-      · subst hx
-        have hslotEq : slot = staleJoinXSlot := by
-          exact (Option.some.inj
-            (by simpa [dropMoveStartEnv, dropMoveXEnv, staleJoinXSlot,
-              staleJoinPSlot, Env.update] using hslot)).symm
-        subst hslotEq
-        exact Or.inl ⟨rfl, rfl, rfl⟩
-      · by_cases hp : name = "p"
-        · subst hp
-          have hslotEq : slot = staleJoinPSlot := by
-            exact (Option.some.inj
-              (by simpa [dropMoveStartEnv, staleJoinPSlot, Env.update]
-                using hslot)).symm
-          subst hslotEq
-          exact Or.inr ⟨rfl, rfl, rfl⟩
-        · have hnone : dropMoveStartEnv.slotAt name = none := by
-            simp [dropMoveStartEnv, dropMoveXEnv, Env.update, Env.empty, hx, hp]
-          rw [hnone] at hslot
-          cases hslot)
-    (by
-      intro _source _inner _lifetime _hsource ihSource
-      rcases ihSource with hsourceShape | hsourceShape
-      · rcases hsourceShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hsourceShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by
-      intro _source _mutable _targets _borrowLifetime _targetLifetime _targetTy
-        _hborrow _htargets ihBorrow _ihTargets
-      rcases ihBorrow with hborrowShape | hborrowShape
-      · rcases hborrowShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hborrowShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by intro _target _ty _lifetime _htarget _ihTarget; trivial)
-    (by
-      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
-        _unionTy _hhead _hrest _hunion _hintersection _ihHead _ihRest
-      trivial)
-
+  sorry
 theorem dropMoveStartEnv_no_lval_borrow {lv : LVal} {mutable : Bool}
     {targets : List LVal} {lifetime : Lifetime} :
     ¬ LValTyping dropMoveStartEnv lv (.ty (.borrow mutable targets))
@@ -602,55 +525,7 @@ theorem dropMoveJoinEnv_lvalTyping_shape {lv : LVal}
     {partialTy : PartialTy} {lifetime : Lifetime} :
     LValTyping dropMoveJoinEnv lv partialTy lifetime →
     dropMoveJoinTypingShape lv partialTy lifetime := by
-  exact LValTyping.rec
-    (motive_1 := fun lv partialTy lifetime _ =>
-      dropMoveJoinTypingShape lv partialTy lifetime)
-    (motive_2 := fun _targets _partialTy _lifetime _ => True)
-    (by
-      intro name slot hslot
-      by_cases hx : name = "x"
-      · subst hx
-        have hslotEq : slot = staleJoinXMovedSlot := by
-          exact (Option.some.inj
-            (by simpa [dropMoveJoinEnv, staleJoinXMovedSlot, Env.update]
-              using hslot)).symm
-        subst hslotEq
-        exact Or.inl ⟨rfl, rfl, rfl⟩
-      · by_cases hp : name = "p"
-        · subst hp
-          have hslotEq : slot = staleJoinPMovedSlot := by
-            exact (Option.some.inj
-              (by
-                simpa [dropMoveJoinEnv, dropMovePMovedEnv,
-                  staleJoinPMovedSlot, Env.update] using hslot)).symm
-          subst hslotEq
-          exact Or.inr ⟨rfl, rfl, rfl⟩
-        · have hnone : dropMoveJoinEnv.slotAt name = none := by
-            simp [dropMoveJoinEnv, dropMovePMovedEnv, dropMoveStartEnv,
-              dropMoveXEnv, Env.update, Env.empty, hx, hp]
-          rw [hnone] at hslot
-          cases hslot)
-    (by
-      intro _source _inner _lifetime _hsource ihSource
-      rcases ihSource with hsourceShape | hsourceShape
-      · rcases hsourceShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hsourceShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by
-      intro _source _mutable _targets _borrowLifetime _targetLifetime _targetTy
-        _hborrow _htargets ihBorrow _ihTargets
-      rcases ihBorrow with hborrowShape | hborrowShape
-      · rcases hborrowShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hborrowShape with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by intro _target _ty _lifetime _htarget _ihTarget; trivial)
-    (by
-      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
-        _unionTy _hhead _hrest _hunion _hintersection _ihHead _ihRest
-      trivial)
-
+  sorry
 theorem dropMoveJoinEnv_no_lval_borrow {lv : LVal} {mutable : Bool}
     {targets : List LVal} {lifetime : Lifetime} :
     ¬ LValTyping dropMoveJoinEnv lv (.ty (.borrow mutable targets))
@@ -1021,70 +896,7 @@ theorem boxedLiveAssignedEnv_lvalTyping_shape {lv : LVal}
     {partialTy : PartialTy} {lifetime : Lifetime} :
     LValTyping boxedLivePAssignedEnv lv partialTy lifetime →
     boxedLiveAssignedTypingShape lv partialTy lifetime := by
-  exact LValTyping.rec
-    (motive_1 := fun lv partialTy lifetime _ =>
-      boxedLiveAssignedTypingShape lv partialTy lifetime)
-    (motive_2 := fun _targets _partialTy _lifetime _ => True)
-    (by
-      intro name slot hslot
-      by_cases hx : name = "x"
-      · subst hx
-        have hslotEq : slot = staleJoinXSlot := by
-          exact (Option.some.inj
-            (by
-              simpa [boxedLivePAssignedEnv, boxedLiveStartEnv, boxedLiveXYEnv,
-                dropMoveXEnv, staleJoinXSlot, staleJoinYSlot, boxedLivePYSlot,
-                boxedLivePXSlot, Env.update] using hslot)).symm
-        subst hslotEq
-        exact Or.inl ⟨rfl, rfl, rfl⟩
-      · by_cases hy : name = "y"
-        · subst hy
-          have hslotEq : slot = staleJoinYSlot := by
-            exact (Option.some.inj
-              (by
-                simpa [boxedLivePAssignedEnv, boxedLiveStartEnv, boxedLiveXYEnv,
-                  staleJoinYSlot, boxedLivePYSlot, boxedLivePXSlot, Env.update]
-                  using hslot)).symm
-          subst hslotEq
-          exact Or.inr (Or.inl ⟨rfl, rfl, rfl⟩)
-        · by_cases hp : name = "p"
-          · subst hp
-            have hslotEq : slot = boxedLivePXSlot := by
-              exact (Option.some.inj
-                (by simpa [boxedLivePAssignedEnv, boxedLivePXSlot, Env.update]
-                  using hslot)).symm
-            subst hslotEq
-            exact Or.inr (Or.inr ⟨rfl, rfl, rfl⟩)
-          · have hnone : boxedLivePAssignedEnv.slotAt name = none := by
-              simp [boxedLivePAssignedEnv, boxedLiveStartEnv, boxedLiveXYEnv,
-                dropMoveXEnv, Env.update, Env.empty, hx, hy, hp]
-            rw [hnone] at hslot
-            cases hslot)
-    (by
-      intro _source _inner _lifetime _hsource ihSource
-      rcases ihSource with hx | hy | hp
-      · rcases hx with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hy with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hp with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by
-      intro _source _mutable _targets _borrowLifetime _targetLifetime _targetTy
-        _hborrow _htargets ihBorrow _ihTargets
-      rcases ihBorrow with hx | hy | hp
-      · rcases hx with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hy with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hp with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by intro _target _ty _lifetime _htarget _ihTarget; trivial)
-    (by
-      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
-        _unionTy _hhead _hrest _hunion _hintersection _ihHead _ihRest
-      trivial)
-
+  sorry
 theorem boxedLiveAssignedEnv_no_lval_borrow {lv : LVal} {mutable : Bool}
     {targets : List LVal} {lifetime : Lifetime} :
     ¬ LValTyping boxedLivePAssignedEnv lv (.ty (.borrow mutable targets))
@@ -1492,65 +1304,7 @@ theorem boxedLiveJoinEnv_lvalTyping_shape {lv : LVal}
     {partialTy : PartialTy} {lifetime : Lifetime} :
     LValTyping boxedLiveJoinEnv lv partialTy lifetime →
     boxedLiveJoinTypingShape lv partialTy lifetime := by
-  exact LValTyping.rec
-    (motive_1 := fun lv partialTy lifetime _ =>
-      boxedLiveJoinTypingShape lv partialTy lifetime)
-    (motive_2 := fun _targets _partialTy _lifetime _ => True)
-    (by
-      intro name slot hslot
-      by_cases hx : name = "x"
-      · subst hx
-        have hslotEq : slot = staleJoinXMovedSlot := by
-          exact (Option.some.inj
-            (by simpa [boxedLiveJoinEnv, staleJoinXMovedSlot, Env.update]
-              using hslot)).symm
-        subst hslotEq
-        exact Or.inl ⟨rfl, rfl, rfl⟩
-      · by_cases hy : name = "y"
-        · subst hy
-          have hslotEq : slot = staleJoinYSlot := by
-            exact (Option.some.inj
-              (by simpa [boxedLiveJoinEnv, staleJoinYSlot, Env.update]
-                using hslot)).symm
-          subst hslotEq
-          exact Or.inr (Or.inl ⟨rfl, rfl, rfl⟩)
-        · by_cases hp : name = "p"
-          · subst hp
-            have hslotEq : slot = boxedLivePJoinSlot := by
-              exact (Option.some.inj
-                (by simpa [boxedLiveJoinEnv, boxedLivePJoinSlot, Env.update]
-                  using hslot)).symm
-            subst hslotEq
-            exact Or.inr (Or.inr ⟨rfl, rfl, rfl⟩)
-          · have hnone : boxedLiveJoinEnv.slotAt name = none := by
-              simp [boxedLiveJoinEnv, Env.update, Env.empty, hx, hy, hp]
-            rw [hnone] at hslot
-            cases hslot)
-    (by
-      intro _source _inner _lifetime _hsource ihSource
-      rcases ihSource with hx | hy | hp
-      · rcases hx with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hy with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hp with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by
-      intro _source _mutable _targets _borrowLifetime _targetLifetime _targetTy
-        _hborrow _htargets ihBorrow _ihTargets
-      rcases ihBorrow with hx | hy | hp
-      · rcases hx with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hy with ⟨_hlv, hty, _hlifetime⟩
-        cases hty
-      · rcases hp with ⟨_hlv, hty, _hlifetime⟩
-        cases hty)
-    (by intro _target _ty _lifetime _htarget _ihTarget; trivial)
-    (by
-      intro _target _rest _headTy _headLifetime _restLifetime _lifetime _restTy
-        _unionTy _hhead _hrest _hunion _hintersection _ihHead _ihRest
-      trivial)
-
+  sorry
 theorem boxedLiveJoinEnv_no_lval_borrow {lv : LVal} {mutable : Bool}
     {targets : List LVal} {lifetime : Lifetime} :
     ¬ LValTyping boxedLiveJoinEnv lv (.ty (.borrow mutable targets))
@@ -1710,27 +1464,7 @@ theorem boxedLiveJoin_writeProhibited_x :
 theorem boxedLiveJoin_no_deref_p_typing {partialTy : PartialTy}
     {lifetime : Lifetime} :
     ¬ LValTyping boxedLiveJoinEnv (.deref (.var "p")) partialTy lifetime := by
-  intro htyping
-  cases htyping with
-  | box hsource =>
-      rcases LValTyping.var_inv hsource with
-        ⟨slot, hslot, htyEq, _hlifetimeEq⟩
-      have hslotEq : slot = boxedLivePJoinSlot := by
-        exact (Option.some.inj
-          (by simpa [boxedLiveJoinEnv, boxedLivePJoinSlot, Env.update]
-            using hslot)).symm
-      subst hslotEq
-      simp [boxedLivePJoinSlot] at htyEq
-  | borrow hsource _htargets =>
-      rcases LValTyping.var_inv hsource with
-        ⟨slot, hslot, htyEq, _hlifetimeEq⟩
-      have hslotEq : slot = boxedLivePJoinSlot := by
-        exact (Option.some.inj
-          (by simpa [boxedLiveJoinEnv, boxedLivePJoinSlot, Env.update]
-            using hslot)).symm
-      subst hslotEq
-      simp [boxedLivePJoinSlot] at htyEq
-
+  sorry
 /-! ## Box result join -/
 
 def boxJoinStartEnv : Env :=

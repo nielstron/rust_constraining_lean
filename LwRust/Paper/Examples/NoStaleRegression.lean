@@ -1345,6 +1345,171 @@ theorem noStaleIfAfterWrite_no_box_lval :
       | borrow _hinner htargets =>
           exact LValTargetsTyping.not_box htargets
 
+theorem noStaleIfAfterWrite_no_full_box :
+    (∀ {lv partialTy lifetime},
+      LValTyping noStaleIfAfterWriteEnv lv partialTy lifetime →
+        ∀ inner, partialTy = .ty (.box inner) → False) ∧
+    (∀ {targets partialTy lifetime},
+      LValTargetsTyping noStaleIfAfterWriteEnv targets partialTy lifetime →
+        ∀ inner, partialTy = .ty (.box inner) → False) := by
+  have hvar :
+      ∀ {x slot inner},
+        noStaleIfAfterWriteEnv.slotAt x = some slot →
+        slot.ty = .ty (.box inner) →
+        False := by
+    intro x slot inner hslot hty
+    by_cases hp : x = noStaleIfP
+    · subst hp
+      have hslotEq : slot = noStaleIfPAfterWriteSlot :=
+        Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_p)
+      subst hslotEq
+      simp [noStaleIfPAfterWriteSlot] at hty
+    · by_cases hq : x = noStaleIfQ
+      · subst hq
+        have hslotEq : slot = noStaleIfQAfterWriteSlot :=
+          Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_q)
+        subst hslotEq
+        simp [noStaleIfQAfterWriteSlot] at hty
+      · by_cases hy : x = noStaleIfY
+        · subst hy
+          have hslotEq : slot = noStaleIfYJoinSlot :=
+            Option.some.inj (hslot.symm.trans noStaleIf_afterWrite_y_slot)
+          subst hslotEq
+          simp [noStaleIfYJoinSlot] at hty
+        · by_cases hs : x = noStaleIfS
+          · subst hs
+            have hslotEq : slot = noStaleIfSJoinSlot :=
+              Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_s)
+            subst hslotEq
+            simp [noStaleIfSJoinSlot] at hty
+          · by_cases ha : x = noStaleIfA
+            · subst ha
+              have hslotEq : slot = noStaleIfIntSlot :=
+                Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_a)
+              subst hslotEq
+              simp [noStaleIfIntSlot] at hty
+            · by_cases hb : x = noStaleIfB
+              · subst hb
+                have hslotEq : slot = noStaleIfIntSlot :=
+                  Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_b)
+                subst hslotEq
+                simp [noStaleIfIntSlot] at hty
+              · by_cases hc : x = noStaleIfC
+                · subst hc
+                  have hslotEq : slot = noStaleIfIntSlot :=
+                    Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_c)
+                  subst hslotEq
+                  simp [noStaleIfIntSlot] at hty
+                · by_cases hd : x = noStaleIfD
+                  · subst hd
+                    have hslotEq : slot = noStaleIfIntSlot :=
+                      Option.some.inj (hslot.symm.trans noStaleIfAfterWrite_slot_d)
+                    subst hslotEq
+                    simp [noStaleIfIntSlot] at hty
+                  · by_cases hsth : x = noStaleIfSth
+                    · subst hsth
+                      have hslotTy : slot.ty = .ty .bool := by
+                        simpa [noStaleIfAfterWriteEnv, noStaleIfJoinEnv,
+                          noStaleIfEnv9, noStaleIfEnv8, noStaleIfEnv7,
+                          noStaleIfEnv6, noStaleIfEnv5, noStaleIfEnv4,
+                          noStaleIfEnv3, noStaleIfEnv2, noStaleIfEnv1,
+                          noStaleIfEnv0, noStaleIfA, noStaleIfB,
+                          noStaleIfC, noStaleIfD, noStaleIfSth, noStaleIfP,
+                          noStaleIfQ, noStaleIfY, noStaleIfS,
+                          noStaleIfBoolSlot, Env.update]
+                          using
+                          (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
+                            hslot).symm
+                      rw [hslotTy] at hty
+                      cases hty
+                    · have hnone : noStaleIfAfterWriteEnv.slotAt x = none := by
+                        simp [noStaleIfAfterWriteEnv, noStaleIfJoinEnv,
+                          noStaleIfEnv9, noStaleIfEnv8, noStaleIfEnv7,
+                          noStaleIfEnv6, noStaleIfEnv5, noStaleIfEnv4,
+                          noStaleIfEnv3, noStaleIfEnv2, noStaleIfEnv1,
+                          noStaleIfEnv0, Env.update, Env.empty, hp, hq, hy,
+                          hs, ha, hb, hc, hd, hsth]
+                      rw [hslot] at hnone
+                      cases hnone
+  constructor
+  · intro lv partialTy lifetime htyping
+    exact LValTyping.rec
+      (motive_1 := fun _lv partialTy _lifetime _ =>
+        ∀ inner, partialTy = .ty (.box inner) → False)
+      (motive_2 := fun _targets partialTy _lifetime _ =>
+        ∀ inner, partialTy = .ty (.box inner) → False)
+      (by
+        intro _x slot hslot inner hty
+        exact hvar hslot hty)
+      (by
+        intro lv inner lifetime hbox _ih fullInner hfull
+        cases hfull
+        exact noStaleIfAfterWrite_no_box_lval lv hbox)
+      (by
+        intro _lv _inner _lifetime _hbox ih fullInner hfull
+        cases hfull
+        exact ih _ rfl)
+      (by
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+          _hborrow _htargets _ihBorrow ihTargets inner hfull
+        exact ihTargets inner hfull)
+      (by
+        intro _target ty _lifetime _htarget ihTarget inner hfull
+        exact ihTarget inner hfull)
+      (by
+        intro _target _rest headTy _headLifetime _restLifetime _lifetime _restTy
+          _unionTy _hhead _hrest hunion _hintersection ihHead _ihRest inner hfull
+        cases hfull
+        have hstrength :
+            PartialTyStrengthens (.ty headTy) (.ty (.box inner)) :=
+          PartialTyUnion.left_strengthens hunion
+        rcases PartialTyStrengthens.to_box_ty_inv hstrength with
+          ⟨headInner, hheadEq, _hinnerStrength⟩
+        cases hheadEq
+        exact ihHead headInner rfl)
+      htyping
+  · intro targets partialTy lifetime htyping
+    exact LValTargetsTyping.rec
+      (motive_1 := fun _lv partialTy _lifetime _ =>
+        ∀ inner, partialTy = .ty (.box inner) → False)
+      (motive_2 := fun _targets partialTy _lifetime _ =>
+        ∀ inner, partialTy = .ty (.box inner) → False)
+      (by
+        intro _x slot hslot inner hty
+        exact hvar hslot hty)
+      (by
+        intro lv inner lifetime hbox _ih fullInner hfull
+        cases hfull
+        exact noStaleIfAfterWrite_no_box_lval lv hbox)
+      (by
+        intro _lv _inner _lifetime _hbox ih fullInner hfull
+        cases hfull
+        exact ih _ rfl)
+      (by
+        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+          _hborrow _htargets _ihBorrow ihTargets inner hfull
+        exact ihTargets inner hfull)
+      (by
+        intro _target ty _lifetime _htarget ihTarget inner hfull
+        exact ihTarget inner hfull)
+      (by
+        intro _target _rest headTy _headLifetime _restLifetime _lifetime _restTy
+          _unionTy _hhead _hrest hunion _hintersection ihHead _ihRest inner hfull
+        cases hfull
+        have hstrength :
+            PartialTyStrengthens (.ty headTy) (.ty (.box inner)) :=
+          PartialTyUnion.left_strengthens hunion
+        rcases PartialTyStrengthens.to_box_ty_inv hstrength with
+          ⟨headInner, hheadEq, _hinnerStrength⟩
+        cases hheadEq
+        exact ihHead headInner rfl)
+      htyping
+
+theorem noStaleIfAfterWrite_no_full_box_lval {lv inner lifetime} :
+    ¬ LValTyping noStaleIfAfterWriteEnv lv (.ty (.box inner)) lifetime := by
+  intro htyping
+  exact noStaleIfAfterWrite_no_full_box.1 htyping inner rfl
+
 theorem noStaleIfAfterWrite_var_int_full {x ty lifetime}
     (hx : x = noStaleIfA ∨ x = noStaleIfB ∨ x = noStaleIfC ∨
       x = noStaleIfD) :
@@ -1398,6 +1563,8 @@ theorem noStaleIfAfterWrite_deref_p_full_int {ty lifetime} :
   cases htyping with
   | box hinner =>
       exact False.elim (noStaleIfAfterWrite_no_box_lval noStaleIfPLVal hinner)
+  | boxFull hinner =>
+      exact False.elim (noStaleIfAfterWrite_no_full_box_lval hinner)
   | borrow hinner htargets =>
       rcases LValTyping.var_inv
           (by simpa [noStaleIfPLVal] using hinner) with
@@ -1749,6 +1916,8 @@ theorem noStaleIfAfterWrite_borrow_lval_inv :
       cases htyping with
       | box hinner =>
           exact False.elim (noStaleIfAfterWrite_no_box_lval lv hinner)
+      | boxFull hinner =>
+          exact False.elim (noStaleIfAfterWrite_no_full_box_lval hinner)
       | borrow hinner htargets =>
           rcases ih hinner with hp | hq | hy | hs | hds
           · rcases hp with ⟨hlv, htargetsEq⟩

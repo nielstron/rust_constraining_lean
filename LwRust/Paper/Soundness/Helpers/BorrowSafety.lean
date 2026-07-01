@@ -410,6 +410,10 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
           hcontains target htarget hread
         exact ih (PartialTyContains.box hcontains) target htarget hread)
       (by
+        intro _lv _inner _lifetime _htyping ih borrowTargets
+          hcontains target htarget hread
+        exact ih (PartialTyContains.tyBox hcontains) target htarget hread)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets borrowTargets
           hcontains target htarget hread
@@ -462,6 +466,10 @@ theorem LValTyping.no_readProhibited_targets_of_immBorrow {env : Env} :
         intro _lv _inner _lifetime _htyping ih borrowTargets
           hcontains target htarget hread
         exact ih (PartialTyContains.box hcontains) target htarget hread)
+      (by
+        intro _lv _inner _lifetime _htyping ih borrowTargets
+          hcontains target htarget hread
+        exact ih (PartialTyContains.tyBox hcontains) target htarget hread)
       (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets borrowTargets
@@ -814,10 +822,19 @@ theorem PartialTyContains.not_strike_result {path : Path} {source struck : Parti
       cases source <;> cases struck <;> simp [Strike] at hstrike
       cases hcontains
   | cons _ path ih =>
-      cases source <;> cases struck <;> simp [Strike] at hstrike
-      cases hcontains with
-      | box hinner =>
-          exact ih hstrike hinner
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy <;> cases struck <;> simp [Strike] at hstrike
+          cases hcontains with
+          | box hinner =>
+              exact ih hstrike hinner
+      | box inner =>
+          cases struck <;> simp [Strike] at hstrike
+          cases hcontains with
+          | box hinner =>
+              exact ih hstrike hinner
+      | undef sourceTy =>
+          cases struck <;> simp [Strike] at hstrike
 
 theorem List.Unit_cons_append_eq_append_cons (path suffix : List Unit) :
     () :: (path ++ suffix) = path ++ (() :: suffix) := by
@@ -862,6 +879,20 @@ theorem LValTyping.strike_suffix_at_type {env : Env} :
           exact Option.some.inj hsomeEq
         subst hslotEq
         exact ⟨struck, by simpa [LVal.path] using hstrike⟩)
+      (by
+        intro lv inner lifetime _htyping ih slot struck suffix hbase hstrike
+        have hstrikeAtParent :
+            Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck := by
+          simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+            using hstrike
+        rcases ih hbase hstrikeAtParent with ⟨parentStruck, hparentStruck⟩
+        cases parentStruck with
+        | ty parentTy =>
+            simp [Strike] at hparentStruck
+        | box innerStruck =>
+            exact ⟨innerStruck, by simpa [Strike] using hparentStruck⟩
+        | undef parentTy =>
+            simp [Strike] at hparentStruck)
       (by
         intro lv inner lifetime _htyping ih slot struck suffix hbase hstrike
         have hstrikeAtParent :
@@ -942,6 +973,14 @@ theorem LValTyping.contains_base_of_strike_suffix {env : Env} :
           simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
             using hstrike
         exact ih hbase hstrikeAtParent (PartialTyContains.box hcontains))
+      (by
+        intro lv inner lifetime _htyping ih slot struck suffix needle hbase hstrike
+          hcontains
+        have hstrikeAtParent :
+            Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck := by
+          simpa [LVal.path_deref_cons, List.Unit_cons_append_eq_append_cons]
+            using hstrike
+        exact ih hbase hstrikeAtParent (PartialTyContains.tyBox hcontains))
       (by
         intro lv mutable targets borrowLifetime targetLifetime targetTy
           hborrow _htargets _ihBorrow _ihTargets slot struck suffix needle hbase hstrike

@@ -531,6 +531,9 @@ theorem LValTyping.typeNameFresh {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih hfresh
         simpa [PartialTy.allVars] using ih hfresh)
       (by
+        intro _lv _inner _lifetime _hinner ih hfresh
+        simpa [PartialTy.allVars, Ty.allVars] using ih hfresh)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets hfresh
         exact ihTargets hfresh)
@@ -559,6 +562,9 @@ theorem LValTyping.typeNameFresh {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih hfresh
         simpa [PartialTy.allVars] using ih hfresh)
+      (by
+        intro _lv _inner _lifetime _hinner ih hfresh
+        simpa [PartialTy.allVars, Ty.allVars] using ih hfresh)
       (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets hfresh
@@ -607,6 +613,10 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih hfresh hnotMention
         exact LValTyping.box
+          (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
+      (by
+        intro _lv _inner _lifetime _hinner ih hfresh hnotMention
+        exact LValTyping.boxFull
           (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
       (by
         intro _lv mutable targets _borrowLifetime _targetLifetime _targetTy
@@ -658,6 +668,10 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih hfresh hnotMention
         exact LValTyping.box
+          (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
+      (by
+        intro _lv _inner _lifetime _hinner ih hfresh hnotMention
+        exact LValTyping.boxFull
           (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
       (by
         intro _lv mutable targets _borrowLifetime _targetLifetime _targetTy
@@ -716,6 +730,9 @@ theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih
         exact LValTyping.box ih)
       (by
+        intro _lv _inner _lifetime _hinner ih
+        exact LValTyping.boxFull ih)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets
         exact LValTyping.borrow ihBorrow ihTargets)
@@ -742,6 +759,9 @@ theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih
         exact LValTyping.box ih)
+      (by
+        intro _lv _inner _lifetime _hinner ih
+        exact LValTyping.boxFull ih)
       (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets
@@ -790,6 +810,10 @@ theorem LValTargetsTyping.not_mentions_of_fresh {env : Env} {ghost : Name}
         rw [hslot] at hfresh
         contradiction
       exact LVal.not_mentions_of_base_ne (lv := .var x) hx)
+    (by
+      intro _lv _inner _lifetime _hinner ih
+      intro hmention
+      exact ih (by simpa [LVal.Mentions] using hmention))
     (by
       intro _lv _inner _lifetime _hinner ih
       intro hmention
@@ -933,6 +957,11 @@ theorem Mutable.erase_ghost {env : Env} {ghost : Name} {lv : LVal} :
         (LValTyping.erase_ghost.1 hLv hfresh
           (by simpa [LVal.Mentions] using hnotMention))
         (ih (by simpa [LVal.Mentions] using hnotMention))
+  | boxFull hLv _hmutable ih =>
+      exact Mutable.boxFull
+        (LValTyping.erase_ghost.1 hLv hfresh
+          (by simpa [LVal.Mentions] using hnotMention))
+        (ih (by simpa [LVal.Mentions] using hnotMention))
   | borrow hLv htargets ih =>
       rename_i source targets lifetime
       have hLvErased :=
@@ -981,7 +1010,10 @@ theorem Strike.allVars_fresh {path : Path} {source struck : PartialTy}
   | cons _ path ih =>
       cases source with
       | ty sourceTy =>
-          cases struck <;> simp [Strike] at hstrike
+          cases sourceTy <;> cases struck <;> simp [Strike] at hstrike
+          · simp [PartialTy.allVars, Ty.allVars] at hstrike ⊢
+            intro hfresh
+            exact ih hstrike hfresh
       | undef sourceTy =>
           cases struck <;> simp [Strike] at hstrike
       | box inner =>
@@ -1744,6 +1776,14 @@ private theorem prependPath_not_mentions {path : List Unit} {target : LVal}
     simpa [base_prependPath] using hprepBase
   exact hnot ((LVal.mentions_iff_base (ghost := ghost) target).2 hbase)
 
+private theorem partialTyRebox_allVars_fresh {partialTy : PartialTy}
+    {ghost : Name} :
+    ghost ∉ PartialTy.allVars partialTy →
+    ghost ∉ PartialTy.allVars (partialTyRebox partialTy) := by
+  intro hfresh
+  cases partialTy <;> simpa [partialTyRebox, PartialTy.allVars, Ty.allVars]
+    using hfresh
+
 mutual
   theorem UpdateAtPath.erase_ghost {rank : Nat} {env₁ env₂ : Env}
       {path : List Unit} {oldTy updatedTy : PartialTy} {ty : Ty}
@@ -1787,6 +1827,12 @@ mutual
           hfresh holdFresh htyFresh
         exact UpdateAtPath.box
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+            htyFresh))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        exact UpdateAtPath.boxFull
+          (ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
             htyFresh))
       (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
@@ -1885,6 +1931,12 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        exact UpdateAtPath.boxFull
+          (ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh))
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -1978,6 +2030,12 @@ mutual
           hfresh holdFresh htyFresh
         exact UpdateAtPath.box
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+            htyFresh))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        exact UpdateAtPath.boxFull
+          (ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
             htyFresh))
       (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
@@ -2077,6 +2135,12 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        rcases ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+          htyFresh with ⟨hfreshOut, hupdatedFresh⟩
+        exact ⟨hfreshOut, partialTyRebox_allVars_fresh hupdatedFresh⟩)
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -2166,6 +2230,12 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        rcases ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+          htyFresh with ⟨hfreshOut, hupdatedFresh⟩
+        exact ⟨hfreshOut, partialTyRebox_allVars_fresh hupdatedFresh⟩)
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -2253,6 +2323,12 @@ mutual
         rcases ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        rcases ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+          htyFresh with ⟨hfreshOut, hupdatedFresh⟩
+        exact ⟨hfreshOut, partialTyRebox_allVars_fresh hupdatedFresh⟩)
       (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
@@ -2357,6 +2433,14 @@ mutual
             (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
           ⟨hfreshOut, hinnerRestored⟩
         exact ⟨hfreshOut, UpdateAtPath.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.boxFull hinnerRestored⟩)
       (by
         intro env₁ env₂ rank path targets ty _htargets ih htypeFresh
           hfresh holdFresh htyFresh
@@ -2483,6 +2567,14 @@ mutual
           ⟨hfreshOut, hinnerRestored⟩
         exact ⟨hfreshOut, UpdateAtPath.box hinnerRestored⟩)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.boxFull hinnerRestored⟩)
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih htypeFresh
           hfresh holdFresh htyFresh
         have htargetsNot :
@@ -2606,6 +2698,14 @@ mutual
             (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
           ⟨hfreshOut, hinnerRestored⟩
         exact ⟨hfreshOut, UpdateAtPath.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.boxFull hinnerRestored⟩)
       (by
         intro env₁ env₂ rank path targets ty _htargets ih htypeFresh
           hfresh holdFresh htyFresh
@@ -2743,6 +2843,23 @@ mutual
           ⟨hfreshOut, hinnerRestored⟩
         exact ⟨hfreshOut,
           UpdateAtPathEffectiveWrite.boxPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxFullPassthrough hinnerRestored⟩)
       (by
         intro env₁ env₂ base rank path targets ty written _htargets ih
           htypeFresh hfresh holdFresh htyFresh
@@ -2892,6 +3009,23 @@ mutual
         exact ⟨hfreshOut,
           UpdateAtPathEffectiveWrite.boxPassthrough hinnerRestored⟩)
       (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxFullPassthrough hinnerRestored⟩)
+      (by
         intro env₁ env₂ base rank path targets ty written _htargets ih
           htypeFresh hfresh holdFresh htyFresh
         have htargetsNot :
@@ -3038,6 +3172,23 @@ mutual
           ⟨hfreshOut, hinnerRestored⟩
         exact ⟨hfreshOut,
           UpdateAtPathEffectiveWrite.boxPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxFullPassthrough hinnerRestored⟩)
       (by
         intro env₁ env₂ base rank path targets ty written _htargets ih
           htypeFresh hfresh holdFresh htyFresh
@@ -3190,6 +3341,21 @@ mutual
               (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
                 htyFresh heffectiveInner))
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | boxFull heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFull
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxFullPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFullPassthrough
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh
           htyFresh base erasedResult erasedUpdatedTy written heffective
         have htargetsNot :
@@ -3319,6 +3485,21 @@ mutual
               (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
                 htyFresh heffectiveInner))
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | boxFull heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFull
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxFullPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFullPassthrough
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh
           htyFresh base erasedResult erasedUpdatedTy written heffective
         have htargetsNot :
@@ -3444,6 +3625,21 @@ mutual
         | boxPassthrough heffectiveInner =>
             exact UpdateAtPathEffectiveWrite.boxPassthrough
               (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | boxFull heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFull
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxFullPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFullPassthrough
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
                 htyFresh heffectiveInner))
       (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh

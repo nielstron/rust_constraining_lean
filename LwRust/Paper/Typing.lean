@@ -439,6 +439,10 @@ mutual
     | box {env : Env} {lv : LVal} {inner : PartialTy} {lifetime : Lifetime} :
         LValTyping env lv (.box inner) lifetime →
         LValTyping env (.deref lv) inner lifetime
+    /-- T-LvBox for fully initialized owner types. -/
+    | boxFull {env : Env} {lv : LVal} {inner : Ty} {lifetime : Lifetime} :
+        LValTyping env lv (.ty (.box inner)) lifetime →
+        LValTyping env (.deref lv) (.ty inner) lifetime
     /--
     T-LvBor.  If `w` has borrow type over target list `u`, then `*w` has the
     finite union of the target types and the intersection/meet of their
@@ -502,6 +506,7 @@ theorem LValTargetsTyping.toMaybe {env : Env} {targets : List LVal}
     (motive_2 := fun targets partialTy lifetime _ =>
       LValTargetsMaybeTyping env targets partialTy lifetime)
     (by intro _x _slot _hslot; trivial)
+    (by intro _lv _inner _lifetime _htyping _ih; trivial)
     (by intro _lv _inner _lifetime _htyping _ih; trivial)
     (by
       intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
@@ -1110,6 +1115,7 @@ def WriteProhibited (env : Env) (lv : LVal) : Prop :=
 def Strike : Path → PartialTy → PartialTy → Prop
   | [], .ty sourceTy, .undef targetTy => sourceTy = targetTy
   | _ :: path, .box inner, .box struck => Strike path inner struck
+  | _ :: path, .ty (.box inner), .box struck => Strike path (.ty inner) struck
   | _, _, _ => False
 
 /-- Definition 3.18, `move(Γ, w)`. -/
@@ -1134,6 +1140,10 @@ inductive Mutable : Env → LVal → Prop where
       Mutable env (.var x)
   | box {env : Env} {lv : LVal} {inner : PartialTy} {lifetime : Lifetime} :
       LValTyping env lv (.box inner) lifetime →
+      Mutable env lv →
+      Mutable env (.deref lv)
+  | boxFull {env : Env} {lv : LVal} {inner : Ty} {lifetime : Lifetime} :
+      LValTyping env lv (.ty (.box inner)) lifetime →
       Mutable env lv →
       Mutable env (.deref lv)
   | borrow {env : Env} {lv : LVal} {targets : List LVal} {lifetime : Lifetime} :
@@ -1733,6 +1743,11 @@ theorem EnvMayReadThrough.trans {env : Env}
       _hinner ih =>
       exact EnvMayReadThrough.borrow htyping hmem (ih hleft)
 
+/-- Re-wrap an updated box element, preserving full-box shape when possible. -/
+def partialTyRebox : PartialTy → PartialTy
+  | .ty inner => .ty (.box inner)
+  | inner => .box inner
+
 mutual
   /-- Definition 3.23, `update_k(Γ, π | T̃, T)`. -/
   inductive UpdateAtPath : Nat → Env → List Unit → PartialTy → Ty → Env → PartialTy → Prop where
@@ -1746,6 +1761,11 @@ mutual
         {inner updatedInner : PartialTy} {ty : Ty} :
         UpdateAtPath rank env₁ path inner ty env₂ updatedInner →
         UpdateAtPath rank env₁ (() :: path) (.box inner) ty env₂ (.box updatedInner)
+    | boxFull {env₁ env₂ : Env} {rank : Nat} {path : List Unit}
+        {inner : Ty} {updatedInner : PartialTy} {ty : Ty} :
+        UpdateAtPath rank env₁ path (.ty inner) ty env₂ updatedInner →
+        UpdateAtPath rank env₁ (() :: path) (.ty (.box inner)) ty env₂
+          (partialTyRebox updatedInner)
     | mutBorrow {env₁ env₂ : Env} {rank : Nat} {path : List Unit}
         {targets : List LVal} {ty : Ty} :
         WriteBorrowTargets (rank + 1) env₁ path targets ty env₂ →
@@ -1825,6 +1845,20 @@ mutual
           updatedInner written →
         UpdateAtPathEffectiveWrite rank env₁ base (() :: path) (.box inner) ty
           env₂ (.box updatedInner) written
+    | boxFull {env₁ env₂ : Env} {base : Name} {rank : Nat}
+        {path : List Unit} {inner : Ty} {updatedInner : PartialTy} {ty : Ty}
+        {written : LVal} :
+        UpdateAtPathEffectiveWrite rank env₁ base path (.ty inner) ty env₂
+          updatedInner written →
+        UpdateAtPathEffectiveWrite rank env₁ base (() :: path) (.ty (.box inner))
+          ty env₂ (partialTyRebox updatedInner) (.deref written)
+    | boxFullPassthrough {env₁ env₂ : Env} {base : Name} {rank : Nat}
+        {path : List Unit} {inner : Ty} {updatedInner : PartialTy} {ty : Ty}
+        {written : LVal} :
+        UpdateAtPathEffectiveWrite rank env₁ base path (.ty inner) ty env₂
+          updatedInner written →
+        UpdateAtPathEffectiveWrite rank env₁ base (() :: path) (.ty (.box inner))
+          ty env₂ (partialTyRebox updatedInner) written
     | mutBorrow {env₁ env₂ : Env} {base : Name} {rank : Nat}
         {path : List Unit} {targets : List LVal} {ty : Ty}
         {written : LVal} :
@@ -1908,6 +1942,8 @@ theorem EnvWrite.finiteSupport {rank : Nat} {env result : Env}
       Env.FiniteSupport env → Env.FiniteSupport result)
     (fun {env old ty} hfinite => hfinite)
     (fun {env rank old joined ty} _hshape _hjoin hfinite => hfinite)
+    (fun {env₁ env₂ rank path inner updatedInner ty} _hupdate ih hfinite =>
+      ih hfinite)
     (fun {env₁ env₂ rank path inner updatedInner ty} _hupdate ih hfinite =>
       ih hfinite)
     (fun {env₁ env₂ rank path targets ty} _htargets ih hfinite =>

@@ -325,10 +325,13 @@ theorem LValTargetsTyping.output_full {env : Env}
     (by
       intro _lv _inner _lifetime _htyping _ih
       trivial)
-      (by
-        intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
-          _hborrow _htargets _ihBorrow _ihTargets
-        trivial)
+    (by
+      intro _lv _inner _lifetime _htyping _ih
+      trivial)
+    (by
+      intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+        _hborrow _htargets _ihBorrow _ihTargets
+      trivial)
     (by
       intro _target ty _lifetime _htarget _ihTarget
       exact ⟨ty, rfl⟩)
@@ -910,6 +913,8 @@ theorem lvalTyping_vars_rank_lt {env : Env} {φ : Name → Nat}
         ∀ v, v ∈ PartialTy.vars pt → ∃ t, t ∈ tgts ∧ φ v < φ (LVal.base t))
       (fun {x slot} h v hv => hφ x slot h v hv)
       (fun {lv' inner _life} _htyping ih v hv => ih v hv)
+      (fun {lv' inner _life} _htyping ih v hv =>
+        ih v (by simpa [PartialTy.vars, Ty.vars] using hv))
       (fun {lv'} {mutable} {targets} {borrowLife} {targetLife} {targetTy}
           _hborrow _htargets ihBorrow ihTargets v hv => by
         rcases ihTargets v hv with ⟨t, ht, hvt⟩
@@ -933,6 +938,8 @@ theorem lvalTyping_vars_rank_lt {env : Env} {φ : Name → Nat}
         ∀ v, v ∈ PartialTy.vars pt → ∃ t, t ∈ tgts ∧ φ v < φ (LVal.base t))
       (fun {x slot} h v hv => hφ x slot h v hv)
       (fun {lv' inner _life} _htyping ih v hv => ih v hv)
+      (fun {lv' inner _life} _htyping ih v hv =>
+        ih v (by simpa [PartialTy.vars, Ty.vars] using hv))
       (fun {lv'} {mutable} {targets} {borrowLife} {targetLife} {targetTy}
           _hborrow _htargets ihBorrow ihTargets v hv => by
         rcases ihTargets v hv with ⟨t, ht, hvt⟩
@@ -1118,6 +1125,9 @@ inductive WriteShapeCompat (env : Env) : List Unit → PartialTy → Ty → Prop
   | box {path : List Unit} {inner : PartialTy} {ty : Ty} :
       WriteShapeCompat env path inner ty →
       WriteShapeCompat env (() :: path) (.box inner) ty
+  | boxFull {path : List Unit} {inner : Ty} {ty : Ty} :
+      WriteShapeCompat env path (.ty inner) ty →
+      WriteShapeCompat env (() :: path) (.ty (.box inner)) ty
   | borrow {path : List Unit} {targets : List LVal} {ty : Ty} :
       (∀ t, t ∈ targets → ∀ tslot,
         env.slotAt (LVal.base (prependPath path t)) = some tslot →
@@ -1402,8 +1412,10 @@ theorem lvalTargetsTyping_member_strengthens {env : Env}
         ∃ ty targetLifetime,
           LValTyping env target (.ty ty) targetLifetime ∧
           PartialTyStrengthens (.ty ty) unionTy)
-    ?var ?box ?borrow ?singleton ?cons htargets
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htargets
   · intro _x _slot _hslot
+    trivial
+  · intro _lv _inner _lifetime _htyping _ih
     trivial
   · intro _lv _inner _lifetime _htyping _ih
     trivial

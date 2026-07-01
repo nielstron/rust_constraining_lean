@@ -44,6 +44,7 @@ theorem lvalTyping_empty_false {lv : LVal} {p : PartialTy} {lf : Lifetime}
   | deref lv' ih =>
       cases h with
       | box hb => exact ih hb
+      | boxFull hb => exact ih hb
       | borrow hb _ => exact ih hb
 
 theorem coherent_empty : Coherent Env.empty := by
@@ -121,6 +122,9 @@ theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
         intro lv inner lifetime _htyping ih
         exact LValTyping.box ih)
       (by
+        intro lv inner lifetime _htyping ih
+        exact LValTyping.boxFull ih)
+      (by
         intro lv mutable targets borrowLifetime targetLifetime targetTy
           _hborrow _htargets ihBorrow ihTargets
         exact LValTyping.borrow ihBorrow ihTargets)
@@ -149,6 +153,9 @@ theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
       (by
         intro lv inner lifetime _htyping ih
         exact LValTyping.box ih)
+      (by
+        intro lv inner lifetime _htyping ih
+        exact LValTyping.boxFull ih)
       (by
         intro lv mutable targets borrowLifetime targetLifetime targetTy
           _hborrow _htargets ihBorrow ihTargets
@@ -639,6 +646,7 @@ theorem LValTyping.base_slot_exists {env : Env} :
       intro p lf h
       cases h with
       | box hb => simpa [LVal.base] using ih hb
+      | boxFull hb => simpa [LVal.base] using ih hb
       | borrow hb => simpa [LVal.base] using ih hb
 
 /-- A variable in a (partial) type's `vars` comes from a contained borrow whose
@@ -1146,6 +1154,9 @@ theorem UpdateWrite.lifetimesPreserved :
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
         exact ih)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+        exact ih)
+      (by
         intro env₁ env₂ rank path targets ty _hwrites ih
         exact ih)
       (by
@@ -1178,6 +1189,9 @@ theorem UpdateWrite.lifetimesPreserved :
         (by
           intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesPreserved.refl env)
+        (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
@@ -1217,6 +1231,9 @@ theorem UpdateWrite.lifetimesPreserved :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
+        (by
           intro env₁ env₂ rank path targets ty _hwrites ih
           exact ih)
         (by
@@ -1245,10 +1262,14 @@ theorem UpdateAtPath.cons_inv {rank : Nat} {env₁ env₂ : Env}
     {path : List Unit} {oldTy : PartialTy} {ty : Ty}
     {updatedTy : PartialTy} :
     UpdateAtPath rank env₁ (() :: path) oldTy ty env₂ updatedTy →
-    (∃ inner updatedInner,
-      oldTy = .box inner ∧
-      updatedTy = .box updatedInner ∧
-      UpdateAtPath rank env₁ path inner ty env₂ updatedInner) ∨
+    ((∃ inner updatedInner,
+        oldTy = .box inner ∧
+        updatedTy = .box updatedInner ∧
+        UpdateAtPath rank env₁ path inner ty env₂ updatedInner) ∨
+      (∃ inner updatedInner,
+        oldTy = .ty (.box inner) ∧
+        updatedTy = partialTyRebox updatedInner ∧
+        UpdateAtPath rank env₁ path (.ty inner) ty env₂ updatedInner)) ∨
     (∃ targets,
       oldTy = .ty (.borrow true targets) ∧
       updatedTy = .ty (.borrow true targets) ∧
@@ -1256,7 +1277,9 @@ theorem UpdateAtPath.cons_inv {rank : Nat} {env₁ env₂ : Env}
   intro hupdate
   cases hupdate with
   | box hinner =>
-      exact Or.inl ⟨_, _, rfl, rfl, hinner⟩
+      exact Or.inl (Or.inl ⟨_, _, rfl, rfl, hinner⟩)
+  | boxFull hinner =>
+      exact Or.inl (Or.inr ⟨_, _, rfl, rfl, hinner⟩)
   | mutBorrow hwrites =>
       exact Or.inr ⟨_, rfl, rfl, hwrites⟩
 
@@ -1371,6 +1394,9 @@ theorem UpdateWrite.lifetimesSurvive :
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
         exact ih)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+        exact ih)
+      (by
         intro env₁ env₂ rank path targets ty _hwrites ih
         exact ih)
       (by
@@ -1407,6 +1433,9 @@ theorem UpdateWrite.lifetimesSurvive :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
+        (by
           intro env₁ env₂ rank path targets ty _hwrites ih
           exact ih)
         (by
@@ -1438,6 +1467,9 @@ theorem UpdateWrite.lifetimesSurvive :
         (by
           intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesSurvive.refl env)
+        (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
@@ -1580,6 +1612,9 @@ theorem LValTyping.lifetime_outlives_of_slots {env : Env} {current : Lifetime} :
         intro _lv _inner _lifetime _htyping ih
         exact ih)
       (by
+        intro _lv _inner _lifetime _htyping ih
+        exact ih)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets
         exact ihTargets)
@@ -1598,6 +1633,9 @@ theorem LValTyping.lifetime_outlives_of_slots {env : Env} {current : Lifetime} :
       (by
         intro x slot hslot
         exact houtlives x slot hslot)
+      (by
+        intro _lv _inner _lifetime _htyping ih
+        exact ih)
       (by
         intro _lv _inner _lifetime _htyping ih
         exact ih)
@@ -1657,6 +1695,9 @@ theorem LValTyping.base_outlives_one_of_slots {env : Env} {current : Lifetime}
       intro _lv _inner _lifetime _htyping ih
       exact ih)
     (by
+      intro _lv _inner _lifetime _htyping ih
+      exact ih)
+    (by
       intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
         _hborrow _htargets ihBorrow _ihTargets
       exact ihBorrow)
@@ -1693,8 +1734,10 @@ theorem LValTargetsTyping.borrowTargetsWellFormed_of_slots {env : Env}
           LValTyping env target (.ty targetTy) targetLifetime ∧
           targetLifetime ≤ current ∧
           LValBaseOutlives env target current)
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htyping
   · intro _x _slot _hslot
+    trivial
+  · intro _lv _inner _lifetime _htyping _ih
     trivial
   · intro _lv _inner _lifetime _htyping _ih
     trivial

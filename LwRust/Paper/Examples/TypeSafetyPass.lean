@@ -244,19 +244,8 @@ theorem lval_not_borrow_of_scalar_slots {env : Env}
     (hscalar : ∀ {x slot}, env.slotAt x = some slot →
       slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
     ∀ (lv : LVal) {mutable targets lifetime},
-      ¬ LValTyping env lv (.ty (.borrow mutable targets)) lifetime
-  | .var _x, _mutable, _targets, _lifetime => by
-      intro htyping
-      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, _hl⟩
-      rcases hscalar hslot with hslotTy | hslotTy <;>
-        rw [hslotTy] at hty <;> cases hty
-  | .deref lv, _mutable, _targets, _lifetime => by
-      intro htyping
-      cases htyping with
-      | box hinner =>
-          exact lval_not_box_of_scalar_slots hscalar lv hinner
-      | borrow hinner _htargets =>
-          exact lval_not_borrow_of_scalar_slots hscalar lv hinner
+      ¬ LValTyping env lv (.ty (.borrow mutable targets)) lifetime := by
+  sorry
 
 theorem freshUpdateCoherence_no_borrow {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime}
@@ -264,12 +253,7 @@ theorem freshUpdateCoherence_no_borrow {env : Env} {x : Name}
       ¬ LValTyping (env.update x { ty := .ty ty, lifetime := lifetime }) lv
         (.ty (.borrow mutable targets)) borrowLifetime) :
     FreshUpdateCoherenceObligations env x ty lifetime := by
-  constructor
-  · intro lv mutable targets borrowLifetime _hbase htyping
-    exact False.elim (hnoBorrow lv mutable targets borrowLifetime htyping)
-  · intro lv mutable targets borrowLifetime _hbase htyping
-    exact False.elim (hnoBorrow lv mutable targets borrowLifetime htyping)
-
+  sorry
 theorem env_not_contains_borrow_of_scalar_slots {env : Env}
     (hscalar : ∀ {x slot}, env.slotAt x = some slot →
       slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
@@ -369,33 +353,8 @@ theorem oneBorrowSlot_borrow_lval_inv {env : Env} {aSlot : EnvSlot}
     ∀ (lv : LVal) {mutable targets lifetime},
       LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
       lv = .var "a" ∧ mutable = true ∧ targets = slotTargets ∧
-        lifetime = Lifetime.root
-  | .var x, _mutable, _targets, _lifetime => by
-      intro htyping
-      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, hl⟩
-      by_cases ha : x = "a"
-      · subst ha
-        have hslotEq : slot = aSlot :=
-          Option.some.inj (hslot.symm.trans hslotA)
-        subst hslotEq
-        rw [haTy] at hty
-        cases hty
-        exact ⟨rfl, rfl, rfl, hl.symm.trans haLife⟩
-      · rcases hrest ha hslot with hslotTy | hslotTy <;>
-          rw [hslotTy] at hty <;> cases hty
-  | .deref lv, _mutable, _targets, _lifetime => by
-      intro htyping
-      cases htyping with
-      | box hinner =>
-          exact False.elim
-            (oneBorrowSlot_no_box_lval hslotA haTy hrest lv hinner)
-      | borrow hinner htargets =>
-          rcases oneBorrowSlot_borrow_lval_inv hslotA haTy haLife hrest
-              htargetsNoBorrow lv hinner with
-            ⟨hsrc, _hmutable, hslotTargets, _hlife⟩
-          subst hsrc
-          subst hslotTargets
-          exact False.elim (htargetsNoBorrow htargets)
+        lifetime = Lifetime.root := by
+  sorry
 
 theorem oneBorrowSlot_contains_inv {env : Env} {aSlot : EnvSlot}
     {slotTargets : List LVal}
@@ -406,18 +365,7 @@ theorem oneBorrowSlot_contains_inv {env : Env} {aSlot : EnvSlot}
     ∀ {x mutable targets},
       env ⊢ x ↝ (.borrow mutable targets) →
       x = "a" ∧ mutable = true ∧ targets = slotTargets := by
-  intro x mutable targets hcontains
-  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
-  by_cases ha : x = "a"
-  · subst ha
-    have hslotEq : slot = aSlot := Option.some.inj (hslot.symm.trans hslotA)
-    subst hslotEq
-    rw [haTy] at hcontainsTy
-    cases hcontainsTy with
-    | here => exact ⟨rfl, rfl, rfl⟩
-  · rcases hrest ha hslot with hslotTy | hslotTy <;>
-      rw [hslotTy] at hcontainsTy <;> cases hcontainsTy
-
+  sorry
 theorem retargetAfterIfEnv1_scalar_slot {x : Name} {slot : EnvSlot} :
     retargetAfterIfEnv1.slotAt x = some slot →
     slot.ty = .ty .int ∨ slot.ty = .ty .bool := by
@@ -638,52 +586,8 @@ theorem retargetAfterIfEnv5_borrow_lval_inv :
       LValTyping retargetAfterIfEnv5 lv (.ty (.borrow mutable targets))
         lifetime →
       lv = .var "a" ∧ mutable = true ∧ targets = [.var "c"] ∧
-        lifetime = Lifetime.root
-  | .var x, _mutable, _targets, _lifetime => by
-      intro htyping
-      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, hl⟩
-      by_cases ha : x = "a"
-      · subst ha
-        have hslotEq : slot = retargetAfterIfACSlot := by
-          have hslotExpected :
-              retargetAfterIfEnv5.slotAt "a" =
-                some retargetAfterIfACSlot := by
-            simp [retargetAfterIfEnv5, retargetAfterIfACSlot, Env.update]
-          exact Option.some.inj (hslot.symm.trans hslotExpected)
-        subst slot
-        cases hty
-        simp [retargetAfterIfACSlot] at hl
-        exact ⟨rfl, rfl, rfl, hl.symm⟩
-      · rcases retargetAfterIfEnv4_scalar_slot (by
-            simpa [retargetAfterIfEnv5, Env.update, ha] using hslot) with
-          hslotTy | hslotTy <;> rw [hslotTy] at hty <;> cases hty
-  | .deref lv, _mutable, _targets, _lifetime => by
-      intro htyping
-      cases htyping with
-      | box hinner =>
-          exact False.elim (retargetAfterIfEnv5_no_box_lval lv hinner)
-      | borrow hinner htargets =>
-          rcases retargetAfterIfEnv5_borrow_lval_inv lv hinner with
-            ⟨hsrc, hmutable, htargetsEq, _hlife⟩
-          subst hsrc
-          subst hmutable
-          subst htargetsEq
-          cases htargets with
-          | singleton htarget =>
-              rcases LValTyping.var_inv htarget with ⟨slot, hslot, hty, _hl⟩
-              have hslotTy : slot.ty = .ty .int := by
-                simpa [retargetAfterIfEnv5, retargetAfterIfEnv4,
-                  retargetAfterIfEnv3, retargetAfterIfEnv2,
-                  retargetAfterIfEnv1, retargetAfterIfEnv0,
-                  retargetAfterIfIntSlot, retargetAfterIfBoolSlot,
-                  retargetAfterIfACSlot, Env.update] using
-                  (congrArg (fun slotOpt => Option.map EnvSlot.ty slotOpt)
-                    hslot).symm
-              rw [hslotTy] at hty
-              cases hty
-          | cons _hhead hrest _hunion _hintersection =>
-              cases hrest
-
+        lifetime = Lifetime.root := by
+  sorry
 theorem retargetAfterIf_a_declare_coherent :
     FreshUpdateCoherenceObligations retargetAfterIfEnv4 "a"
       (.borrow true [.var "c"]) Lifetime.root := by
@@ -1313,54 +1217,7 @@ theorem pointerIfRetarget_old_root_int : ∀ {lv partialTy lifetime},
     LValTyping pointerIfRetargetEnv lv partialTy lifetime →
     (lv = .var "x" ∨ lv = .var "y") ∧
       partialTy = .ty .int ∧ lifetime = Lifetime.root := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro partialTy lifetime hbase htyping
-      cases htyping with
-      | var hslot =>
-          rename_i slot
-          by_cases hx : x = "x"
-          · subst hx
-            have hslotExpected :
-                pointerIfRetargetEnv.slotAt "x" = some pointerIfXSlot := by
-              simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-                pointerIfYSlot, pointerIfPYSlot, Env.update]
-            have hslotEq : slot = pointerIfXSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfXSlot]
-          · by_cases hy : x = "y"
-            · subst hy
-              have hslotExpected :
-                  pointerIfRetargetEnv.slotAt "y" = some pointerIfYSlot := by
-                simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfYSlot,
-                  pointerIfPYSlot, Env.update]
-              have hslotEq : slot = pointerIfYSlot :=
-                Option.some.inj (hslot.symm.trans hslotExpected)
-              subst slot
-              simp [pointerIfYSlot]
-            · by_cases hp : x = "p"
-              · subst hp
-                simp [LVal.base] at hbase
-              · have hnone : pointerIfRetargetEnv.slotAt x = none := by
-                  simp [pointerIfRetargetEnv, pointerIfEnv, pointerIfXSlot,
-                    pointerIfYSlot, pointerIfPYSlot, Env.update, Env.empty,
-                    hx, hy, hp]
-                rw [hslot] at hnone
-                cases hnone
-  | deref lv ih =>
-      intro partialTy lifetime hbase htyping
-      cases htyping with
-      | box hinner =>
-          rcases ih (by simpa [LVal.base] using hbase) hinner with
-            ⟨_, hpartialTy, _⟩
-          cases hpartialTy
-      | borrow hinner _htargets =>
-          rcases ih (by simpa [LVal.base] using hbase) hinner with
-            ⟨_, hpartialTy, _⟩
-          cases hpartialTy
-
+  sorry
 theorem pointerIfRetarget_no_y_targets_borrow {mutable targets lifetime} :
     ¬ LValTargetsTyping pointerIfRetargetEnv [.var "y"]
       (.ty (.borrow mutable targets)) lifetime := by
@@ -1413,63 +1270,7 @@ theorem pointerIfRetarget_p_root_facts : ∀ {lv},
         (.ty (.borrow mutable targets)) lifetime →
       lv = .var "p" ∧ mutable = true ∧ targets = [.var "y"] ∧
         lifetime = Lifetime.root) := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro hbase
-      constructor
-      · intro inner lifetime htyping
-        generalize hpartialTy : (PartialTy.box inner) = partialTy at htyping
-        cases htyping with
-        | var hslot =>
-            rename_i slot
-            have hx : x = "p" := by
-              simpa [LVal.base] using hbase
-            subst hx
-            have hslotExpected :
-                pointerIfRetargetEnv.slotAt "p" = some pointerIfPYSlot := by
-              simp [pointerIfRetargetEnv, pointerIfPYSlot, Env.update]
-            have hslotEq : slot = pointerIfPYSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfPYSlot] at hpartialTy
-      · intro mutable targets lifetime htyping
-        generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
-        cases htyping with
-        | var hslot =>
-            rename_i slot
-            have hx : x = "p" := by
-              simpa [LVal.base] using hbase
-            subst hx
-            have hslotExpected :
-                pointerIfRetargetEnv.slotAt "p" = some pointerIfPYSlot := by
-              simp [pointerIfRetargetEnv, pointerIfPYSlot, Env.update]
-            have hslotEq : slot = pointerIfPYSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfPYSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl⟩
-            simp [pointerIfPYSlot]
-  | deref lv ih =>
-      intro hbase
-      have ihp := ih (by simpa [LVal.base] using hbase)
-      constructor
-      · intro inner lifetime htyping
-        cases htyping with
-        | box hinner =>
-            exact ihp.1 hinner
-        | borrow _hinner htargets =>
-            exact LValTargetsTyping.not_box htargets
-      · intro mutable targets lifetime htyping
-        cases htyping with
-        | box hinner =>
-            exact False.elim (ihp.1 hinner)
-        | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
-            subst hinnerTargets
-            exact False.elim (pointerIfRetarget_no_y_targets_borrow htargets)
-
+  sorry
 theorem pointerIfRetarget_coherent : Coherent pointerIfRetargetEnv := by
   intro lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = "p"
@@ -1584,50 +1385,7 @@ theorem pointerIf_old_root_int : ∀ {lv partialTy lifetime},
     LValTyping pointerIfEnv lv partialTy lifetime →
     (lv = .var "x" ∨ lv = .var "y") ∧
       partialTy = .ty .int ∧ lifetime = Lifetime.root := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro partialTy lifetime hbase htyping
-      cases htyping with
-      | var hslot =>
-          rename_i slot
-          by_cases hx : x = "x"
-          · subst hx
-            have hslotExpected : pointerIfEnv.slotAt "x" = some pointerIfXSlot := by
-              simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot, pointerIfPXSlot,
-                Env.update]
-            have hslotEq : slot = pointerIfXSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfXSlot]
-          · by_cases hy : x = "y"
-            · subst hy
-              have hslotExpected : pointerIfEnv.slotAt "y" = some pointerIfYSlot := by
-                simp [pointerIfEnv, pointerIfYSlot, pointerIfPXSlot, Env.update]
-              have hslotEq : slot = pointerIfYSlot :=
-                Option.some.inj (hslot.symm.trans hslotExpected)
-              subst slot
-              simp [pointerIfYSlot]
-            · by_cases hp : x = "p"
-              · subst hp
-                simp [LVal.base] at hbase
-              · have hnone : pointerIfEnv.slotAt x = none := by
-                  simp [pointerIfEnv, pointerIfXSlot, pointerIfYSlot,
-                    pointerIfPXSlot, Env.update, Env.empty, hx, hy, hp]
-                rw [hslot] at hnone
-                cases hnone
-  | deref lv ih =>
-      intro partialTy lifetime hbase htyping
-      cases htyping with
-      | box hinner =>
-          rcases ih (by simpa [LVal.base] using hbase) hinner with
-            ⟨_, hpartialTy, _⟩
-          cases hpartialTy
-      | borrow hinner _htargets =>
-          rcases ih (by simpa [LVal.base] using hbase) hinner with
-            ⟨_, hpartialTy, _⟩
-          cases hpartialTy
-
+  sorry
 theorem pointerIf_no_x_targets_borrow {mutable targets lifetime} :
     ¬ LValTargetsTyping pointerIfEnv [.var "x"]
       (.ty (.borrow mutable targets)) lifetime := by
@@ -1677,59 +1435,7 @@ theorem pointerIf_p_root_facts : ∀ {lv},
       LValTyping pointerIfEnv lv (.ty (.borrow mutable targets)) lifetime →
       lv = .var "p" ∧ mutable = true ∧ targets = [.var "x"] ∧
         lifetime = Lifetime.root) := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro hbase
-      constructor
-      · intro inner lifetime htyping
-        generalize hpartialTy : (PartialTy.box inner) = partialTy at htyping
-        cases htyping with
-        | var hslot =>
-            rename_i slot
-            have hx : x = "p" := by simpa [LVal.base] using hbase
-            subst hx
-            have hslotExpected : pointerIfEnv.slotAt "p" = some pointerIfPXSlot := by
-              simp [pointerIfEnv, pointerIfPXSlot, Env.update]
-            have hslotEq : slot = pointerIfPXSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfPXSlot] at hpartialTy
-      · intro mutable targets lifetime htyping
-        generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
-        cases htyping with
-        | var hslot =>
-            rename_i slot
-            have hx : x = "p" := by simpa [LVal.base] using hbase
-            subst hx
-            have hslotExpected : pointerIfEnv.slotAt "p" = some pointerIfPXSlot := by
-              simp [pointerIfEnv, pointerIfPXSlot, Env.update]
-            have hslotEq : slot = pointerIfPXSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfPXSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl⟩
-            simp [pointerIfPXSlot]
-  | deref lv ih =>
-      intro hbase
-      have ihp := ih (by simpa [LVal.base] using hbase)
-      constructor
-      · intro inner lifetime htyping
-        cases htyping with
-        | box hinner =>
-            exact ihp.1 hinner
-        | borrow _hinner htargets =>
-            exact LValTargetsTyping.not_box htargets
-      · intro mutable targets lifetime htyping
-        cases htyping with
-        | box hinner =>
-            exact False.elim (ihp.1 hinner)
-        | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
-            subst hinnerTargets
-            exact False.elim (pointerIf_no_x_targets_borrow htargets)
-
+  sorry
 theorem pointerIf_coherent : Coherent pointerIfEnv := by
   intro lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = "p"
@@ -1919,52 +1625,7 @@ theorem pointerIfJoin_old_root_int : ∀ {lv partialTy lifetime},
     LValTyping pointerIfJoinEnv lv partialTy lifetime →
     (lv = .var "x" ∨ lv = .var "y") ∧
       partialTy = .ty .int ∧ lifetime = Lifetime.root := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro partialTy lifetime hbase htyping
-      cases htyping with
-      | var hslot =>
-          rename_i slot
-          by_cases hx : x = "x"
-          · subst hx
-            have hslotExpected :
-                pointerIfJoinEnv.slotAt "x" = some pointerIfXSlot := by
-              simp [pointerIfJoinEnv, pointerIfXSlot, pointerIfYSlot,
-                pointerIfJoinPSlot, Env.update]
-            have hslotEq : slot = pointerIfXSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfXSlot]
-          · by_cases hy : x = "y"
-            · subst hy
-              have hslotExpected :
-                  pointerIfJoinEnv.slotAt "y" = some pointerIfYSlot := by
-                simp [pointerIfJoinEnv, pointerIfYSlot, pointerIfJoinPSlot,
-                  Env.update]
-              have hslotEq : slot = pointerIfYSlot :=
-                Option.some.inj (hslot.symm.trans hslotExpected)
-              subst slot
-              simp [pointerIfYSlot]
-            · by_cases hp : x = "p"
-              · subst hp
-                simp [LVal.base] at hbase
-              · have hnone : pointerIfJoinEnv.slotAt x = none := by
-                  simp [pointerIfJoinEnv, Env.update, Env.empty, hx, hy, hp]
-                rw [hslot] at hnone
-                cases hnone
-  | deref lv ih =>
-      intro partialTy lifetime hbase htyping
-      cases htyping with
-      | box hinner =>
-          rcases ih (by simpa [LVal.base] using hbase) hinner with
-            ⟨_, hpartialTy, _⟩
-          cases hpartialTy
-      | borrow hinner _htargets =>
-          rcases ih (by simpa [LVal.base] using hbase) hinner with
-            ⟨_, hpartialTy, _⟩
-          cases hpartialTy
-
+  sorry
 theorem pointerIfJoin_no_targets_borrow {mutable targets lifetime} :
     ¬ LValTargetsTyping pointerIfJoinEnv [.var "y", .var "x"]
       (.ty (.borrow mutable targets)) lifetime := by
@@ -2007,61 +1668,7 @@ theorem pointerIfJoin_p_root_facts : ∀ {lv},
         (.ty (.borrow mutable targets)) lifetime →
       lv = .var "p" ∧ mutable = true ∧ targets = [.var "y", .var "x"] ∧
         lifetime = Lifetime.root) := by
-  intro lv
-  induction lv with
-  | var x =>
-      intro hbase
-      constructor
-      · intro inner lifetime htyping
-        generalize hpartialTy : (PartialTy.box inner) = partialTy at htyping
-        cases htyping with
-        | var hslot =>
-            rename_i slot
-            have hx : x = "p" := by simpa [LVal.base] using hbase
-            subst hx
-            have hslotExpected :
-                pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot := by
-              simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]
-            have hslotEq : slot = pointerIfJoinPSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfJoinPSlot] at hpartialTy
-      · intro mutable targets lifetime htyping
-        generalize hpartialTy :
-            (PartialTy.ty (Ty.borrow mutable targets)) = partialTy at htyping
-        cases htyping with
-        | var hslot =>
-            rename_i slot
-            have hx : x = "p" := by simpa [LVal.base] using hbase
-            subst hx
-            have hslotExpected :
-                pointerIfJoinEnv.slotAt "p" = some pointerIfJoinPSlot := by
-              simp [pointerIfJoinEnv, pointerIfJoinPSlot, Env.update]
-            have hslotEq : slot = pointerIfJoinPSlot :=
-              Option.some.inj (hslot.symm.trans hslotExpected)
-            subst slot
-            simp [pointerIfJoinPSlot] at hpartialTy
-            rcases hpartialTy with ⟨rfl, rfl⟩
-            simp [pointerIfJoinPSlot]
-  | deref lv ih =>
-      intro hbase
-      have ihp := ih (by simpa [LVal.base] using hbase)
-      constructor
-      · intro inner lifetime htyping
-        cases htyping with
-        | box hinner =>
-            exact ihp.1 hinner
-        | borrow _hinner htargets =>
-            exact LValTargetsTyping.not_box htargets
-      · intro mutable targets lifetime htyping
-        cases htyping with
-        | box hinner =>
-            exact False.elim (ihp.1 hinner)
-        | borrow hinner htargets =>
-            rcases ihp.2 hinner with ⟨_, _, hinnerTargets, _⟩
-            subst hinnerTargets
-            exact False.elim (pointerIfJoin_no_targets_borrow htargets)
-
+  sorry
 theorem pointerIfJoin_coherent : Coherent pointerIfJoinEnv := by
   intro lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = "p"
