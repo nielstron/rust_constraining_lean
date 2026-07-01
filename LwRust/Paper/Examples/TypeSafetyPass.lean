@@ -240,12 +240,41 @@ theorem lval_not_box_of_scalar_slots {env : Env}
       | borrow _hborrow htargets =>
           exact LValTargetsTyping.not_box htargets
 
+theorem lval_full_type_scalar_slots {env : Env}
+    (hscalar : ∀ {x slot}, env.slotAt x = some slot →
+      slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
+    ∀ (lv : LVal) {ty lifetime},
+      LValTyping env lv (.ty ty) lifetime → ty = .int ∨ ty = .bool
+  | .var _x, _ty, _lifetime => by
+      intro htyping
+      rcases LValTyping.var_inv htyping with ⟨slot, hslot, hty, _hl⟩
+      rcases hscalar hslot with hslotTy | hslotTy
+      · rw [hslotTy] at hty
+        cases hty
+        exact Or.inl rfl
+      · rw [hslotTy] at hty
+        cases hty
+        exact Or.inr rfl
+  | .deref lv, _ty, _lifetime => by
+      intro htyping
+      cases htyping with
+      | box hinner =>
+          exact False.elim (lval_not_box_of_scalar_slots hscalar lv hinner)
+      | boxFull hinner =>
+          rcases lval_full_type_scalar_slots hscalar lv hinner with hbox | hbox <;>
+            cases hbox
+      | borrow hinner _htargets =>
+          rcases lval_full_type_scalar_slots hscalar lv hinner with hborrow | hborrow <;>
+            cases hborrow
+
 theorem lval_not_borrow_of_scalar_slots {env : Env}
     (hscalar : ∀ {x slot}, env.slotAt x = some slot →
       slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
     ∀ (lv : LVal) {mutable targets lifetime},
       ¬ LValTyping env lv (.ty (.borrow mutable targets)) lifetime := by
-  sorry
+  intro lv mutable targets lifetime htyping
+  rcases lval_full_type_scalar_slots hscalar lv htyping with hty | hty <;>
+    cases hty
 
 theorem freshUpdateCoherence_no_borrow {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime}
@@ -253,7 +282,11 @@ theorem freshUpdateCoherence_no_borrow {env : Env} {x : Name}
       ¬ LValTyping (env.update x { ty := .ty ty, lifetime := lifetime }) lv
         (.ty (.borrow mutable targets)) borrowLifetime) :
     FreshUpdateCoherenceObligations env x ty lifetime := by
-  sorry
+  constructor
+  · intro lv mutable targets borrowLifetime _hbase htyping
+    exact False.elim (hnoBorrow lv mutable targets borrowLifetime htyping)
+  · intro lv mutable targets borrowLifetime _hbase htyping
+    exact False.elim (hnoBorrow lv mutable targets borrowLifetime htyping)
 theorem env_not_contains_borrow_of_scalar_slots {env : Env}
     (hscalar : ∀ {x slot}, env.slotAt x = some slot →
       slot.ty = .ty .int ∨ slot.ty = .ty .bool) :
@@ -365,7 +398,19 @@ theorem oneBorrowSlot_contains_inv {env : Env} {aSlot : EnvSlot}
     ∀ {x mutable targets},
       env ⊢ x ↝ (.borrow mutable targets) →
       x = "a" ∧ mutable = true ∧ targets = slotTargets := by
-  sorry
+  intro x mutable targets hcontains
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  by_cases ha : x = "a"
+  · subst ha
+    have hslotEq : slot = aSlot :=
+      Option.some.inj (hslot.symm.trans hslotA)
+    subst hslotEq
+    rw [haTy] at hcontainsTy
+    cases hcontainsTy
+    exact ⟨rfl, rfl, rfl⟩
+  · rcases hrest ha hslot with hslotTy | hslotTy <;>
+      rw [hslotTy] at hcontainsTy <;> cases hcontainsTy
+
 theorem retargetAfterIfEnv1_scalar_slot {x : Name} {slot : EnvSlot} :
     retargetAfterIfEnv1.slotAt x = some slot →
     slot.ty = .ty .int ∨ slot.ty = .ty .bool := by

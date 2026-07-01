@@ -1372,7 +1372,34 @@ theorem RuntimeTargetsPathSelected.of_lvalTargetsTyping {store : ProgramStore}
       selectedSlotTy →
     RuntimeTargetsPathSelected store env targets path selectedName selectedSlot
       selectedSlotTy := by
-  sorry
+  intro htargets hselected
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _target _ty _lifetime _htyping => True)
+    (motive_2 := fun targets pt lifetime _htyping =>
+      ∀ {path : List Unit} {selectedName : Name} {selectedSlot : EnvSlot}
+        {selectedSlotTy : Ty},
+        RuntimePathSelected store env pt path selectedName selectedSlot
+          selectedSlotTy →
+        RuntimeTargetsPathSelected store env targets path selectedName
+          selectedSlot selectedSlotTy)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htargets hselected
+  case var | box | boxFull | borrow => intros; trivial
+  case singleton =>
+      intro target ty lifetime htarget _ih path selectedName selectedSlot
+        selectedSlotTy hselected
+      exact RuntimeTargetsPathSelected.target (by simp) htarget hselected
+  case cons =>
+      intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+        hhead _hrest hunion _hintersection _ihHead ihRest
+        path selectedName selectedSlot selectedSlotTy hselected
+      rcases RuntimePathSelected.of_partialTyUnion hunion hselected with
+        hheadSelected | hrestSelected
+      · exact RuntimeTargetsPathSelected.target (by simp) hhead hheadSelected
+      · cases ihRest hrestSelected with
+        | target hmem htargetTyping hpath =>
+            exact RuntimeTargetsPathSelected.target (List.mem_cons_of_mem _ hmem)
+              htargetTyping hpath
+
 theorem RuntimePathSelected.prepend_of_lvalTyping {store : ProgramStore}
     {env : Env} {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
     {selectedName : Name} {selectedSlot : EnvSlot} {selectedSlotTy : Ty}
@@ -1440,7 +1467,97 @@ theorem lval_loc_var_slot_full_of_lvalTyping {store : ProgramStore} {env : Env}
     store.loc lv = some (VariableProjection x) →
     env.slotAt x = some slot →
     ∃ slotTy, slot.ty = .ty slotTy := by
-  sorry
+  intro hwellFormed hsafe hheap htyping
+  refine LValTyping.rec
+    (motive_1 := fun lv partialTy lifetime _ =>
+      ∀ ty, partialTy = .ty ty →
+        store.loc lv = some (VariableProjection x) →
+        env.slotAt x = some slot →
+        ∃ slotTy, slot.ty = .ty slotTy)
+    (motive_2 := fun targets partialTy lifetime _ =>
+      ∀ target, target ∈ targets →
+        store.loc target = some (VariableProjection x) →
+        env.slotAt x = some slot →
+        ∃ slotTy, slot.ty = .ty slotTy)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htyping ty rfl
+  · intro y envSlot henvSlot ty hty hloc hxSlot
+    simp [ProgramStore.loc, VariableProjection] at hloc
+    cases hloc
+    have hslotEq : slot = envSlot :=
+      Option.some.inj (hxSlot.symm.trans henvSlot)
+    subst hslotEq
+    exact ⟨ty, hty⟩
+  · intro source inner sourceLifetime hsource _ih ty hty hloc _hxSlot
+    cases hty
+    have hsourceAbs : LValLocationAbstraction store source (.box (.ty ty)) :=
+      lvalTyping_defined_location hwellFormed hsafe hsource
+    rcases hsourceAbs with
+      ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+    rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+    cases hsourceValid with
+    | @box ownerLocation ownerSlot _ hownerSlot _hinnerValid =>
+        have hderefLoc : store.loc source.deref = some ownerLocation := by
+          simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+        have hownerEq : ownerLocation = VariableProjection x := by
+          rw [hloc] at hderefLoc
+          exact (Option.some.inj hderefLoc).symm
+        subst hownerEq
+        have howns : ProgramStore.Owns store (VariableProjection x) :=
+          ⟨sourceLocation, sourceSlotLifetime, by
+            simpa [owningRef] using hsourceSlot⟩
+        exact False.elim ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
+  · intro source inner sourceLifetime hsource _ih ty hty hloc _hxSlot
+    cases hty
+    have hsourceAbs :
+        LValLocationAbstraction store source (.ty (.box inner)) :=
+      lvalTyping_defined_location hwellFormed hsafe hsource
+    rcases hsourceAbs with
+      ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+    rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+    cases hsourceValid with
+    | @boxFull ownerLocation ownerSlot _ hownerSlot _hinnerValid =>
+        have hderefLoc : store.loc source.deref = some ownerLocation := by
+          simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+        have hownerEq : ownerLocation = VariableProjection x := by
+          rw [hloc] at hderefLoc
+          exact (Option.some.inj hderefLoc).symm
+        subst hownerEq
+        have howns : ProgramStore.Owns store (VariableProjection x) :=
+          ⟨sourceLocation, sourceSlotLifetime, by
+            simpa [owningRef] using hsourceSlot⟩
+        exact False.elim ((not_owns_var_of_storeOwnerTargetsHeap hheap) howns)
+  · intro source mutable targets borrowLifetime targetLifetime targetTy
+      hsource htargets _ihSource ihTargets ty hty hloc hxSlot
+    cases hty
+    have hsourceAbs :
+        LValLocationAbstraction store source (.ty (.borrow mutable targets)) :=
+      lvalTyping_defined_location hwellFormed hsafe hsource
+    rcases hsourceAbs with
+      ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+    rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+    cases hsourceValid with
+    | @borrow selectedLocation _mutable _targets selected hmem hselectedLoc =>
+        have hderefLoc : store.loc source.deref = some selectedLocation := by
+          simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+        have hselectedLocationEq : selectedLocation = VariableProjection x := by
+          rw [hloc] at hderefLoc
+          exact (Option.some.inj hderefLoc).symm
+        have hselectedLocVar :
+            store.loc selected = some (VariableProjection x) := by
+          simpa [hselectedLocationEq] using hselectedLoc
+        exact ihTargets selected hmem hselectedLocVar hxSlot
+  · intro target targetTy targetLifetime _htarget ihTarget selected hmem hloc hxSlot
+    rw [List.mem_singleton] at hmem
+    subst hmem
+    exact ihTarget targetTy rfl hloc hxSlot
+  · intro target rest headTy headLifetime restLifetime lifetime restTy unionTy
+      _hhead _hrest _hunion _hintersection ihHead ihRest selected hmem hloc
+      hxSlot
+    rcases List.mem_cons.mp hmem with hhead | htail
+    · subst hhead
+      exact ihHead headTy rfl hloc hxSlot
+    · exact ihRest selected htail hloc hxSlot
+
 mutual
   /--
   A path through a partial type whose runtime-selected borrow branch eventually
@@ -1554,7 +1671,30 @@ theorem RuntimeSpineTargetsSelected.of_lvalTargetsTyping {store : ProgramStore}
     LValTargetsTyping env targets pt lifetime →
     RuntimeSpinePathSelected store env pt path address →
     RuntimeSpineTargetsSelected store env targets path address := by
-  sorry
+  intro htargets hselected
+  refine LValTargetsTyping.rec
+    (motive_1 := fun _target _ty _lifetime _htyping => True)
+    (motive_2 := fun targets pt lifetime _htyping =>
+      ∀ {path : List Unit} {address : Nat},
+        RuntimeSpinePathSelected store env pt path address →
+        RuntimeSpineTargetsSelected store env targets path address)
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htargets hselected
+  case var | box | boxFull | borrow => intros; trivial
+  case singleton =>
+      intro target ty lifetime htarget _ih path address hselected
+      exact RuntimeSpineTargetsSelected.target (by simp) htarget hselected
+  case cons =>
+      intro target rest headTy headLifetime restLifetime lifetime restTy
+        unionTy hhead _hrest hunion _hintersection _ihHead ihRest
+        path address hselected
+      rcases RuntimeSpinePathSelected.of_partialTyUnion hunion hselected with
+        hheadSelected | hrestSelected
+      · exact RuntimeSpineTargetsSelected.target (by simp) hhead hheadSelected
+      · cases ihRest hrestSelected with
+        | target hmem htargetTyping hpath =>
+            exact RuntimeSpineTargetsSelected.target
+              (List.mem_cons_of_mem _ hmem) htargetTyping hpath
+
 theorem RuntimeSpinePathSelected.prepend_of_lvalTyping {store : ProgramStore}
     {env : Env} {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
     {address : Nat}
