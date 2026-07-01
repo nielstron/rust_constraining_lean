@@ -4170,6 +4170,25 @@ theorem LVal.sizeOf_base_lt : ∀ lv : LVal, sizeOf (LVal.base lv) < sizeOf lv
       exact Nat.lt_trans (LVal.sizeOf_base_lt lv)
         (by simpa [Nat.succ_eq_add_one] using Nat.lt_succ_self (sizeOf lv))
 
+theorem prependPath_deref_preservation (path : List Unit) (lv : LVal) :
+    prependPath path (.deref lv) = prependPath (() :: path) lv := by
+  induction path with
+  | nil =>
+      rfl
+  | cons head tail ih =>
+      cases head
+      simp [prependPath, ih]
+
+theorem prependPath_append_preservation :
+    ∀ (left right : List Unit) (lv : LVal),
+      prependPath right (prependPath left lv) =
+        prependPath (left ++ right) lv
+  | [], _right, _lv => rfl
+  | () :: left, right, lv => by
+      rw [prependPath, prependPath_deref_preservation,
+        prependPath_append_preservation left (() :: right)]
+      simp [List.Unit_append_cons]
+
 theorem LocationBelow.irrefl_whenInitialized {env : Env}
     {store : ProgramStore} {φ : Name → Nat}
     {location : Location} {slot : StoreSlot} {ty : PartialTy} :
@@ -4665,6 +4684,167 @@ theorem LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitial
                   ⟨targetTy, targetLifetime, htargetTyping, _hstrength⟩
                 exact ⟨targetTy, targetLifetime, htargetTyping⟩
               exact False.elim (hstale hinitialized)
+
+theorem RuntimeLocationPathSelected.envMayReadThrough_below_ranked
+    {store : ProgramStore} {env : Env}
+    {oldTy : PartialTy} {path : List Unit} {location : Location}
+    {written : LVal} {φ : Name → Nat} {rootRank : Nat} :
+    (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+    RuntimeLocationPathSelected store env oldTy path location →
+    (∀ {target : LVal} {targetTy : Ty} {targetLifetime : Lifetime}
+      {residual : List Unit},
+      residual ≠ [] →
+      φ (LVal.base target) < rootRank →
+      LValTyping env target (.ty targetTy) targetLifetime →
+      store.loc target = some location →
+      EnvMayReadThrough env written (prependPath residual target)) →
+    (∀ {target : LVal} {pt : PartialTy} {targetLifetime : Lifetime}
+      {branchPath residual : List Unit},
+      residual ≠ [] →
+      φ (LVal.base target) < rootRank →
+      LValTyping env target pt targetLifetime →
+      RuntimeLocationPathSelected store env pt branchPath location →
+      EnvMayReadThrough env written
+        (prependPath residual (prependPath branchPath target))) →
+    ∀ {source : LVal} {sourceLifetime : Lifetime} {residual : List Unit},
+      residual ≠ [] →
+      LValTyping env source oldTy sourceLifetime →
+      EnvMayReadThrough env written
+        (prependPath residual (prependPath path source)) := by
+  intro hbelow hselected hdirect hindirect
+  refine RuntimeLocationPathSelected.rec
+    (motive_1 := fun oldTy path location _hselected =>
+      (∀ v, v ∈ PartialTy.vars oldTy → φ v < rootRank) →
+      (∀ {target : LVal} {targetTy : Ty} {targetLifetime : Lifetime}
+        {residual : List Unit},
+        residual ≠ [] →
+        φ (LVal.base target) < rootRank →
+        LValTyping env target (.ty targetTy) targetLifetime →
+        store.loc target = some location →
+        EnvMayReadThrough env written (prependPath residual target)) →
+      (∀ {target : LVal} {pt : PartialTy} {targetLifetime : Lifetime}
+        {branchPath residual : List Unit},
+        residual ≠ [] →
+        φ (LVal.base target) < rootRank →
+        LValTyping env target pt targetLifetime →
+        RuntimeLocationPathSelected store env pt branchPath location →
+        EnvMayReadThrough env written
+          (prependPath residual (prependPath branchPath target))) →
+      ∀ {source : LVal} {sourceLifetime : Lifetime}
+        {residual : List Unit},
+        residual ≠ [] →
+        LValTyping env source oldTy sourceLifetime →
+        EnvMayReadThrough env written
+          (prependPath residual (prependPath path source)))
+    (motive_2 := fun _targets _path _location _hselected => True)
+    ?borrowHere ?borrowPath ?box ?boxFull ?borrowStep ?target hselected
+    hbelow hdirect hindirect
+  case borrowHere =>
+      intro mutable targets selectedTarget selectedTargetTy
+        selectedTargetLifetime location hmem hselectedTyping hselectedLoc
+        hbelow hdirect _hindirect source sourceLifetime residual
+        hresidual hsourceTyping
+      have htargetRank :
+          φ (LVal.base selectedTarget) < rootRank :=
+        hbelow (LVal.base selectedTarget)
+          (mem_partialTy_vars_iff.mpr
+            ⟨mutable, targets, selectedTarget, PartialTyContains.here,
+              hmem, rfl⟩)
+      have hinner :
+          EnvMayReadThrough env written
+            (prependPath residual selectedTarget) :=
+        hdirect hresidual htargetRank hselectedTyping hselectedLoc
+      have hborrow :
+          EnvMayReadThrough env written
+            (prependPath (() :: residual) source) :=
+        EnvMayReadThrough.borrow (source := source)
+          (selected := selectedTarget) (suffix := residual)
+          hsourceTyping hmem hinner
+      simpa [prependPath_append_preservation] using hborrow
+  case borrowPath =>
+      intro mutable targets selectedTarget branchPath selectedTy
+        selectedLifetime location hmem hselectedTyping hselectedLoc
+        hbelow hdirect _hindirect source sourceLifetime residual
+        hresidual hsourceTyping
+      have htargetRank :
+          φ (LVal.base (prependPath branchPath selectedTarget)) < rootRank := by
+        simpa [LVal.base_prependPath] using
+          hbelow (LVal.base selectedTarget)
+            (mem_partialTy_vars_iff.mpr
+              ⟨mutable, targets, selectedTarget, PartialTyContains.here,
+                hmem, rfl⟩)
+      have hinnerDirect :
+          EnvMayReadThrough env written
+            (prependPath residual (prependPath branchPath selectedTarget)) :=
+        hdirect hresidual htargetRank hselectedTyping hselectedLoc
+      have hinner :
+          EnvMayReadThrough env written
+            (prependPath (branchPath ++ residual) selectedTarget) := by
+        simpa [prependPath_append_preservation] using hinnerDirect
+      have hborrow :
+          EnvMayReadThrough env written
+            (prependPath (() :: (branchPath ++ residual)) source) :=
+        EnvMayReadThrough.borrow (source := source)
+          (selected := selectedTarget) (suffix := branchPath ++ residual)
+          hsourceTyping hmem hinner
+      simpa [prependPath_append_preservation, List.cons_append] using hborrow
+  case box =>
+      intro inner branchPath location hinnerSelected ih hbelow hdirect
+        hindirect source sourceLifetime residual hresidual hsourceTyping
+      have hbelowInner :
+          ∀ v, v ∈ PartialTy.vars inner → φ v < rootRank := by
+        intro v hv
+        exact hbelow v (by simpa [PartialTy.vars] using hv)
+      have hread :=
+        ih hbelowInner hdirect hindirect (source := .deref source)
+          (sourceLifetime := sourceLifetime) (residual := residual)
+          hresidual (LValTyping.box hsourceTyping)
+      simpa [prependPath_deref_preservation] using hread
+  case boxFull =>
+      intro inner branchPath location hinnerSelected ih hbelow hdirect
+        hindirect source sourceLifetime residual hresidual hsourceTyping
+      have hbelowInner :
+          ∀ v, v ∈ PartialTy.vars (.ty inner) → φ v < rootRank := by
+        intro v hv
+        exact hbelow v (by simpa [PartialTy.vars, Ty.vars] using hv)
+      have hread :=
+        ih hbelowInner hdirect hindirect (source := .deref source)
+          (sourceLifetime := sourceLifetime) (residual := residual)
+          hresidual (LValTyping.boxFull hsourceTyping)
+      simpa [prependPath_deref_preservation] using hread
+  case borrowStep =>
+      intro mutable targets branchPath location htargetsSelected _ih hbelow
+        _hdirect hindirect source sourceLifetime residual hresidual
+        hsourceTyping
+      cases htargetsSelected with
+      | target hmem htargetTyping htargetSelected =>
+          rename_i branchTarget branchPt branchLifetime
+          have htargetRank :
+              φ (LVal.base branchTarget) < rootRank :=
+            hbelow (LVal.base branchTarget)
+              (mem_partialTy_vars_iff.mpr
+                ⟨mutable, targets, branchTarget, PartialTyContains.here,
+                  hmem, rfl⟩)
+          have hinnerDirect :
+              EnvMayReadThrough env written
+                (prependPath residual
+                  (prependPath branchPath branchTarget)) :=
+            hindirect hresidual htargetRank htargetTyping htargetSelected
+          have hinner :
+              EnvMayReadThrough env written
+                (prependPath (branchPath ++ residual) branchTarget) := by
+            simpa [prependPath_append_preservation] using hinnerDirect
+          have hborrow :
+              EnvMayReadThrough env written
+                (prependPath (() :: (branchPath ++ residual)) source) :=
+            EnvMayReadThrough.borrow (source := source)
+              (selected := branchTarget) (suffix := branchPath ++ residual)
+              hsourceTyping hmem hinner
+          simpa [prependPath_append_preservation, List.cons_append] using
+            hborrow
+  case target =>
+      intros
+      trivial
 
 theorem lval_loc_var_slot_strengthens_whenInitialized
     {store : ProgramStore} {env : Env}
@@ -5892,41 +6072,6 @@ theorem EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_whenInitialized
       hwrittenSpine hreadSpine
   simpa [heq] using hmayRead
 
-/--
-Full-box dereference alias transfer.
-
-If `written` is the concrete owner path to the location reached by `*source`,
-then any read-through dependency below `*source` can be re-expressed below
-`written`.  The interesting case is when `source` itself was reached through a
-runtime-selected borrow target: the proof must reselect that target and keep the
-remaining dereference suffix.
--/
-theorem EnvMayReadThrough.ownerSpine_of_boxFull_deref_same_location_whenInitialized
-    {store : ProgramStore} {env : Env}
-    {lifetime sourceLifetime : Lifetime}
-    {written source target : LVal}
-    {writtenTy inner : Ty}
-    {envSlot : EnvSlot} {rootSlot leafSlot : StoreSlot} {leaf : Location} :
-    WellFormedEnvWhenInitialized env lifetime →
-    SafeAbstractionWhenInitialized store env →
-    ValidStore store →
-    StoreOwnerTargetsHeap store →
-    StoreOwnerSpineWhenInitialized env store
-      (VariableProjection (LVal.base written)) rootSlot
-      envSlot.ty (LVal.path written) leaf leafSlot (.ty writtenTy) →
-    LValTyping env source (.ty (.box inner)) sourceLifetime →
-    store.loc (.deref source) = some leaf →
-    EnvMayReadThrough env (.deref source) target →
-    EnvMayReadThrough env written target := by
-  intro hwellFormed hsafe hvalidStore hheap hwrittenSpine hsource
-    hsourceDerefLoc hmayRead
-  induction hmayRead with
-  | direct hprefix =>
-      sorry
-  | @borrow borrowSource selected suffix mutable targets borrowLifetime
-      hborrowSource hmem _hinner ih =>
-      exact EnvMayReadThrough.borrow hborrowSource hmem ih
-
 theorem EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized
     {store : ProgramStore} {env : Env}
     {lifetime writtenLifetime readPrefixLifetime : Lifetime}
@@ -6045,10 +6190,153 @@ where
                         hvalidStore hheap hwrittenSpine hreadSpine
                         (EnvMayReadThrough.direct hprefix)
               | @boxFull _ inner sourceLifetime hsource =>
-                  exact
-                    EnvMayReadThrough.ownerSpine_of_boxFull_deref_same_location_whenInitialized
-                      hwellFormed hsafe hvalidStore hheap hwrittenSpine
-                      hsource hreadPrefixLoc (EnvMayReadThrough.direct hprefix)
+                  rcases LVal.StrictPrefixOf.eq_prependPath hprefix with
+                    ⟨residual, hresidualNonempty, htargetEq⟩
+                  rcases LValTyping.base_slot_exists hsource with
+                    ⟨sourceEnvSlot, hsourceEnvSlot⟩
+                  have hderefLoc :
+                      store.loc (prependPath (() :: []) source) =
+                        some leaf := by
+                    simpa [prependPath] using hreadPrefixLoc
+                  rcases
+                      LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
+                        hφ hwellFormed hsafe hheap hsource hsourceEnvSlot
+                        hderefLoc with
+                    howner | hselected
+                  · rcases howner with
+                      ⟨readRootSlot, readLeafSlot, actualLeafTy, hreadRootSlot,
+                        hreadSpine, _hstrength, _hnonempty⟩
+                    have hreadSpineDeref :
+                        StoreOwnerSpineWhenInitialized env store
+                          (VariableProjection (LVal.base (.deref source)))
+                          readRootSlot sourceEnvSlot.ty
+                          (LVal.path (.deref source)) leaf readLeafSlot
+                          (.ty actualLeafTy) := by
+                      simpa [LVal.base, LVal.path_deref_cons,
+                        List.Unit_append_cons] using hreadSpine
+                    exact
+                      EnvMayReadThrough.ownerSpine_of_ownerSpine_same_leaf_whenInitialized
+                        hvalidStore hheap hwrittenSpine hreadSpineDeref
+                        (EnvMayReadThrough.direct hprefix)
+                  · have hselectedBase :
+                        RuntimeLocationPathSelected store env sourceEnvSlot.ty
+                          (() :: LVal.path source) leaf := by
+                      simpa [List.Unit_append_cons] using hselected
+                    let sourceRank := φ (LVal.base source)
+                    let PathRead : Nat → Prop := fun rootRank =>
+                      rootRank ≤ sourceRank →
+                      ∀ {target : LVal} {pt : PartialTy}
+                        {targetLifetime : Lifetime} {path residual : List Unit},
+                        residual ≠ [] →
+                        φ (LVal.base target) = rootRank →
+                        LValTyping env target pt targetLifetime →
+                        RuntimeLocationPathSelected store env pt path leaf →
+                        EnvMayReadThrough env written
+                          (prependPath residual (prependPath path target))
+                    let DirectRead : Nat → Prop := fun rootRank =>
+                      rootRank < sourceRank →
+                      ∀ {target : LVal} {targetTy : Ty}
+                        {targetLifetime : Lifetime} {residual : List Unit},
+                        residual ≠ [] →
+                        φ (LVal.base target) = rootRank →
+                        LValTyping env target (.ty targetTy) targetLifetime →
+                        store.loc target = some leaf →
+                        EnvMayReadThrough env written
+                          (prependPath residual target)
+                    have hall : ∀ rootRank,
+                        PathRead rootRank ∧ DirectRead rootRank := by
+                      intro rootRank
+                      refine Nat.strong_induction_on rootRank ?_
+                      intro rootRank ih
+                      have hpath : PathRead rootRank := by
+                        intro hrootLe target pt targetLifetime path residual
+                          hresidual hrootEq htargetTyping hselectedPath
+                        have hbelow :
+                            ∀ v, v ∈ PartialTy.vars pt →
+                              φ v < φ (LVal.base target) :=
+                          (lvalTyping_vars_rank_lt hφ).1 htargetTyping
+                        exact
+                          RuntimeLocationPathSelected.envMayReadThrough_below_ranked
+                            (rootRank := φ (LVal.base target))
+                            hbelow hselectedPath
+                            (fun {target} {_targetTy} {_targetLifetime}
+                                {residual} hrecursiveResidual htargetRank
+                                hrecursiveTyping hrecursiveLoc =>
+                              have hlt :
+                                  φ (LVal.base target) <
+                                    rootRank := by
+                                simpa [hrootEq] using htargetRank
+                              have hrecursiveLtSource :
+                                  φ (LVal.base target) <
+                                    sourceRank :=
+                                lt_of_lt_of_le hlt hrootLe
+                              (ih (φ (LVal.base target)) hlt).2
+                                hrecursiveLtSource hrecursiveResidual rfl
+                                hrecursiveTyping hrecursiveLoc)
+                            (fun {target} {_pt} {_targetLifetime}
+                                {_branchPath} {residual} hrecursiveResidual
+                                htargetRank hrecursiveTyping hrecursiveSelected =>
+                              have hlt :
+                                  φ (LVal.base target) <
+                                    rootRank := by
+                                simpa [hrootEq] using htargetRank
+                              have hrecursiveLeSource :
+                                  φ (LVal.base target) ≤
+                                    sourceRank :=
+                                le_of_lt (lt_of_lt_of_le hlt hrootLe)
+                              (ih (φ (LVal.base target)) hlt).1
+                                hrecursiveLeSource hrecursiveResidual rfl
+                                hrecursiveTyping hrecursiveSelected)
+                            hresidual htargetTyping
+                      have hdirect : DirectRead rootRank := by
+                        intro hrootLt target targetTy targetLifetime residual
+                          hresidual hrootEq htargetTyping htargetLoc
+                        have hselectedRead :
+                            EnvMayReadThrough env target
+                              (prependPath residual target) := by
+                          cases residual with
+                          | nil =>
+                              exact False.elim (hresidual rfl)
+                          | cons head tail =>
+                              cases head
+                              exact
+                                EnvMayReadThrough.direct_prependPath_self_deref
+                                  tail
+                        have hcallRank :
+                            φ (LVal.base target) <
+                              φ (LVal.base (.deref source)) := by
+                          simpa [sourceRank, LVal.base, hrootEq] using hrootLt
+                        exact
+                          go hwellFormed hsafe hvalidStore hheap hφ
+                            hwrittenSpine htargetTyping htargetLoc
+                            hselectedRead
+                      exact ⟨hpath, hdirect⟩
+                    have hbaseDerefEq :
+                        prependPath (() :: LVal.path source)
+                            (.var (LVal.base source)) =
+                          .deref source := by
+                      apply LVal.eq_of_base_path
+                      · simp [LVal.base]
+                      · simp [LVal.path_prependPath, LVal.path]
+                    have hreadBase :
+                        EnvMayReadThrough env written
+                          (prependPath residual
+                            (prependPath (() :: LVal.path source)
+                              (.var (LVal.base source)))) :=
+                      (hall (φ (LVal.base source))).1 le_rfl
+                        (target := .var (LVal.base source))
+                        (pt := sourceEnvSlot.ty)
+                        (targetLifetime := sourceEnvSlot.lifetime)
+                        (path := () :: LVal.path source)
+                        (residual := residual)
+                        hresidualNonempty rfl
+                        (LValTyping.var hsourceEnvSlot) hselectedBase
+                    have hreadDeref :
+                        EnvMayReadThrough env written
+                          (prependPath residual (.deref source)) := by
+                      simpa [hbaseDerefEq] using hreadBase
+                    rw [htargetEq]
+                    exact hreadDeref
               | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
                   hsourceBorrow htargets =>
                 rcases LVal.StrictPrefixOf.eq_prependPath hprefix with
@@ -6124,9 +6412,11 @@ where
         exact EnvMayReadThrough.borrow hsourceBorrow hmem ih
   termination_by (φ (LVal.base readPrefix), sizeOf readPrefix)
   decreasing_by
-    subst_vars
-    simp_wf
-    exact Prod.Lex.left _ _ hcallRank
+    all_goals
+      simp_wf
+      try subst_vars
+      try simp [LVal.base]
+      exact Prod.Lex.left _ _ hcallRank
 
 theorem envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_whenInitialized
     {store : ProgramStore} {env result : Env}
