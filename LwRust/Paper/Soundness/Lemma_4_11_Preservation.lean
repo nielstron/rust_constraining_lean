@@ -3101,7 +3101,40 @@ theorem preservation_assign_deref_step_runtime_of_wellFormed
     ValidValue store value rhsTy →
     Step store lifetime (.assign (.deref source) (.val value)) store' (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  sorry
+  intro hwellFormed hruntimeSafe hvalidRuntime hLhs hshape hwellTy hwrite
+    hranked hnotWrite hwellOut hvalidValue hstep
+  have hsafe : store ∼ₛ env :=
+    RuntimeFrame.RuntimeSafeAbstraction.safe hruntimeSafe
+  cases hLhs with
+  | box hsourceBox =>
+      exact preservation_assign_deref_box_step_runtime_of_wellFormed
+        hwellFormed hruntimeSafe hvalidRuntime hsourceBox hshape hwellTy
+        hwrite hranked hnotWrite hwellOut hvalidValue hstep
+  | boxFull hsourceBox =>
+      rcases assign_step_components hstep with
+        ⟨writtenStore, oldSlot, lhsLocation, hread, hwriteStore, hdrops,
+          hlhsLoc, hlhsSlot, _hwriteStoreEq, hresult⟩
+      cases hresult
+      rcases location_boxFull
+          (lvalTyping_defined_location hwellFormed hsafe hsourceBox) with
+        ⟨typedLocation, typedSlot, htypedLoc, htypedSlot, htypedValid⟩
+      have htypedLocationEq : typedLocation = lhsLocation := by
+        rw [hlhsLoc] at htypedLoc
+        exact (Option.some.inj htypedLoc).symm
+      subst htypedLocationEq
+      have htypedSlotEq : typedSlot = oldSlot := by
+        rw [hlhsSlot] at htypedSlot
+        exact (Option.some.inj htypedSlot).symm
+      have holdSlotValid := by
+        simpa [htypedSlotEq] using htypedValid
+      exact preservation_assign_deref_envWrite_terminal_of_wellFormed
+        hwellFormed hruntimeSafe hvalidRuntime (LValTyping.boxFull hsourceBox)
+        hshape hwellTy hvalidValue hwrite hranked hnotWrite hwellOut hread
+        hlhsLoc hlhsSlot holdSlotValid hwriteStore hdrops
+  | borrow hsourceBorrow htargets =>
+      exact preservation_assign_deref_borrow_step_runtime_of_wellFormed
+        hwellFormed hruntimeSafe hvalidRuntime hsourceBorrow htargets hshape
+        hwellTy hwrite hranked hnotWrite hwellOut hvalidValue hstep
 /--
 Runtime-selected safe-abstraction obligation for assignment through a borrow
 target.
