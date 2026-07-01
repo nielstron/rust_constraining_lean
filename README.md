@@ -17,10 +17,12 @@ stated; the deviation then documents the corrected claim).
   no admissibility theorem bridges the gap.**  `T-Assign` carries extra
   obligations (the lhs re-typeable after the rhs, a linearization/rank witness
   `∃ φ, LinearizedBy φ ∧ EnvWriteRhsBorrowTargetsBelow`,
-  a plain `Coherent env₃`, and the minimal `EnvWriteRhsTargetsWellFormed`
-  for the result (the broad result `ContainedBorrowsWellFormed` is now derived,
-  and the former structured `EnvWriteCoherenceObligations` has been flattened to
-  `Coherent env₃`; see the coherence-obligations deviation below),
+  a plain `Coherent env₃`, the stale-retarget guard
+  `EnvWriteNoStaleBorrowTargets`, and the minimal
+  `EnvWriteRhsTargetsWellFormed` for the result (the broad result
+  `ContainedBorrowsWellFormed` is now derived, and the former structured
+  `EnvWriteCoherenceObligations` has been flattened to `Coherent env₃`; see the
+  coherence-obligations deviation below),
   plus per-branch typing witnesses and weak-update shape premises inside
   `EnvWrite` itself); `T-Declare` carries `FreshUpdateCoherenceObligations`
   and a second freshness check on the post-initialiser environment; `T-Block`
@@ -82,6 +84,16 @@ stated; the deviation then documents the corrected claim).
     `EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed`) and is shown to
     reject the multi-target counterexample
     (`Examples/TypeSafetyReject.lean`).
+  - *No stale surviving borrow targets* (`EnvWriteNoStaleBorrowTargets`) —
+    **genuinely additional relative to the printed rules**: neither
+    `lw_rust.pdf`'s `T-Assign` nor the follow-up's simplified `T-Assign` has an
+    equivalent premise.  The closest printed premise is
+    `¬writeProhibited(Γ₃, w)`, but that only checks the assigned lvalue after the
+    write.  The mechanised guard additionally says that no surviving borrow
+    target in the result may read through any effective write produced by this
+    assignment.  It is currently load-bearing in preservation for stale-retarget
+    configurations such as writing `p` while another surviving borrow target is
+    `*p`.
   - *`EnvWrite` internals* (fan-out initialized-typing witnesses, weak-update
     `ShapeCompatible`) — **formalised paper prose**: the paper asserts
     "borrowed locations cannot have partial types"; for pipeline

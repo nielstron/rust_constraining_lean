@@ -27,6 +27,11 @@ theorem PathConflicts.symm {left right : LVal} :
   intro x slot mutable targets hslot _hcontains
   simp [Env.empty] at hslot
 
+@[simp] theorem containedBorrowsWellFormedWhenInitialized_empty :
+    ContainedBorrowsWellFormedWhenInitialized Env.empty := by
+  intro x slot mutable targets hslot _hcontains
+  simp [Env.empty] at hslot
+
 @[simp] theorem envSlotsOutlive_empty (lifetime : Lifetime) :
     EnvSlotsOutlive Env.empty lifetime := by
   intro x slot hslot
@@ -39,14 +44,25 @@ theorem lvalTyping_empty_false {lv : LVal} {p : PartialTy} {lf : Lifetime}
   | deref lv' ih =>
       cases h with
       | box hb => exact ih hb
+      | boxFull hb => exact ih hb
       | borrow hb _ => exact ih hb
 
 theorem coherent_empty : Coherent Env.empty := by
   intro lv m T bLf hty
   exact (lvalTyping_empty_false hty).elim
 
+theorem coherentWhenInitialized_empty : CoherentWhenInitialized Env.empty := by
+  intro lv m T bLf hty _htargets
+  exact (lvalTyping_empty_false hty).elim
+
 theorem linearizable_empty : Linearizable Env.empty :=
   ⟨fun _ => 0, by intro x slot hslot; simp [Env.empty] at hslot⟩
+
+@[simp] theorem wellFormedEnvWhenInitialized_empty (lifetime : Lifetime) :
+    WellFormedEnvWhenInitialized Env.empty lifetime := by
+  exact ⟨containedBorrowsWellFormedWhenInitialized_empty,
+    envSlotsOutlive_empty lifetime, coherentWhenInitialized_empty,
+    linearizable_empty⟩
 
 @[simp] theorem wellFormedEnv_empty (lifetime : Lifetime) :
     WellFormedEnv Env.empty lifetime := by
@@ -57,6 +73,26 @@ theorem wellFormedEnv_empty_all :
     ∀ lifetime, WellFormedEnv Env.empty lifetime := by
   intro lifetime
   exact wellFormedEnv_empty lifetime
+
+theorem Coherent.whenInitialized {env : Env} :
+    Coherent env → CoherentWhenInitialized env := by
+  intro hcoherent lv mutable targets borrowLifetime htyping _htargets
+  exact hcoherent lv mutable targets borrowLifetime htyping
+
+theorem ContainedBorrowsWellFormed.whenInitialized {env : Env} :
+    ContainedBorrowsWellFormed env →
+    ContainedBorrowsWellFormedWhenInitialized env := by
+  intro hcontained x slot mutable targets hslot hcontains target hmem
+  rcases hcontained x slot mutable targets hslot hcontains target hmem with
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+  exact ⟨hbase, fun _ => ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩⟩
+
+theorem WellFormedEnv.whenInitialized {env : Env} {lifetime : Lifetime} :
+    WellFormedEnv env lifetime →
+    WellFormedEnvWhenInitialized env lifetime := by
+  intro hwell
+  exact ⟨ContainedBorrowsWellFormed.whenInitialized hwell.1,
+    hwell.2.1, Coherent.whenInitialized hwell.2.2.1, hwell.2.2.2⟩
 
 theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
     env.fresh x →
@@ -85,6 +121,9 @@ theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
       (by
         intro lv inner lifetime _htyping ih
         exact LValTyping.box ih)
+      (by
+        intro lv inner lifetime _htyping ih
+        exact LValTyping.boxFull ih)
       (by
         intro lv mutable targets borrowLifetime targetLifetime targetTy
           _hborrow _htargets ihBorrow ihTargets
@@ -115,6 +154,9 @@ theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
         intro lv inner lifetime _htyping ih
         exact LValTyping.box ih)
       (by
+        intro lv inner lifetime _htyping ih
+        exact LValTyping.boxFull ih)
+      (by
         intro lv mutable targets borrowLifetime targetLifetime targetTy
           _hborrow _htargets ihBorrow ihTargets
         exact LValTyping.borrow ihBorrow ihTargets)
@@ -142,6 +184,22 @@ theorem LValTargetsTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot}
     LValTargetsTyping (env.update x slot) targets ty lifetime := by
   intro hfresh htyping
   exact (LValTyping.update_fresh (slot := slot) hfresh).2 htyping
+
+theorem LValTargetsMaybeTyping.update_fresh {env : Env} {x : Name}
+    {slot : EnvSlot} {targets : List LVal} {ty : PartialTy}
+    {lifetime : Lifetime} :
+    env.fresh x →
+    LValTargetsMaybeTyping env targets ty lifetime →
+    LValTargetsMaybeTyping (env.update x slot) targets ty lifetime := by
+  intro hfresh htyping
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        (LValTyping.update_fresh_one (slot := slot) hfresh htarget)
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        (LValTyping.update_fresh_one (slot := slot) hfresh hhead)
+        ihRest hunion hintersection
 
 theorem borrowTargetsWellFormedInSlot_update_fresh {env : Env} {x : Name}
     {slot : EnvSlot} {slotLifetime : Lifetime} {targets : List LVal} :
@@ -291,6 +349,14 @@ theorem WellFormedEnv.weaken {env : Env} {outer inner : Lifetime} :
   intro hwell houterInner
   exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2.1 houterInner, hwell.2.2.1, hwell.2.2.2⟩
 
+theorem WellFormedEnvWhenInitialized.weaken {env : Env} {outer inner : Lifetime} :
+    WellFormedEnvWhenInitialized env outer →
+    outer ≤ inner →
+    WellFormedEnvWhenInitialized env inner := by
+  intro hwell houterInner
+  exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2.1 houterInner,
+    hwell.2.2.1, hwell.2.2.2⟩
+
 theorem BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed {env : Env}
     {targets : List LVal} {slotLifetime lifetime : Lifetime} :
     BorrowTargetsWellFormedInSlot env slotLifetime targets →
@@ -331,6 +397,15 @@ theorem BorrowTargetsWellFormed.member {env : Env} {targets : List LVal}
   cases htargets with
   | intro hmembers => exact hmembers target hmem
 
+theorem BorrowTargetsWellFormed.whenInitialized {env : Env} {targets : List LVal}
+    {lifetime : Lifetime} :
+    BorrowTargetsWellFormed env targets lifetime →
+    BorrowTargetsWellFormedWhenInitialized env targets lifetime := by
+  intro htargets target hmem
+  rcases BorrowTargetsWellFormed.member htargets target hmem with
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+  exact ⟨hbase, fun _ => ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩⟩
+
 theorem BorrowTargetsWellFormed.weaken {env : Env} {targets : List LVal}
     {outer inner : Lifetime} :
     BorrowTargetsWellFormed env targets outer →
@@ -362,6 +437,49 @@ theorem BorrowTargetsWellFormedInSlot.weaken {env : Env} {targets : List LVal}
   rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
   exact ⟨baseSlot, hbaseSlot, LifetimeOutlives.trans hbaseOutlives houtlives⟩
 
+theorem BorrowTargetsWellFormedInSlot.whenInitialized {env : Env}
+    {targets : List LVal} {slotLifetime : Lifetime} :
+    BorrowTargetsWellFormedInSlot env slotLifetime targets →
+    BorrowTargetsWellFormedInSlotWhenInitialized env slotLifetime targets := by
+  intro htargets target hmem
+  rcases htargets target hmem with
+    ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩
+  exact ⟨hbase, fun _ => ⟨targetTy, targetLifetime, htyping, houtlives, hbase⟩⟩
+
+theorem BorrowTargetsWellFormedWhenInitialized.weaken {env : Env}
+    {targets : List LVal} {outer inner : Lifetime} :
+    BorrowTargetsWellFormedWhenInitialized env targets outer →
+    outer ≤ inner →
+    BorrowTargetsWellFormedWhenInitialized env targets inner := by
+  intro htargets houtlives target htarget
+  rcases htargets target htarget with ⟨hbase, hinitialized⟩
+  refine ⟨?_, ?_⟩
+  · rcases hbase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+    exact ⟨baseSlot, hbaseSlot,
+      LifetimeOutlives.trans hbaseOutlives houtlives⟩
+  · intro htargetInitialized
+    rcases hinitialized htargetInitialized with
+      ⟨targetTy, targetLifetime, htyping, htargetOutlives, htargetBase⟩
+    refine ⟨targetTy, targetLifetime, htyping,
+      LifetimeOutlives.trans htargetOutlives houtlives, ?_⟩
+    rcases htargetBase with ⟨baseSlot, hbaseSlot, hbaseOutlives⟩
+    exact ⟨baseSlot, hbaseSlot,
+      LifetimeOutlives.trans hbaseOutlives houtlives⟩
+
+theorem BorrowTargetsWellFormedInSlotWhenInitialized.weaken {env : Env}
+    {targets : List LVal} {outer inner : Lifetime} :
+    BorrowTargetsWellFormedInSlotWhenInitialized env outer targets →
+    outer ≤ inner →
+    BorrowTargetsWellFormedInSlotWhenInitialized env inner targets := by
+  exact BorrowTargetsWellFormedWhenInitialized.weaken
+
+theorem BorrowTargetsWellFormedWhenInitialized.inSlot {env : Env}
+    {targets : List LVal} {lifetime : Lifetime} :
+    BorrowTargetsWellFormedWhenInitialized env targets lifetime →
+    BorrowTargetsWellFormedInSlotWhenInitialized env lifetime targets := by
+  intro htargets
+  exact htargets
+
 theorem PartialTyBorrowsWellFormedInSlot.weaken {env : Env}
     {partialTy : PartialTy} {outer inner : Lifetime} :
     PartialTyBorrowsWellFormedInSlot env outer partialTy →
@@ -369,6 +487,22 @@ theorem PartialTyBorrowsWellFormedInSlot.weaken {env : Env}
     PartialTyBorrowsWellFormedInSlot env inner partialTy := by
   intro hpartial houtlives mutable targets hcontains
   exact BorrowTargetsWellFormedInSlot.weaken (hpartial hcontains) houtlives
+
+theorem PartialTyBorrowsWellFormedInSlot.whenInitialized {env : Env}
+    {partialTy : PartialTy} {slotLifetime : Lifetime} :
+    PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+    PartialTyBorrowsWellFormedInSlotWhenInitialized env slotLifetime partialTy := by
+  intro hpartial mutable targets hcontains
+  exact BorrowTargetsWellFormedInSlot.whenInitialized (hpartial hcontains)
+
+theorem PartialTyBorrowsWellFormedInSlotWhenInitialized.weaken {env : Env}
+    {partialTy : PartialTy} {outer inner : Lifetime} :
+    PartialTyBorrowsWellFormedInSlotWhenInitialized env outer partialTy →
+    outer ≤ inner →
+    PartialTyBorrowsWellFormedInSlotWhenInitialized env inner partialTy := by
+  intro hpartial houtlives mutable targets hcontains
+  exact BorrowTargetsWellFormedInSlotWhenInitialized.weaken
+    (hpartial hcontains) houtlives
 
 theorem WellFormedTy.weaken {env : Env} {ty : Ty} {outer inner : Lifetime} :
     WellFormedTy env ty outer →
@@ -388,6 +522,43 @@ theorem WellFormedTy.weaken {env : Env} {ty : Ty} {outer inner : Lifetime} :
   | box _hinner ih =>
       exact WellFormedTy.box (ih houtlives)
 
+theorem WellFormedTy.whenInitialized {env : Env} {ty : Ty}
+    {lifetime : Lifetime} :
+    WellFormedTy env ty lifetime →
+    WellFormedTyWhenInitialized env ty lifetime := by
+  intro hwell
+  induction hwell with
+  | unit =>
+      exact WellFormedTyWhenInitialized.unit
+  | int =>
+      exact WellFormedTyWhenInitialized.int
+  | bool =>
+      exact WellFormedTyWhenInitialized.bool
+  | borrow htargets =>
+      exact WellFormedTyWhenInitialized.borrow
+        (BorrowTargetsWellFormed.whenInitialized htargets)
+  | box _hinner ih =>
+      exact WellFormedTyWhenInitialized.box ih
+
+theorem WellFormedTyWhenInitialized.weaken {env : Env} {ty : Ty}
+    {outer inner : Lifetime} :
+    WellFormedTyWhenInitialized env ty outer →
+    outer ≤ inner →
+    WellFormedTyWhenInitialized env ty inner := by
+  intro hwell houtlives
+  induction hwell with
+  | unit =>
+      exact WellFormedTyWhenInitialized.unit
+  | int =>
+      exact WellFormedTyWhenInitialized.int
+  | bool =>
+      exact WellFormedTyWhenInitialized.bool
+  | borrow htargets =>
+      exact WellFormedTyWhenInitialized.borrow
+        (BorrowTargetsWellFormedWhenInitialized.weaken htargets houtlives)
+  | box _hinner ih =>
+      exact WellFormedTyWhenInitialized.box (ih houtlives)
+
 theorem borrowTargetsWellFormedInSlot_of_wellFormedTy_contains {env : Env}
     {ty : Ty} {lifetime : Lifetime} {mutable : Bool} {targets : List LVal} :
     WellFormedTy env ty lifetime →
@@ -405,12 +576,46 @@ theorem borrowTargetsWellFormedInSlot_of_wellFormedTy_contains {env : Env}
           exact borrowTargetsWellFormedInSlot_of_wellFormedTy_contains
             hwellInner hinner
 
+theorem borrowTargetsWellFormedInSlotWhenInitialized_of_wellFormedTy_contains
+    {env : Env} {ty : Ty} {lifetime : Lifetime} {mutable : Bool}
+    {targets : List LVal} :
+    WellFormedTyWhenInitialized env ty lifetime →
+    PartialTyContains (.ty ty) (.borrow mutable targets) →
+    BorrowTargetsWellFormedInSlotWhenInitialized env lifetime targets := by
+  intro hwellTy hcontains
+  cases hcontains with
+  | here =>
+      cases hwellTy with
+      | borrow htargets =>
+          exact BorrowTargetsWellFormedWhenInitialized.inSlot htargets
+  | tyBox hinner =>
+      cases hwellTy with
+      | box hwellInner =>
+          exact borrowTargetsWellFormedInSlotWhenInitialized_of_wellFormedTy_contains
+            hwellInner hinner
+
 theorem PartialTyBorrowsWellFormedInSlot.of_wellFormedTy {env : Env}
     {ty : Ty} {lifetime : Lifetime} :
     WellFormedTy env ty lifetime →
     PartialTyBorrowsWellFormedInSlot env lifetime (.ty ty) := by
   intro hwellTy mutable targets hcontains
   exact borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontains
+
+theorem PartialTyBorrowsWellFormedInSlotWhenInitialized.of_wellFormedTy
+    {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedTyWhenInitialized env ty lifetime →
+    PartialTyBorrowsWellFormedInSlotWhenInitialized env lifetime (.ty ty) := by
+  intro hwellTy mutable targets hcontains
+  exact borrowTargetsWellFormedInSlotWhenInitialized_of_wellFormedTy_contains
+    hwellTy hcontains
+
+theorem TyBorrowsWellFormedWhenInitialized.of_wellFormedTy {env : Env}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedTy env ty lifetime →
+    TyBorrowsWellFormedWhenInitialized env ty lifetime := by
+  intro hwellTy mutable targets hcontains
+  exact BorrowTargetsWellFormedInSlot.whenInitialized
+    (borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontains)
 
 theorem PartialTyBorrowsWellFormedInSlot.box {env : Env}
     {partialTy : PartialTy} {lifetime : Lifetime} :
@@ -441,6 +646,7 @@ theorem LValTyping.base_slot_exists {env : Env} :
       intro p lf h
       cases h with
       | box hb => simpa [LVal.base] using ih hb
+      | boxFull hb => simpa [LVal.base] using ih hb
       | borrow hb => simpa [LVal.base] using ih hb
 
 /-- A variable in a (partial) type's `vars` comes from a contained borrow whose
@@ -494,6 +700,33 @@ theorem wellFormedTy_vars_in_env {env : Env} {ty : Ty} {lifetime : Lifetime} :
   rw [← hbase]
   exact LValTyping.base_slot_exists hty
 
+theorem wellFormedTyWhenInitialized_vars_in_env {env : Env} {ty : Ty}
+    {lifetime : Lifetime} :
+    WellFormedTyWhenInitialized env ty lifetime →
+    ∀ v, v ∈ Ty.vars ty → ∃ slot, env.slotAt v = some slot := by
+  intro hwf
+  induction hwf with
+  | unit =>
+      intro v hv
+      simp [Ty.vars] at hv
+  | int =>
+      intro v hv
+      simp [Ty.vars] at hv
+  | bool =>
+      intro v hv
+      simp [Ty.vars] at hv
+  | borrow htargets =>
+      intro v hv
+      simp only [Ty.vars, List.mem_map] at hv
+      rcases hv with ⟨tgt, htgt, hbase⟩
+      rcases htargets tgt htgt with ⟨hbaseOutlives, _hinitialized⟩
+      rw [← hbase]
+      rcases hbaseOutlives with ⟨slot, hslot, _houtlives⟩
+      exact ⟨slot, hslot⟩
+  | box _hinner ih =>
+      intro v hv
+      exact ih v (by simpa [Ty.vars] using hv)
+
 /-- Variables in a slot's type of a contained-borrow-well-formed env are bound. -/
 theorem containedBorrows_slot_vars_in_env {env : Env} {y : Name} {slot : EnvSlot} :
     ContainedBorrowsWellFormed env →
@@ -506,6 +739,25 @@ theorem containedBorrows_slot_vars_in_env {env : Env} {y : Name} {slot : EnvSlot
   obtain ⟨T, lt, hty, _, _⟩ := hwf tgt htgt
   rw [← hbase]
   exact LValTyping.base_slot_exists hty
+
+/--
+Weak contained-borrow well-formedness still binds every variable mentioned in a
+slot type.  The full target path may be stale, but the target's base slot is
+kept live by `BorrowTargetsWellFormedWhenInitialized`.
+-/
+theorem containedBorrowsWhenInitialized_slot_vars_in_env {env : Env}
+    {y : Name} {slot : EnvSlot} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    env.slotAt y = some slot →
+    ∀ v, v ∈ PartialTy.vars slot.ty → ∃ s, env.slotAt v = some s := by
+  intro hcontained hslot v hv
+  obtain ⟨m, tgts, hcontains, tgt, htgt, hbase⟩ :=
+    partialTy_vars_mem_contains v hv
+  have hwf := hcontained y slot m tgts hslot ⟨slot, hslot, hcontains⟩
+  rcases hwf tgt htgt with ⟨hbaseOutlives, _hinitialized⟩
+  rw [← hbase]
+  rcases hbaseOutlives with ⟨targetBaseSlot, htargetBaseSlot, _houtlives⟩
+  exact ⟨targetBaseSlot, htargetBaseSlot⟩
 
 /-- Membership bound for the fresh-variable rank: every listed variable's
 `φ + 1` is below the fold-max. -/
@@ -545,13 +797,15 @@ theorem Coherent.update_fresh_ty {env : Env} {x : Name}
     := by
   intro hcoh hfresh hobligations lv mutable targets borrowLifetime htyping
   by_cases hbase : LVal.base lv = x
-  · exact hobligations.fresh_root_coherent hbase htyping
+  · rcases hobligations.fresh_root_coherent hbase htyping with
+      ⟨targetTy, targetLifetime, htargets⟩
+    exact ⟨.ty targetTy, targetLifetime, htargets.toMaybe⟩
   · rcases hobligations.old_root_transport hbase htyping with
       ⟨oldBorrowLifetime, htypingOld⟩
     rcases hcoh lv mutable targets oldBorrowLifetime htypingOld with
       ⟨targetTy, targetLifetime, htargetsOld⟩
     exact ⟨targetTy, targetLifetime,
-      LValTargetsTyping.update_fresh
+      LValTargetsMaybeTyping.update_fresh
         (slot := { ty := .ty ty, lifetime := lifetime }) hfresh htargetsOld⟩
 
 theorem Coherent.update_fresh_ty_of_obligations {env : Env} {x : Name}
@@ -900,6 +1154,9 @@ theorem UpdateWrite.lifetimesPreserved :
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
         exact ih)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+        exact ih)
+      (by
         intro env₁ env₂ rank path targets ty _hwrites ih
         exact ih)
       (by
@@ -932,6 +1189,9 @@ theorem UpdateWrite.lifetimesPreserved :
         (by
           intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesPreserved.refl env)
+        (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
@@ -971,6 +1231,9 @@ theorem UpdateWrite.lifetimesPreserved :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
+        (by
           intro env₁ env₂ rank path targets ty _hwrites ih
           exact ih)
         (by
@@ -999,10 +1262,14 @@ theorem UpdateAtPath.cons_inv {rank : Nat} {env₁ env₂ : Env}
     {path : List Unit} {oldTy : PartialTy} {ty : Ty}
     {updatedTy : PartialTy} :
     UpdateAtPath rank env₁ (() :: path) oldTy ty env₂ updatedTy →
-    (∃ inner updatedInner,
-      oldTy = .box inner ∧
-      updatedTy = .box updatedInner ∧
-      UpdateAtPath rank env₁ path inner ty env₂ updatedInner) ∨
+    ((∃ inner updatedInner,
+        oldTy = .box inner ∧
+        updatedTy = .box updatedInner ∧
+        UpdateAtPath rank env₁ path inner ty env₂ updatedInner) ∨
+      (∃ inner updatedInner,
+        oldTy = .ty (.box inner) ∧
+        updatedTy = partialTyRebox updatedInner ∧
+        UpdateAtPath rank env₁ path (.ty inner) ty env₂ updatedInner)) ∨
     (∃ targets,
       oldTy = .ty (.borrow true targets) ∧
       updatedTy = .ty (.borrow true targets) ∧
@@ -1010,7 +1277,9 @@ theorem UpdateAtPath.cons_inv {rank : Nat} {env₁ env₂ : Env}
   intro hupdate
   cases hupdate with
   | box hinner =>
-      exact Or.inl ⟨_, _, rfl, rfl, hinner⟩
+      exact Or.inl (Or.inl ⟨_, _, rfl, rfl, hinner⟩)
+  | boxFull hinner =>
+      exact Or.inl (Or.inr ⟨_, _, rfl, rfl, hinner⟩)
   | mutBorrow hwrites =>
       exact Or.inr ⟨_, rfl, rfl, hwrites⟩
 
@@ -1125,6 +1394,9 @@ theorem UpdateWrite.lifetimesSurvive :
         intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
         exact ih)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+        exact ih)
+      (by
         intro env₁ env₂ rank path targets ty _hwrites ih
         exact ih)
       (by
@@ -1161,6 +1433,9 @@ theorem UpdateWrite.lifetimesSurvive :
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
         (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
+        (by
           intro env₁ env₂ rank path targets ty _hwrites ih
           exact ih)
         (by
@@ -1192,6 +1467,9 @@ theorem UpdateWrite.lifetimesSurvive :
         (by
           intro env rank old joined ty _hshape _hjoinTy
           exact EnvLifetimesSurvive.refl env)
+        (by
+          intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
+          exact ih)
         (by
           intro env₁ env₂ rank path inner updatedInner ty _hupdate ih
           exact ih)
@@ -1334,6 +1612,9 @@ theorem LValTyping.lifetime_outlives_of_slots {env : Env} {current : Lifetime} :
         intro _lv _inner _lifetime _htyping ih
         exact ih)
       (by
+        intro _lv _inner _lifetime _htyping ih
+        exact ih)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets
         exact ihTargets)
@@ -1352,6 +1633,9 @@ theorem LValTyping.lifetime_outlives_of_slots {env : Env} {current : Lifetime} :
       (by
         intro x slot hslot
         exact houtlives x slot hslot)
+      (by
+        intro _lv _inner _lifetime _htyping ih
+        exact ih)
       (by
         intro _lv _inner _lifetime _htyping ih
         exact ih)
@@ -1411,6 +1695,9 @@ theorem LValTyping.base_outlives_one_of_slots {env : Env} {current : Lifetime}
       intro _lv _inner _lifetime _htyping ih
       exact ih)
     (by
+      intro _lv _inner _lifetime _htyping ih
+      exact ih)
+    (by
       intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
         _hborrow _htargets ihBorrow _ihTargets
       exact ihBorrow)
@@ -1447,8 +1734,10 @@ theorem LValTargetsTyping.borrowTargetsWellFormed_of_slots {env : Env}
           LValTyping env target (.ty targetTy) targetLifetime ∧
           targetLifetime ≤ current ∧
           LValBaseOutlives env target current)
-    ?var ?box ?borrow ?singleton ?cons htyping
+    ?var ?box ?boxFull ?borrow ?singleton ?cons htyping
   · intro _x _slot _hslot
+    trivial
+  · intro _lv _inner _lifetime _htyping _ih
     trivial
   · intro _lv _inner _lifetime _htyping _ih
     trivial
@@ -1483,19 +1772,24 @@ theorem copyTy_result_wellFormed_of_coherent_slots {env : Env} {lv : LVal}
     {ty : Ty} {valueLifetime lifetime : Lifetime} :
     Coherent env →
     EnvSlotsOutlive env lifetime →
+    BorrowTargetsInitialized env (match ty with | .borrow _ targets => targets | _ => []) →
     LValTyping env lv (.ty ty) valueLifetime →
     CopyTy ty →
     WellFormedTy env ty lifetime := by
-  intro hcoherent houtlives hLv hcopy
+  intro _hcoherent houtlives hinitialized _hLv hcopy
   cases hcopy with
   | unit | int | bool =>
       constructor
   | immBorrow =>
       rename_i targets
-      rcases hcoherent lv false targets valueLifetime hLv with
-        ⟨_targetTy, _targetLifetime, htargets⟩
       exact WellFormedTy.borrow
-        (LValTargetsTyping.borrowTargetsWellFormed_of_slots houtlives htargets)
+        (BorrowTargetsWellFormed.intro (by
+          intro target hmem
+          rcases hinitialized target hmem with
+            ⟨targetTy, targetLifetime, htargetTyping⟩
+          exact ⟨targetTy, targetLifetime, htargetTyping,
+            LValTyping.lifetime_outlives_one_of_slots houtlives htargetTyping,
+            LValTyping.base_outlives_one_of_slots houtlives htargetTyping⟩))
 
 theorem LValTyping.var_inv {env : Env} {x : Name}
     {ty : PartialTy} {lifetime : Lifetime} :

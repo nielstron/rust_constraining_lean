@@ -7,7 +7,8 @@ import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 > (the final store is safely abstracted by the result environment).
 
 Status: mechanized through Preservation (Lemma 4.11).  This is the
-`finalStore ∼ₛ env₂` conjunct of `TerminalStateSafe`.  Mechanized support:
+`SafeAbstractionWhenInitialized finalStore env₂` conjunct of
+`TerminalStateSafeWhenInitialized`.  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
   `preservation_declare_redex_runtime_of_validValue` (uses Lemma 9.7);
@@ -40,14 +41,13 @@ theorem lemma_9_10_storePreservation
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
       WellFormedEnv env₁ lifetime →
-      BorrowSafeEnv env₁ →
       store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    finalStore ∼ₛ env₂ := by
-    intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
+    SafeAbstractionWhenInitialized finalStore env₂ := by
+    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hborrowSafe hsafe htyping hmulti).2.1
+      hwellFormed hsafe htyping hmulti).2.1
 
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete
@@ -63,7 +63,6 @@ theorem lemma_9_10_assign_var_envShape_frame
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
@@ -106,7 +105,11 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
       ∀ ℓ, RuntimeFrame.Reaches store oldValue envSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
     ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
-      ValidValue store' value ty :=
-  preservation_move_var_step_runtime_of_frames
+      ValidValue store' value ty := by
+  intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
+    hvalueFrame hotherFrames
+  exact preservation_move_var_step_runtime_of_frames
+    (WellFormedEnv.whenInitialized hwellFormed) hsafe hvalidRuntime henvSlot
+    hmove htyping hstep hvalueFrame hotherFrames
 
 end LwRust.Paper.Soundness

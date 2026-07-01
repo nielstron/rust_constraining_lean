@@ -7,9 +7,10 @@ import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 > value is abstracted by the result type: `S₂ ▷ v ∼ T`.
 
 Status: **proven** for the strengthened Section 4 typing system over source
-continuations.  This is the `ValidValue finalStore finalValue ty` conjunct of
-`TerminalStateSafe`, established by Preservation (Lemma 4.11).  The file also
-exposes representative redex-level frame lemmas for move/value cases.
+continuations.  This is the value-validity conjunct of
+`TerminalStateSafeWhenInitialized`, established by Preservation (Lemma 4.11).
+The file also exposes representative redex-level frame lemmas for move/value
+cases.
 -/
 
 namespace LwRust.Paper.Soundness
@@ -27,14 +28,14 @@ theorem lemma_9_9_valuePreservation
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
       WellFormedEnv env₁ lifetime →
-      BorrowSafeEnv env₁ →
       store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    ValidValue finalStore finalValue ty := by
-    intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hsafe htyping hmulti
+    ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
+      (.ty ty) := by
+    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hborrowSafe hsafe htyping hmulti).2.2
+      hwellFormed hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

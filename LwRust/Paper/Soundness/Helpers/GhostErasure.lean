@@ -85,6 +85,70 @@ theorem erase_update_same_of_fresh {env : Env} {x : Name} {slot : EnvSlot} :
         simpa using hfresh.symm
       · simp [hy]
 
+def restore (erased source : Env) (ghost : Name) : Env :=
+  { slotAt := fun y => if y = ghost then source.slotAt ghost else erased.slotAt y }
+
+@[simp] theorem restore_slotAt_same (erased source : Env) (ghost : Name) :
+    (restore erased source ghost).slotAt ghost = source.slotAt ghost := by
+  simp [restore]
+
+@[simp] theorem restore_slotAt_ne {erased source : Env} {ghost y : Name} :
+    y ≠ ghost →
+    (restore erased source ghost).slotAt y = erased.slotAt y := by
+  intro hne
+  simp [restore, hne]
+
+theorem restore_erase_of_fresh {erased source : Env} {ghost : Name} :
+    erased.fresh ghost →
+    (restore erased source ghost).erase ghost = erased := by
+  intro hfresh
+  cases erased with
+  | mk erasedSlotAt =>
+      cases source with
+      | mk sourceSlotAt =>
+          unfold Env.fresh at hfresh
+          simp [restore, Env.erase] at hfresh ⊢
+          funext y
+          by_cases hy : y = ghost
+          · subst hy
+            simpa using hfresh.symm
+          · simp [hy]
+
+theorem restore_erase (erased source : Env) (ghost : Name) :
+    (restore erased source ghost).erase ghost = erased.erase ghost := by
+  cases erased with
+  | mk erasedSlotAt =>
+      cases source with
+      | mk sourceSlotAt =>
+          simp [restore, Env.erase]
+          funext y
+          by_cases hy : y = ghost <;> simp [hy]
+
+theorem restore_of_erase (source : Env) (ghost : Name) :
+    restore (source.erase ghost) source ghost = source := by
+  cases source with
+  | mk sourceSlotAt =>
+      simp [restore, Env.erase]
+      funext y
+      by_cases hy : y = ghost <;> simp [hy]
+
+theorem restore_update_ne (env source : Env) {ghost y : Name}
+    (slot : EnvSlot) :
+    y ≠ ghost →
+    restore (env.update y slot) source ghost =
+      (restore env source ghost).update y slot := by
+  intro hne
+  cases env with
+  | mk envSlotAt =>
+      cases source with
+      | mk sourceSlotAt =>
+          simp [restore, Env.update]
+          funext z
+          by_cases hzY : z = y
+          · subst hzY
+            simp [hne]
+          · simp [hzY]
+
 theorem dropLifetime_erase (env : Env) (x : Name) (lifetime : Lifetime) :
     (env.dropLifetime lifetime).erase x =
       (env.erase x).dropLifetime lifetime := by
@@ -467,6 +531,9 @@ theorem LValTyping.typeNameFresh {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih hfresh
         simpa [PartialTy.allVars] using ih hfresh)
       (by
+        intro _lv _inner _lifetime _hinner ih hfresh
+        simpa [PartialTy.allVars, Ty.allVars] using ih hfresh)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets hfresh
         exact ihTargets hfresh)
@@ -495,6 +562,9 @@ theorem LValTyping.typeNameFresh {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih hfresh
         simpa [PartialTy.allVars] using ih hfresh)
+      (by
+        intro _lv _inner _lifetime _hinner ih hfresh
+        simpa [PartialTy.allVars, Ty.allVars] using ih hfresh)
       (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets _ihBorrow ihTargets hfresh
@@ -543,6 +613,10 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih hfresh hnotMention
         exact LValTyping.box
+          (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
+      (by
+        intro _lv _inner _lifetime _hinner ih hfresh hnotMention
+        exact LValTyping.boxFull
           (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
       (by
         intro _lv mutable targets _borrowLifetime _targetLifetime _targetTy
@@ -594,6 +668,10 @@ theorem LValTyping.erase_ghost {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih hfresh hnotMention
         exact LValTyping.box
+          (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
+      (by
+        intro _lv _inner _lifetime _hinner ih hfresh hnotMention
+        exact LValTyping.boxFull
           (ih hfresh (by simpa [LVal.Mentions] using hnotMention)))
       (by
         intro _lv mutable targets _borrowLifetime _targetLifetime _targetTy
@@ -652,6 +730,9 @@ theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
         intro _lv _inner _lifetime _hinner ih
         exact LValTyping.box ih)
       (by
+        intro _lv _inner _lifetime _hinner ih
+        exact LValTyping.boxFull ih)
+      (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets
         exact LValTyping.borrow ihBorrow ihTargets)
@@ -678,6 +759,9 @@ theorem LValTyping.erase_to_env {env : Env} {ghost : Name} :
       (by
         intro _lv _inner _lifetime _hinner ih
         exact LValTyping.box ih)
+      (by
+        intro _lv _inner _lifetime _hinner ih
+        exact LValTyping.boxFull ih)
       (by
         intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
           _hborrow _htargets ihBorrow ihTargets
@@ -731,6 +815,10 @@ theorem LValTargetsTyping.not_mentions_of_fresh {env : Env} {ghost : Name}
       intro hmention
       exact ih (by simpa [LVal.Mentions] using hmention))
     (by
+      intro _lv _inner _lifetime _hinner ih
+      intro hmention
+      exact ih (by simpa [LVal.Mentions] using hmention))
+    (by
       intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
         _hborrow _htargets ihBorrow _ihTargets
       intro hmention
@@ -750,6 +838,71 @@ theorem LValTargetsTyping.not_mentions_of_fresh {env : Env} {ghost : Name}
         exact ihHead
       · exact ihRest candidate hmem)
     htargets
+
+theorem ShapeCompatible.erase_to_env {env : Env} {ghost : Name}
+    {left right : PartialTy} :
+    ShapeCompatible (env.erase ghost) left right →
+    ShapeCompatible env left right := by
+  intro hshape
+  induction hshape with
+  | unit => exact ShapeCompatible.unit
+  | int => exact ShapeCompatible.int
+  | bool => exact ShapeCompatible.bool
+  | tyBox _inner =>
+      exact ShapeCompatible.tyBox ‹ShapeCompatible env _ _›
+  | box _inner =>
+      exact ShapeCompatible.box ‹ShapeCompatible env _ _›
+  | borrow hleft hright _hinner ih =>
+      exact ShapeCompatible.borrow
+        (by
+          intro leftTarget hmem
+          rcases hleft leftTarget hmem with ⟨leftLifetime, htyping⟩
+          exact ⟨leftLifetime, LValTyping.erase_to_env.1 htyping⟩)
+        (by
+          intro rightTarget hmem
+          rcases hright rightTarget hmem with ⟨rightLifetime, htyping⟩
+          exact ⟨rightLifetime, LValTyping.erase_to_env.1 htyping⟩)
+        ih
+  | undefLeft _inner ih =>
+      exact ShapeCompatible.undefLeft ih
+  | undefRight _inner ih =>
+      exact ShapeCompatible.undefRight ih
+
+theorem LValTyping.restore_ghost {erased source : Env} {ghost : Name} :
+    (∀ {lv partialTy lifetime},
+      LValTyping erased lv partialTy lifetime →
+      erased.fresh ghost →
+      LValTyping (Env.restore erased source ghost) lv partialTy lifetime) ∧
+    (∀ {targets partialTy lifetime},
+      LValTargetsTyping erased targets partialTy lifetime →
+      erased.fresh ghost →
+      LValTargetsTyping (Env.restore erased source ghost) targets partialTy
+        lifetime) := by
+  constructor
+  · intro lv partialTy lifetime htyping hfresh
+    have htypingErased :
+        LValTyping ((Env.restore erased source ghost).erase ghost) lv
+          partialTy lifetime := by
+      simpa [Env.restore_erase_of_fresh hfresh] using htyping
+    exact LValTyping.erase_to_env.1 htypingErased
+  · intro targets partialTy lifetime htyping hfresh
+    have htypingErased :
+        LValTargetsTyping ((Env.restore erased source ghost).erase ghost)
+          targets partialTy lifetime := by
+      simpa [Env.restore_erase_of_fresh hfresh] using htyping
+    exact LValTyping.erase_to_env.2 htypingErased
+
+theorem ShapeCompatible.restore_ghost {erased source : Env} {ghost : Name}
+    {left right : PartialTy} :
+    ShapeCompatible erased left right →
+    erased.fresh ghost →
+    ShapeCompatible (Env.restore erased source ghost) left right := by
+  intro hshape hfresh
+  have hshapeErased :
+      ShapeCompatible ((Env.restore erased source ghost).erase ghost)
+        left right := by
+    simpa [Env.restore_erase_of_fresh hfresh] using hshape
+  exact ShapeCompatible.erase_to_env hshapeErased
 
 theorem EnvContains.erase_to_env {env : Env} {ghost x : Name} {ty : Ty} :
     (env.erase ghost) ⊢ x ↝ ty →
@@ -804,6 +957,11 @@ theorem Mutable.erase_ghost {env : Env} {ghost : Name} {lv : LVal} :
         (LValTyping.erase_ghost.1 hLv hfresh
           (by simpa [LVal.Mentions] using hnotMention))
         (ih (by simpa [LVal.Mentions] using hnotMention))
+  | boxFull hLv _hmutable ih =>
+      exact Mutable.boxFull
+        (LValTyping.erase_ghost.1 hLv hfresh
+          (by simpa [LVal.Mentions] using hnotMention))
+        (ih (by simpa [LVal.Mentions] using hnotMention))
   | borrow hLv htargets ih =>
       rename_i source targets lifetime
       have hLvErased :=
@@ -852,7 +1010,10 @@ theorem Strike.allVars_fresh {path : Path} {source struck : PartialTy}
   | cons _ path ih =>
       cases source with
       | ty sourceTy =>
-          cases struck <;> simp [Strike] at hstrike
+          cases sourceTy <;> cases struck <;> simp [Strike] at hstrike
+          · simp [PartialTy.allVars, Ty.allVars] at hstrike ⊢
+            intro hfresh
+            exact ih hstrike hfresh
       | undef sourceTy =>
           cases struck <;> simp [Strike] at hstrike
       | box inner =>
@@ -1226,6 +1387,27 @@ theorem BorrowTargetsWellFormedInSlot.erase_ghost {env : Env} {ghost : Name}
     houtlives,
     LValBaseOutlives.erase_ghost (hnot target hmem) hbase⟩
 
+theorem LValTargetsMaybeTyping.erase_ghost {env : Env} {ghost : Name}
+    {targets : List LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
+    LValTargetsMaybeTyping env targets partialTy lifetime →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+    LValTargetsMaybeTyping (env.erase ghost) targets partialTy lifetime := by
+  intro htyping hfresh hnot
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        (LValTyping.erase_ghost.1 htarget hfresh
+          (hnot _ (by simp)))
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        (LValTyping.erase_ghost.1 hhead hfresh
+          (hnot _ (by simp)))
+        (ihRest (by
+          intro target hmem
+          exact hnot target (by simp [hmem])))
+        hunion hintersection
+
 theorem ContainedBorrowsWellFormed.erase_ghost {env : Env} {ghost : Name} :
     ContainedBorrowsWellFormed env →
     Env.TypeNameFresh (env.erase ghost) ghost →
@@ -1286,7 +1468,8 @@ theorem Coherent.erase_ghost {env : Env} {ghost : Name} :
   have htargetsNot :
       ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
     not_mentions_of_mem_borrow_allVars hborrowFresh
-  exact ⟨targetTy, targetLifetime, LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTargetsMaybeTyping.erase_ghost htargets hfresh htargetsNot⟩
 
 theorem LinearizedBy.erase_ghost {φ : Name → Nat} {env : Env}
     {ghost : Name} :
@@ -1388,6 +1571,82 @@ theorem EnvJoin.erase_ghost {left right join : Env} {ghost : Name} :
       rw [hx]
       simp [Env.erase, hghostNone]
     · simpa [Env.erase, hx, ubPlus] using hleastJoin x
+
+theorem EnvJoin.restore_ghost {left right join source : Env} {ghost : Name} :
+    EnvJoin left right join →
+    left.fresh ghost →
+    right.fresh ghost →
+    join.fresh ghost →
+    EnvJoin (Env.restore left source ghost) (Env.restore right source ghost)
+      (Env.restore join source ghost) := by
+  intro hjoin hleftFresh hrightFresh hjoinFresh
+  apply EnvJoin.of_isLUB
+  refine ⟨?upper, ?least⟩
+  · intro candidate hcandidate
+    simp at hcandidate
+    rcases hcandidate with rfl | rfl
+    · intro x
+      by_cases hx : x = ghost
+      · subst hx
+        cases hsource : source.slotAt x <;> simp [Env.restore, hsource]
+      · simpa [Env.restore, hx] using EnvJoin.left_le hjoin x
+    · intro x
+      by_cases hx : x = ghost
+      · subst hx
+        cases hsource : source.slotAt x <;> simp [Env.restore, hsource]
+      · simpa [Env.restore, hx] using EnvJoin.right_le hjoin x
+  · intro upper hupper
+    have herasedUpper :
+        upper.erase ghost ∈ upperBounds ({left, right} : Set Env) := by
+      intro candidate hcandidate
+      simp at hcandidate
+      rcases hcandidate with rfl | rfl
+      · have hrestored :
+            EnvStrengthens (Env.restore candidate source ghost) upper := by
+          apply hupper
+          simp
+        intro x
+        by_cases hx : x = ghost
+        · subst hx
+          unfold Env.fresh at hleftFresh
+          simp [Env.erase, hleftFresh]
+        · simpa [Env.restore, Env.erase, hx] using hrestored x
+      · have hrestored :
+            EnvStrengthens (Env.restore candidate source ghost) upper := by
+          apply hupper
+          simp
+        intro x
+        by_cases hx : x = ghost
+        · subst hx
+          unfold Env.fresh at hrightFresh
+          simp [Env.erase, hrightFresh]
+        · simpa [Env.restore, Env.erase, hx] using hrestored x
+    have hleastErased : EnvStrengthens join (upper.erase ghost) :=
+      hjoin.2 herasedUpper
+    intro x
+    by_cases hx : x = ghost
+    · subst hx
+      have hrestored :
+          EnvStrengthens (Env.restore left source x) upper := by
+        apply hupper
+        simp
+      simpa [Env.restore] using hrestored x
+    · simpa [Env.restore, Env.erase, hx] using hleastErased x
+
+theorem EnvJoin.fresh_of_fresh {left right join : Env} {ghost : Name} :
+    EnvJoin left right join →
+    left.fresh ghost →
+    right.fresh ghost →
+    join.fresh ghost := by
+  intro hjoin hleftFresh _hrightFresh
+  unfold Env.fresh at hleftFresh ⊢
+  have hle := EnvJoin.left_le hjoin ghost
+  rw [hleftFresh] at hle
+  cases hjoinSlot : join.slotAt ghost with
+  | none => rfl
+  | some slot =>
+      rw [hjoinSlot] at hle
+      exact False.elim hle
 
 theorem EnvJoin.typeNameFresh_erase {left right join : Env} {ghost : Name} :
     EnvJoin left right join →
@@ -1498,22 +1757,13 @@ theorem EnvWriteRhsBorrowTargetsBelow.erase_ghost {φ : Name → Nat}
     {result : Env} {rhsTy : Ty} {ghost : Name} :
     EnvWriteRhsBorrowTargetsBelow φ result rhsTy →
     EnvWriteRhsBorrowTargetsBelow φ (result.erase ghost) rhsTy := by
-  rintro ⟨hrank, hconflicts⟩
-  constructor
-  · intro x slot mutable targets target hslot hcontains htarget hrhs
-    have hslotOrig : result.slotAt x = some slot := by
-      by_cases hx : x = ghost
-      · subst hx
-        simp [Env.erase] at hslot
-      · simpa [Env.erase, hx] using hslot
-    exact hrank x slot mutable targets target hslotOrig hcontains htarget hrhs
-  · intro x y mutable targetsMutable targetsOther
-      targetMutable targetOther hx hy htargetMutable htargetOther hconflict
-      hrhsMutable hrhsOther
-    exact hconflicts x y mutable targetsMutable targetsOther
-      targetMutable targetOther (EnvContains.erase_to_env hx)
-      (EnvContains.erase_to_env hy) htargetMutable htargetOther hconflict
-      hrhsMutable hrhsOther
+  intro hrank x slot mutable targets target hslot hcontains htarget hrhs
+  have hslotOrig : result.slotAt x = some slot := by
+    by_cases hx : x = ghost
+    · subst hx
+      simp [Env.erase] at hslot
+    · simpa [Env.erase, hx] using hslot
+  exact hrank x slot mutable targets target hslotOrig hcontains htarget hrhs
 
 private theorem prependPath_not_mentions {path : List Unit} {target : LVal}
     {ghost : Name} :
@@ -1525,6 +1775,14 @@ private theorem prependPath_not_mentions {path : List Unit} {target : LVal}
       (LVal.mentions_iff_base (ghost := ghost) _).1 hmention
     simpa [base_prependPath] using hprepBase
   exact hnot ((LVal.mentions_iff_base (ghost := ghost) target).2 hbase)
+
+private theorem partialTyRebox_allVars_fresh {partialTy : PartialTy}
+    {ghost : Name} :
+    ghost ∉ PartialTy.allVars partialTy →
+    ghost ∉ PartialTy.allVars (partialTyRebox partialTy) := by
+  intro hfresh
+  cases partialTy <;> simpa [partialTyRebox, PartialTy.allVars, Ty.allVars]
+    using hfresh
 
 mutual
   theorem UpdateAtPath.erase_ghost {rank : Nat} {env₁ env₂ : Env}
@@ -1569,6 +1827,12 @@ mutual
           hfresh holdFresh htyFresh
         exact UpdateAtPath.box
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+            htyFresh))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        exact UpdateAtPath.boxFull
+          (ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
             htyFresh))
       (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
@@ -1667,6 +1931,12 @@ mutual
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
             htyFresh))
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        exact UpdateAtPath.boxFull
+          (ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh))
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -1760,6 +2030,12 @@ mutual
           hfresh holdFresh htyFresh
         exact UpdateAtPath.box
           (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+            htyFresh))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        exact UpdateAtPath.boxFull
+          (ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
             htyFresh))
       (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
@@ -1859,6 +2135,12 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        rcases ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+          htyFresh with ⟨hfreshOut, hupdatedFresh⟩
+        exact ⟨hfreshOut, partialTyRebox_allVars_fresh hupdatedFresh⟩)
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -1948,6 +2230,12 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        rcases ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+          htyFresh with ⟨hfreshOut, hupdatedFresh⟩
+        exact ⟨hfreshOut, partialTyRebox_allVars_fresh hupdatedFresh⟩)
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -2036,6 +2324,12 @@ mutual
           htyFresh with ⟨hfreshOut, hupdatedFresh⟩
         exact ⟨hfreshOut, by simpa [PartialTy.allVars] using hupdatedFresh⟩)
       (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          hfresh holdFresh htyFresh
+        rcases ih hfresh (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+          htyFresh with ⟨hfreshOut, hupdatedFresh⟩
+        exact ⟨hfreshOut, partialTyRebox_allVars_fresh hupdatedFresh⟩)
+      (by
         intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh htyFresh
         have htargetsNot :
             ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
@@ -2084,6 +2378,1386 @@ mutual
         exact Env.typeNameFresh_update hfreshEnv₂ hupdatedFresh)
       hwrite hfresh hnot htyFresh
   end
+
+mutual
+  theorem UpdateAtPath.restore_ghost {rank : Nat} {env result source : Env}
+      {path : List Unit} {oldTy updatedTy : PartialTy} {ty : Ty}
+      {ghost : Name} :
+      UpdateAtPath rank env path oldTy ty result updatedTy →
+      Env.TypeNameFresh env ghost →
+      env.fresh ghost →
+      ghost ∉ PartialTy.allVars oldTy →
+      ghost ∉ Ty.allVars ty →
+      result.fresh ghost ∧
+        UpdateAtPath rank (Env.restore env source ghost) path oldTy ty
+          (Env.restore result source ghost) updatedTy := by
+    intro hupdate htypeFresh hfresh holdFresh htyFresh
+    exact UpdateAtPath.rec
+      (motive_1 := fun rank env path oldTy ty result updatedTy _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          UpdateAtPath rank (Env.restore env source ghost) path oldTy ty
+            (Env.restore result source ghost) updatedTy)
+      (motive_2 := fun rank env path targets ty result _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          WriteBorrowTargets rank (Env.restore env source ghost) path targets ty
+            (Env.restore result source ghost))
+      (motive_3 := fun rank env lv ty result _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          EnvWrite rank (Env.restore env source ghost) lv ty
+            (Env.restore result source ghost))
+      (by
+        intro env old ty _htypeFresh hfresh _holdFresh _htyFresh
+        exact ⟨hfresh, UpdateAtPath.strong⟩)
+      (by
+        intro env rank old joined ty hshape hjoin _htypeFresh hfresh
+          _holdFresh _htyFresh
+        exact ⟨hfresh,
+          UpdateAtPath.weak (ShapeCompatible.restore_ghost hshape hfresh)
+            hjoin⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path targets ty _htargets ih htypeFresh
+          hfresh holdFresh htyFresh
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        rcases ih htypeFresh hfresh htargetsNot htyFresh with
+          ⟨hfreshOut, htargetsRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.mutBorrow htargetsRestored⟩)
+      (by
+        intro rank env path ty _htypeFresh hfresh _hnot _htyFresh
+        exact ⟨hfresh, WriteBorrowTargets.nil⟩)
+      (by
+        intro rank env updated path target ty hwrite hleaf ihWrite
+          htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        rcases ihWrite htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases hleaf with ⟨leafTy, leafLifetime, hleafTyping⟩
+        exact ⟨hfreshUpdated,
+          WriteBorrowTargets.singleton hwriteRestored
+            ⟨leafTy, leafLifetime,
+              LValTyping.restore_ghost.1 hleafTyping hfresh⟩⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty hwrite hleaf
+          _hrest hjoin ihWrite ihRest htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases ihWrite htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases ihRest htypeFresh hfresh hrestNot htyFresh with
+          ⟨hfreshRest, hrestRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        rcases hleaf with ⟨leafTy, leafLifetime, hleafTyping⟩
+        exact ⟨hfreshResult,
+          WriteBorrowTargets.cons hwriteRestored
+            ⟨leafTy, leafLifetime,
+              LValTyping.restore_ghost.1 hleafTyping hfresh⟩
+            hrestRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ihUpdate
+          htypeFresh hfresh hnot htyFresh
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+          htypeFresh (LVal.base lv) slot hslot
+        rcases ihUpdate htypeFresh hfresh hslotFresh htyFresh with
+          ⟨hfreshEnv₂, hupdateRestored⟩
+        have hslotRestored :
+            (Env.restore env₁ source ghost).slotAt (LVal.base lv) =
+              some slot := by
+          simpa [Env.restore, hbaseNe] using hslot
+        have hfreshResult :
+            (env₂.update (LVal.base lv) { slot with ty := updatedTy }).fresh
+              ghost := by
+          unfold Env.fresh at hfreshEnv₂ ⊢
+          simpa [Env.update, hbaseNe.symm] using hfreshEnv₂
+        rw [Env.restore_update_ne env₂ source
+          (ghost := ghost) (y := LVal.base lv) { slot with ty := updatedTy }
+          hbaseNe]
+        exact ⟨hfreshResult,
+          EnvWrite.intro hslotRestored hupdateRestored⟩)
+      hupdate htypeFresh hfresh holdFresh htyFresh
+
+  theorem WriteBorrowTargets.restore_ghost {rank : Nat}
+      {env result source : Env} {path : List Unit} {targets : List LVal}
+      {ty : Ty} {ghost : Name} :
+      WriteBorrowTargets rank env path targets ty result →
+      Env.TypeNameFresh env ghost →
+      env.fresh ghost →
+      (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+      ghost ∉ Ty.allVars ty →
+      result.fresh ghost ∧
+        WriteBorrowTargets rank (Env.restore env source ghost) path targets ty
+          (Env.restore result source ghost) := by
+    intro htargets htypeFresh hfresh hnot htyFresh
+    exact WriteBorrowTargets.rec
+      (motive_1 := fun rank env path oldTy ty result updatedTy _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          UpdateAtPath rank (Env.restore env source ghost) path oldTy ty
+            (Env.restore result source ghost) updatedTy)
+      (motive_2 := fun rank env path targets ty result _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          WriteBorrowTargets rank (Env.restore env source ghost) path targets ty
+            (Env.restore result source ghost))
+      (motive_3 := fun rank env lv ty result _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          EnvWrite rank (Env.restore env source ghost) lv ty
+            (Env.restore result source ghost))
+      (by
+        intro env old ty _htypeFresh hfresh _holdFresh _htyFresh
+        exact ⟨hfresh, UpdateAtPath.strong⟩)
+      (by
+        intro env rank old joined ty hshape hjoin _htypeFresh hfresh
+          _holdFresh _htyFresh
+        exact ⟨hfresh,
+          UpdateAtPath.weak (ShapeCompatible.restore_ghost hshape hfresh)
+            hjoin⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path targets ty _htargets ih htypeFresh
+          hfresh holdFresh htyFresh
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        rcases ih htypeFresh hfresh htargetsNot htyFresh with
+          ⟨hfreshOut, htargetsRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.mutBorrow htargetsRestored⟩)
+      (by
+        intro rank env path ty _htypeFresh hfresh _hnot _htyFresh
+        exact ⟨hfresh, WriteBorrowTargets.nil⟩)
+      (by
+        intro rank env updated path target ty hwrite hleaf ihWrite
+          htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        rcases ihWrite htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases hleaf with ⟨leafTy, leafLifetime, hleafTyping⟩
+        exact ⟨hfreshUpdated,
+          WriteBorrowTargets.singleton hwriteRestored
+            ⟨leafTy, leafLifetime,
+              LValTyping.restore_ghost.1 hleafTyping hfresh⟩⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty hwrite hleaf
+          _hrest hjoin ihWrite ihRest htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases ihWrite htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases ihRest htypeFresh hfresh hrestNot htyFresh with
+          ⟨hfreshRest, hrestRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        rcases hleaf with ⟨leafTy, leafLifetime, hleafTyping⟩
+        exact ⟨hfreshResult,
+          WriteBorrowTargets.cons hwriteRestored
+            ⟨leafTy, leafLifetime,
+              LValTyping.restore_ghost.1 hleafTyping hfresh⟩
+            hrestRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ihUpdate
+          htypeFresh hfresh hnot htyFresh
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+          htypeFresh (LVal.base lv) slot hslot
+        rcases ihUpdate htypeFresh hfresh hslotFresh htyFresh with
+          ⟨hfreshEnv₂, hupdateRestored⟩
+        have hslotRestored :
+            (Env.restore env₁ source ghost).slotAt (LVal.base lv) =
+              some slot := by
+          simpa [Env.restore, hbaseNe] using hslot
+        have hfreshResult :
+            (env₂.update (LVal.base lv) { slot with ty := updatedTy }).fresh
+              ghost := by
+          unfold Env.fresh at hfreshEnv₂ ⊢
+          simpa [Env.update, hbaseNe.symm] using hfreshEnv₂
+        rw [Env.restore_update_ne env₂ source
+          (ghost := ghost) (y := LVal.base lv) { slot with ty := updatedTy }
+          hbaseNe]
+        exact ⟨hfreshResult,
+          EnvWrite.intro hslotRestored hupdateRestored⟩)
+      htargets htypeFresh hfresh hnot htyFresh
+
+  theorem EnvWrite.restore_ghost {rank : Nat} {env result source : Env}
+      {lv : LVal} {ty : Ty} {ghost : Name} :
+      EnvWrite rank env lv ty result →
+      Env.TypeNameFresh env ghost →
+      env.fresh ghost →
+      ¬ LVal.Mentions ghost lv →
+      ghost ∉ Ty.allVars ty →
+      result.fresh ghost ∧
+        EnvWrite rank (Env.restore env source ghost) lv ty
+          (Env.restore result source ghost) := by
+    intro hwrite htypeFresh hfresh hnot htyFresh
+    exact EnvWrite.rec
+      (motive_1 := fun rank env path oldTy ty result updatedTy _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          UpdateAtPath rank (Env.restore env source ghost) path oldTy ty
+            (Env.restore result source ghost) updatedTy)
+      (motive_2 := fun rank env path targets ty result _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          WriteBorrowTargets rank (Env.restore env source ghost) path targets ty
+            (Env.restore result source ghost))
+      (motive_3 := fun rank env lv ty result _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          EnvWrite rank (Env.restore env source ghost) lv ty
+            (Env.restore result source ghost))
+      (by
+        intro env old ty _htypeFresh hfresh _holdFresh _htyFresh
+        exact ⟨hfresh, UpdateAtPath.strong⟩)
+      (by
+        intro env rank old joined ty hshape hjoin _htypeFresh hfresh
+          _holdFresh _htyFresh
+        exact ⟨hfresh,
+          UpdateAtPath.weak (ShapeCompatible.restore_ghost hshape hfresh)
+            hjoin⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih
+          htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ rank path targets ty _htargets ih htypeFresh
+          hfresh holdFresh htyFresh
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        rcases ih htypeFresh hfresh htargetsNot htyFresh with
+          ⟨hfreshOut, htargetsRestored⟩
+        exact ⟨hfreshOut, UpdateAtPath.mutBorrow htargetsRestored⟩)
+      (by
+        intro rank env path ty _htypeFresh hfresh _hnot _htyFresh
+        exact ⟨hfresh, WriteBorrowTargets.nil⟩)
+      (by
+        intro rank env updated path target ty hwrite hleaf ihWrite
+          htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        rcases ihWrite htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases hleaf with ⟨leafTy, leafLifetime, hleafTyping⟩
+        exact ⟨hfreshUpdated,
+          WriteBorrowTargets.singleton hwriteRestored
+            ⟨leafTy, leafLifetime,
+              LValTyping.restore_ghost.1 hleafTyping hfresh⟩⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty hwrite hleaf
+          _hrest hjoin ihWrite ihRest htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases ihWrite htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases ihRest htypeFresh hfresh hrestNot htyFresh with
+          ⟨hfreshRest, hrestRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        rcases hleaf with ⟨leafTy, leafLifetime, hleafTyping⟩
+        exact ⟨hfreshResult,
+          WriteBorrowTargets.cons hwriteRestored
+            ⟨leafTy, leafLifetime,
+              LValTyping.restore_ghost.1 hleafTyping hfresh⟩
+            hrestRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ihUpdate
+          htypeFresh hfresh hnot htyFresh
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+          htypeFresh (LVal.base lv) slot hslot
+        rcases ihUpdate htypeFresh hfresh hslotFresh htyFresh with
+          ⟨hfreshEnv₂, hupdateRestored⟩
+        have hslotRestored :
+            (Env.restore env₁ source ghost).slotAt (LVal.base lv) =
+              some slot := by
+          simpa [Env.restore, hbaseNe] using hslot
+        have hfreshResult :
+            (env₂.update (LVal.base lv) { slot with ty := updatedTy }).fresh
+              ghost := by
+          unfold Env.fresh at hfreshEnv₂ ⊢
+          simpa [Env.update, hbaseNe.symm] using hfreshEnv₂
+        rw [Env.restore_update_ne env₂ source
+          (ghost := ghost) (y := LVal.base lv) { slot with ty := updatedTy }
+          hbaseNe]
+        exact ⟨hfreshResult,
+          EnvWrite.intro hslotRestored hupdateRestored⟩)
+      hwrite htypeFresh hfresh hnot htyFresh
+end
+
+mutual
+  theorem UpdateAtPathEffectiveWrite.restore_ghost {rank : Nat}
+      {env result source : Env} {base : Name} {path : List Unit}
+      {oldTy updatedTy : PartialTy} {ty : Ty} {written : LVal}
+      {ghost : Name} :
+      UpdateAtPathEffectiveWrite rank env base path oldTy ty result updatedTy
+        written →
+      Env.TypeNameFresh env ghost →
+      env.fresh ghost →
+      ghost ∉ PartialTy.allVars oldTy →
+      ghost ∉ Ty.allVars ty →
+      result.fresh ghost ∧
+        UpdateAtPathEffectiveWrite rank (Env.restore env source ghost) base
+          path oldTy ty (Env.restore result source ghost) updatedTy written := by
+    intro heffective htypeFresh hfresh holdFresh htyFresh
+    exact UpdateAtPathEffectiveWrite.rec
+      (motive_1 := fun rank env base path oldTy ty result updatedTy written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          UpdateAtPathEffectiveWrite rank (Env.restore env source ghost) base
+            path oldTy ty (Env.restore result source ghost) updatedTy written)
+      (motive_2 := fun rank env path targets ty result written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          WriteBorrowTargetsEffectiveWrite rank (Env.restore env source ghost)
+            path targets ty (Env.restore result source ghost) written)
+      (motive_3 := fun rank env lv ty result written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          EnvWriteEffectiveWrite rank (Env.restore env source ghost) lv ty
+            (Env.restore result source ghost) written)
+      (by
+        intro env base old ty _htypeFresh hfresh _holdFresh _htyFresh
+        exact ⟨hfresh, UpdateAtPathEffectiveWrite.strong⟩)
+      (by
+        intro env base rank old joined ty hshape hjoin _htypeFresh hfresh
+          _holdFresh _htyFresh
+        exact ⟨hfresh,
+          UpdateAtPathEffectiveWrite.weak
+            (ShapeCompatible.restore_ghost hshape hfresh) hjoin⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxFullPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path targets ty written _htargets ih
+          htypeFresh hfresh holdFresh htyFresh
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        rcases ih htypeFresh hfresh htargetsNot htyFresh with
+          ⟨hfreshOut, htargetsRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.mutBorrow htargetsRestored⟩)
+      (by
+        intro rank env updated path target ty written heffective ih
+          htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        rcases ih htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, heffectiveRestored⟩
+        exact ⟨hfreshUpdated,
+          WriteBorrowTargetsEffectiveWrite.singleton heffectiveRestored⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty written
+          heffective hrest hjoin ihEffective htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases ihEffective htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, heffectiveRestored⟩
+        rcases WriteBorrowTargets.restore_ghost hrest htypeFresh hfresh
+            hrestNot htyFresh with
+          ⟨hfreshRest, hrestRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        exact ⟨hfreshResult,
+          WriteBorrowTargetsEffectiveWrite.consHead heffectiveRestored
+            hrestRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty written hwrite
+          heffective hjoin ihEffective htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases EnvWrite.restore_ghost hwrite htypeFresh hfresh htargetNot
+            htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases ihEffective htypeFresh hfresh hrestNot htyFresh with
+          ⟨hfreshRest, heffectiveRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        exact ⟨hfreshResult,
+          WriteBorrowTargetsEffectiveWrite.consTail hwriteRestored
+            heffectiveRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env₁ env₂ lv written slot ty updatedTy hslot
+          _heffective ih htypeFresh hfresh hnot htyFresh
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+          htypeFresh (LVal.base lv) slot hslot
+        rcases ih htypeFresh hfresh hslotFresh htyFresh with
+          ⟨hfreshEnv₂, heffectiveRestored⟩
+        have hslotRestored :
+            (Env.restore env₁ source ghost).slotAt (LVal.base lv) =
+              some slot := by
+          simpa [Env.restore, hbaseNe] using hslot
+        have hfreshResult :
+            (env₂.update (LVal.base lv) { slot with ty := updatedTy }).fresh
+              ghost := by
+          unfold Env.fresh at hfreshEnv₂ ⊢
+          simpa [Env.update, hbaseNe.symm] using hfreshEnv₂
+        rw [Env.restore_update_ne env₂ source
+          (ghost := ghost) (y := LVal.base lv) { slot with ty := updatedTy }
+          hbaseNe]
+        exact ⟨hfreshResult,
+          EnvWriteEffectiveWrite.intro hslotRestored heffectiveRestored⟩)
+      heffective htypeFresh hfresh holdFresh htyFresh
+
+  theorem WriteBorrowTargetsEffectiveWrite.restore_ghost {rank : Nat}
+      {env result source : Env} {path : List Unit} {targets : List LVal}
+      {ty : Ty} {written : LVal} {ghost : Name} :
+      WriteBorrowTargetsEffectiveWrite rank env path targets ty result
+        written →
+      Env.TypeNameFresh env ghost →
+      env.fresh ghost →
+      (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+      ghost ∉ Ty.allVars ty →
+      result.fresh ghost ∧
+        WriteBorrowTargetsEffectiveWrite rank (Env.restore env source ghost)
+          path targets ty (Env.restore result source ghost) written := by
+    intro heffective htypeFresh hfresh hnot htyFresh
+    exact WriteBorrowTargetsEffectiveWrite.rec
+      (motive_1 := fun rank env base path oldTy ty result updatedTy written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          UpdateAtPathEffectiveWrite rank (Env.restore env source ghost) base
+            path oldTy ty (Env.restore result source ghost) updatedTy written)
+      (motive_2 := fun rank env path targets ty result written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          WriteBorrowTargetsEffectiveWrite rank (Env.restore env source ghost)
+            path targets ty (Env.restore result source ghost) written)
+      (motive_3 := fun rank env lv ty result written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          EnvWriteEffectiveWrite rank (Env.restore env source ghost) lv ty
+            (Env.restore result source ghost) written)
+      (by
+        intro env base old ty _htypeFresh hfresh _holdFresh _htyFresh
+        exact ⟨hfresh, UpdateAtPathEffectiveWrite.strong⟩)
+      (by
+        intro env base rank old joined ty hshape hjoin _htypeFresh hfresh
+          _holdFresh _htyFresh
+        exact ⟨hfresh,
+          UpdateAtPathEffectiveWrite.weak
+            (ShapeCompatible.restore_ghost hshape hfresh) hjoin⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxFullPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path targets ty written _htargets ih
+          htypeFresh hfresh holdFresh htyFresh
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        rcases ih htypeFresh hfresh htargetsNot htyFresh with
+          ⟨hfreshOut, htargetsRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.mutBorrow htargetsRestored⟩)
+      (by
+        intro rank env updated path target ty written heffective ih
+          htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        rcases ih htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, heffectiveRestored⟩
+        exact ⟨hfreshUpdated,
+          WriteBorrowTargetsEffectiveWrite.singleton heffectiveRestored⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty written
+          heffective hrest hjoin ihEffective htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases ihEffective htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, heffectiveRestored⟩
+        rcases WriteBorrowTargets.restore_ghost hrest htypeFresh hfresh
+            hrestNot htyFresh with
+          ⟨hfreshRest, hrestRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        exact ⟨hfreshResult,
+          WriteBorrowTargetsEffectiveWrite.consHead heffectiveRestored
+            hrestRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty written hwrite
+          heffective hjoin ihEffective htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases EnvWrite.restore_ghost hwrite htypeFresh hfresh htargetNot
+            htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases ihEffective htypeFresh hfresh hrestNot htyFresh with
+          ⟨hfreshRest, heffectiveRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        exact ⟨hfreshResult,
+          WriteBorrowTargetsEffectiveWrite.consTail hwriteRestored
+            heffectiveRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env₁ env₂ lv written slot ty updatedTy hslot
+          _heffective ih htypeFresh hfresh hnot htyFresh
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+          htypeFresh (LVal.base lv) slot hslot
+        rcases ih htypeFresh hfresh hslotFresh htyFresh with
+          ⟨hfreshEnv₂, heffectiveRestored⟩
+        have hslotRestored :
+            (Env.restore env₁ source ghost).slotAt (LVal.base lv) =
+              some slot := by
+          simpa [Env.restore, hbaseNe] using hslot
+        have hfreshResult :
+            (env₂.update (LVal.base lv) { slot with ty := updatedTy }).fresh
+              ghost := by
+          unfold Env.fresh at hfreshEnv₂ ⊢
+          simpa [Env.update, hbaseNe.symm] using hfreshEnv₂
+        rw [Env.restore_update_ne env₂ source
+          (ghost := ghost) (y := LVal.base lv) { slot with ty := updatedTy }
+          hbaseNe]
+        exact ⟨hfreshResult,
+          EnvWriteEffectiveWrite.intro hslotRestored heffectiveRestored⟩)
+      heffective htypeFresh hfresh hnot htyFresh
+
+  theorem EnvWriteEffectiveWrite.restore_ghost {rank : Nat}
+      {env result source : Env} {lv : LVal} {ty : Ty}
+      {written : LVal} {ghost : Name} :
+      EnvWriteEffectiveWrite rank env lv ty result written →
+      Env.TypeNameFresh env ghost →
+      env.fresh ghost →
+      ¬ LVal.Mentions ghost lv →
+      ghost ∉ Ty.allVars ty →
+      result.fresh ghost ∧
+        EnvWriteEffectiveWrite rank (Env.restore env source ghost) lv ty
+          (Env.restore result source ghost) written := by
+    intro heffective htypeFresh hfresh hnot htyFresh
+    exact EnvWriteEffectiveWrite.rec
+      (motive_1 := fun rank env base path oldTy ty result updatedTy written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          UpdateAtPathEffectiveWrite rank (Env.restore env source ghost) base
+            path oldTy ty (Env.restore result source ghost) updatedTy written)
+      (motive_2 := fun rank env path targets ty result written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          WriteBorrowTargetsEffectiveWrite rank (Env.restore env source ghost)
+            path targets ty (Env.restore result source ghost) written)
+      (motive_3 := fun rank env lv ty result written _ =>
+        Env.TypeNameFresh env ghost →
+        env.fresh ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        result.fresh ghost ∧
+          EnvWriteEffectiveWrite rank (Env.restore env source ghost) lv ty
+            (Env.restore result source ghost) written)
+      (by
+        intro env base old ty _htypeFresh hfresh _holdFresh _htyFresh
+        exact ⟨hfresh, UpdateAtPathEffectiveWrite.strong⟩)
+      (by
+        intro env base rank old joined ty hshape hjoin _htypeFresh hfresh
+          _holdFresh _htyFresh
+        exact ⟨hfresh,
+          UpdateAtPathEffectiveWrite.weak
+            (ShapeCompatible.restore_ghost hshape hfresh) hjoin⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.box hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars] using holdFresh) htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut, UpdateAtPathEffectiveWrite.boxFull hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path inner updatedInner ty written
+          _hinner ih htypeFresh hfresh holdFresh htyFresh
+        rcases ih htypeFresh hfresh
+            (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+            htyFresh with
+          ⟨hfreshOut, hinnerRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.boxFullPassthrough hinnerRestored⟩)
+      (by
+        intro env₁ env₂ base rank path targets ty written _htargets ih
+          htypeFresh hfresh holdFresh htyFresh
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        rcases ih htypeFresh hfresh htargetsNot htyFresh with
+          ⟨hfreshOut, htargetsRestored⟩
+        exact ⟨hfreshOut,
+          UpdateAtPathEffectiveWrite.mutBorrow htargetsRestored⟩)
+      (by
+        intro rank env updated path target ty written heffective ih
+          htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        rcases ih htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, heffectiveRestored⟩
+        exact ⟨hfreshUpdated,
+          WriteBorrowTargetsEffectiveWrite.singleton heffectiveRestored⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty written
+          heffective hrest hjoin ihEffective htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases ihEffective htypeFresh hfresh htargetNot htyFresh with
+          ⟨hfreshUpdated, heffectiveRestored⟩
+        rcases WriteBorrowTargets.restore_ghost hrest htypeFresh hfresh
+            hrestNot htyFresh with
+          ⟨hfreshRest, hrestRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        exact ⟨hfreshResult,
+          WriteBorrowTargetsEffectiveWrite.consHead heffectiveRestored
+            hrestRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env updated restEnv result path target rest ty written hwrite
+          heffective hjoin ihEffective htypeFresh hfresh hnot htyFresh
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        rcases EnvWrite.restore_ghost hwrite htypeFresh hfresh htargetNot
+            htyFresh with
+          ⟨hfreshUpdated, hwriteRestored⟩
+        rcases ihEffective htypeFresh hfresh hrestNot htyFresh with
+          ⟨hfreshRest, heffectiveRestored⟩
+        have hfreshResult : result.fresh ghost :=
+          EnvJoin.fresh_of_fresh hjoin hfreshUpdated hfreshRest
+        exact ⟨hfreshResult,
+          WriteBorrowTargetsEffectiveWrite.consTail hwriteRestored
+            heffectiveRestored
+            (EnvJoin.restore_ghost hjoin hfreshUpdated hfreshRest
+              hfreshResult)⟩)
+      (by
+        intro rank env₁ env₂ lv written slot ty updatedTy hslot
+          _heffective ih htypeFresh hfresh hnot htyFresh
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+          htypeFresh (LVal.base lv) slot hslot
+        rcases ih htypeFresh hfresh hslotFresh htyFresh with
+          ⟨hfreshEnv₂, heffectiveRestored⟩
+        have hslotRestored :
+            (Env.restore env₁ source ghost).slotAt (LVal.base lv) =
+              some slot := by
+          simpa [Env.restore, hbaseNe] using hslot
+        have hfreshResult :
+            (env₂.update (LVal.base lv) { slot with ty := updatedTy }).fresh
+              ghost := by
+          unfold Env.fresh at hfreshEnv₂ ⊢
+          simpa [Env.update, hbaseNe.symm] using hfreshEnv₂
+        rw [Env.restore_update_ne env₂ source
+          (ghost := ghost) (y := LVal.base lv) { slot with ty := updatedTy }
+          hbaseNe]
+        exact ⟨hfreshResult,
+          EnvWriteEffectiveWrite.intro hslotRestored heffectiveRestored⟩)
+      heffective htypeFresh hfresh hnot htyFresh
+end
+
+mutual
+  theorem UpdateAtPathEffectiveWrite.erase_to_env_any {rank : Nat}
+      {env result : Env} {path : List Unit} {oldTy updatedTy : PartialTy}
+      {ty : Ty} {ghost : Name} :
+      UpdateAtPath rank env path oldTy ty result updatedTy →
+      Env.TypeNameFresh (env.erase ghost) ghost →
+      ghost ∉ PartialTy.allVars oldTy →
+      ghost ∉ Ty.allVars ty →
+      ∀ {base erasedResult erasedUpdatedTy written},
+        UpdateAtPathEffectiveWrite rank (env.erase ghost) base path oldTy ty
+          erasedResult erasedUpdatedTy written →
+        UpdateAtPathEffectiveWrite rank env base path oldTy ty result updatedTy
+          written := by
+    intro hupdate hfresh holdFresh htyFresh
+    exact UpdateAtPath.rec
+      (motive_1 := fun rank env path oldTy ty result updatedTy _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        ∀ {base erasedResult erasedUpdatedTy written},
+          UpdateAtPathEffectiveWrite rank (env.erase ghost) base path oldTy ty
+            erasedResult erasedUpdatedTy written →
+          UpdateAtPathEffectiveWrite rank env base path oldTy ty result
+            updatedTy written)
+      (motive_2 := fun rank env path targets ty result _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        ∀ {erasedResult written},
+          WriteBorrowTargetsEffectiveWrite rank (env.erase ghost) path targets
+            ty erasedResult written →
+          WriteBorrowTargetsEffectiveWrite rank env path targets ty result
+            written)
+      (motive_3 := fun rank env lv ty result _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        ∀ {erasedResult written},
+          EnvWriteEffectiveWrite rank (env.erase ghost) lv ty erasedResult
+            written →
+          EnvWriteEffectiveWrite rank env lv ty result written)
+      (by
+        intro env old ty _hfresh _holdFresh _htyFresh base erasedResult
+          erasedUpdatedTy written heffective
+        cases heffective
+        exact UpdateAtPathEffectiveWrite.strong)
+      (by
+        intro env rank old joined ty hshape hjoin _hfresh _holdFresh
+          _htyFresh base erasedResult erasedUpdatedTy written heffective
+        cases heffective
+        exact UpdateAtPathEffectiveWrite.weak hshape hjoin)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | box heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.box
+              (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxPassthrough
+              (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | boxFull heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFull
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxFullPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFullPassthrough
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh
+          htyFresh base erasedResult erasedUpdatedTy written heffective
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        cases heffective
+        case mutBorrow heffectiveTargets =>
+          exact UpdateAtPathEffectiveWrite.mutBorrow
+            (ih hfresh htargetsNot htyFresh heffectiveTargets))
+      (by
+        intro rank env path ty _hfresh _hnot _htyFresh erasedResult written
+          heffective
+        cases heffective)
+      (by
+        intro rank env updated path target ty hwrite _hleaf ihWrite hfresh hnot
+          htyFresh erasedResult written heffective
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        cases heffective with
+        | singleton heffectiveWrite =>
+            exact WriteBorrowTargetsEffectiveWrite.singleton
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite)
+        | consHead heffectiveWrite _hrest _hjoin =>
+            exact WriteBorrowTargetsEffectiveWrite.singleton
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite)
+        | consTail _hwrite heffectiveRest _hjoin =>
+            cases heffectiveRest)
+      (by
+        intro rank env updated restEnv result path target rest ty hwrite _hleaf
+          hrest hjoin ihWrite ihRest hfresh hnot htyFresh erasedResult written
+          heffective
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        cases heffective with
+        | singleton heffectiveWrite =>
+            exact WriteBorrowTargetsEffectiveWrite.consHead
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite) hrest hjoin
+        | consHead heffectiveWrite _hrestE _hjoinE =>
+            exact WriteBorrowTargetsEffectiveWrite.consHead
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite) hrest hjoin
+        | consTail _hwriteE heffectiveRest _hjoinE =>
+            exact WriteBorrowTargetsEffectiveWrite.consTail hwrite
+              (ihRest hfresh hrestNot htyFresh heffectiveRest) hjoin)
+      (by
+        intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ihUpdate
+          hfresh hnot htyFresh erasedResult written heffective
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotErased :
+            (env₁.erase ghost).slotAt (LVal.base lv) = some slot := by
+          simpa [Env.erase, hbaseNe] using hslot
+        cases heffective with
+        | intro hslotEffective heffectiveUpdate =>
+            have hslotEq := Option.some.inj (hslotEffective.symm.trans hslotErased)
+            cases hslotEq
+            have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+              hfresh (LVal.base lv) slot hslotErased
+            exact EnvWriteEffectiveWrite.intro hslot
+              (ihUpdate hfresh hslotFresh htyFresh heffectiveUpdate))
+      hupdate hfresh holdFresh htyFresh
+
+  theorem WriteBorrowTargetsEffectiveWrite.erase_to_env_any {rank : Nat}
+      {env result : Env} {path : List Unit} {targets : List LVal}
+      {ty : Ty} {ghost : Name} :
+      WriteBorrowTargets rank env path targets ty result →
+      Env.TypeNameFresh (env.erase ghost) ghost →
+      (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+      ghost ∉ Ty.allVars ty →
+      ∀ {erasedResult written},
+        WriteBorrowTargetsEffectiveWrite rank (env.erase ghost) path targets ty
+          erasedResult written →
+        WriteBorrowTargetsEffectiveWrite rank env path targets ty result
+          written := by
+    intro htargets hfresh hnot htyFresh
+    exact WriteBorrowTargets.rec
+      (motive_1 := fun rank env path oldTy ty result updatedTy _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        ∀ {base erasedResult erasedUpdatedTy written},
+          UpdateAtPathEffectiveWrite rank (env.erase ghost) base path oldTy ty
+            erasedResult erasedUpdatedTy written →
+          UpdateAtPathEffectiveWrite rank env base path oldTy ty result
+            updatedTy written)
+      (motive_2 := fun rank env path targets ty result _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        ∀ {erasedResult written},
+          WriteBorrowTargetsEffectiveWrite rank (env.erase ghost) path targets
+            ty erasedResult written →
+          WriteBorrowTargetsEffectiveWrite rank env path targets ty result
+            written)
+      (motive_3 := fun rank env lv ty result _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        ∀ {erasedResult written},
+          EnvWriteEffectiveWrite rank (env.erase ghost) lv ty erasedResult
+            written →
+          EnvWriteEffectiveWrite rank env lv ty result written)
+      (by
+        intro env old ty _hfresh _holdFresh _htyFresh base erasedResult
+          erasedUpdatedTy written heffective
+        cases heffective
+        exact UpdateAtPathEffectiveWrite.strong)
+      (by
+        intro env rank old joined ty hshape hjoin _hfresh _holdFresh
+          _htyFresh base erasedResult erasedUpdatedTy written heffective
+        cases heffective
+        exact UpdateAtPathEffectiveWrite.weak hshape hjoin)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | box heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.box
+              (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxPassthrough
+              (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | boxFull heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFull
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxFullPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFullPassthrough
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh
+          htyFresh base erasedResult erasedUpdatedTy written heffective
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        cases heffective
+        case mutBorrow heffectiveTargets =>
+          exact UpdateAtPathEffectiveWrite.mutBorrow
+            (ih hfresh htargetsNot htyFresh heffectiveTargets))
+      (by
+        intro rank env path ty _hfresh _hnot _htyFresh erasedResult written
+          heffective
+        cases heffective)
+      (by
+        intro rank env updated path target ty hwrite _hleaf ihWrite hfresh hnot
+          htyFresh erasedResult written heffective
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        cases heffective with
+        | singleton heffectiveWrite =>
+            exact WriteBorrowTargetsEffectiveWrite.singleton
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite)
+        | consHead heffectiveWrite _hrest _hjoin =>
+            exact WriteBorrowTargetsEffectiveWrite.singleton
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite)
+        | consTail _hwrite heffectiveRest _hjoin =>
+            cases heffectiveRest)
+      (by
+        intro rank env updated restEnv result path target rest ty hwrite _hleaf
+          hrest hjoin ihWrite ihRest hfresh hnot htyFresh erasedResult written
+          heffective
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        cases heffective with
+        | singleton heffectiveWrite =>
+            exact WriteBorrowTargetsEffectiveWrite.consHead
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite) hrest hjoin
+        | consHead heffectiveWrite _hrestE _hjoinE =>
+            exact WriteBorrowTargetsEffectiveWrite.consHead
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite) hrest hjoin
+        | consTail _hwriteE heffectiveRest _hjoinE =>
+            exact WriteBorrowTargetsEffectiveWrite.consTail hwrite
+              (ihRest hfresh hrestNot htyFresh heffectiveRest) hjoin)
+      (by
+        intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ihUpdate
+          hfresh hnot htyFresh erasedResult written heffective
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotErased :
+            (env₁.erase ghost).slotAt (LVal.base lv) = some slot := by
+          simpa [Env.erase, hbaseNe] using hslot
+        cases heffective with
+        | intro hslotEffective heffectiveUpdate =>
+            have hslotEq := Option.some.inj (hslotEffective.symm.trans hslotErased)
+            cases hslotEq
+            have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+              hfresh (LVal.base lv) slot hslotErased
+            exact EnvWriteEffectiveWrite.intro hslot
+              (ihUpdate hfresh hslotFresh htyFresh heffectiveUpdate))
+      htargets hfresh hnot htyFresh
+
+  theorem EnvWriteEffectiveWrite.erase_to_env_any {rank : Nat}
+      {env result : Env} {lv : LVal} {ty : Ty} {ghost : Name} :
+      EnvWrite rank env lv ty result →
+      Env.TypeNameFresh (env.erase ghost) ghost →
+      ¬ LVal.Mentions ghost lv →
+      ghost ∉ Ty.allVars ty →
+      ∀ {erasedResult written},
+        EnvWriteEffectiveWrite rank (env.erase ghost) lv ty erasedResult
+          written →
+        EnvWriteEffectiveWrite rank env lv ty result written := by
+    intro hwrite hfresh hnot htyFresh
+    exact EnvWrite.rec
+      (motive_1 := fun rank env path oldTy ty result updatedTy _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        ghost ∉ PartialTy.allVars oldTy →
+        ghost ∉ Ty.allVars ty →
+        ∀ {base erasedResult erasedUpdatedTy written},
+          UpdateAtPathEffectiveWrite rank (env.erase ghost) base path oldTy ty
+            erasedResult erasedUpdatedTy written →
+          UpdateAtPathEffectiveWrite rank env base path oldTy ty result
+            updatedTy written)
+      (motive_2 := fun rank env path targets ty result _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+        ghost ∉ Ty.allVars ty →
+        ∀ {erasedResult written},
+          WriteBorrowTargetsEffectiveWrite rank (env.erase ghost) path targets
+            ty erasedResult written →
+          WriteBorrowTargetsEffectiveWrite rank env path targets ty result
+            written)
+      (motive_3 := fun rank env lv ty result _ =>
+        Env.TypeNameFresh (env.erase ghost) ghost →
+        ¬ LVal.Mentions ghost lv →
+        ghost ∉ Ty.allVars ty →
+        ∀ {erasedResult written},
+          EnvWriteEffectiveWrite rank (env.erase ghost) lv ty erasedResult
+            written →
+          EnvWriteEffectiveWrite rank env lv ty result written)
+      (by
+        intro env old ty _hfresh _holdFresh _htyFresh base erasedResult
+          erasedUpdatedTy written heffective
+        cases heffective
+        exact UpdateAtPathEffectiveWrite.strong)
+      (by
+        intro env rank old joined ty hshape hjoin _hfresh _holdFresh
+          _htyFresh base erasedResult erasedUpdatedTy written heffective
+        cases heffective
+        exact UpdateAtPathEffectiveWrite.weak hshape hjoin)
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | box heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.box
+              (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxPassthrough
+              (ih hfresh (by simpa [PartialTy.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path inner updatedInner ty _hinner ih hfresh
+          holdFresh htyFresh base erasedResult erasedUpdatedTy written
+          heffective
+        cases heffective with
+        | boxFull heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFull
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner)
+        | boxFullPassthrough heffectiveInner =>
+            exact UpdateAtPathEffectiveWrite.boxFullPassthrough
+              (ih hfresh
+                (by simpa [PartialTy.allVars, Ty.allVars] using holdFresh)
+                htyFresh heffectiveInner))
+      (by
+        intro env₁ env₂ rank path targets ty _htargets ih hfresh holdFresh
+          htyFresh base erasedResult erasedUpdatedTy written heffective
+        have htargetsNot :
+            ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+          not_mentions_of_mem_borrow_allVars holdFresh
+        cases heffective
+        case mutBorrow heffectiveTargets =>
+          exact UpdateAtPathEffectiveWrite.mutBorrow
+            (ih hfresh htargetsNot htyFresh heffectiveTargets))
+      (by
+        intro rank env path ty _hfresh _hnot _htyFresh erasedResult written
+          heffective
+        cases heffective)
+      (by
+        intro rank env updated path target ty hwrite _hleaf ihWrite hfresh hnot
+          htyFresh erasedResult written heffective
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        cases heffective with
+        | singleton heffectiveWrite =>
+            exact WriteBorrowTargetsEffectiveWrite.singleton
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite)
+        | consHead heffectiveWrite _hrest _hjoin =>
+            exact WriteBorrowTargetsEffectiveWrite.singleton
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite)
+        | consTail _hwrite heffectiveRest _hjoin =>
+            cases heffectiveRest)
+      (by
+        intro rank env updated restEnv result path target rest ty hwrite _hleaf
+          hrest hjoin ihWrite ihRest hfresh hnot htyFresh erasedResult written
+          heffective
+        have htargetNot : ¬ LVal.Mentions ghost (prependPath path target) :=
+          prependPath_not_mentions (hnot target (by simp))
+        have hrestNot :
+            ∀ candidate, candidate ∈ rest → ¬ LVal.Mentions ghost candidate := by
+          intro candidate hmem
+          exact hnot candidate (by simp [hmem])
+        cases heffective with
+        | singleton heffectiveWrite =>
+            exact WriteBorrowTargetsEffectiveWrite.consHead
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite) hrest hjoin
+        | consHead heffectiveWrite _hrestE _hjoinE =>
+            exact WriteBorrowTargetsEffectiveWrite.consHead
+              (ihWrite hfresh htargetNot htyFresh heffectiveWrite) hrest hjoin
+        | consTail _hwriteE heffectiveRest _hjoinE =>
+            exact WriteBorrowTargetsEffectiveWrite.consTail hwrite
+              (ihRest hfresh hrestNot htyFresh heffectiveRest) hjoin)
+      (by
+        intro rank env₁ env₂ lv slot ty updatedTy hslot _hupdate ihUpdate
+          hfresh hnot htyFresh erasedResult written heffective
+        have hbaseNe : LVal.base lv ≠ ghost :=
+          LVal.base_ne_of_not_mentions hnot
+        have hslotErased :
+            (env₁.erase ghost).slotAt (LVal.base lv) = some slot := by
+          simpa [Env.erase, hbaseNe] using hslot
+        cases heffective with
+        | intro hslotEffective heffectiveUpdate =>
+            have hslotEq := Option.some.inj (hslotEffective.symm.trans hslotErased)
+            cases hslotEq
+            have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+              hfresh (LVal.base lv) slot hslotErased
+            exact EnvWriteEffectiveWrite.intro hslot
+              (ihUpdate hfresh hslotFresh htyFresh heffectiveUpdate))
+      hwrite hfresh hnot htyFresh
+end
+
+theorem EnvMayReadThrough.erase_to_env {env : Env} {ghost : Name}
+    {written target : LVal} :
+    EnvMayReadThrough (env.erase ghost) written target →
+    EnvMayReadThrough env written target := by
+  intro hread
+  induction hread with
+  | direct hprefix =>
+      exact EnvMayReadThrough.direct hprefix
+  | @borrow source selected suffix mutable targets lifetime htyping hmem _ ih =>
+      exact EnvMayReadThrough.borrow (LValTyping.erase_to_env.1 htyping)
+        hmem ih
+
+theorem EnvWriteEffectiveWrite.erase_to_env_of_write {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {written : LVal}
+    {ghost : Name} :
+    EnvWrite rank env lv rhsTy result →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    ¬ LVal.Mentions ghost lv →
+    ghost ∉ Ty.allVars rhsTy →
+    EnvWriteEffectiveWrite rank (env.erase ghost) lv rhsTy
+      (result.erase ghost) written →
+    EnvWriteEffectiveWrite rank env lv rhsTy result written := by
+  intro hwrite hfresh hnot htyFresh heffective
+  exact EnvWriteEffectiveWrite.erase_to_env_any hwrite hfresh hnot htyFresh
+    heffective
+
+theorem EnvWriteNoStaleBorrowTargets.erase_ghost_of_write {rank : Nat}
+    {env result : Env} {lv : LVal} {rhsTy : Ty} {ghost : Name} :
+    EnvWriteNoStaleBorrowTargets rank env lv rhsTy result →
+    EnvWrite rank env lv rhsTy result →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    ¬ LVal.Mentions ghost lv →
+    ghost ∉ Ty.allVars rhsTy →
+    EnvWriteNoStaleBorrowTargets rank (env.erase ghost) lv rhsTy
+      (result.erase ghost) := by
+  intro hnoStale hwrite hfresh hnotLv hrhsFresh
+  intro written x slot mutable targets target heffective hslot hcontains
+    htarget hmayRead
+  have heffectiveOrig :
+      EnvWriteEffectiveWrite rank env lv rhsTy result written :=
+    EnvWriteEffectiveWrite.erase_to_env_of_write hwrite hfresh hnotLv
+      hrhsFresh heffective
+  have hslotOrig : result.slotAt x = some slot := by
+    by_cases hx : x = ghost
+    · subst hx
+      simp [Env.erase] at hslot
+    · simpa [Env.erase, hx] using hslot
+  exact hnoStale written x slot mutable targets target heffectiveOrig
+    hslotOrig (EnvContains.erase_to_env hcontains) htarget
+    (EnvMayReadThrough.erase_to_env hmayRead)
 
 theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty}
@@ -2243,7 +3917,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
                 by simp [Ty.allVars]⟩)
     (by
       intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs
-        rhsTy hRhs hLhs hshape hwell hwrite hranked hcoh hcontained
+        rhsTy hRhs hLhs hshape hwell hwrite hnoStale hranked hcoh hcontained
         hnotWrite ih hfresh hstore hnot
       have hnotRhs : ¬ Term.Mentions ghost rhs := by
         intro hmention
@@ -2259,6 +3933,9 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         LValTyping.typeNameFresh.1 hLhsErased hfreshRhs
       have hwriteErased :=
         EnvWrite.erase_ghost hwrite hfreshRhs hnotLhs hrhsFresh
+      have hnoStaleErased :=
+        EnvWriteNoStaleBorrowTargets.erase_ghost_of_write hnoStale hwrite
+          hfreshRhs hnotLhs hrhsFresh
       have hfreshWrite :=
         EnvWrite.typeNameFresh_erase hwrite hfreshRhs hnotLhs hrhsFresh
       rcases hranked with ⟨φ, hlinear, hrhsBelow⟩
@@ -2269,6 +3946,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
           (by simpa [PartialTy.allVars] using hrhsFresh))
         (WellFormedTy.erase_ghost hwell hfreshRhs hrhsFresh)
         hwriteErased
+        hnoStaleErased
         ⟨φ, LinearizedBy.erase_ghost hlinear,
           EnvWriteRhsBorrowTargetsBelow.erase_ghost hrhsBelow⟩
         (Coherent.erase_ghost hcoh hfreshWrite)
@@ -2370,9 +4048,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ env₃ env₄ env₅ typing lifetime condition trueBranch
         falseBranch trueTy falseTy joinTy hcondition htrue hfalse htyJoin
-        henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear
-        hborrowSafe hresultSafe ihCondition ihTrue ihFalse
-        hfresh hstore hnot
+        henvJoin hwellJoin hcoherent hlinear
+        ihCondition ihTrue ihFalse hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
         exact hnot (by simp [Term.Mentions, hmention])
@@ -2398,13 +4075,9 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         EnvJoin.typeNameFresh_erase henvJoin hfreshTrue hfreshFalse
       exact ⟨TermTyping.ite hconditionErased htrueErased hfalseErased
         htyJoin (EnvJoin.erase_ghost henvJoin)
-        (EnvJoinSameShape.erase_ghost hsameLeft)
-        (EnvJoinSameShape.erase_ghost hsameRight)
         (WellFormedTy.erase_ghost hwellJoin hfreshJoin hjoinTyFresh)
         (Coherent.erase_ghost hcoherent hfreshJoin)
-        (Linearizable.erase_ghost hlinear)
-        (BorrowSafeEnv.erase hborrowSafe)
-        (TyBorrowSafeAgainstEnv.erase_ghost hresultSafe),
+        (Linearizable.erase_ghost hlinear),
         hfreshJoin, hjoinTyFresh⟩)
     (by
       intro env₁ env₂ env₃ env₄ typing lifetime condition trueBranch
