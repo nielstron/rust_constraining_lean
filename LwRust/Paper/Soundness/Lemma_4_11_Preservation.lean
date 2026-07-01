@@ -4877,6 +4877,10 @@ theorem StoreOwnerSpineWhenInitialized.path_unique {env₁ env₂ : Env}
           exact absurd rfl
             (StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons
               (StoreOwnerSpineWhenInitialized.box hslot₂ howner₂ htail₂))
+      | boxFull hslot₂ howner₂ htail₂ =>
+          exact absurd rfl
+            (StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons
+              (StoreOwnerSpineWhenInitialized.boxFull hslot₂ howner₂ htail₂))
   | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot
       howner htail ih =>
       intro slot₂ ty₂ leafTy₂ leafSlot₂ path₂ h₂
@@ -4886,6 +4890,50 @@ theorem StoreOwnerSpineWhenInitialized.path_unique {env₁ env₂ : Env}
             (StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons
               (StoreOwnerSpineWhenInitialized.box hslot howner htail))
       | @box _ owned₂ _ _ ownedSlot₂ _ inner₂ _ path₂' hslot₂ howner₂
+          htail₂ =>
+          have hslotEq : slot = slot₂ :=
+            Option.some.inj (hslot.symm.trans hslot₂)
+          have hownedEq : owned = owned₂ := by
+            have hvalueEq :
+                PartialValue.value (owningRef owned) =
+                  PartialValue.value (owningRef owned₂) := by
+              rw [← howner, hslotEq, howner₂]
+            simpa [owningRef] using hvalueEq
+          subst hownedEq
+          rw [ih htail₂]
+      | @boxFull _ owned₂ _ _ ownedSlot₂ _ inner₂ _ path₂' hslot₂ howner₂
+          htail₂ =>
+          have hslotEq : slot = slot₂ :=
+            Option.some.inj (hslot.symm.trans hslot₂)
+          have hownedEq : owned = owned₂ := by
+            have hvalueEq :
+                PartialValue.value (owningRef owned) =
+                  PartialValue.value (owningRef owned₂) := by
+              rw [← howner, hslotEq, howner₂]
+            simpa [owningRef] using hvalueEq
+          subst hownedEq
+          rw [ih htail₂]
+  | @boxFull storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot
+      howner htail ih =>
+      intro slot₂ ty₂ leafTy₂ leafSlot₂ path₂ h₂
+      cases h₂ with
+      | nil hslot₂ _ =>
+          exact absurd rfl
+            (StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons
+              (StoreOwnerSpineWhenInitialized.boxFull hslot howner htail))
+      | @box _ owned₂ _ _ ownedSlot₂ _ inner₂ _ path₂' hslot₂ howner₂
+          htail₂ =>
+          have hslotEq : slot = slot₂ :=
+            Option.some.inj (hslot.symm.trans hslot₂)
+          have hownedEq : owned = owned₂ := by
+            have hvalueEq :
+                PartialValue.value (owningRef owned) =
+                  PartialValue.value (owningRef owned₂) := by
+              rw [← howner, hslotEq, howner₂]
+            simpa [owningRef] using hvalueEq
+          subst hownedEq
+          rw [ih htail₂]
+      | @boxFull _ owned₂ _ _ ownedSlot₂ _ inner₂ _ path₂' hslot₂ howner₂
           htail₂ =>
           have hslotEq : slot = slot₂ :=
             Option.some.inj (hslot.symm.trans hslot₂)
@@ -4935,59 +4983,6 @@ theorem StoreOwnerSpineWhenInitialized.lval_eq_of_same_leaf
 
 namespace StoreOwnerSpineWhenInitialized
 
-theorem valid_after_leaf_strong_update_box {env : Env}
-    {store : ProgramStore} {value : Value} {rhsTy : Ty}
-    {newSlot : StoreSlot} (hnewValue : newSlot.value = .value value) :
-    ∀ {path : Path} {storage leaf : Location} {slot leafSlot : StoreSlot}
-      {inner leafTy : PartialTy},
-      StoreOwnerSpineWhenInitialized env store storage slot (.box inner)
-        (() :: path) leaf leafSlot leafTy →
-      ValidPartialValueWhenInitialized env (store.update leaf newSlot)
-        (.value value) (.ty rhsTy) →
-      ValidPartialValueWhenInitialized env (store.update leaf newSlot)
-        slot.value (.box (PartialTy.strongLeafUpdate inner path rhsTy)) := by
-  intro path
-  induction path with
-  | nil =>
-      intro storage leaf slot leafSlot inner leafTy hspine hnewValid
-      cases hspine with
-      | box hslot howner htail =>
-          cases htail with
-          | nil hleafSlot _hleafValid =>
-              rw [howner]
-              have hnewSlotAt :
-                  (store.update leaf newSlot).slotAt leaf = some newSlot := by
-                simp [ProgramStore.update]
-              refine ValidPartialValueWhenInitialized.box hnewSlotAt ?_
-              rw [hnewValue]
-              simpa [PartialTy.strongLeafUpdate] using hnewValid
-  | cons head rest ih =>
-      cases head
-      intro storage leaf slot leafSlot inner leafTy hspine hnewValid
-      cases hspine with
-      | box hslot howner htail =>
-          rename_i owned ownedSlot
-          cases htail with
-          | box hslot₂ howner₂ htail₂ =>
-              rename_i owned₂ ownedSlot₂ inner₂
-              rw [howner]
-              have hinnerSpine :
-                  StoreOwnerSpineWhenInitialized env store owned ownedSlot
-                    (.box inner₂) (() :: rest) leaf leafSlot leafTy :=
-                StoreOwnerSpineWhenInitialized.box hslot₂ howner₂ htail₂
-              have hleafNeOwned : leaf ≠ owned :=
-                StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons
-                  hinnerSpine
-              have hownedNeLeaf : owned ≠ leaf := fun h => hleafNeOwned h.symm
-              have hownedSlotAt :
-                  (store.update leaf newSlot).slotAt owned =
-                    some ownedSlot := by
-                rw [RuntimeFrame.ProgramStore.slotAt_update_ne hownedNeLeaf]
-                exact hslot₂
-              have hinnerValid := ih hinnerSpine hnewValid
-              simpa [PartialTy.strongLeafUpdate, owningRef] using
-                ValidPartialValueWhenInitialized.box hownedSlotAt hinnerValid
-
 theorem valid_after_leaf_strong_update {env : Env} {store : ProgramStore}
     {storage leaf : Location} {slot leafSlot : StoreSlot}
     {ty leafTy : PartialTy} {path : Path} {value : Value} {rhsTy : Ty}
@@ -5001,15 +4996,90 @@ theorem valid_after_leaf_strong_update {env : Env} {store : ProgramStore}
     ValidPartialValueWhenInitialized env (store.update leaf newSlot) slot.value
       (PartialTy.strongLeafUpdate ty path rhsTy) := by
   intro hspine hpath hnewValue hnewValid
-  cases hspine with
+  induction hspine with
   | nil _hslot _hvalid =>
       exact absurd rfl hpath
-  | box hslot howner htail =>
-      have hres :=
-        StoreOwnerSpineWhenInitialized.valid_after_leaf_strong_update_box
-          hnewValue
-          (StoreOwnerSpineWhenInitialized.box hslot howner htail) hnewValid
-      simpa [PartialTy.strongLeafUpdate] using hres
+  | @box storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot
+      howner htail ih =>
+      cases htail with
+      | nil hleafSlot _hleafValid =>
+          rw [howner]
+          have hnewSlotAt :
+              (store.update owned newSlot).slotAt owned = some newSlot := by
+            simp [ProgramStore.update]
+          have hnewSlotValid :
+              ValidPartialValueWhenInitialized env (store.update owned newSlot)
+                newSlot.value (.ty rhsTy) := by
+            rw [hnewValue]
+            exact hnewValid
+          simpa [PartialTy.strongLeafUpdate, owningRef] using
+            ValidPartialValueWhenInitialized.box hnewSlotAt hnewSlotValid
+      | box hslot₂ howner₂ htail₂ =>
+          rw [howner]
+          have htailSpine :
+              StoreOwnerSpineWhenInitialized env store owned ownedSlot _
+                (() :: _) leaf leafSlot leafTy :=
+            StoreOwnerSpineWhenInitialized.box hslot₂ howner₂ htail₂
+          have htailValid :=
+            ih (by simp) hnewValid
+          have hleafNeOwned : leaf ≠ owned :=
+            StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons htailSpine
+          have hownedNeLeaf : owned ≠ leaf := fun h => hleafNeOwned h.symm
+          have hownedSlotAt :
+              (store.update leaf newSlot).slotAt owned = some ownedSlot := by
+            rw [RuntimeFrame.ProgramStore.slotAt_update_ne hownedNeLeaf]
+            exact StoreOwnerSpineWhenInitialized.storage_slot htailSpine
+          simpa [PartialTy.strongLeafUpdate, owningRef] using
+            ValidPartialValueWhenInitialized.box hownedSlotAt htailValid
+      | boxFull hslot₂ howner₂ htail₂ =>
+          rw [howner]
+          have htailSpine :
+              StoreOwnerSpineWhenInitialized env store owned ownedSlot _
+                (() :: _) leaf leafSlot leafTy :=
+            StoreOwnerSpineWhenInitialized.boxFull hslot₂ howner₂ htail₂
+          have htailValid :=
+            ih (by simp) hnewValid
+          have hleafNeOwned : leaf ≠ owned :=
+            StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons htailSpine
+          have hownedNeLeaf : owned ≠ leaf := fun h => hleafNeOwned h.symm
+          have hownedSlotAt :
+              (store.update leaf newSlot).slotAt owned = some ownedSlot := by
+            rw [RuntimeFrame.ProgramStore.slotAt_update_ne hownedNeLeaf]
+            exact StoreOwnerSpineWhenInitialized.storage_slot htailSpine
+          simpa [PartialTy.strongLeafUpdate, owningRef] using
+            ValidPartialValueWhenInitialized.box hownedSlotAt htailValid
+  | @boxFull storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot
+      howner htail ih =>
+      cases htail with
+      | nil hleafSlot _hleafValid =>
+          rw [howner]
+          have hnewSlotAt :
+              (store.update owned newSlot).slotAt owned = some newSlot := by
+            simp [ProgramStore.update]
+          have hnewSlotValid :
+              ValidPartialValueWhenInitialized env (store.update owned newSlot)
+                newSlot.value (.ty rhsTy) := by
+            rw [hnewValue]
+            exact hnewValid
+          simpa [PartialTy.strongLeafUpdate, owningRef] using
+            StoreOwnerSpineWhenInitialized.valid_rebox hnewSlotAt hnewSlotValid
+      | boxFull hslot₂ howner₂ htail₂ =>
+          rw [howner]
+          have htailSpine :
+              StoreOwnerSpineWhenInitialized env store owned ownedSlot _
+                (() :: _) leaf leafSlot leafTy :=
+            StoreOwnerSpineWhenInitialized.boxFull hslot₂ howner₂ htail₂
+          have htailValid :=
+            ih (by simp) hnewValid
+          have hleafNeOwned : leaf ≠ owned :=
+            StoreOwnerSpineWhenInitialized.leaf_ne_storage_of_cons htailSpine
+          have hownedNeLeaf : owned ≠ leaf := fun h => hleafNeOwned h.symm
+          have hownedSlotAt :
+              (store.update leaf newSlot).slotAt owned = some ownedSlot := by
+            rw [RuntimeFrame.ProgramStore.slotAt_update_ne hownedNeLeaf]
+            exact StoreOwnerSpineWhenInitialized.storage_slot htailSpine
+          simpa [PartialTy.strongLeafUpdate, owningRef] using
+            StoreOwnerSpineWhenInitialized.valid_rebox hownedSlotAt htailValid
 
 theorem strongLeafUpdate_strengthens_updateAtPath {env writeEnv : Env}
     {store : ProgramStore} {rank : Nat}
@@ -5054,10 +5124,34 @@ theorem strongLeafUpdate_strengthens_updateAtPath {env writeEnv : Env}
       | @box _env₁ _env₂ _rank _path _inner updatedInner _ty hinnerUpdate =>
           rcases ih hleafTy hinnerUpdate with ⟨hstr, hshape⟩
           constructor
-          · simpa [PartialTy.strongLeafUpdate] using
-              PartialTyStrengthens.box hstr
-          · simpa [PartialTy.strongLeafUpdate, PartialTy.sameShape] using
-              hshape
+          · change
+              PartialTyStrengthens
+                (.box (PartialTy.strongLeafUpdate spineInner path rhsTy))
+                (.box updatedInner)
+            exact PartialTyStrengthens.box hstr
+          · change
+              PartialTy.sameShape
+                (.box (PartialTy.strongLeafUpdate spineInner path rhsTy))
+                (.box updatedInner)
+            simpa [PartialTy.sameShape] using hshape
+  | @boxFull storage owned leaf slot ownedSlot leafSlot spineInner leafTy path
+      hslot howner htail ih =>
+      cases hupdate with
+      | @boxFull _env₁ _env₂ _rank _path _inner updatedInner _ty hinnerUpdate =>
+          rcases ih hleafTy hinnerUpdate with ⟨hstr, hshape⟩
+          constructor
+          · change
+              PartialTyStrengthens
+                (partialTyRebox
+                  (PartialTy.strongLeafUpdate (.ty spineInner) path rhsTy))
+                (partialTyRebox updatedInner)
+            exact PartialTyStrengthens.rebox hstr hshape
+          · change
+              PartialTy.sameShape
+                (partialTyRebox
+                  (PartialTy.strongLeafUpdate (.ty spineInner) path rhsTy))
+                (partialTyRebox updatedInner)
+            exact PartialTy.sameShape_rebox hshape
 
 theorem strongLeafUpdate_contains {env : Env} {store : ProgramStore}
     {storage leaf : Location} {slot leafSlot : StoreSlot}
@@ -5072,6 +5166,23 @@ theorem strongLeafUpdate_contains {env : Env} {store : ProgramStore}
       simpa [PartialTy.strongLeafUpdate] using hcontains
   | box _hslot _howner _htail ih =>
       simpa [PartialTy.strongLeafUpdate] using PartialTyContains.box ih
+  | @boxFull storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot
+      howner htail ih =>
+      have hinner :
+          PartialTyContains (PartialTy.strongLeafUpdate (.ty inner) path rhsTy)
+            needle :=
+        ih
+      generalize hupdated :
+        PartialTy.strongLeafUpdate (.ty inner) path rhsTy = updated at hinner ⊢
+      cases updated with
+      | ty updatedInner =>
+          simpa [PartialTy.strongLeafUpdate, hupdated, partialTyRebox] using
+            PartialTyContains.tyBox hinner
+      | box updatedInner =>
+          simpa [PartialTy.strongLeafUpdate, hupdated, partialTyRebox] using
+            PartialTyContains.box hinner
+      | undef updatedInner =>
+          cases hinner
 
 theorem updateAtPath_env_eq {env writeEnv : Env}
     {store : ProgramStore} {rank : Nat}
@@ -5092,6 +5203,11 @@ theorem updateAtPath_env_eq {env writeEnv : Env}
       cases hupdate with
       | box hinner =>
           exact ih hinner
+  | @boxFull storage owned leaf slot ownedSlot leafSlot inner leafTy path hslot
+      howner htail ih =>
+      cases hupdate with
+      | boxFull hinner =>
+          exact ih hinner
 
 theorem contains_leafTy {env : Env} {store : ProgramStore}
     {storage leaf : Location} {slot leafSlot : StoreSlot}
@@ -5110,6 +5226,9 @@ theorem contains_leafTy {env : Env} {store : ProgramStore}
   | box _hslot _howner _htail ih =>
       intro h
       exact PartialTyContains.box (ih h)
+  | boxFull _hslot _howner _htail ih =>
+      intro h
+      exact PartialTyContains.tyBox (ih h)
 
 theorem updateAtPath_node_fanout {env writeEnv : Env}
     {store : ProgramStore}
@@ -5150,6 +5269,20 @@ theorem updateAtPath_node_fanout {env writeEnv : Env}
         · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
             _hinner⟩
           cases htyEq
+      · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
+  | boxFull _hslot _howner _htail ih =>
+      intro hleafTy hupdate
+      rcases UpdateAtPath.cons_inv (by simpa [List.cons_append] using hupdate) with
+        hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            hinner⟩
+          cases htyEq
+          exact ih hleafTy hinner
       · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
 theorem updateAtPathEffective_node_fanout_passthrough {env writeEnv : Env}
@@ -5208,6 +5341,24 @@ theorem updateAtPathEffective_node_fanout_passthrough {env writeEnv : Env}
           cases htyEq
       · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
         cases htyEq
+  | boxFull _hslot _howner _htail ih =>
+      intro hleafTy hupdate hfanout
+      rcases UpdateAtPath.cons_inv (by simpa [List.cons_append] using hupdate) with
+        hbox | hborrow
+      · rcases hbox with hbox | hboxFull
+        · rcases hbox with ⟨inner, updatedInner, htyEq, _hupdatedEq,
+            _hinner⟩
+          cases htyEq
+        · rcases hboxFull with ⟨inner, updatedInner, htyEq, hupdatedEq,
+            hinner⟩
+          cases htyEq
+          cases hupdatedEq
+          rcases ih hleafTy hinner hfanout with
+            ⟨written, heffective, hP⟩
+          exact ⟨written,
+            UpdateAtPathEffectiveWrite.boxFullPassthrough heffective, hP⟩
+      · rcases hborrow with ⟨writeTargets, htyEq, _hupdatedEq, _hwrites⟩
+        cases htyEq
 theorem updateAtPathEffective_leaf_self {env writeEnv : Env}
     {store : ProgramStore}
     {storage leaf : Location} {slot leafSlot : StoreSlot}
@@ -5237,6 +5388,14 @@ theorem updateAtPathEffective_leaf_self {env writeEnv : Env}
       | box hinner =>
           simpa [prependPath] using
             (UpdateAtPathEffectiveWrite.box
+              (ih (writeEnv := writeEnv) (rhsTy := rhsTy)
+                (base := base) hinner))
+  | boxFull _hslot _howner _htail ih =>
+      intro hupdate
+      cases hupdate with
+      | boxFull hinner =>
+          simpa [prependPath] using
+            (UpdateAtPathEffectiveWrite.boxFull
               (ih (writeEnv := writeEnv) (rhsTy := rhsTy)
                 (base := base) hinner))
 
