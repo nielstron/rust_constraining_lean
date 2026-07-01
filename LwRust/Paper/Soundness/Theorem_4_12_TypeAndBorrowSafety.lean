@@ -54,9 +54,91 @@ theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
     store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
+  ProgressResult store lifetime term := by
+  intro _hvalidRuntime hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htyping
+  exact progress_typing hvalidStoreTyping hslotsOutlive hsafe.whenInitialized
+    hstoreProgress htyping
+
+/--
+Progress for the stale-aware initialized invariant.
+
+This is the form to use once a current-state preservation invariant supplies
+typing together with `SafeAbstractionWhenInitialized`: full borrow-target
+resolution is required only when the current typing rule actually dereferences
+through those targets.
+-/
+theorem typeAndBorrowProgress_whenInitialized {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    EnvSlotsOutlive env₁ lifetime →
+    SafeAbstractionWhenInitialized store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
   intro _hvalidRuntime hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htyping
   exact progress_typing hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htyping
+
+/--
+Non-terminal initialized typed states can step.
+-/
+theorem typeAndBorrowStep_whenInitialized {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    EnvSlotsOutlive env₁ lifetime →
+    SafeAbstractionWhenInitialized store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ¬ Terminal term →
+    ∃ store' term', Step store lifetime term store' term' := by
+  intro hvalidRuntime hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htyping
+    hnotTerminal
+  exact (typeAndBorrowProgress_whenInitialized hvalidRuntime hvalidStoreTyping
+    hslotsOutlive hsafe hstoreProgress htyping).step_of_not_terminal
+    hnotTerminal
+
+/--
+Progress under exactly the initialized current-state invariant used by
+`preservation_bounded`: runtime validity, store typing, initialized
+well-formedness, initialized safe abstraction, and term typing.
+-/
+theorem typeAndBorrowProgress_of_preservationInvariant {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnvWhenInitialized env₁ lifetime →
+    SafeAbstractionWhenInitialized store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ProgressResult store lifetime term := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
+  exact progress_runtime_whenInitialized hvalidRuntime hvalidStoreTyping
+    hwellFormed hsafe hstoreProgress htyping
+
+/--
+Non-terminal states satisfying the same initialized current-state invariant as
+`preservation_bounded` can step.
+-/
+theorem typeAndBorrowStep_of_preservationInvariant {store : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnvWhenInitialized env₁ lifetime →
+    SafeAbstractionWhenInitialized store env₁ →
+    OperationalStoreProgress store →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    ¬ Terminal term →
+    ∃ store' term', Step store lifetime term store' term' := by
+  intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
+    hnotTerminal
+  exact (typeAndBorrowProgress_of_preservationInvariant hvalidRuntime
+    hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping).step_of_not_terminal
+    hnotTerminal
 
 /--
 Progress from mere typability of the current term.
@@ -160,6 +242,57 @@ theorem theorem_4_12_typeAndBorrowProgress
     (htyping : ∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) :
     ProgressResult store lifetime term :=
   typeAndBorrowProgress_of_typable hvalid hstoreTyping hslotsOutlive hsafe hstore htyping
+
+/-- Theorem 4.12 progress component over the initialized invariant. -/
+theorem theorem_4_12_typeAndBorrowProgress_whenInitialized
+    {store : ProgramStore} {env₁ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term}
+      (hvalid : ValidRuntimeState store term)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hslotsOutlive : EnvSlotsOutlive env₁ lifetime)
+      (hsafe : SafeAbstractionWhenInitialized store env₁)
+      (hstore : OperationalStoreProgress store)
+    (htyping : ∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) :
+    ProgressResult store lifetime term := by
+  rcases htyping with ⟨env₂, ty, htyping⟩
+  exact typeAndBorrowProgress_whenInitialized hvalid hstoreTyping hslotsOutlive
+    hsafe hstore htyping
+
+/--
+Initialized typed current states do not get stuck: if the term is not terminal,
+the operational semantics has a next step.
+-/
+theorem theorem_4_12_typeAndBorrowStep_whenInitialized
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty}
+      (hvalid : ValidRuntimeState store term)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hslotsOutlive : EnvSlotsOutlive env₁ lifetime)
+      (hsafe : SafeAbstractionWhenInitialized store env₁)
+      (hstore : OperationalStoreProgress store)
+      (htyping : TermTyping env₁ typing lifetime term ty env₂)
+      (hnotTerminal : ¬ Terminal term) :
+    ∃ store' term', Step store lifetime term store' term' :=
+  typeAndBorrowStep_whenInitialized hvalid hstoreTyping hslotsOutlive hsafe
+    hstore htyping hnotTerminal
+
+/--
+Theorem 4.12 progress component under the same initialized current-state
+invariant used by preservation.
+-/
+theorem theorem_4_12_typeAndBorrowStep_of_preservationInvariant
+    {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {term : Term} {ty : Ty}
+      (hvalid : ValidRuntimeState store term)
+      (hstoreTyping : ValidStoreTyping store term typing)
+      (hwellFormed : WellFormedEnvWhenInitialized env₁ lifetime)
+      (hsafe : SafeAbstractionWhenInitialized store env₁)
+      (hstore : OperationalStoreProgress store)
+      (htyping : TermTyping env₁ typing lifetime term ty env₂)
+      (hnotTerminal : ¬ Terminal term) :
+    ∃ store' term', Step store lifetime term store' term' :=
+  typeAndBorrowStep_of_preservationInvariant hvalid hstoreTyping hwellFormed
+    hsafe hstore htyping hnotTerminal
 
 /-- Theorem 4.12, conditional Type and Borrow Safety for source continuations.
 This currently assumes termination, which is too strong, but we will anyways introduce non-termination later.

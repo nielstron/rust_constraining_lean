@@ -2161,6 +2161,16 @@ theorem write_defined_of_location {store : ProgramStore} {lv : LVal}
   exact ⟨store.update location { slot with value := value }, by
     simp [ProgramStore.write, hloc, hslot]⟩
 
+/-- Stale-aware operational corollary: locating an lval makes `write` defined. -/
+theorem write_defined_of_location_whenInitialized {store : ProgramStore}
+    {env : Env} {lv : LVal} {ty : PartialTy} {value : PartialValue} :
+    LValLocationAbstractionWhenInitialized env store lv ty →
+    ∃ store', store.write lv value = some store' := by
+  intro hlocation
+  rcases hlocation with ⟨location, slot, hloc, hslot, _hvalid⟩
+  exact ⟨store.update location { slot with value := value }, by
+    simp [ProgramStore.write, hloc, hslot]⟩
+
 /-- A successful runtime write updates exactly the location selected by `loc`. -/
 theorem write_eq_update_of_read {store store' : ProgramStore}
     {lv : LVal} {oldSlot : StoreSlot} {value : PartialValue} :
@@ -2215,6 +2225,22 @@ theorem readPreservation_of_location {store : ProgramStore} {lv : LVal} {ty : Ty
     hvalue,
     hvalidValue⟩
 
+theorem readPreservation_of_location_whenInitialized {store : ProgramStore}
+    {env : Env} {lv : LVal} {ty : Ty} :
+    LValLocationAbstractionWhenInitialized env store lv (.ty ty) →
+    ∃ value slot,
+      store.read lv = some slot ∧
+      slot.value = .value value ∧
+      ValidPartialValueWhenInitialized env store (.value value) (.ty ty) := by
+  intro hlocation
+  rcases hlocation with ⟨location, slot, hloc, hslot, hvalid⟩
+  rcases validPartialValueWhenInitialized_full_value hvalid with
+    ⟨value, hvalue, hvalidValue⟩
+  exact ⟨value, slot, by
+      simp [ProgramStore.read, hloc, hslot],
+    hvalue,
+    hvalidValue⟩
+
 theorem readPreservation_of_safe {store : ProgramStore} {env : Env}
     {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
     store ∼ₛ env →
@@ -2226,6 +2252,18 @@ theorem readPreservation_of_safe {store : ProgramStore} {env : Env}
   intro hsafe htyping
   exact readPreservation_of_location
     (lvalTyping_defined_location_of_safe hsafe htyping)
+
+theorem readPreservation_of_safe_whenInitialized {store : ProgramStore}
+    {env : Env} {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
+    SafeAbstractionWhenInitialized store env →
+    LValTyping env lv (.ty ty) lifetime →
+    ∃ value slot,
+      store.read lv = some slot ∧
+      slot.value = .value value ∧
+      ValidPartialValueWhenInitialized env store (.value value) (.ty ty) := by
+  intro hsafe htyping
+  exact readPreservation_of_location_whenInitialized
+    (lvalTyping_defined_location_whenInitialized hsafe htyping)
 
 /-- Corollary 9.4, Read Preservation. -/
 theorem readPreservation {store : ProgramStore} {env : Env}

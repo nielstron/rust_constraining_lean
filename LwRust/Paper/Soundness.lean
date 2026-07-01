@@ -31,7 +31,9 @@ strengthenings to keep.  In brief:
   references, matching Definition 3.18;
 * theorem interface: Theorem 4.12 exposes `TerminatesAsValue` instead of
   proving terminal existence.  The nontermination-friendly local safety
-  statement is `progress_runtime_step`;
+  statement is `progress_runtime_step`; for states maintained by the
+  stale-aware preservation invariant, use
+  `theorem_4_12_typeAndBorrowStep_of_preservationInvariant`;
 * repairs/strengthenings: the abstract `ProgramStore` exposes progress
   totality as `OperationalStoreProgress`, declaration and assignment carry the
   local coherence/rank facts needed by preservation, and source-initial wrappers
