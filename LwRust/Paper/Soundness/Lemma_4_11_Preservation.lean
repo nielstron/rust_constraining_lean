@@ -5471,6 +5471,40 @@ theorem EnvWrite.runtime_selected_lval_map_whenInitialized
     exact ⟨hpath, hdirect⟩
   exact (hall (φ (LVal.base lv))).2 rfl htyping hloc hselectedSlot
     hselectedSlotTy hwrite
+/--
+Full-box branch of `EnvWrite.runtime_selected_spine_map_whenInitialized`.
+
+This is the remaining selected-owner transport obligation for full boxes: if
+`*source` resolves to the protected heap leaf, then writing through `*source`
+must have the same environment shape as updating the reconstructed owner spine.
+When `source` itself is reached through a borrow, the proof has to reselect the
+borrow target and then descend through that target's full box.
+-/
+theorem EnvWrite.runtime_selected_spine_map_boxFull_whenInitialized
+    {store : ProgramStore}
+    {env result : Env} {current sourceLifetime : Lifetime} {source : LVal}
+    {lvTy rhsTy : Ty} {address : Nat} {xRoot : Name} {envSlot : EnvSlot}
+    {rootSlot leafSlot : StoreSlot} {spinePath : List Unit} {leafTy : Ty}
+    {rank : Nat} {φ : Name → Nat} :
+    LinearizedBy φ env →
+    WellFormedEnvWhenInitialized env current →
+    SafeAbstractionWhenInitialized store env →
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    env.slotAt xRoot = some envSlot →
+    StoreOwnerSpineWhenInitialized env store (VariableProjection xRoot)
+      rootSlot envSlot.ty spinePath (.heap address) leafSlot (.ty leafTy) →
+    spinePath ≠ [] →
+    LValTyping env source (.ty (.box lvTy)) sourceLifetime →
+    store.loc (.deref source) = some (.heap address) →
+    EnvWrite rank env (.deref source) rhsTy result →
+    EnvSameShapeStrengthening
+      (env.update xRoot
+        { envSlot with
+            ty := PartialTy.strongLeafUpdate envSlot.ty spinePath rhsTy })
+      result := by
+  sorry
+
 theorem EnvWrite.runtime_selected_spine_map_whenInitialized
     {store : ProgramStore}
     {env result : Env} {current lifetime : Lifetime} {lv : LVal}
@@ -5605,7 +5639,9 @@ where
                 rw [hgoalEq]
                 exact hfinal
       | @boxFull _ inner sourceLifetime hsource =>
-        sorry
+        exact EnvWrite.runtime_selected_spine_map_boxFull_whenInitialized
+          hφ hwellFormed hsafe hvalidStore hheap hrootSlot hspine
+          hspineNonempty hsource hloc hwrite
       | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
           hsource htargets =>
         have hsourceAbs :
