@@ -229,21 +229,15 @@ These deviations from the paper should be kept.
   which implies it (`OperationalStoreProgress.of_finiteSupport`), is preserved
   by reduction (`FiniteSupport.step`), and powers the reachable-state results.
 
-- **Theorem 4.12 is proven in the paper's total form.**  `SoundState` is the
-  step-stable soundness invariant (re-established by the step theorem
-  `SoundState.step`), giving progress and terminal preservation at every
-  reachable state (`no_stuck_states`: no reachable state is stuck) and
-  termination (`SoundState.terminatesAsValue`, via the step-decreasing size
-  measure `step_size_lt`).  `theorem_4_12_typeAndBorrowSafety_total` and
-  `emptyInitial_typeAndBorrowSafety_total` conclude the paper's claim —
-  execution reaches a terminal value and that state is safe — with
-  termination proven rather than assumed.  `SoundState` carries the
-  originating typed run rather than a re-typing of the intermediate
-  continuation; a literal continuation re-typing is unavailable in this
-  calculus, since a declaration whose initialiser block declares the same
-  variable reaches safe intermediate states whose continuation is not
-  typeable (the runtime store already holds the inner variable's slot while
-  `T-Declare` requires the outer binder fresh).
+- **Theorem 4.12 is proven in the paper's total form for missing-free source
+  terms.**  `terminatesAsValue_missingFree` constructs the terminal multistep by
+  recursion over the typing derivation, using preservation of evaluated
+  subterms to recover the safe abstraction needed by later operations.
+  `step_size_lt` records the operational reason this works: every missing-free
+  step strictly decreases syntax size.  `theorem_4_12_typeAndBorrowSafety_total`
+  and `emptyInitial_typeAndBorrowSafety_total` conclude the paper's claim for
+  `Term.MissingFree` programs — execution reaches a terminal value and that
+  state is safe — with termination proven rather than assumed.
 
 - **Write fan-out requires initialized typed leaves.**  `WriteBorrowTargets`
   carries an initialized full-lvalue typing witness for each concrete fan-out
@@ -276,11 +270,14 @@ These deviations from the paper should be kept.
   store typing to environment/lifetime well-formedness.  They are proof
   interface obligations, not extra source typing rules.
 
-- **Theorem 4.12 assumes terminal execution.**  The paper states existence of a
-  terminal run, relying on termination of the core calculus.  The mechanisation
-  keeps this separate: `typeAndBorrowSafety` takes an explicit
-  `TerminatesAsValue` witness and proves safety for that terminal run.  The
-  nontermination-friendly component is exposed as progress.
+- **Theorem 4.12 proves terminal execution for missing-free source terms.**  The
+  integrated syntax still contains generated `.missing`, which is intentionally
+  well typed and self-loops.  The lower-level `typeAndBorrowSafety` bridge keeps
+  an explicit `TerminatesAsValue` witness for such generated terms, while
+  `theorem_4_12_typeAndBorrowSafety_total` and
+  `emptyInitial_typeAndBorrowSafety_total` derive the terminal run from
+  `Term.MissingFree`.  The nontermination-friendly component remains exposed as
+  progress.
 
 - **Progress exposes the finite-store operational assumption.**
   `OperationalStoreProgress` packages fresh-allocation, drop, assignment, and

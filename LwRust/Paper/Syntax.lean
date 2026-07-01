@@ -133,5 +133,103 @@ inductive Term.Diverges : Term → Prop where
       Term.Diverges term →
       Term.Diverges (.block lifetime terms)
 
+mutual
+  /-- Syntactic exclusion of the generated diverging `missing` placeholder. -/
+  def Term.MissingFree : Term → Prop
+    | .block _ terms => Term.MissingFreeList terms
+    | .letMut _ initialiser => initialiser.MissingFree
+    | .assign _ rhs => rhs.MissingFree
+    | .box operand => operand.MissingFree
+    | .borrow _ _ => True
+    | .move _ => True
+    | .copy _ => True
+    | .val _ => True
+    | .missing => False
+    | .eq lhs rhs => lhs.MissingFree ∧ rhs.MissingFree
+    | .ite condition trueBranch falseBranch =>
+        condition.MissingFree ∧ trueBranch.MissingFree ∧ falseBranch.MissingFree
+
+  def Term.MissingFreeList : List Term → Prop
+    | [] => True
+    | term :: rest => term.MissingFree ∧ Term.MissingFreeList rest
+end
+
+theorem Term.MissingFreeList.of_mem {terms : List Term} {term : Term} :
+    Term.MissingFreeList terms →
+    term ∈ terms →
+    term.MissingFree := by
+  intro hfree hmem
+  induction terms with
+  | nil =>
+      cases hmem
+  | cons head tail ih =>
+      rcases hfree with ⟨hhead, htail⟩
+      rcases List.mem_cons.mp hmem with hterm | hmem
+      · subst hterm
+        exact hhead
+      · exact ih htail hmem
+
+theorem Term.MissingFreeList.tail {term : Term} {rest : List Term} :
+    Term.MissingFreeList (term :: rest) →
+    Term.MissingFreeList rest :=
+  fun hfree => hfree.2
+
+theorem Term.MissingFree.block_head {lifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    Term.MissingFree (.block lifetime (term :: rest)) →
+    term.MissingFree :=
+  fun hfree => hfree.1
+
+theorem Term.MissingFree.block_tail {lifetime : Lifetime} {term next : Term}
+    {rest : List Term} :
+    Term.MissingFree (.block lifetime (term :: next :: rest)) →
+    Term.MissingFree (.block lifetime (next :: rest)) :=
+  fun hfree => hfree.2
+
+theorem Term.MissingFree.box_inner {term : Term} :
+    Term.MissingFree (.box term) → term.MissingFree :=
+  fun hfree => hfree
+
+theorem Term.MissingFree.declare_inner {x : Name} {term : Term} :
+    Term.MissingFree (.letMut x term) → term.MissingFree :=
+  fun hfree => hfree
+
+theorem Term.MissingFree.assign_inner {lhs : LVal} {rhs : Term} :
+    Term.MissingFree (.assign lhs rhs) → rhs.MissingFree :=
+  fun hfree => hfree
+
+theorem Term.MissingFree.eq_lhs {lhs rhs : Term} :
+    Term.MissingFree (.eq lhs rhs) → lhs.MissingFree :=
+  fun hfree => hfree.1
+
+theorem Term.MissingFree.eq_rhs {lhs rhs : Term} :
+    Term.MissingFree (.eq lhs rhs) → rhs.MissingFree :=
+  fun hfree => hfree.2
+
+theorem Term.MissingFree.ite_condition {condition trueBranch falseBranch : Term} :
+    Term.MissingFree (.ite condition trueBranch falseBranch) →
+    condition.MissingFree :=
+  fun hfree => hfree.1
+
+theorem Term.MissingFree.ite_trueBranch {condition trueBranch falseBranch : Term} :
+    Term.MissingFree (.ite condition trueBranch falseBranch) →
+    trueBranch.MissingFree :=
+  fun hfree => hfree.2.1
+
+theorem Term.MissingFree.ite_falseBranch {condition trueBranch falseBranch : Term} :
+    Term.MissingFree (.ite condition trueBranch falseBranch) →
+    falseBranch.MissingFree :=
+  fun hfree => hfree.2.2
+
+theorem Term.MissingFree.not_diverges {term : Term} :
+    term.MissingFree →
+    ¬ term.Diverges := by
+  intro hfree hdiv
+  induction hdiv with
+  | missing =>
+      exact hfree
+  | block hmem _hinner ih =>
+      exact ih (Term.MissingFreeList.of_mem hfree hmem)
+
 end Core
 end LwRust

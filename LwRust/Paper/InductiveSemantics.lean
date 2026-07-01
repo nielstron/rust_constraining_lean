@@ -278,12 +278,163 @@ theorem multistep_append {store₁ store₂ store₃ : ProgramStore} {lifetime :
   | trans hstep _ ih =>
       exact MultiStep.trans hstep (ih hright)
 
+theorem MultiStep.subBox {store store' : ProgramStore} {lifetime : Lifetime}
+    {term term' : Term} :
+    MultiStep store lifetime term store' term' →
+    MultiStep store lifetime (.box term) store' (.box term') := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subBox hstep) ih
+
+theorem MultiStep.subDeclare {store store' : ProgramStore} {lifetime : Lifetime}
+    {x : Name} {term term' : Term} :
+    MultiStep store lifetime term store' term' →
+    MultiStep store lifetime (.letMut x term) store' (.letMut x term') := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subDeclare hstep) ih
+
+theorem MultiStep.subAssign {store store' : ProgramStore} {lifetime : Lifetime}
+    {lhs : LVal} {rhs rhs' : Term} :
+    MultiStep store lifetime rhs store' rhs' →
+    MultiStep store lifetime (.assign lhs rhs) store' (.assign lhs rhs') := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subAssign hstep) ih
+
+theorem MultiStep.subEqLeft {store store' : ProgramStore} {lifetime : Lifetime}
+    {lhs lhs' rhs : Term} :
+    MultiStep store lifetime lhs store' lhs' →
+    MultiStep store lifetime (.eq lhs rhs) store' (.eq lhs' rhs) := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subEqLeft hstep) ih
+
+theorem MultiStep.subEqRight {store store' : ProgramStore} {lifetime : Lifetime}
+    {value : Value} {rhs rhs' : Term} :
+    MultiStep store lifetime rhs store' rhs' →
+    MultiStep store lifetime (.eq (.val value) rhs) store' (.eq (.val value) rhs') := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subEqRight hstep) ih
+
+theorem MultiStep.subIte {store store' : ProgramStore} {lifetime : Lifetime}
+    {condition condition' trueBranch falseBranch : Term} :
+    MultiStep store lifetime condition store' condition' →
+    MultiStep store lifetime (.ite condition trueBranch falseBranch)
+      store' (.ite condition' trueBranch falseBranch) := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.subIte hstep) ih
+
+theorem MultiStep.blockHead {store store' : ProgramStore}
+    {outerLifetime blockLifetime : Lifetime} {term term' : Term}
+    {rest : List Term} :
+    MultiStep store blockLifetime term store' term' →
+    MultiStep store outerLifetime (.block blockLifetime (term :: rest))
+      store' (.block blockLifetime (term' :: rest)) := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      exact MultiStep.refl
+  | trans hstep _ ih =>
+      exact MultiStep.trans (Step.blockA hstep) ih
+
 theorem step_multistep {store store' : ProgramStore} {lifetime : Lifetime}
     {term term' : Term} :
     Step store lifetime term store' term' →
     MultiStep store lifetime term store' term' := by
   intro hstep
   exact MultiStep.trans hstep MultiStep.refl
+
+theorem Term.MissingFree.step {store store' : ProgramStore}
+    {lifetime : Lifetime} {term term' : Term} :
+    term.MissingFree →
+    Step store lifetime term store' term' →
+    term'.MissingFree := by
+  intro hfree hstep
+  induction hstep with
+  | missing =>
+      exact False.elim hfree
+  | copy _ | move _ _ | box _ _ | borrow _ | assign _ _ _ | declare _
+    | eqTrue | eqFalse _ =>
+      trivial
+  | seq _hdrops =>
+      exact hfree.2
+  | blockA _ ih =>
+      exact ⟨ih hfree.1, hfree.2⟩
+  | blockB _hdrops =>
+      trivial
+  | subBox _ ih =>
+      exact ih hfree
+  | subDeclare _ ih =>
+      exact ih hfree
+  | subAssign _ ih =>
+      exact ih hfree
+  | iteTrue =>
+      exact hfree.2.1
+  | iteFalse =>
+      exact hfree.2.2
+  | subEqLeft _ ih =>
+      exact ⟨ih hfree.1, hfree.2⟩
+  | subEqRight _ ih =>
+      exact ⟨trivial, ih hfree.2⟩
+  | subIte _ ih =>
+      exact ⟨ih hfree.1, hfree.2⟩
+
+theorem step_size_lt {store store' : ProgramStore} {lifetime : Lifetime}
+    {term term' : Term} :
+    term.MissingFree →
+    Step store lifetime term store' term' →
+    term'.size < term.size := by
+  intro hfree hstep
+  induction hstep with
+  | missing =>
+      exact False.elim hfree
+  | copy _ | move _ _ | box _ _ | borrow _ | assign _ _ _ | declare _
+    | seq _ | blockB _ | eqTrue | eqFalse _ =>
+      simp [Term.size, Term.sizeList]
+  | iteTrue | iteFalse =>
+      simp [Term.size]
+      omega
+  | blockA _ ih =>
+      have hinner := ih hfree.1
+      simp [Term.size, Term.sizeList]
+      omega
+  | subBox _ ih | subDeclare _ ih | subAssign _ ih =>
+      have hinner := ih hfree
+      simp [Term.size]
+      omega
+  | subEqLeft _ ih =>
+      have hinner := ih hfree.1
+      simp [Term.size]
+      omega
+  | subEqRight _ ih =>
+      have hinner := ih hfree.2
+      simp [Term.size]
+      omega
+  | subIte _ ih =>
+      have hinner := ih hfree.1
+      simp [Term.size]
+      omega
 
 theorem multistep_first_step_of_not_terminal {store finalStore : ProgramStore}
     {lifetime : Lifetime} {term : Term} {finalValue : Value} :

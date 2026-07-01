@@ -17,37 +17,36 @@ borrow/read/write conflict checks, small-step semantics, progress, and
 preservation infrastructure.  It also incorporates the follow-up paper's
 linearizability idea and the Section 6 boolean/equality/conditional extension.
 
-The mechanized headline result is not exactly the paper's Theorem 4.12.  The
-paper derives terminal execution for the terminating core calculus.  Lean's
-Theorem 4.12 wrappers assume a terminal multistep as an input, because the
-formalized language includes a well-typed diverging `missing` term.  Preservation
-also concludes a weaker "when initialized" safety predicate rather than the full
-paper safe-abstraction/value-validity conclusion.
+The mechanized headline result is close to the paper's Theorem 4.12 for the
+terminating core calculus: Lean now proves terminal execution for source terms
+that satisfy `Term.MissingFree`.  The integrated language still includes a
+well-typed diverging `missing` term, so lower-level generated-term safety keeps
+an explicit terminal multistep input.  Preservation also concludes a weaker
+"when initialized" safety predicate rather than the full paper
+safe-abstraction/value-validity conclusion.
 
 ## Major Differences
 
-### 1. The final type-and-borrow-safety theorem assumes termination
+### 1. Terminal existence is proved only for missing-free terms
 
 The paper's Theorem 4.12 states that a well-typed program evaluates to some
 terminal value, using the fact that the core calculus has no looping construct.
 
-Lean's corresponding theorem requires:
+Lean's paper-facing wrapper now requires:
 
-- `TerminatesAsValue store lifetime term` as a hypothesis
-  (`LwRust/Paper/Soundness/Theorem_4_12_TypeAndBorrowSafety.lean:202-215`,
-  `300-316`, `325-341`).
-- A separate progress component proves only terminal-or-step
-  (`LwRust/Paper/Soundness/Theorem_4_12_TypeAndBorrowSafety.lean:233-244`).
+- `Term.MissingFree term`, excluding the generated diverging placeholder.
+- finite store support, the concrete-store condition used to discharge
+  allocation/drop totality.
 
-This is a real result difference.  Terminal existence is not established by the
-formalization for the integrated language.  This is not just cosmetic:
+This is still a real integrated-language distinction:
 `.missing` is part of `Term` (`LwRust/Paper/Syntax.lean:87-103`), has a self-loop
 step (`LwRust/Paper/InductiveSemantics.lean:16-19`), is typable at loan-free
 well-formed types (`LwRust/Paper/Typing.lean:2032-2039`), and cannot multistep to
 a value (`LwRust/Paper/InductiveSemantics.lean:207-211`).
 
-Conclusion: Lean proves non-stuckness plus conditional terminal safety, not the
-paper's unconditional terminal-existence theorem.
+Conclusion: Lean proves the paper-style terminal-existence theorem for the
+missing-free source fragment, while generated terms containing `.missing` remain
+covered by the conditional terminal-safety bridge.
 
 ### 2. Preservation concludes a weaker final safety predicate
 
@@ -265,8 +264,9 @@ The formalization does not appear to smuggle in an assumption that the program i
 already safe, and the proofs are not completed by obvious proof holes.  However,
 the formalized results differ significantly from the papers:
 
-- The paper's terminal-existence theorem is replaced by a conditional theorem
-  that assumes termination.
+- The paper's terminal-existence theorem is proved for the missing-free source
+  fragment; generated `.missing` terms still use the conditional terminal-safety
+  bridge.
 - Preservation concludes a weaker initialized/stale-loan safety predicate.
 - The type system is strengthened with coherence, linearizability, and
   assignment/declaration obligations not present in the original rules.

@@ -4,8 +4,9 @@ import LwRust.Paper.Soundness.InitialStates
 Build-checked accepted paper-style examples.
 
 Each `*_typeSafety` theorem invokes the empty-initial form of Theorem 4.12:
-from a typing derivation, the program reduces to a terminal value whose final
-state is safe at initialized places.
+from a typing derivation and syntactic exclusion of generated `.missing`, the
+program reduces to a terminal value whose final state is safe at initialized
+places.
 -/
 
 namespace LwRust
@@ -44,13 +45,18 @@ theorem scalarCopyComparison_terminates :
   exact ⟨ProgramStore.empty, .bool true,
     MultiStep.trans Step.eqTrue MultiStep.refl⟩
 
+theorem scalarCopyComparison_missingFree :
+    scalarCopyComparison.MissingFree := by
+  unfold scalarCopyComparison
+  simp [Term.MissingFree]
+
 theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .bool :=
   emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
-    scalarCopyComparison_terminates
+    scalarCopyComparison_missingFree
 
 /--
 Accepted `if/else` example for the control-flow extension: both branches return
@@ -80,13 +86,18 @@ theorem ifThenElseInt_terminates :
   exact ⟨ProgramStore.empty, .int 1,
     MultiStep.trans Step.iteTrue MultiStep.refl⟩
 
+theorem ifThenElseInt_missingFree :
+    ifThenElseInt.MissingFree := by
+  unfold ifThenElseInt
+  simp [Term.MissingFree]
+
 theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
-    ifThenElseInt_terminates
+    ifThenElseInt_missingFree
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
@@ -117,13 +128,18 @@ theorem ifEqThenElseInt_terminates :
     MultiStep.trans (Step.subIte Step.eqTrue)
       (MultiStep.trans Step.iteTrue MultiStep.refl)⟩
 
+theorem ifEqThenElseInt_missingFree :
+    ifEqThenElseInt.MissingFree := by
+  unfold ifEqThenElseInt scalarCopyComparison
+  simp [Term.MissingFree]
+
 theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
-    ifEqThenElseInt_terminates
+    ifEqThenElseInt_missingFree
 
 /--
 Regression outline for the relaxed `T-If` join.

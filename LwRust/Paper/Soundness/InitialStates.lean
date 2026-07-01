@@ -714,27 +714,27 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     htyping
 
 /--
-**Theorem 4.12, empty-initial terminal-safety form.**  Any term typed from the
-empty initial environment and store typing has a safe terminal state whenever
-such a terminal execution is supplied.  This no longer derives termination:
-generated `missing` syntax is well typed and diverges by self-loop.
+**Theorem 4.12, empty-initial terminal-safety form.**  Any missing-free term
+typed from the empty initial environment and store typing has a safe terminal
+state.  The `MissingFree` premise is necessary because generated `.missing`
+syntax is well typed and diverges by self-loop.
 -/
 theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    TerminatesAsValue ProgramStore.empty lifetime term →
+    term.MissingFree →
     ∃ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore
           (.val finalValue) ∧
         TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty := by
-  intro htyping hterminates
+  intro htyping hfree
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
+  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hfree hvalidRuntime hvalidStoreTyping
     (hwellFormed lifetime) hsafe
-    ProgramStore.finiteSupport_empty htyping hterminates).2
+    ProgramStore.finiteSupport_empty htyping).2
 
 end Paper
 end LwRust

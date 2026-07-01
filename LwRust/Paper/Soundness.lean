@@ -29,9 +29,11 @@ strengthenings to keep.  In brief:
 * move sources are lvalue-general where the paper permits them; `EnvMove` is
   intentionally `Strike`-based and therefore cannot move out through borrowed
   references, matching Definition 3.18;
-* theorem interface: Theorem 4.12 exposes `TerminatesAsValue` instead of
-  proving terminal existence.  The nontermination-friendly local safety
-  statement is `progress_runtime_step`; for states maintained by the
+* theorem interface: the lower-level safety bridge still accepts an explicit
+  `TerminatesAsValue` witness for generated terms that may contain `.missing`,
+  while the paper-facing Theorem 4.12 wrapper proves terminal existence for
+  source terms satisfying `Term.MissingFree`.  The nontermination-friendly local
+  safety statement is `progress_runtime_step`; for states maintained by the
   stale-aware preservation invariant, use
   `theorem_4_12_typeAndBorrowStep_of_preservationInvariant`;
 * repairs/strengthenings: the abstract `ProgramStore` exposes progress
