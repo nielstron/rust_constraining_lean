@@ -1784,21 +1784,26 @@ theorem noStaleIfAfterWrite_coherent :
     hp | hq | hy | hs | hds
   · rcases hp with ⟨_hlv, htargets⟩
     subst htargets
-    exact ⟨.int, Lifetime.root, noStaleIfAfterWrite_ab_targets_typing⟩
+    exact ⟨.ty .int, Lifetime.root,
+      LValTargetsTyping.toMaybe noStaleIfAfterWrite_ab_targets_typing⟩
   · rcases hq with ⟨_hlv, htargets⟩
     subst htargets
-    exact ⟨.int, Lifetime.root, noStaleIfAfterWrite_db_targets_typing⟩
+    exact ⟨.ty .int, Lifetime.root,
+      LValTargetsTyping.toMaybe noStaleIfAfterWrite_db_targets_typing⟩
   · rcases hy with ⟨_hlv, htargets⟩
     subst htargets
-    exact ⟨.int, Lifetime.root, noStaleIfAfterWrite_deref_p_c_targets_typing⟩
+    exact ⟨.ty .int, Lifetime.root,
+      LValTargetsTyping.toMaybe noStaleIfAfterWrite_deref_p_c_targets_typing⟩
   · rcases hs with ⟨_hlv, htargets⟩
     subst htargets
-    exact ⟨.borrow true
-        [noStaleIfDLVal, noStaleIfBLVal, noStaleIfALVal, noStaleIfBLVal],
-      Lifetime.root, noStaleIfAfterWrite_qp_targets_typing⟩
+    exact ⟨.ty (.borrow true
+        [noStaleIfDLVal, noStaleIfBLVal, noStaleIfALVal, noStaleIfBLVal]),
+      Lifetime.root, LValTargetsTyping.toMaybe
+        noStaleIfAfterWrite_qp_targets_typing⟩
   · rcases hds with ⟨_hlv, hnonempty, hmem⟩
-    exact ⟨.int, Lifetime.root,
-      noStaleIfAfterWrite_targets_int_typing targets hnonempty hmem⟩
+    exact ⟨.ty .int, Lifetime.root,
+      LValTargetsTyping.toMaybe
+        (noStaleIfAfterWrite_targets_int_typing targets hnonempty hmem)⟩
 
 theorem noStaleIf_final_write_rhs_targets_wellFormed :
     EnvWriteRhsTargetsWellFormed noStaleIfAfterWriteEnv
@@ -1839,25 +1844,8 @@ theorem noStaleIf_final_write_rhs_targets_wellFormed :
         rw [hslotLifetime]
         exact LifetimeOutlives.refl Lifetime.root⟩
 
-theorem noStaleIf_final_write_typing :
-    TermTyping noStaleIfJoinEnv StoreTyping.empty Lifetime.root
-      (.assign (.deref noStaleIfSLVal) (.borrow true noStaleIfBLVal))
-      .unit noStaleIfAfterWriteEnv := by
-  exact TermTyping.assign
-    (TermTyping.mutBorrow noStaleIfJoin_b_typing
-      (Mutable.var noStaleIfJoin_slot_b)
-      noStaleIfJoin_not_writeProhibited_b)
-    noStaleIfJoin_deref_s_typing
-    noStaleIf_shape_deref_s_rhs
-    noStaleIf_borrow_b_wellFormed
-    noStaleIf_write_deref_s
-    noStaleIf_final_write_ranked
-    noStaleIfAfterWrite_coherent
-    noStaleIf_final_write_rhs_targets_wellFormed
-    noStaleIfAfterWrite_not_writeProhibited_deref_s
-
 theorem noStaleIf_p_may_read_through_deref_p :
-    EnvMayReadThrough noStaleIfAfterWriteEnv noStaleIfPLVal
+    EnvMayReadThrough noStaleIfJoinEnv noStaleIfPLVal
       noStaleIfDerefP :=
   EnvMayReadThrough.direct (LVal.StrictPrefixOf.self_deref noStaleIfPLVal)
 

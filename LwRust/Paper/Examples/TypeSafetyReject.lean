@@ -101,9 +101,9 @@ theorem invalidBorrowExample_rejected :
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
-                                  | assign _hRhs _hLhsPost _hshape _hwell
-                                      hwrite _hranked _hcoh _hcontained
-                                      hnotWrite =>
+                                    | assign _hRhs _hLhsPost _hshape _hwell
+                                        hwrite _hnoStale _hranked _hcoherent
+                                        _hrhsTargets hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue

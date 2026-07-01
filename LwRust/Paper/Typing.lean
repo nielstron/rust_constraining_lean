@@ -468,6 +468,54 @@ mutual
         LValTargetsTyping env (target :: rest) unionTy lifetime
 end
 
+/--
+Stale-aware target-list typing used by coherence invariants.
+
+Unlike `LValTargetsTyping`, this allows a target to contribute an `undef`
+partial type.  It records that the static target list still has a least common
+partial type, without making the corresponding borrow dereference readable:
+`T-LvBor` continues to use `LValTargetsTyping`, whose singleton targets must be
+fully initialized.
+-/
+inductive LValTargetsMaybeTyping :
+    Env → List LVal → PartialTy → Lifetime → Prop where
+  | singleton {env : Env} {target : LVal} {partialTy : PartialTy}
+      {lifetime : Lifetime} :
+      LValTyping env target partialTy lifetime →
+      LValTargetsMaybeTyping env [target] partialTy lifetime
+  | cons {env : Env} {target : LVal} {rest : List LVal}
+      {headTy : PartialTy} {headLifetime restLifetime lifetime : Lifetime}
+      {restTy unionTy : PartialTy} :
+      LValTyping env target headTy headLifetime →
+      LValTargetsMaybeTyping env rest restTy restLifetime →
+      PartialTyUnion headTy restTy unionTy →
+      LifetimeIntersection headLifetime restLifetime lifetime →
+      LValTargetsMaybeTyping env (target :: rest) unionTy lifetime
+
+theorem LValTargetsTyping.toMaybe {env : Env} {targets : List LVal}
+    {partialTy : PartialTy} {lifetime : Lifetime} :
+    LValTargetsTyping env targets partialTy lifetime →
+    LValTargetsMaybeTyping env targets partialTy lifetime := by
+  intro htyping
+  exact LValTargetsTyping.rec
+    (motive_1 := fun _lv _partialTy _lifetime _ => True)
+    (motive_2 := fun targets partialTy lifetime _ =>
+      LValTargetsMaybeTyping env targets partialTy lifetime)
+    (by intro _x _slot _hslot; trivial)
+    (by intro _lv _inner _lifetime _htyping _ih; trivial)
+    (by
+      intro _lv _mutable _targets _borrowLifetime _targetLifetime _targetTy
+        _hborrow _htargets _ihBorrow _ihTargets
+      trivial)
+    (by
+      intro target _ty _lifetime htarget _ihTarget
+      exact LValTargetsMaybeTyping.singleton htarget)
+    (by
+      intro target rest _headTy _headLifetime _restLifetime _lifetime _restTy
+        _unionTy hhead _hrest hunion hintersection _ihHead ihRest
+      exact LValTargetsMaybeTyping.cons hhead ihRest hunion hintersection)
+    htyping
+
 /-- Definitions 3.12 and 3.13 collapse to a list of dereference selectors. -/
 abbrev Path := List Unit
 
@@ -1164,12 +1212,52 @@ def BorrowTargetsWellFormedInSlot
         targetLifetime ≤ slotLifetime ∧
         LValBaseOutlives env target slotLifetime
 
+/--
+Weaker borrow-target invariant for stale loan annotations.
+
+A target list carried by a type can be a conservative protection token after a
+path-insensitive join: the annotation still blocks writes through
+`ReadProhibited`/`WriteProhibited`, but a moved-out target is not currently
+dereferenceable.  The target's base slot must still survive for the containing
+loan, but the full target typing needed to dereference the borrow is conditional
+on the target being initialized.
+-/
+def BorrowTargetsWellFormedWhenInitialized
+    (env : Env) (targets : List LVal) (lifetime : Lifetime) : Prop :=
+  ∀ target, target ∈ targets →
+    LValBaseOutlives env target lifetime ∧
+      ((∃ targetTy targetLifetime,
+        LValTyping env target (.ty targetTy) targetLifetime) →
+      ∃ targetTy targetLifetime,
+        LValTyping env target (.ty targetTy) targetLifetime ∧
+          targetLifetime ≤ lifetime ∧
+          LValBaseOutlives env target lifetime)
+
+/-- Slot-local version of `BorrowTargetsWellFormedWhenInitialized`. -/
+def BorrowTargetsWellFormedInSlotWhenInitialized
+    (env : Env) (slotLifetime : Lifetime) (targets : List LVal) : Prop :=
+  BorrowTargetsWellFormedWhenInitialized env targets slotLifetime
+
 /-- Slot-local borrow invariant for a partial type. -/
 def PartialTyBorrowsWellFormedInSlot
     (env : Env) (slotLifetime : Lifetime) (partialTy : PartialTy) : Prop :=
   ∀ {mutable targets},
     PartialTyContains partialTy (.borrow mutable targets) →
     BorrowTargetsWellFormedInSlot env slotLifetime targets
+
+/-- Slot-local weak borrow invariant for a partial type. -/
+def PartialTyBorrowsWellFormedInSlotWhenInitialized
+    (env : Env) (slotLifetime : Lifetime) (partialTy : PartialTy) : Prop :=
+  ∀ {mutable targets},
+    PartialTyContains partialTy (.borrow mutable targets) →
+    BorrowTargetsWellFormedInSlotWhenInitialized env slotLifetime targets
+
+/-- Weak borrow invariant for a full type. -/
+def TyBorrowsWellFormedWhenInitialized
+    (env : Env) (ty : Ty) (lifetime : Lifetime) : Prop :=
+  ∀ {mutable targets},
+    PartialTyContains (.ty ty) (.borrow mutable targets) →
+    BorrowTargetsWellFormedWhenInitialized env targets lifetime
 
 /--
 Minimal lifetime obligation for assignment writes.
@@ -1211,6 +1299,16 @@ def ContainedBorrowsWellFormed (env : Env) : Prop :=
     env ⊢ x ↝ (Ty.borrow mutable targets) →
     BorrowTargetsWellFormedInSlot env slot.lifetime targets
 
+/--
+Every borrow contained in every environment slot has well-formed targets when
+those targets are currently initialized.
+-/
+def ContainedBorrowsWellFormedWhenInitialized (env : Env) : Prop :=
+  ∀ x slot mutable targets,
+    env.slotAt x = some slot →
+    env ⊢ x ↝ (Ty.borrow mutable targets) →
+    BorrowTargetsWellFormedInSlotWhenInitialized env slot.lifetime targets
+
 /-- The minimal RHS-target obligation is (much) weaker than the broad result
 CBWF: any environment that is fully `ContainedBorrowsWellFormed` satisfies it for
 every `rhsTy`.  Used to discharge the obligation in examples that already prove
@@ -1234,12 +1332,39 @@ targets, which is what `T-LvBor` needs for reborrows.
 def Coherent (env : Env) : Prop :=
   ∀ lv mutable targets borrowLifetime,
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
-    ∃ ty lifetime, LValTargetsTyping env targets (.ty ty) lifetime
+    ∃ partialTy lifetime, LValTargetsMaybeTyping env targets partialTy lifetime
+
+/-- A target list whose every target is currently initialized. -/
+def BorrowTargetsInitialized (env : Env) (targets : List LVal) : Prop :=
+  ∀ target, target ∈ targets →
+    ∃ targetTy targetLifetime,
+      LValTyping env target (.ty targetTy) targetLifetime
+
+/--
+Weaker coherence for stale loan annotations: a borrow-typed lvalue must have
+jointly typeable targets only when all of those targets are currently
+initialized.  If some target has been moved out, the borrow annotation remains a
+protection token but cannot be dereferenced through `T-LvBor`.
+-/
+def CoherentWhenInitialized (env : Env) : Prop :=
+  ∀ lv mutable targets borrowLifetime,
+    LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
+    BorrowTargetsInitialized env targets →
+    ∃ partialTy lifetime, LValTargetsMaybeTyping env targets partialTy lifetime
 
 theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
     LinearizedBy φ env → Linearizable env := by
   intro hφ
   exact ⟨φ, hφ⟩
+
+/--
+Weaker environment invariant that permits stale loan annotations while keeping
+their base slots live as conservative protection tokens.
+-/
+def WellFormedEnvWhenInitialized (env : Env) (lifetime : Lifetime) : Prop :=
+  ContainedBorrowsWellFormedWhenInitialized env ∧
+    EnvSlotsOutlive env lifetime ∧
+    CoherentWhenInitialized env ∧ Linearizable env
 
 /-- Definition 4.8, well-formed environment, with the maintained invariants. -/
 def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
@@ -1400,6 +1525,28 @@ inductive WellFormedTy : Env → Ty → Lifetime → Prop where
   | box {env : Env} {ty : Ty} {lifetime : Lifetime} :
       WellFormedTy env ty lifetime →
       WellFormedTy env (.box ty) lifetime
+
+/--
+Weak type well-formedness for stale loan annotations.
+
+This mirrors `WellFormedTy`, but borrow targets only need to be well formed
+when initialized.  A type may therefore carry a conservative borrow target list
+whose base slot is still live but whose full lvalue is currently moved out.
+-/
+inductive WellFormedTyWhenInitialized : Env → Ty → Lifetime → Prop where
+  | unit {env : Env} {lifetime : Lifetime} :
+      WellFormedTyWhenInitialized env .unit lifetime
+  | int {env : Env} {lifetime : Lifetime} :
+      WellFormedTyWhenInitialized env .int lifetime
+  | bool {env : Env} {lifetime : Lifetime} :
+      WellFormedTyWhenInitialized env .bool lifetime
+  | borrow {env : Env} {mutable : Bool} {targets : List LVal}
+      {lifetime : Lifetime} :
+      BorrowTargetsWellFormedWhenInitialized env targets lifetime →
+      WellFormedTyWhenInitialized env (.borrow mutable targets) lifetime
+  | box {env : Env} {ty : Ty} {lifetime : Lifetime} :
+      WellFormedTyWhenInitialized env ty lifetime →
+      WellFormedTyWhenInitialized env (.box ty) lifetime
 
 /-- Definition 3.22, compatible shape `Γ ⊢ T̃₁ ≈ T̃₂`. -/
 inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
@@ -1728,12 +1875,13 @@ mutual
 end
 
 /--
-No surviving borrow target may dereference through an effective write.
+No surviving borrow target may dereference through an effective write in the
+pre-write environment.
 
 This is a local assignment-side obligation, weaker than global `BorrowSafeEnv`:
 it only talks about old or newly surviving borrow targets in the write result,
 and only forbids the stale-resolution shape where an effective write is a
-strict prefix of a live borrow target.
+strict prefix of a live borrow target as resolved before the write.
 -/
 def EnvWriteNoStaleBorrowTargets
     (rank : Nat) (env : Env) (lv : LVal) (rhsTy : Ty) (result : Env) : Prop :=
@@ -1742,7 +1890,7 @@ def EnvWriteNoStaleBorrowTargets
     result.slotAt x = some slot →
     result ⊢ x ↝ (.borrow mutable targets) →
     target ∈ targets →
-    EnvMayReadThrough result written target →
+    EnvMayReadThrough env written target →
     False
 
 theorem EnvWrite.finiteSupport {rank : Nat} {env result : Env}
@@ -1874,6 +2022,7 @@ mutual
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
         EnvWrite 0 env₂ lhs rhsTy env₃ →
+        EnvWriteNoStaleBorrowTargets 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
         Coherent env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
@@ -1911,13 +2060,12 @@ mutual
     post-condition environment, and the resulting type/environment are the
     joins (Definitions 3.8 and 3.10) of the branch results.
 
-    Mechanisation obligations on the joined result, following the repo's
-    convention of rule-carried structural obligations (cf. `T-Assign`).
+    Legacy mechanisation obligations on the joined result, following the
+    repo's earlier convention of rule-carried obligations (cf. `T-Assign`).
+    `EnvJoinSameShape` is no longer a premise: join shape facts used by the
+    metatheory are derived internally from the weak initialized invariant and
+    the concrete join construction.
 
-    * `EnvJoinSameShape` for both branches — branches must agree on each
-      variable's initialisation state (see that definition for why the
-      paper's more liberal join is unsound against Definition 4.4 as
-      printed);
     * `Coherent`, `Linearizable` — the result invariants needed to type
       dereferences through joined borrow target lists.  The per-target
       `ContainedBorrowsWellFormed` invariant is derived in the preservation
@@ -1930,8 +2078,6 @@ mutual
         TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
         PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
         EnvJoin env₃ env₄ env₅ →
-        EnvJoinSameShape env₃ env₅ →
-        EnvJoinSameShape env₄ env₅ →
         WellFormedTy env₅ joinTy lifetime →
         Coherent env₅ →
         Linearizable env₅ →
@@ -2012,16 +2158,16 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hrank _hcoherence
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnoStale _hrank _hcoherence
         _hcontained _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs
         _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
       rw [henvEq]
       exact (ihRhs (ihLhs hfinite).update).erase)
-    (fun _hcondition _htrue _hfalse _htyJoin henvJoin _hsameLeft
-        _hsameRight _hwellTy _hcoherent _hlinear ihCondition ihTrue
-        _ihFalse hfinite =>
+    (fun _hcondition _htrue _hfalse _htyJoin henvJoin
+        _hwellTy _hcoherent _hlinear
+        ihCondition ihTrue _ihFalse hfinite =>
       EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
     (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
         _ihFalse hfinite =>

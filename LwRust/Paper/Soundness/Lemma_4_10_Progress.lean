@@ -992,10 +992,10 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
         (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-      hRhs hLhsPost hshape hwfTy hwrite hranked hcoh hcontained hnotWrite
+      hRhs hLhsPost hshape hwfTy hwrite hnoStale hranked hcoh hcontained hnotWrite
       ih hsize hvst hwf hsafe hstore
     exact progress_assign_typing hsafe hstore
-      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hranked hcoh
+      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hnoStale hranked hcoh
         hcontained hnotWrite)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
@@ -1031,7 +1031,7 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
   case ite =>
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing lifetime condition trueBranch
       falseBranch trueTy falseTy joinTy hcondition _htrue _hfalse _hjoin _henvJoin
-      _hsameLeft _hsameRight _hwellJoin _hcoherent _hlinear ihCondition
+      _hwellJoin _hcoherent _hlinear ihCondition
       _ihTrue _ihFalse hsize hvst hwf hsafe hstore
     rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
         hvst.ite_condition hwf hsafe hstore with

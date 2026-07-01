@@ -5,7 +5,7 @@ Build-checked accepted paper-style examples.
 
 Each `*_typeSafety` theorem invokes the empty-initial form of Theorem 4.12:
 from a typing derivation, the program reduces to a terminal value whose final
-state is safe.
+state is safe at initialized places.
 -/
 
 namespace LwRust
@@ -48,13 +48,13 @@ theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
-      TerminalStateSafe finalStore finalValue Env.empty .bool :=
+      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .bool :=
   emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
     scalarCopyComparison_terminates
 
 /--
 Accepted `if/else` example for the control-flow extension: both branches return
-the same borrow-free type, and the joined environment is empty and borrow safe.
+the same borrow-free type, and the joined environment is empty.
 -/
 def ifThenElseInt : Term :=
   .ite (.val (.bool true)) (.val (.int 1)) (.val (.int 2))
@@ -68,15 +68,11 @@ theorem ifThenElseInt_typing :
     (TermTyping.const ValueTyping.int)
     (TermTyping.const ValueTyping.int)
     (PartialTyJoin.self (.ty .int))
-    ?join ?leftShape ?rightShape
+    ?join
     WellFormedTy.int
     coherent_empty
     linearizable_empty
   · simp [EnvJoin]
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
 
 theorem ifThenElseInt_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root ifThenElseInt := by
@@ -88,13 +84,13 @@ theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
-      TerminalStateSafe finalStore finalValue Env.empty .int :=
+      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
     ifThenElseInt_terminates
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
-still joins to the empty borrow-safe environment.
+still joins to the empty environment.
 -/
 def ifEqThenElseInt : Term :=
   .ite scalarCopyComparison (.val (.int 1)) (.val (.int 2))
@@ -108,15 +104,11 @@ theorem ifEqThenElseInt_typing :
     (TermTyping.const ValueTyping.int)
     (TermTyping.const ValueTyping.int)
     (PartialTyJoin.self (.ty .int))
-    ?join ?leftShape ?rightShape
+    ?join
     WellFormedTy.int
     coherent_empty
     linearizable_empty
   · simp [EnvJoin]
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
-  · intro x branchSlot joinSlot hbranch
-    simp [Env.empty] at hbranch
 
 theorem ifEqThenElseInt_terminates :
     TerminatesAsValue ProgramStore.empty Lifetime.root ifEqThenElseInt := by
@@ -129,7 +121,7 @@ theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
-      TerminalStateSafe finalStore finalValue Env.empty .int :=
+      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
     ifEqThenElseInt_terminates
 
@@ -707,7 +699,7 @@ theorem retargetAfterIf_a_declare_coherent :
         simpa [retargetAfterIfEnv5, retargetAfterIfACSlot] using htyping) with
       ⟨_hlv, _hmutable, htargets, _hlife⟩
     subst htargets
-    exact ⟨.int, Lifetime.root,
+    exact ⟨Ty.int, Lifetime.root,
       LValTargetsTyping.singleton retargetAfterIfEnv5_c_typing⟩
 
 theorem retargetAfterIf_declare_c_typing :
@@ -1483,8 +1475,8 @@ theorem pointerIfRetarget_coherent : Coherent pointerIfRetargetEnv := by
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIfRetarget_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
-    exact ⟨.int, Lifetime.root,
-      LValTargetsTyping.singleton pointerIfRetarget_y_typing⟩
+    exact ⟨.ty Ty.int, Lifetime.root,
+      LValTargetsMaybeTyping.singleton pointerIfRetarget_y_typing⟩
   · rcases pointerIfRetarget_old_root_int hbase htyping with
       ⟨_, hpartialTy, _⟩
     cases hpartialTy
@@ -1500,6 +1492,7 @@ theorem pointerRetargetBranch_typing :
     pointerIf_shape_px_py
     pointerIf_borrow_y_wellFormed
     pointerIf_retarget_write
+    pointerIf_retarget_noStale
     pointerIf_retarget_ranked
     pointerIfRetarget_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed pointerIfRetarget_contained)
@@ -1742,7 +1735,8 @@ theorem pointerIf_coherent : Coherent pointerIfEnv := by
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIf_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
-    exact ⟨.int, Lifetime.root, LValTargetsTyping.singleton pointerIf_x_typing⟩
+    exact ⟨.ty Ty.int, Lifetime.root,
+      LValTargetsMaybeTyping.singleton pointerIf_x_typing⟩
   · rcases pointerIf_old_root_int hbase htyping with ⟨_, hpartialTy, _⟩
     cases hpartialTy
 
@@ -1864,6 +1858,7 @@ theorem pointerWriteBranch_typing :
     ShapeCompatible.int
     WellFormedTy.int
     pointerIf_write_deref_p
+    pointerIf_write_noStale
     pointerIf_write_ranked
     pointerIf_write_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
@@ -2072,9 +2067,9 @@ theorem pointerIfJoin_coherent : Coherent pointerIfJoinEnv := by
   by_cases hbase : LVal.base lv = "p"
   · rcases (pointerIfJoin_p_root_facts hbase).2 htyping with
       ⟨rfl, rfl, rfl, rfl⟩
-    exact ⟨.int, Lifetime.root,
-      LValTargetsTyping.cons pointerIfJoin_y_typing
-        (LValTargetsTyping.singleton pointerIfJoin_x_typing)
+    exact ⟨.ty Ty.int, Lifetime.root,
+      LValTargetsMaybeTyping.cons pointerIfJoin_y_typing
+        (LValTargetsMaybeTyping.singleton pointerIfJoin_x_typing)
         (PartialTyUnion.self (.ty .int))
         (LifetimeIntersection.self Lifetime.root)⟩
   · rcases pointerIfJoin_old_root_int hbase htyping with ⟨_, hpartialTy, _⟩
@@ -2468,8 +2463,6 @@ theorem ifPointerAssignment_typing :
     pointerWriteBranch_typing
     (PartialTyJoin.self (.ty .unit))
     ifPointerAssignment_join_obligations.1
-    ifPointerAssignment_join_obligations.2.1
-    ifPointerAssignment_join_obligations.2.2.1
     WellFormedTy.unit
     ifPointerAssignment_join_obligations.2.2.2.2.1
     ifPointerAssignment_join_obligations.2.2.2.2.2.1
@@ -2747,8 +2740,8 @@ theorem retargetAfterIfTrue_coherent : Coherent retargetAfterIfTrueEnv := by
   subst hlv
   subst hmutable
   subst htargets
-  exact ⟨.int, Lifetime.root,
-    LValTargetsTyping.singleton retargetAfterIfTrue_d_typing⟩
+  exact ⟨.ty Ty.int, Lifetime.root,
+    LValTargetsMaybeTyping.singleton retargetAfterIfTrue_d_typing⟩
 
 theorem retargetAfterIfTrue_contained :
     ContainedBorrowsWellFormed retargetAfterIfTrueEnv := by
@@ -2850,8 +2843,8 @@ theorem retargetAfterIfFalse_coherent : Coherent retargetAfterIfFalseEnv := by
   subst hlv
   subst hmutable
   subst htargets
-  exact ⟨.int, Lifetime.root,
-    LValTargetsTyping.singleton retargetAfterIfFalse_e_typing⟩
+  exact ⟨.ty Ty.int, Lifetime.root,
+    LValTargetsMaybeTyping.singleton retargetAfterIfFalse_e_typing⟩
 
 theorem retargetAfterIfFalse_contained :
     ContainedBorrowsWellFormed retargetAfterIfFalseEnv := by
@@ -2996,6 +2989,7 @@ theorem retargetAfterIf_trueBranch_typing :
     retargetAfterIf_shape_ac_ad
     retargetAfterIf_borrow_d_wellFormed
     retargetAfterIf_write_a_d
+    retargetAfterIf_retarget_d_noStale
     retargetAfterIf_retarget_d_ranked
     retargetAfterIfTrue_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
@@ -3014,6 +3008,7 @@ theorem retargetAfterIf_falseBranch_typing :
     retargetAfterIf_shape_ac_ae
     retargetAfterIf_borrow_e_wellFormed
     retargetAfterIf_write_a_e
+    retargetAfterIf_retarget_e_noStale
     retargetAfterIf_retarget_e_ranked
     retargetAfterIfFalse_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed
@@ -3115,9 +3110,9 @@ theorem retargetAfterIfJoin_coherent : Coherent retargetAfterIfJoinEnv := by
   subst hlv
   subst hmutable
   subst htargets
-  exact ⟨.int, Lifetime.root,
-    LValTargetsTyping.cons retargetAfterIfJoin_d_typing
-      (LValTargetsTyping.singleton retargetAfterIfJoin_e_typing)
+  exact ⟨.ty Ty.int, Lifetime.root,
+    LValTargetsMaybeTyping.cons retargetAfterIfJoin_d_typing
+      (LValTargetsMaybeTyping.singleton retargetAfterIfJoin_e_typing)
       (PartialTyUnion.self (.ty .int))
       (LifetimeIntersection.self Lifetime.root)⟩
 
@@ -3681,8 +3676,6 @@ theorem retargetAfterIf_if_typing :
     retargetAfterIf_falseBranch_typing
     (PartialTyJoin.self (.ty .unit))
     retargetAfterIf_envJoin
-    retargetAfterIfTrue_join_sameShape
-    retargetAfterIfFalse_join_sameShape
     WellFormedTy.unit
     retargetAfterIfJoin_coherent
     retargetAfterIfJoin_linearizable
@@ -3895,6 +3888,7 @@ theorem retargetAfterIf_final_write_typing :
     ShapeCompatible.int
     WellFormedTy.int
     retargetAfterIf_write_deref_a
+    retargetAfterIf_write_deref_a_noStale
     retargetAfterIf_write_int_ranked
     retargetAfterIfJoin_coherent
     (EnvWriteRhsTargetsWellFormed.of_containedBorrowsWellFormed

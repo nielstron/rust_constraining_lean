@@ -1355,6 +1355,27 @@ theorem BorrowTargetsWellFormedInSlot.erase_ghost {env : Env} {ghost : Name}
     houtlives,
     LValBaseOutlives.erase_ghost (hnot target hmem) hbase⟩
 
+theorem LValTargetsMaybeTyping.erase_ghost {env : Env} {ghost : Name}
+    {targets : List LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
+    LValTargetsMaybeTyping env targets partialTy lifetime →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+    LValTargetsMaybeTyping (env.erase ghost) targets partialTy lifetime := by
+  intro htyping hfresh hnot
+  induction htyping with
+  | singleton htarget =>
+      exact LValTargetsMaybeTyping.singleton
+        (LValTyping.erase_ghost.1 htarget hfresh
+          (hnot _ (by simp)))
+  | cons hhead _hrest hunion hintersection ihRest =>
+      exact LValTargetsMaybeTyping.cons
+        (LValTyping.erase_ghost.1 hhead hfresh
+          (hnot _ (by simp)))
+        (ihRest (by
+          intro target hmem
+          exact hnot target (by simp [hmem])))
+        hunion hintersection
+
 theorem ContainedBorrowsWellFormed.erase_ghost {env : Env} {ghost : Name} :
     ContainedBorrowsWellFormed env →
     Env.TypeNameFresh (env.erase ghost) ghost →
@@ -1415,7 +1436,8 @@ theorem Coherent.erase_ghost {env : Env} {ghost : Name} :
   have htargetsNot :
       ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
     not_mentions_of_mem_borrow_allVars hborrowFresh
-  exact ⟨targetTy, targetLifetime, LValTyping.erase_ghost.2 htargets hfresh htargetsNot⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTargetsMaybeTyping.erase_ghost htargets hfresh htargetsNot⟩
 
 theorem LinearizedBy.erase_ghost {φ : Name → Nat} {env : Env}
     {ghost : Name} :
@@ -3699,7 +3721,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
                 by simp [Ty.allVars]⟩)
     (by
       intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs
-        rhsTy hRhs hLhs hshape hwell hwrite hranked hcoh hcontained
+        rhsTy hRhs hLhs hshape hwell hwrite hnoStale hranked hcoh hcontained
         hnotWrite ih hfresh hstore hnot
       have hnotRhs : ¬ Term.Mentions ghost rhs := by
         intro hmention
@@ -3715,6 +3737,9 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         LValTyping.typeNameFresh.1 hLhsErased hfreshRhs
       have hwriteErased :=
         EnvWrite.erase_ghost hwrite hfreshRhs hnotLhs hrhsFresh
+      have hnoStaleErased :=
+        EnvWriteNoStaleBorrowTargets.erase_ghost_of_write hnoStale hwrite
+          hfreshRhs hnotLhs hrhsFresh
       have hfreshWrite :=
         EnvWrite.typeNameFresh_erase hwrite hfreshRhs hnotLhs hrhsFresh
       rcases hranked with ⟨φ, hlinear, hrhsBelow⟩
@@ -3725,6 +3750,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
           (by simpa [PartialTy.allVars] using hrhsFresh))
         (WellFormedTy.erase_ghost hwell hfreshRhs hrhsFresh)
         hwriteErased
+        hnoStaleErased
         ⟨φ, LinearizedBy.erase_ghost hlinear,
           EnvWriteRhsBorrowTargetsBelow.erase_ghost hrhsBelow⟩
         (Coherent.erase_ghost hcoh hfreshWrite)
@@ -3826,7 +3852,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ env₃ env₄ env₅ typing lifetime condition trueBranch
         falseBranch trueTy falseTy joinTy hcondition htrue hfalse htyJoin
-        henvJoin hsameLeft hsameRight hwellJoin hcoherent hlinear
+        henvJoin hwellJoin hcoherent hlinear
         ihCondition ihTrue ihFalse hfresh hstore hnot
       have hnotCondition : ¬ Term.Mentions ghost condition := by
         intro hmention
@@ -3853,8 +3879,6 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         EnvJoin.typeNameFresh_erase henvJoin hfreshTrue hfreshFalse
       exact ⟨TermTyping.ite hconditionErased htrueErased hfalseErased
         htyJoin (EnvJoin.erase_ghost henvJoin)
-        (EnvJoinSameShape.erase_ghost hsameLeft)
-        (EnvJoinSameShape.erase_ghost hsameRight)
         (WellFormedTy.erase_ghost hwellJoin hfreshJoin hjoinTyFresh)
         (Coherent.erase_ghost hcoherent hfreshJoin)
         (Linearizable.erase_ghost hlinear),

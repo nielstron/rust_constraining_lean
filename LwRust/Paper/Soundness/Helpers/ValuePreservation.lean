@@ -373,6 +373,21 @@ theorem storeOwnersAllocated_declare_step_of_validValue {store store' : ProgramS
       subst hstore'
       exact storeOwnersAllocated_declare_of_validValue hallocated hvalidValue
 
+/-- Weak allocation preservation for `R-Declare`, from initialized validity. -/
+theorem storeOwnersAllocated_declare_step_of_validValueWhenInitialized
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    StoreOwnersAllocated store' := by
+  intro hallocated hvalidValue hstep
+  cases hstep with
+  | declare hstore' =>
+      subst hstore'
+      exact storeOwnersAllocated_declare_of_validValueWhenInitialized
+        hallocated hvalidValue
+
 /-- Allocation invariant preservation for `R-Seq`. -/
 theorem storeOwnersAllocated_seq_step {store store' : ProgramStore}
     {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
@@ -459,7 +474,23 @@ theorem validState_box_step_of_validValue {store store' : ProgramStore}
   cases hstep with
   | box hfresh hbox =>
       exact validState_box_step hvalidState hfresh
-        (validValue_fresh_not_owningLocation hvalidValue hfresh)
+          (validValue_fresh_not_owningLocation hvalidValue hfresh)
+          (not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
+          hbox
+
+/-- Weak-runtime version of `validState_box_step_of_validValue`. -/
+theorem validState_box_step_of_validValueWhenInitialized {store store' : ProgramStore}
+    {env : Env} {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
+    ValidState store (.box (.val value)) →
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidState store' (.val (.ref ref)) := by
+  intro hvalidState hallocated hvalidValue hstep
+  cases hstep with
+  | box hfresh hbox =>
+      exact validState_box_step hvalidState hfresh
+        (validValueWhenInitialized_fresh_not_owningLocation hvalidValue hfresh)
         (not_owns_of_fresh_of_storeOwnersAllocated hallocated hfresh)
         hbox
 
@@ -475,6 +506,20 @@ theorem storeOwnersAllocated_box_step_of_validValue {store store' : ProgramStore
   | box _hfresh hbox =>
       cases hbox
       exact storeOwnersAllocated_boxAt_of_validValue hallocated hvalidValue
+
+/-- Weak-runtime allocation invariant preservation for `R-Box`. -/
+theorem storeOwnersAllocated_box_step_of_validValueWhenInitialized
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
+    StoreOwnersAllocated store →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    StoreOwnersAllocated store' := by
+  intro hallocated hvalidValue hstep
+  cases hstep with
+  | box _hfresh hbox =>
+      cases hbox
+      exact storeOwnersAllocated_boxAt_of_validValueWhenInitialized hallocated hvalidValue
 
 /-! ### Composed Runtime Validity Preservation Fragments -/
 
@@ -658,6 +703,38 @@ theorem validRuntimeState_declare_step_of_validValue {store store' : ProgramStor
               (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
         termOwnerTargetsHeap_unit⟩
 
+/-- Runtime-validity preservation for `R-Declare`, from initialized validity. -/
+theorem validRuntimeState_declare_step_of_validValueWhenInitialized
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
+    ValidRuntimeState store (.letMut x (.val value)) →
+    store.fresh (.var x) →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
+    ValidRuntimeState store' (.val .unit) := by
+  intro hvalidRuntime hfresh hvalidValue hstep
+  cases hstep with
+  | declare hstore' =>
+      subst hstore'
+      have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+        ValueOwnerTargetsHeap.partial
+          (TermOwnerTargetsHeap.value
+            (termOwnerTargetsHeap_declare_inner
+              (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+      exact ⟨validState_declare hvalidRuntime.1 hfresh,
+        storeOwnersAllocated_declare_step_of_validValueWhenInitialized
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue
+          (Step.declare rfl),
+        by
+          simpa [ProgramStore.declare] using
+            storeOwnerTargetsHeap_update
+              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap,
+        by
+          simpa [ProgramStore.declare] using
+            heapSlotsRootLifetime_update_var
+              (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
+        termOwnerTargetsHeap_unit⟩
+
 /-- Runtime-validity preservation for `R-Seq`. -/
 theorem validRuntimeState_seq_step {store store' : ProgramStore}
     {lifetime blockLifetime : Lifetime} {value : Value} {next : Term} {rest : List Term} :
@@ -739,6 +816,45 @@ theorem validRuntimeState_box_step_of_validValue {store store' : ProgramStore}
           (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
           hvalidValue (Step.box (lifetime := lifetime) hfresh hbox),
         storeOwnersAllocated_box_step_of_validValue
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue
+          (Step.box (lifetime := lifetime) hfresh hbox),
+        by
+          cases hbox
+          simpa [ProgramStore.boxAt] using
+            storeOwnerTargetsHeap_update
+              (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hvalueHeap,
+        by
+          cases hbox
+          simpa [ProgramStore.boxAt] using
+            heapSlotsRootLifetime_update_heap_root
+              (ValidRuntimeState.heapSlotsRootLifetime hvalidRuntime),
+        by
+          cases hbox
+          intro owned hmem
+          simp [termOwningLocations, termValues, valueOwningLocations,
+            valueOwnedLocation?] at hmem
+          exact ⟨_, hmem⟩⟩
+
+/-- Weak-runtime preservation for `R-Box`, from weak operand validity. -/
+theorem validRuntimeState_box_step_of_validValueWhenInitialized
+    {store store' : ProgramStore} {env : Env}
+    {lifetime : Lifetime} {value : Value} {ty : Ty} {ref : Reference} :
+    ValidRuntimeState store (.box (.val value)) →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidRuntimeState store' (.val (.ref ref)) := by
+  intro hvalidRuntime hvalidValue hstep
+  cases hstep with
+  | box hfresh hbox =>
+      have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
+        ValueOwnerTargetsHeap.partial
+          (TermOwnerTargetsHeap.value
+            (termOwnerTargetsHeap_box_inner
+              (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime)))
+      exact ⟨validState_box_step_of_validValueWhenInitialized hvalidRuntime.1
+          (ValidRuntimeState.storeOwnersAllocated hvalidRuntime)
+          hvalidValue (Step.box (lifetime := lifetime) hfresh hbox),
+        storeOwnersAllocated_box_step_of_validValueWhenInitialized
           (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hvalidValue
           (Step.box (lifetime := lifetime) hfresh hbox),
         by
@@ -884,7 +1000,7 @@ after the source slot is overwritten with `undef`.
 theorem preservation_move_var_step_runtime {store store' : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
-    WellFormedEnv env₁ current →
+    WellFormedEnvWhenInitialized env₁ current →
     store ∼ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
@@ -917,7 +1033,7 @@ direct-variable analogue of the framed assignment fragments.
 theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
-    WellFormedEnv env₁ current →
+    WellFormedEnvWhenInitialized env₁ current →
     store ∼ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
@@ -1000,9 +1116,31 @@ theorem preservation_box_redex_runtime_of_validValue {store store' : ProgramStor
   | box hfresh hbox =>
       cases hbox
       exact ⟨validRuntimeState_box_step_of_validValue hvalidRuntime hoperandValid
-          (Step.box (lifetime := lifetime) hfresh rfl),
-        safeAbstraction_boxAt hfresh hsafe,
-        validValue_boxAt_ref hfresh hoperandValid⟩
+            (Step.box (lifetime := lifetime) hfresh rfl),
+          safeAbstraction_boxAt hfresh hsafe,
+          validValue_boxAt_ref hfresh hoperandValid⟩
+
+/-- Weak-runtime `R-Box` one-step preservation fragment. -/
+theorem preservation_box_redex_runtime_of_validValueWhenInitialized
+    {store store' : ProgramStore}
+    {env : Env} {lifetime : Lifetime}
+    {value : Value} {ty : Ty} {ref : Reference} :
+    SafeAbstractionWhenInitialized store env →
+    ValidRuntimeState store (.box (.val value)) →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
+    ValidRuntimeState store' (.val (.ref ref)) ∧
+      SafeAbstractionWhenInitialized store' env ∧
+      ValidPartialValueWhenInitialized env store' (.value (.ref ref))
+        (.ty (.box ty)) := by
+  intro hsafe hvalidRuntime hoperandValid hstep
+  cases hstep with
+  | box hfresh hbox =>
+      cases hbox
+      exact ⟨validRuntimeState_box_step_of_validValueWhenInitialized
+          hvalidRuntime hoperandValid (Step.box (lifetime := lifetime) hfresh rfl),
+        safeAbstractionWhenInitialized_boxAt hfresh hsafe,
+        validValueWhenInitialized_boxAt_ref hfresh hoperandValid⟩
 
 /--
 Lemma 4.11, `R-Box` one-step preservation fragment, factored around the
@@ -1237,7 +1375,6 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
-      (∃ inner, envSlot.ty = .undef inner) ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
@@ -1464,8 +1601,48 @@ theorem preservation_box_context_terminal_multistep_runtime
     (by
       intro hvalidInner hvalidStoreTypingInner hsafeInner hinnerTyping hmultiInner
       exact hinnerPreservation hvalidInner hvalidStoreTypingInner hsafeInner
-        hinnerTyping hmultiInner)
-    hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hboxStep
+          hinnerTyping hmultiInner)
+      hvalidRuntime hvalidStoreTyping hsafe htyping hinnerMulti hboxStep
+
+/-- Weak-runtime `T-Box` multistep preservation case. -/
+theorem preservation_box_context_terminal_multistep_runtime_whenInitialized
+    {store finalStore : ProgramStore}
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    (∀ {midStore value},
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      SafeAbstractionWhenInitialized store env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term midStore (.val value) →
+      ValidRuntimeState midStore (.val value) ∧
+        SafeAbstractionWhenInitialized midStore env₂ ∧
+        ValidPartialValueWhenInitialized env₂ midStore (.value value) (.ty ty)) →
+    ValidRuntimeState store (.box term) →
+    ValidStoreTyping store (.box term) typing →
+    SafeAbstractionWhenInitialized store env₁ →
+    TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
+    MultiStep store lifetime (.box term) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧
+      SafeAbstractionWhenInitialized finalStore env₂ ∧
+      ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
+        (.ty (.box ty)) := by
+  intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
+  rcases multistep_box_to_value_inv hmulti with
+    ⟨midStore, value, hinnerMulti, hboxStep⟩
+  cases htyping with
+  | box hinnerTyping =>
+      rcases hinnerPreservation
+          (validRuntimeState_box_inner hvalidRuntime)
+          (validStoreTyping_box_inner hvalidStoreTyping)
+          hsafe hinnerTyping hinnerMulti with
+        ⟨hvalidInner, hsafeInner, hvalidValue⟩
+      cases hboxStep with
+      | box hfresh hbox =>
+          exact preservation_box_redex_runtime_of_validValueWhenInitialized hsafeInner
+            (validRuntimeState_box_value_of_value hvalidInner)
+            hvalidValue
+            (Step.box (lifetime := lifetime) hfresh hbox)
 
 /-- Lemma 4.11, multistep preservation for `R-Declare` redexes. -/
 theorem preservation_declare_multistep_runtime {store finalStore : ProgramStore}

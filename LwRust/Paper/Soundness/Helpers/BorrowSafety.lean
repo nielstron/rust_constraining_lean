@@ -1069,11 +1069,11 @@ theorem borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {ty : Ty} :
     (∀ env lifetime, StoreTypingRefsWellFormed env typing lifetime) →
     ValidState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    store ∼ₛ env₁ →
-    TermTyping env₁ typing lifetime term ty env₂ →
-    WellFormedEnv env₂ lifetime := by
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      store ∼ₛ env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping
   exact borrowInvariance_of_ruleCarriedObligations
     hrefs hvalidState hvalidStoreTyping hwellFormed hsafe htyping

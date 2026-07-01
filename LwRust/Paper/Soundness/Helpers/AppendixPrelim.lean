@@ -1436,10 +1436,10 @@ theorem EnvJoin.le_right {left right join : Env}
     (h : EnvJoin left right join) : right ≤ join :=
   h.1 (Set.mem_insert_of_mem _ rfl)
 
-/-- Slots present in both branches of a join have the same shape: each
-branch slot is `sameShape` to the join slot (the `EnvJoinSameShape` rule
-premises), and shapes compose through the join.  This is the cross-branch
-fact needed by the same-shape strengthening maps of `T-IfJoin`. -/
+/-- Slots present in both branches of a join have the same shape when legacy
+same-shape-to-join evidence is available.  Current `T-If` no longer requires
+this premise; this helper remains for compatibility with full-invariant
+transport lemmas. -/
 theorem EnvJoin.branches_sameShape {left right join : Env}
     (hjoin : EnvJoin left right join)
     (hsameLeft : EnvJoinSameShape left join)
