@@ -5019,6 +5019,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
         EnvMayReadThrough env written dependencyTarget := by
   intro hwellFormed hsafe hvalidStore hheap hLv hwrite hreadPrefixTyping
     hlvLoc hreadPrefixLoc hmayRead
+  rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
   cases lv with
   | var x =>
       rcases LValTyping.var_inv hLv with
@@ -5081,7 +5082,10 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
                     hspineDeref hwrite hreadPrefixTyping hderefLoc
                     hreadPrefixLocOwner hmayRead
       | @boxFull _ inner sourceLifetime hsource =>
-          sorry
+          exact
+            envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location_whenInitialized.go
+              hwellFormed hsafe hvalidStore hheap hφ (LValTyping.boxFull hsource)
+              hwrite hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
       | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
           hsource htargets =>
           exact
