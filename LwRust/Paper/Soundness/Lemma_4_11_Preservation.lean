@@ -6595,7 +6595,272 @@ theorem EnvWrite.runtime_selected_spine_map_whenInitialized
         { envSlot with
             ty := PartialTy.strongLeafUpdate envSlot.ty spinePath rhsTy })
       result := by
-  sorry
+  intro hφ hwellFormed hsafe hvalidStore hheap hrootSlot hspine hspineNonempty
+    htyping hloc hwrite
+  exact goLVal hφ hwellFormed hsafe hvalidStore hheap hrootSlot hspine
+    hspineNonempty htyping hloc hwrite
+where
+  goLVal {store : ProgramStore} {env result : Env}
+      {current lifetime : Lifetime} {lv : LVal} {lvTy rhsTy : Ty}
+      {address : Nat} {xRoot : Name} {envSlot : EnvSlot}
+      {rootSlot leafSlot : StoreSlot} {spinePath : List Unit} {leafTy : Ty}
+      {rank : Nat} {φ : Name → Nat}
+      (hφ : LinearizedBy φ env)
+      (hwellFormed : WellFormedEnvWhenInitialized env current)
+      (hsafe : SafeAbstractionWhenInitialized store env)
+      (hvalidStore : ValidStore store) (hheap : StoreOwnerTargetsHeap store)
+      (hrootSlot : env.slotAt xRoot = some envSlot)
+      (hspine : StoreOwnerSpineWhenInitialized env store
+        (VariableProjection xRoot) rootSlot envSlot.ty spinePath
+        (.heap address) leafSlot (.ty leafTy))
+      (hspineNonempty : spinePath ≠ [])
+      (htyping : LValTyping env lv (.ty lvTy) lifetime)
+      (hloc : store.loc lv = some (.heap address))
+      (hwrite : EnvWrite rank env lv rhsTy result) :
+      EnvSameShapeStrengthening
+        (env.update xRoot
+          { envSlot with
+              ty := PartialTy.strongLeafUpdate envSlot.ty spinePath rhsTy })
+        result := by
+    cases lv with
+    | var x =>
+        simp [ProgramStore.loc] at hloc
+    | deref source =>
+      cases htyping with
+      | @box _ _ sourceLifetime hsource =>
+        rcases StoreOwnerSpineWhenInitialized.of_lvalTyping_box
+            hwellFormed hsafe hsource with
+          ⟨envSlot', rootSlot', sourceLocation, sourceSlot, henvBase,
+            hrootSlot', hrootLifetime', hsourceLoc, hsourceSlot,
+            hsourceSpine⟩
+        have hsourceValid :=
+          StoreOwnerSpineWhenInitialized.leaf_valid hsourceSpine
+        rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
+        cases hsourceValid with
+        | @box ownerLocation ownerSlot _ hownedSlot hinnerValid =>
+            have hderefLoc :
+                store.loc (.deref source) = some ownerLocation := by
+              simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+            have hlocEq : Location.heap address = ownerLocation := by
+              rw [hloc] at hderefLoc
+              exact Option.some.inj hderefLoc
+            have hsnoc :=
+              StoreOwnerSpineWhenInitialized.snoc_box hsourceSpine rfl rfl
+                hownedSlot hinnerValid
+            rw [← hlocEq] at hsnoc
+            have hlocalProt :
+                ProtectedByBase store (LVal.base source) (.heap address) :=
+              Or.inr
+                (StoreOwnerSpineWhenInitialized.ownsTransitively_of_nonempty
+                  hsnoc (by simp))
+            have hrootProt :
+                ProtectedByBase store xRoot (.heap address) :=
+              Or.inr
+                (StoreOwnerSpineWhenInitialized.ownsTransitively_of_nonempty
+                  hspine hspineNonempty)
+            have hbaseEq : LVal.base source = xRoot :=
+              ProtectedByBase.root_unique hvalidStore hheap hlocalProt
+                hrootProt
+            have henvSlotEq : envSlot' = envSlot := by
+              rw [hbaseEq] at henvBase
+              exact Option.some.inj (henvBase.symm.trans hrootSlot)
+            rw [henvSlotEq, hbaseEq] at hsnoc
+            have hpathEq : spinePath = () :: LVal.path source :=
+              StoreOwnerSpineWhenInitialized.path_unique hspine hsnoc
+            cases hwrite with
+            | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
+                hwriteSlot hupdate =>
+                have hwriteSlotBase :
+                    env.slotAt (LVal.base source) = some writeSlot := by
+                  simpa [LVal.base] using hwriteSlot
+                have hwriteSlotEq : writeSlot = envSlot := by
+                  rw [hbaseEq] at hwriteSlotBase
+                  exact Option.some.inj (hwriteSlotBase.symm.trans hrootSlot)
+                have hupdatePath :
+                    UpdateAtPath rank env (() :: LVal.path source) envSlot.ty
+                      rhsTy writeEnv updatedTy := by
+                  rw [← hwriteSlotEq]
+                  simpa [LVal.path_deref_cons] using hupdate
+                have hwriteEnvEq : writeEnv = env :=
+                  StoreOwnerSpineWhenInitialized.updateAtPath_env_eq hsnoc
+                    hupdatePath
+                rcases
+                    StoreOwnerSpineWhenInitialized.strongLeafUpdate_strengthens_updateAtPath
+                      hsnoc rfl hupdatePath with
+                  ⟨hstrength, hshape⟩
+                rw [hwriteEnvEq, hpathEq]
+                have hfinal :
+                    EnvSameShapeStrengthening
+                      (env.update xRoot
+                        { envSlot with
+                            ty := PartialTy.strongLeafUpdate envSlot.ty
+                              (() :: LVal.path source) rhsTy })
+                      (env.update xRoot { envSlot with ty := updatedTy }) :=
+                  EnvSameShapeStrengthening.update_same rfl hstrength hshape
+                have hgoalEq :
+                    env.update (LVal.base (LVal.deref source))
+                        { writeSlot with ty := updatedTy } =
+                      env.update xRoot { envSlot with ty := updatedTy } := by
+                  rw [hwriteSlotEq]
+                  simp [LVal.base, hbaseEq]
+                rw [hgoalEq]
+                exact hfinal
+      | @boxFull _ inner sourceLifetime hsource =>
+        sorry
+      | @borrow _ mutable targets borrowLifetime targetLifetime targetTy
+          hsource htargets =>
+        have hsourceAbs :
+            LValLocationAbstractionWhenInitialized env store source
+              (.ty (.borrow mutable targets)) :=
+          lvalTyping_defined_location_whenInitialized hsafe hsource
+        rcases hsourceAbs with
+          ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+        rcases sourceSlot with ⟨sourceValue, sourceLifetime'⟩
+        cases hsourceValid with
+        | @borrowLive selectedLocation _mutable _targets selectedTarget
+            _hinit hselectedMem htargetLocFromBorrow =>
+            rcases lvalTargetsTyping_member_strengthens htargets _
+                hselectedMem with
+              ⟨selectedTargetTy, selectedTargetLifetime, hselectedTyping,
+                _hselectedStrengthens⟩
+            have hderefLoc :
+                store.loc source.deref = some selectedLocation := by
+              simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+            have hselectedLocationEq :
+                selectedLocation = Location.heap address := by
+              rw [hloc] at hderefLoc
+              exact (Option.some.inj hderefLoc).symm
+            have hselectedLocHeap :
+                store.loc selectedTarget = some (.heap address) := by
+              simpa [hselectedLocationEq] using htargetLocFromBorrow
+            have hpathSelected :
+                RuntimeSpinePathSelected store env
+                  (.ty (.borrow mutable targets)) [()] address :=
+              RuntimeSpinePathSelected.borrowHere hselectedMem
+                hselectedTyping hselectedLocHeap
+            exact goPath hφ hwellFormed hsafe hvalidStore hheap hrootSlot
+              hspine hspineNonempty hsource hpathSelected
+              (by simpa [prependPath] using hwrite)
+        | @borrowStale _location _mutable _targets hstale =>
+            have hinitialized : BorrowTargetsInitialized env targets := by
+              intro target hmem
+              rcases lvalTargetsTyping_member_strengthens htargets target hmem with
+                ⟨selectedTy, selectedLifetime, hselectedTyping, _hstrength⟩
+              exact ⟨selectedTy, selectedLifetime, hselectedTyping⟩
+            exact False.elim (hstale hinitialized)
+  termination_by (φ (LVal.base lv), sizeOf lv, 1)
+  decreasing_by
+    all_goals
+      simp_wf
+      try subst_vars
+      try simp [LVal.base]
+      first
+      | exact Prod.Lex.right _ (Prod.Lex.left _ _ (by simp))
+      | exact Prod.Lex.left _ _ (by assumption)
+
+  goPath {store : ProgramStore} {env result : Env}
+      {current lifetime : Lifetime} {lv : LVal} {pt : PartialTy}
+      {path : List Unit} {rhsTy : Ty} {address : Nat} {xRoot : Name}
+      {envSlot : EnvSlot} {rootSlot leafSlot : StoreSlot}
+      {spinePath : List Unit} {leafTy : Ty} {rank : Nat} {φ : Name → Nat}
+      (hφ : LinearizedBy φ env)
+      (hwellFormed : WellFormedEnvWhenInitialized env current)
+      (hsafe : SafeAbstractionWhenInitialized store env)
+      (hvalidStore : ValidStore store) (hheap : StoreOwnerTargetsHeap store)
+      (hrootSlot : env.slotAt xRoot = some envSlot)
+      (hspine : StoreOwnerSpineWhenInitialized env store
+        (VariableProjection xRoot) rootSlot envSlot.ty spinePath
+        (.heap address) leafSlot (.ty leafTy))
+      (hspineNonempty : spinePath ≠ [])
+      (htyping : LValTyping env lv pt lifetime)
+      (hselected : RuntimeSpinePathSelected store env pt path address)
+      (hwrite : EnvWrite rank env (prependPath path lv) rhsTy result) :
+      EnvSameShapeStrengthening
+        (env.update xRoot
+          { envSlot with
+              ty := PartialTy.strongLeafUpdate envSlot.ty spinePath rhsTy })
+        result := by
+    cases hwrite with
+    | @intro _rank _env₁ writeEnv _writeLv writeSlot _ty updatedTy
+        hwriteSlot hupdate =>
+        have hwriteSlotBase :
+            env.slotAt (LVal.base lv) = some writeSlot := by
+          simpa [base_prependPath] using hwriteSlot
+        have hupdatePath :
+            UpdateAtPath rank env (LVal.path lv ++ path) writeSlot.ty rhsTy
+              writeEnv updatedTy := by
+          simpa [path_prependPath] using hupdate
+        have hselectedBase :
+            RuntimeSpinePathSelected store env writeSlot.ty
+              (LVal.path lv ++ path) address :=
+          RuntimeSpinePathSelected.prepend_of_lvalTyping htyping
+            hwriteSlotBase path hselected
+        have hbelow :
+            ∀ v, v ∈ PartialTy.vars writeSlot.ty → φ v < φ (LVal.base lv) :=
+          hφ (LVal.base lv) writeSlot hwriteSlotBase
+        have hrootProt :
+            ProtectedByBase store xRoot (.heap address) :=
+          Or.inr
+            (StoreOwnerSpineWhenInitialized.ownsTransitively_of_nonempty
+              hspine hspineNonempty)
+        rcases RuntimeSpinePathSelected.updateAtPath_map
+            (store := store) (env := env)
+            (selectedSource :=
+              env.update xRoot
+                { envSlot with
+                    ty := PartialTy.strongLeafUpdate envSlot.ty spinePath
+                      rhsTy })
+            (φ := φ) (rootRank := φ (LVal.base lv))
+            hbelow hselectedBase hupdatePath
+            (fun {branchRank target targetTy branchLifetime branchResult}
+                _hbranchRank _htargetRank htargetTyping htargetLoc
+                hbranchWrite =>
+              goLVal hφ hwellFormed hsafe hvalidStore hheap hrootSlot hspine
+                hspineNonempty htargetTyping htargetLoc hbranchWrite)
+            (fun {branchRank target branchPt branchLifetime branchPath
+                branchResult}
+                _hbranchRank _htargetRank htargetTyping htargetSelected
+                hbranchWrite =>
+              goPath hφ hwellFormed hsafe hvalidStore hheap hrootSlot hspine
+                hspineNonempty htargetTyping htargetSelected hbranchWrite)
+          with ⟨hmap, hstrength, hshape⟩
+        have hselectedRankLt :
+            φ xRoot < φ (LVal.base lv) :=
+          RuntimeSpinePathSelected.rank_lt_of_lvalTyping_whenInitialized
+            hφ hwellFormed hsafe hvalidStore hheap hselected hrootProt htyping
+        have hrootNeBase : xRoot ≠ LVal.base lv := by
+          intro hEq
+          rw [hEq] at hselectedRankLt
+          exact Nat.lt_irrefl _ hselectedRankLt
+        have hbaseNeRoot : LVal.base lv ≠ xRoot := by
+          intro hEq
+          exact hrootNeBase hEq.symm
+        have hslotStrong :
+            (env.update xRoot
+              { envSlot with
+                  ty := PartialTy.strongLeafUpdate envSlot.ty spinePath
+                    rhsTy }).slotAt
+              (LVal.base (prependPath path lv)) = some writeSlot := by
+          simpa [base_prependPath, Env.update, hbaseNeRoot] using
+            hwriteSlotBase
+        have hfinal :
+            EnvSameShapeStrengthening
+              (env.update xRoot
+                { envSlot with
+                    ty := PartialTy.strongLeafUpdate envSlot.ty spinePath
+                      rhsTy })
+              (writeEnv.update (LVal.base (prependPath path lv))
+                { writeSlot with ty := updatedTy }) :=
+          EnvSameShapeStrengthening.update_result_strengthening
+            hmap hslotStrong rfl hstrength hshape
+        simpa [base_prependPath] using hfinal
+  termination_by (φ (LVal.base lv), sizeOf lv, 0)
+  decreasing_by
+    all_goals
+      simp_wf
+      try subst_vars
+      try simp [LVal.base]
+      exact Prod.Lex.left _ _ (by assumption)
 theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed
     {store store' : ProgramStore} {env env' : Env}
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
