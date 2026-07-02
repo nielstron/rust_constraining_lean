@@ -1375,10 +1375,10 @@ theorem preservation_refl_runtime_value_whenInitialized {store : ProgramStore}
     {value : Value} {ty : Ty} :
     ValidRuntimeState store (.val value) →
     ValidStoreTyping store (.val value) typing →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     TermTyping env typing lifetime (.val value) ty env₂ →
     ValidRuntimeState store (.val value) ∧
-      SafeAbstractionWhenInitialized store env₂ ∧
+      SafeAbstraction store env₂ ∧
       ValidPartialValueWhenInitialized env₂ store (.value value) (.ty ty) := by
   intro hvalidRuntime hvalidStoreTyping hsafe htyping
   rcases valuePreservation_value hvalidStoreTyping htyping with
@@ -1392,11 +1392,11 @@ theorem preservation_multistep_runtime_value_whenInitialized
     {value finalValue : Value} {ty : Ty} :
     ValidRuntimeState store (.val value) →
     ValidStoreTyping store (.val value) typing →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     TermTyping env typing lifetime (.val value) ty env₂ →
     MultiStep store lifetime (.val value) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧
-      SafeAbstractionWhenInitialized finalStore env₂ ∧
+      SafeAbstraction finalStore env₂ ∧
       ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
         (.ty ty) := by
   intro hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
@@ -1426,15 +1426,28 @@ theorem preservation_value_tail_runtime {store finalStore : ProgramStore}
   subst hvalue
   exact hpreserved
 
+theorem preservation_value_tail_runtime_full {store finalStore : ProgramStore}
+    {env : Env} {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
+    ValidRuntimeState store (.val value) ∧ store ≈ₛ env ∧ ValidValue store value ty →
+    MultiStep store lifetime (.val value) finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env ∧
+      ValidValue finalStore finalValue ty := by
+  intro hpreserved hmulti
+  rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
+  injection hterm with hvalue
+  subst hstore
+  subst hvalue
+  exact hpreserved
+
 theorem preservation_value_tail_runtime_whenInitialized
     {store finalStore : ProgramStore}
     {env : Env} {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
     (ValidRuntimeState store (.val value) ∧
-      SafeAbstractionWhenInitialized store env ∧
+      SafeAbstraction store env ∧
       ValidPartialValueWhenInitialized env store (.value value) (.ty ty)) →
     MultiStep store lifetime (.val value) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧
-      SafeAbstractionWhenInitialized finalStore env ∧
+      SafeAbstraction finalStore env ∧
       ValidPartialValueWhenInitialized env finalStore (.value finalValue)
         (.ty ty) := by
   intro hpreserved hmulti
@@ -1510,6 +1523,31 @@ theorem preservation_runtime_multistep_of_step_to_value
       exact preservation_value_tail_runtime hpreserved htail)
     hmulti
 
+theorem preservation_runtime_multistep_of_step_to_value_full
+    {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {term : Term} {finalValue : Value} {ty : Ty} :
+    ¬ Terminal term →
+    (∀ store' term',
+      Step store lifetime term store' term' →
+      ∃ value, term' = .val value) →
+    (∀ store' value,
+      Step store lifetime term store' (.val value) →
+      ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env ∧
+        ValidValue store' value ty) →
+    MultiStep store lifetime term finalStore (.val finalValue) →
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env ∧
+      ValidValue finalStore finalValue ty := by
+  intro hnotTerminal hstepValue hstepPreserve hmulti
+  exact preservation_multistep_of_step_to_value
+    (Result := fun store' value =>
+      ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env ∧
+        ValidValue store' value ty)
+    hnotTerminal hstepValue hstepPreserve
+    (by
+      intro _store' _value _finalStore _finalValue hpreserved htail
+      exact preservation_value_tail_runtime_full hpreserved htail)
+    hmulti
+
 theorem preservation_runtime_multistep_of_step_to_value_whenInitialized
     {store finalStore : ProgramStore} {env : Env} {lifetime : Lifetime}
     {term : Term} {finalValue : Value} {ty : Ty} :
@@ -1520,18 +1558,18 @@ theorem preservation_runtime_multistep_of_step_to_value_whenInitialized
     (∀ store' value,
       Step store lifetime term store' (.val value) →
       ValidRuntimeState store' (.val value) ∧
-        SafeAbstractionWhenInitialized store' env ∧
+        SafeAbstraction store' env ∧
         ValidPartialValueWhenInitialized env store' (.value value) (.ty ty)) →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧
-      SafeAbstractionWhenInitialized finalStore env ∧
+      SafeAbstraction finalStore env ∧
       ValidPartialValueWhenInitialized env finalStore (.value finalValue)
         (.ty ty) := by
   intro hnotTerminal hstepValue hstepPreserve hmulti
   exact preservation_multistep_of_step_to_value
     (Result := fun store' value =>
       ValidRuntimeState store' (.val value) ∧
-        SafeAbstractionWhenInitialized store' env ∧
+        SafeAbstraction store' env ∧
         ValidPartialValueWhenInitialized env store' (.value value) (.ty ty))
     hnotTerminal hstepValue hstepPreserve
     (by
@@ -1687,7 +1725,7 @@ def LValDefinedLocationAbstractionWhenInitialized
 
 theorem location_var_whenInitialized {store : ProgramStore} {env : Env}
     {x : Name} {slot : EnvSlot} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     env.slotAt x = some slot →
     LValLocationAbstractionWhenInitialized env store (.var x) slot.ty := by
   intro hsafe henv
@@ -1752,7 +1790,7 @@ theorem validPartialValueWhenInitialized_full_value {env : Env}
 /-- Lemma 9.3, variable case. -/
 theorem location_var {store : ProgramStore} {env : Env}
     {x : Name} {slot : EnvSlot} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     env.slotAt x = some slot →
     LValLocationAbstraction store (.var x) slot.ty := by
   intro hsafe henv
@@ -1819,7 +1857,7 @@ runtime values.
 -/
 theorem lvalTyping_defined_location_of_safe {store : ProgramStore} {env : Env}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv ty lifetime →
     LValDefinedLocationAbstraction store lv ty := by
   intro hsafe htyping
@@ -1886,7 +1924,7 @@ theorem lvalTyping_defined_location_of_safe {store : ProgramStore} {env : Env}
 
 theorem lvalTyping_defined_location_whenInitialized {store : ProgramStore}
     {env : Env} {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     LValTyping env lv ty lifetime →
     LValDefinedLocationAbstractionWhenInitialized env store lv ty := by
   intro hsafe htyping
@@ -1973,7 +2011,7 @@ initialized in the sense required by `ValidPartialValueWhenInitialized`.
 theorem lvalTyping_allocated_location_of_safe_whenInitialized
     {store : ProgramStore} {env : Env}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     LValTyping env lv ty lifetime →
     LValAllocatedLocation store lv := by
   intro hsafe htyping
@@ -2032,7 +2070,7 @@ theorem lvalTyping_allocated_location_of_safe_whenInitialized
 theorem lvalTyping_defined_location {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv ty lifetime →
     LValDefinedLocationAbstraction store lv ty := by
   intro _hwellFormed hsafe htyping
@@ -2041,7 +2079,7 @@ theorem lvalTyping_defined_location {store : ProgramStore} {env : Env}
 theorem runtimeBorrowTarget_of_lvalTyping_safe {store : ProgramStore} {env : Env}
     {lv : LVal} {mutable : Bool} {targets : List LVal}
     {lifetime : Lifetime} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
     RuntimeBorrowTarget store lv targets := by
   intro hsafe htyping
@@ -2049,7 +2087,7 @@ theorem runtimeBorrowTarget_of_lvalTyping_safe {store : ProgramStore} {env : Env
     (lvalTyping_defined_location_of_safe hsafe htyping)
 
 theorem runtimeBorrowTargetsConservative_of_safe {store : ProgramStore} {env : Env} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     RuntimeBorrowTargetsConservative store env := by
   intro hsafe _lv _mutable _targets _lifetime htyping
   exact runtimeBorrowTarget_of_lvalTyping_safe hsafe htyping
@@ -2066,7 +2104,7 @@ reference is typed and belongs to the abstract target list.
 theorem runtimeCoherent_selectedTarget_of_safe {store : ProgramStore} {env : Env}
     {lv : LVal} {mutable : Bool} {targets : List LVal} {targetTy : Ty}
     {borrowLifetime targetLifetime : Lifetime} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv (.ty (.borrow mutable targets)) borrowLifetime →
     LValTargetsTyping env targets (.ty targetTy) targetLifetime →
     ∃ target targetTy selectedLifetime borrowedLocation,
@@ -2088,7 +2126,7 @@ theorem runtimeCoherent_of_coherent_safe {store : ProgramStore} {env : Env} :
       LValTyping env lv (.ty (.borrow mutable targets)) lifetime →
         ∃ targetTy targetLifetime,
           LValTargetsTyping env targets (.ty targetTy) targetLifetime) →
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     RuntimeCoherent store env := by
   intro hcoherent hsafe _lv _mutable _targets _lifetime htyping
   rcases hcoherent htyping with ⟨targetTy, targetLifetime, htargets⟩
@@ -2096,7 +2134,7 @@ theorem runtimeCoherent_of_coherent_safe {store : ProgramStore} {env : Env} :
 
 theorem lvalTyping_allocated_location_of_safe {store : ProgramStore} {env : Env}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv ty lifetime →
     LValAllocatedLocation store lv := by
   intro hsafe htyping
@@ -2149,7 +2187,7 @@ theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
     LValTyping env lv ty lifetime →
     LValAllocatedLocation store lv := by
   intro _hwellFormed hsafe htyping
-  exact lvalTyping_allocated_location_of_safe hsafe htyping
+  exact lvalTyping_allocated_location_of_safe_whenInitialized hsafe htyping
 
 /-- Lemma 9.3 operational corollary: locating an lval makes `write` defined. -/
 theorem write_defined_of_location {store : ProgramStore} {lv : LVal}
@@ -2243,7 +2281,7 @@ theorem readPreservation_of_location_whenInitialized {store : ProgramStore}
 
 theorem readPreservation_of_safe {store : ProgramStore} {env : Env}
     {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv (.ty ty) lifetime →
     ∃ value slot,
       store.read lv = some slot ∧
@@ -2255,7 +2293,7 @@ theorem readPreservation_of_safe {store : ProgramStore} {env : Env}
 
 theorem readPreservation_of_safe_whenInitialized {store : ProgramStore}
     {env : Env} {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     LValTyping env lv (.ty ty) lifetime →
     ∃ value slot,
       store.read lv = some slot ∧
@@ -2269,7 +2307,7 @@ theorem readPreservation_of_safe_whenInitialized {store : ProgramStore}
 theorem readPreservation {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     LValTyping env lv (.ty ty) lifetime →
     ∃ value slot,
       store.read lv = some slot ∧

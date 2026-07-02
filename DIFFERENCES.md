@@ -54,19 +54,19 @@ The paper's Lemma 4.11 concludes a valid final state, ordinary safe abstraction
 of the output environment, and ordinary value validity at the result type.
 
 Lean's preservation theorem requires a source-term hypothesis and concludes
-`TerminalStateSafeWhenInitialized`, not `TerminalStateSafe`
+`TerminalStateSafe`, not `FullTerminalStateSafe`
 (`LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean:11663-11680`,
 `11694-11707`).  The weaker terminal predicate uses
-`SafeAbstractionWhenInitialized` and `ValidPartialValueWhenInitialized`
+`SafeAbstraction` and `ValidPartialValueWhenInitialized`
 (`LwRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean:50-64`).
 
 The weak validity relation accepts a stale borrow annotation without resolving
 the runtime reference through one of its static targets when the target list is
 not fully initialized
-(`LwRust/Paper/Soundness/Helpers/SafeAbstraction.lean:117-156`,
+(`LwRust/Paper/Soundness/Helpers/FullSafeAbstraction.lean:117-156`,
 `1182-1190`).  Ordinary `ValidPartialValue` does require the reference location
 to match one of the listed targets
-(`LwRust/Paper/Soundness/Helpers/SafeAbstraction.lean:53-99`).
+(`LwRust/Paper/Soundness/Helpers/FullSafeAbstraction.lean:53-99`).
 
 Conclusion: preservation is meaningful, but it is weaker than the paper's stated
 full final abstraction result.  It relies on stale loan annotations being treated
@@ -74,7 +74,7 @@ as protection tokens rather than fully dereferenceable borrow values.
 
 Important nuance: this weaker initialized invariant is not a problem for
 next-step progress.  Lean has progress/step theorems stated directly over
-`SafeAbstractionWhenInitialized`, and over the same
+`SafeAbstraction`, and over the same
 `WellFormedEnvWhenInitialized` preservation invariant
 (`LwRust/Paper/Soundness/Theorem_4_12_TypeAndBorrowSafety.lean:70-100`,
 `126-140`, `247-296`).  For the purpose "a non-terminal typed current state can

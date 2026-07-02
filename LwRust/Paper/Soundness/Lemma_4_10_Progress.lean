@@ -487,7 +487,7 @@ theorem progress_copy_lval_of_safe {store : ProgramStore} {env : Env}
     ∃ value,
       Step store stepLifetime (.copy lv) store (.val value) := by
   intro hsafe htyping
-  rcases readPreservation_of_safe hsafe htyping with
+  rcases readPreservation_of_safe_whenInitialized hsafe htyping with
     ⟨value, runtimeSlot, hread, hslotValue, _hvalid⟩
   rcases runtimeSlot with ⟨partialValue, runtimeLifetime⟩
   cases hslotValue
@@ -495,7 +495,7 @@ theorem progress_copy_lval_of_safe {store : ProgramStore} {env : Env}
 
 theorem progress_copy_lval_whenInitialized {store : ProgramStore} {env : Env}
     {stepLifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     LValTyping env lv (.ty ty) valueLifetime →
     ∃ value,
       Step store stepLifetime (.copy lv) store (.val value) := by
@@ -524,11 +524,12 @@ theorem progress_move_lval_of_safe {store : ProgramStore} {env : Env}
     ∃ value store',
       Step store stepLifetime (.move lv) store' (.val value) := by
   intro hsafe htyping
-  have hlocation : LValLocationAbstraction store lv (.ty ty) :=
-    lvalTyping_defined_location_of_safe hsafe htyping
-  rcases readPreservation_of_location hlocation with
+  have hlocation : LValLocationAbstractionWhenInitialized env store lv (.ty ty) :=
+    lvalTyping_defined_location_whenInitialized hsafe htyping
+  rcases readPreservation_of_location_whenInitialized hlocation with
     ⟨value, runtimeSlot, hread, hslotValue, _hvalid⟩
-  rcases write_defined_of_location (value := PartialValue.undef) hlocation with
+  rcases write_defined_of_location_whenInitialized
+      (value := PartialValue.undef) hlocation with
     ⟨store', hwrite⟩
   rcases runtimeSlot with ⟨partialValue, runtimeLifetime⟩
   cases hslotValue
@@ -536,7 +537,7 @@ theorem progress_move_lval_of_safe {store : ProgramStore} {env : Env}
 
 theorem progress_move_lval_whenInitialized {store : ProgramStore} {env : Env}
     {stepLifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     LValTyping env lv (.ty ty) valueLifetime →
     ∃ value store',
       Step store stepLifetime (.move lv) store' (.val value) := by
@@ -572,14 +573,14 @@ theorem progress_borrow_lval_of_safe {store : ProgramStore} {env : Env}
       Step store stepLifetime (.borrow mutable lv) store
         (.val (.ref { location := location, owner := false })) := by
   intro hsafe htyping
-  rcases lvalTyping_defined_location_of_safe hsafe htyping with
+  rcases lvalTyping_defined_location_whenInitialized hsafe htyping with
     ⟨location, slot, hloc, _hslot, _hvalid⟩
   exact ⟨location, Step.borrow hloc⟩
 
 theorem progress_borrow_lval_whenInitialized {store : ProgramStore} {env : Env}
     {stepLifetime valueLifetime : Lifetime} {lv : LVal} {ty : Ty}
     {mutable : Bool} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     LValTyping env lv (.ty ty) valueLifetime →
     ∃ location,
       Step store stepLifetime (.borrow mutable lv) store
@@ -732,7 +733,7 @@ theorem progress_copy_typing {store : ProgramStore} {env env₂ : Env}
 
 theorem progress_copy_typing_whenInitialized {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {stepLifetime : Lifetime} {lv : LVal} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     TermTyping env typing stepLifetime (.copy lv) ty env₂ →
     ProgressResult store stepLifetime (.copy lv) := by
   intro hsafe htyping
@@ -755,7 +756,7 @@ theorem progress_move_typing {store : ProgramStore} {env env₂ : Env}
 
 theorem progress_move_typing_whenInitialized {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {stepLifetime : Lifetime} {lv : LVal} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     TermTyping env typing stepLifetime (.move lv) ty env₂ →
     ProgressResult store stepLifetime (.move lv) := by
   intro hsafe htyping
@@ -786,7 +787,7 @@ theorem progress_borrow_typing {store : ProgramStore} {env env₂ : Env}
 theorem progress_borrow_typing_whenInitialized {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {stepLifetime : Lifetime} {lv : LVal} {ty : Ty}
     {mutable : Bool} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     TermTyping env typing stepLifetime (.borrow mutable lv) ty env₂ →
     ProgressResult store stepLifetime (.borrow mutable lv) := by
   intro hsafe htyping
@@ -859,14 +860,15 @@ theorem progress_assign_value_typing_of_safe {store : ProgramStore} {env env₂ 
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
-              (lvalTyping_allocated_location_of_safe hsafe hLhsPost) with
+              (lvalTyping_allocated_location_of_safe_whenInitialized
+                hsafe hLhsPost) with
             ⟨oldSlot, hread⟩
           exact progress_assign_value hstore hread
 
 theorem progress_assign_value_typing_whenInitialized {store : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime} {lhs : LVal}
     {value : Value} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     OperationalStoreProgress store →
     TermTyping env typing lifetime (.assign lhs (.val value)) ty env₂ →
     ProgressResult store lifetime (.assign lhs (.val value)) := by
@@ -985,7 +987,7 @@ theorem progress_assign_typing {store : ProgramStore} {env₁ env₂ : Env}
 theorem progress_assign_typing_whenInitialized {store : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime} {lhs : LVal}
     {rhs : Term} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime (.assign lhs rhs) ty env₂ →
     ProgressResult store lifetime rhs →
@@ -1037,7 +1039,7 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
     term.size ≤ fuel →
     ValidStoreTyping store term typing →
     EnvSlotsOutlive env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
@@ -1053,7 +1055,7 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       term.size ≤ fuel.succ →
       ValidStoreTyping store term typing →
       EnvSlotsOutlive env lifetime →
-      SafeAbstractionWhenInitialized store env →
+      SafeAbstraction store env →
       OperationalStoreProgress store →
       ProgressResult store lifetime term)
     (motive_2 := fun env typing blockLifetime terms ty env₂ _ =>
@@ -1061,7 +1063,7 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       ValidStoreTyping store (.block blockLifetime terms) typing →
       ∀ lifetime,
         EnvSlotsOutlive env blockLifetime →
-        SafeAbstractionWhenInitialized store env →
+        SafeAbstraction store env →
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
@@ -1206,7 +1208,7 @@ theorem progress_typing {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     ValidStoreTyping store term typing →
     EnvSlotsOutlive env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
@@ -1220,7 +1222,7 @@ theorem progress_termList_typing {store : ProgramStore} {env₁ env₂ : Env}
     {terms : List Term} {ty : Ty} :
     ValidStoreTyping store (.block blockLifetime terms) typing →
     EnvSlotsOutlive env₁ blockLifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermListTyping env₁ typing blockLifetime terms ty env₂ →
     ProgressResult store lifetime (.block blockLifetime terms) := by
@@ -1247,7 +1249,7 @@ theorem progress_whenInitialized {store : ProgramStore} {env₁ env₂ : Env}
     ValidState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
@@ -1262,7 +1264,7 @@ theorem progress_runtime_whenInitialized {store : ProgramStore} {env₁ env₂ :
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
@@ -1287,7 +1289,7 @@ theorem progress {store : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
   intro _hvalidState hvalidStoreTyping hwellFormed hsafe hstore htyping
-  exact progress_typing hvalidStoreTyping hwellFormed.2.1 hsafe.whenInitialized
+  exact progress_typing hvalidStoreTyping hwellFormed.2.1 hsafe
     hstore htyping
 
 /-- Lemma 4.10, Progress for the mechanised runtime-validity package. -/
@@ -1357,7 +1359,7 @@ theorem progress_step_whenInitialized {store : ProgramStore} {env₁ env₂ : En
     ValidState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ¬ Terminal term →
@@ -1388,7 +1390,7 @@ theorem progress_runtime_step_whenInitialized {store : ProgramStore}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ¬ Terminal term →

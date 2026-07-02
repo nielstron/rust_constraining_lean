@@ -7,8 +7,8 @@ import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 > (the final store is safely abstracted by the result environment).
 
 Status: mechanized through Preservation (Lemma 4.11).  This is the
-`SafeAbstractionWhenInitialized finalStore env₂` conjunct of
-`TerminalStateSafeWhenInitialized`.  Mechanized support:
+`SafeAbstraction finalStore env₂` conjunct of
+`TerminalStateSafe`.  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
   `preservation_declare_redex_runtime_of_validValue` (uses Lemma 9.7);
@@ -44,7 +44,7 @@ theorem lemma_9_10_storePreservation
       store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    SafeAbstractionWhenInitialized finalStore env₂ := by
+    SafeAbstraction finalStore env₂ := by
     intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
       hwellFormed hsafe htyping hmulti).2.1
@@ -58,7 +58,7 @@ theorem lemma_9_10_assign_var_envShape_frame
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
@@ -89,7 +89,7 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
     WellFormedEnv env₁ current →
-    store ∼ₛ env₁ →
+    store ≈ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -104,7 +104,7 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue envSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
+    ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env₂ ∧
       ValidValue store' value ty := by
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
     hvalueFrame hotherFrames

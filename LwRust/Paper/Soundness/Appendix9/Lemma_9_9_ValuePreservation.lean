@@ -8,7 +8,7 @@ import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 
 Status: **proven** for the strengthened Section 4 typing system over source
 continuations.  This is the value-validity conjunct of
-`TerminalStateSafeWhenInitialized`, established by Preservation (Lemma 4.11).
+`TerminalStateSafe`, established by Preservation (Lemma 4.11).
 The file also exposes representative redex-level frame lemmas for move/value
 cases.
 -/
@@ -46,7 +46,7 @@ theorem lemma_9_9_move_postwrite_frame {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     (∀ updated slot,
@@ -61,7 +61,7 @@ theorem lemma_9_9_move_unit_postwrite {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) .unit env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .unit :=
@@ -72,7 +72,7 @@ theorem lemma_9_9_move_int_postwrite {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) .int env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .int :=

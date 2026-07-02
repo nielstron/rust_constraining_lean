@@ -47,9 +47,11 @@ The terminal safety conclusion of Lemma 4.11 / Theorem 4.12: the terminal state
 is valid, the final store safely abstracts the output environment, and the
 terminal value abstracts the result type.
 -/
-def TerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) :
+def FullTerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) :
     Prop :=
-  ValidRuntimeState store (.val value) ∧ store ∼ₛ env ∧ ValidValue store value ty
+  ValidRuntimeState store (.val value) ∧
+    FullSafeAbstraction store env ∧
+    ValidValue store value ty
 
 /--
 Terminal safety against the weakened runtime abstraction used for environments
@@ -57,16 +59,16 @@ with stale loan annotations.  Initialized result values still carry full
 validity at initialized borrow nodes; stale borrow annotations are checked only
 as shape/protection tokens.
 -/
-def TerminalStateSafeWhenInitialized
+def TerminalStateSafe
     (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
   ValidRuntimeState store (.val value) ∧
-    SafeAbstractionWhenInitialized store env ∧
+    store ∼ₛ env ∧
     ValidPartialValueWhenInitialized env store (.value value) (.ty ty)
 
-theorem TerminalStateSafe.whenInitialized {store : ProgramStore}
+theorem FullTerminalStateSafe.whenInitialized {store : ProgramStore}
     {value : Value} {env : Env} {ty : Ty} :
-    TerminalStateSafe store value env ty →
-    TerminalStateSafeWhenInitialized store value env ty := by
+    FullTerminalStateSafe store value env ty →
+    TerminalStateSafe store value env ty := by
   intro hterminal
   exact ⟨hterminal.1, hterminal.2.1.whenInitialized,
     hterminal.2.2.whenInitialized⟩
@@ -124,8 +126,8 @@ theorem EnvSameShapeStrengthening.trans {first second third : Env} :
 theorem EnvSameShapeStrengthening.safe
     {store : ProgramStore} {source result : Env} :
     EnvSameShapeStrengthening source result →
-    store ∼ₛ source →
-    store ∼ₛ result := by
+    store ≈ₛ source →
+    store ≈ₛ result := by
   intro hmap hsafe
   exact safeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
 
@@ -323,7 +325,7 @@ lifetime preservation; the remaining components are the rule's join
 obligations), safe abstraction transports along the same-shape strengthening
 map, and the final value strengthens into the join type.  This packages the
 per-branch conclusion of `T-IfJoin` in the preservation proof. -/
-theorem TerminalStateSafe.strengthen_join {finalStore : ProgramStore}
+theorem FullTerminalStateSafe.strengthen_join {finalStore : ProgramStore}
     {finalValue : Value} {branchEnv joinEnv : Env} {lifetime : Lifetime}
     {branchTy joinTy : Ty}
     (hcontained : ContainedBorrowsWellFormed joinEnv)
@@ -333,18 +335,19 @@ theorem TerminalStateSafe.strengthen_join {finalStore : ProgramStore}
     (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
     (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
     (hwellBranch : WellFormedEnv branchEnv lifetime)
-    (hterminal : TerminalStateSafe finalStore finalValue branchEnv branchTy) :
+    (hterminal : FullTerminalStateSafe finalStore finalValue branchEnv branchTy) :
     WellFormedEnv joinEnv lifetime ∧
-      TerminalStateSafe finalStore finalValue joinEnv joinTy := by
+      FullTerminalStateSafe finalStore finalValue joinEnv joinTy := by
   have hwellJoin : WellFormedEnv joinEnv lifetime :=
     ⟨hcontained,
       EnvSlotsOutlive.of_lifetimesPreserved hwellBranch.2.1 hpreserved,
       hcoherent, hlinear⟩
-  have hsafeJoin : finalStore ∼ₛ joinEnv := hmap.safe hterminal.2.1
+  have hsafeJoin : finalStore ≈ₛ joinEnv := hmap.safe hterminal.2.1
   exact ⟨hwellJoin, hterminal.1, hsafeJoin,
-    safeStrengthening hwellJoin hsafeJoin hstrengthens hterminal.2.2⟩
+    safeStrengthening hwellJoin hsafeJoin.whenInitialized
+      hstrengthens hterminal.2.2⟩
 
-theorem TerminalStateSafe.strengthen_join_whenInitialized {finalStore : ProgramStore}
+theorem FullTerminalStateSafe.strengthen_join_whenInitialized {finalStore : ProgramStore}
     {finalValue : Value} {branchEnv joinEnv : Env} {lifetime : Lifetime}
     {branchTy joinTy : Ty}
     (hcontained : ContainedBorrowsWellFormedWhenInitialized joinEnv)
@@ -354,18 +357,18 @@ theorem TerminalStateSafe.strengthen_join_whenInitialized {finalStore : ProgramS
     (hmap : EnvSameShapeStrengthening branchEnv joinEnv)
     (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
     (hwellBranch : WellFormedEnvWhenInitialized branchEnv lifetime)
-    (hterminal : TerminalStateSafe finalStore finalValue branchEnv branchTy) :
+    (hterminal : FullTerminalStateSafe finalStore finalValue branchEnv branchTy) :
     WellFormedEnvWhenInitialized joinEnv lifetime ∧
-      TerminalStateSafe finalStore finalValue joinEnv joinTy := by
+      FullTerminalStateSafe finalStore finalValue joinEnv joinTy := by
   have hwellJoin : WellFormedEnvWhenInitialized joinEnv lifetime :=
     ⟨hcontained,
       EnvSlotsOutlive.of_lifetimesPreserved hwellBranch.2.1 hpreserved,
       hcoherent, hlinear⟩
-  have hsafeJoin : finalStore ∼ₛ joinEnv := hmap.safe hterminal.2.1
+  have hsafeJoin : finalStore ≈ₛ joinEnv := hmap.safe hterminal.2.1
   exact ⟨hwellJoin, hterminal.1, hsafeJoin,
     safeStrengthening_of_strengthens hstrengthens hterminal.2.2⟩
 
-theorem TerminalStateSafe.strengthen_join_strengthening_whenInitialized
+theorem FullTerminalStateSafe.strengthen_join_strengthening_whenInitialized
     {finalStore : ProgramStore} {finalValue : Value}
     {branchEnv joinEnv : Env} {lifetime : Lifetime} {branchTy joinTy : Ty}
     (hcontained : ContainedBorrowsWellFormedWhenInitialized joinEnv)
@@ -374,20 +377,20 @@ theorem TerminalStateSafe.strengthen_join_strengthening_whenInitialized
     (henvStrengthens : EnvStrengthens branchEnv joinEnv)
     (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
     (hwellBranch : WellFormedEnvWhenInitialized branchEnv lifetime)
-    (hterminal : TerminalStateSafe finalStore finalValue branchEnv branchTy) :
+    (hterminal : FullTerminalStateSafe finalStore finalValue branchEnv branchTy) :
     WellFormedEnvWhenInitialized joinEnv lifetime ∧
-      TerminalStateSafe finalStore finalValue joinEnv joinTy := by
+      FullTerminalStateSafe finalStore finalValue joinEnv joinTy := by
   have hwellJoin : WellFormedEnvWhenInitialized joinEnv lifetime :=
     ⟨hcontained,
       EnvSlotsOutlive.of_lifetimesPreserved hwellBranch.2.1
         (EnvStrengthens.lifetimesPreserved henvStrengthens),
       hcoherent, hlinear⟩
-  have hsafeJoin : finalStore ∼ₛ joinEnv :=
+  have hsafeJoin : finalStore ≈ₛ joinEnv :=
     safeAbstraction_transport_strengthening hterminal.2.1 henvStrengthens
   exact ⟨hwellJoin, hterminal.1, hsafeJoin,
     safeStrengthening_of_strengthens hstrengthens hterminal.2.2⟩
 
-theorem TerminalStateSafeWhenInitialized.strengthen_join_strengthening
+theorem TerminalStateSafe.strengthen_join_strengthening
     {finalStore : ProgramStore} {finalValue : Value}
     {branchEnv joinEnv : Env} {lifetime : Lifetime} {branchTy joinTy : Ty}
     (hcontained : ContainedBorrowsWellFormedWhenInitialized joinEnv)
@@ -399,16 +402,16 @@ theorem TerminalStateSafeWhenInitialized.strengthen_join_strengthening
     (henvStrengthens : EnvStrengthens branchEnv joinEnv)
     (hstrengthens : PartialTyStrengthens (.ty branchTy) (.ty joinTy))
     (hwellBranch : WellFormedEnvWhenInitialized branchEnv lifetime)
-    (hterminal : TerminalStateSafeWhenInitialized finalStore finalValue
+    (hterminal : TerminalStateSafe finalStore finalValue
       branchEnv branchTy) :
     WellFormedEnvWhenInitialized joinEnv lifetime ∧
-      TerminalStateSafeWhenInitialized finalStore finalValue joinEnv joinTy := by
+      TerminalStateSafe finalStore finalValue joinEnv joinTy := by
   have hwellJoin : WellFormedEnvWhenInitialized joinEnv lifetime :=
     ⟨hcontained,
       EnvSlotsOutlive.of_lifetimesPreserved hwellBranch.2.1
         (EnvStrengthens.lifetimesPreserved henvStrengthens),
       hcoherent, hlinear⟩
-  have hsafeJoin : SafeAbstractionWhenInitialized finalStore joinEnv :=
+  have hsafeJoin : SafeAbstraction finalStore joinEnv :=
     safeAbstractionWhenInitialized_transport_strengthening
       hinitBack hterminal.2.1 henvStrengthens
   have hvalidJoinEnv :
@@ -6470,7 +6473,7 @@ theorem lval_loc_var_writeProhibited_or_base {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {lifetime : Lifetime} {x : Name} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
     store.loc lv = some (VariableProjection x) →
@@ -6575,7 +6578,7 @@ theorem locReads_var_writeProhibited_or_base {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {lifetime : Lifetime} {x : Name} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
     RuntimeFrame.LocReads store lv (VariableProjection x) →
@@ -6892,7 +6895,7 @@ theorem lval_loc_or_reads_protected_writeProhibited_or_base
     {store : ProgramStore} {env : Env} {current : Lifetime} {x : Name}
     {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
@@ -7105,7 +7108,7 @@ theorem lval_loc_or_reads_protected_writeProhibited_or_base_whenInitialized
     {store : ProgramStore} {env : Env} {current : Lifetime} {x : Name}
     {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
@@ -7330,7 +7333,7 @@ theorem lval_loc_or_reads_protectedBySomeBase
     {store : ProgramStore} {env : Env} {current : Lifetime}
     {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
@@ -7487,7 +7490,7 @@ theorem lval_loc_or_reads_protectedBySomeBase_whenInitialized
     {store : ProgramStore} {env : Env} {current : Lifetime}
     {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
@@ -7684,7 +7687,7 @@ theorem dropsAvoids_var_of_base_outlives_lifetimeDrop
 theorem dropsAvoids_var_of_base_outlives_lifetimeDrop_whenInitialized
     {store store' : ProgramStore} {env : Env} {dropSet : List PartialValue}
     {parent child : Lifetime} {x : Name} {slot : EnvSlot} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
       ∃ location storeSlot,
@@ -7727,7 +7730,7 @@ theorem lval_loc_or_reads_dropsAvoids_lifetime
     {parent child : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {lifetime : Lifetime} :
     WellFormedEnv env child →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -7776,7 +7779,7 @@ theorem lval_loc_or_reads_dropsAvoids_lifetime
         (Option.some.inj hloc).symm
       subst hlocation
       exact dropsAvoids_var_of_base_outlives_lifetimeDrop
-        hsafe hheap hdropSet hdrops hchild hslot hslotParent
+        hsafe.whenInitialized hheap hdropSet hdrops hchild hslot hslotParent
     · intro location hreads
       cases hreads
   case box =>
@@ -7937,7 +7940,7 @@ theorem lval_loc_or_reads_dropsAvoids_lifetime_whenInitialized
     {parent child : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {lifetime : Lifetime} :
     WellFormedEnvWhenInitialized env child →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -8158,7 +8161,7 @@ theorem borrowDependency_dropsAvoids_lifetime
     {parent child slotLifetime : Lifetime} {value : PartialValue}
     {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnv env child →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -8210,7 +8213,7 @@ theorem borrowDependencyWhenInitialized_dropsAvoids_lifetime
     {parent child slotLifetime : Lifetime} {value : PartialValue}
     {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnvWhenInitialized env child →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -8272,7 +8275,7 @@ theorem borrowDependency_protectedBySomeBase
     {store : ProgramStore} {env : Env} {current slotLifetime : Lifetime}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
@@ -8306,7 +8309,7 @@ theorem borrowDependencyWhenInitialized_protectedBySomeBase
     {store : ProgramStore} {env : Env} {current slotLifetime : Lifetime}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlotWhenInitialized env slotLifetime partialTy →
@@ -8349,7 +8352,7 @@ theorem dropsAvoids_of_borrowDependency_unprotected_values
     {dependency : Location} :
     Drops store values store' →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
@@ -8378,7 +8381,7 @@ theorem dropsAvoids_of_borrowDependencyWhenInitialized_unprotected_values
     {dependency : Location} :
     Drops store values store' →
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
@@ -8409,7 +8412,7 @@ theorem borrowDependency_var_writeProhibited_of_varsProtected
     {store : ProgramStore} {env : Env} {current slotLifetime : Lifetime}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
     (∀ y, y ∈ PartialTy.vars partialTy → WriteProhibited env (.var y)) →
@@ -8459,7 +8462,7 @@ theorem borrowDependency_protected_writeProhibited_or_mem_vars
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
     {x : Name} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
@@ -8504,7 +8507,7 @@ theorem borrowDependencyWhenInitialized_protected_writeProhibited_or_mem_vars
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
     {x : Name} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlotWhenInitialized env slotLifetime partialTy →
@@ -8555,7 +8558,7 @@ theorem borrowDependency_not_protectedByBase_of_varsProtectedIn
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location}
     {x : Name} :
     WellFormedEnv sourceEnv current →
-    store ∼ₛ sourceEnv →
+    store ≈ₛ sourceEnv →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlot sourceEnv slotLifetime partialTy →
@@ -8577,7 +8580,7 @@ theorem borrowDependency_var_writeProhibited_or_mem_vars
     {store : ProgramStore} {env : Env} {current slotLifetime : Lifetime}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
     RuntimeFrame.BorrowDependency store value partialTy dependency →
@@ -8627,7 +8630,7 @@ theorem borrowDependency_not_protectedByMovedBase {store : ProgramStore}
     {env : Env} {current valueLifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} {dependency : Location} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv (.ty ty) valueLifetime →
@@ -8656,7 +8659,7 @@ theorem borrowDependencyWhenInitialized_not_protectedByMovedBase
     {store : ProgramStore} {env : Env} {current valueLifetime : Lifetime}
     {lv : LVal} {value : Value} {ty : Ty} {dependency : Location} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv (.ty ty) valueLifetime →
@@ -8689,7 +8692,7 @@ theorem movedValue_reaches_ne_protected_leaf {store : ProgramStore}
     {env : Env} {current valueLifetime leafLifetime : Lifetime}
     {lv : LVal} {leaf reached : Location} {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv (.ty ty) valueLifetime →
@@ -8717,7 +8720,7 @@ theorem movedValue_reaches_ne_protected_leaf_whenInitialized
     {store : ProgramStore} {env : Env} {current valueLifetime leafLifetime : Lifetime}
     {lv : LVal} {leaf reached : Location} {value : Value} {ty : Ty} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv (.ty ty) valueLifetime →
@@ -9021,7 +9024,7 @@ theorem RuntimeFrame.reaches_ne_var_of_varsProtected {store : ProgramStore}
     {partialValue : PartialValue} {partialTy : PartialTy}
     {location : Location} {x : Name} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     StoreOwnerTargetsHeap store →
     PartialValueOwnerTargetsHeap partialValue →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
@@ -9044,7 +9047,7 @@ theorem RuntimeFrame.reaches_ne_var_of_varsProtectedIn {store : ProgramStore}
     {partialValue : PartialValue} {partialTy : PartialTy}
     {location : Location} {x : Name} :
     WellFormedEnv sourceEnv current →
-    store ∼ₛ sourceEnv →
+    store ≈ₛ sourceEnv →
     StoreOwnerTargetsHeap store →
     PartialValueOwnerTargetsHeap partialValue →
     PartialTyBorrowsWellFormedInSlot sourceEnv slotLifetime partialTy →
@@ -9071,7 +9074,7 @@ theorem RuntimeFrame.value_reaches_ne_var_of_varsProtected
     {store : ProgramStore} {env : Env} {current lifetime : Lifetime}
     {value : Value} {ty : Ty} {location : Location} {x : Name} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     StoreOwnerTargetsHeap store →
     ValueOwnerTargetsHeap value →
     WellFormedTy env ty lifetime →
@@ -9096,7 +9099,7 @@ theorem lval_loc_var_writeProhibited_or_base_whenInitialized
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {lifetime : Lifetime} {x : Name} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
     store.loc lv = some (VariableProjection x) →
@@ -9215,7 +9218,7 @@ theorem locReads_var_writeProhibited_or_base_whenInitialized
     {current : Lifetime} {lv : LVal} {partialTy : PartialTy}
     {lifetime : Lifetime} {x : Name} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     LValTyping env lv partialTy lifetime →
     RuntimeFrame.LocReads store lv (VariableProjection x) →
@@ -9278,7 +9281,7 @@ theorem borrowDependency_var_writeProhibited_or_mem_vars_whenInitialized
     {store : ProgramStore} {env : Env} {current slotLifetime : Lifetime}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnv env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
     RuntimeFrame.BorrowDependency store value partialTy dependency →
@@ -9323,7 +9326,7 @@ theorem borrowDependencyWhenInitialized_var_writeProhibited_or_mem_vars
     {store : ProgramStore} {env : Env} {current slotLifetime : Lifetime}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     PartialTyBorrowsWellFormedInSlotWhenInitialized env slotLifetime partialTy →
     RuntimeFrame.BorrowDependencyWhenInitialized env store value partialTy dependency →
@@ -9369,7 +9372,7 @@ theorem RuntimeFrame.reaches_ne_var_of_varsProtected_whenInitialized
     {partialValue : PartialValue} {partialTy : PartialTy}
     {location : Location} {x : Name} :
     WellFormedEnv env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     PartialValueOwnerTargetsHeap partialValue →
     PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
@@ -9395,7 +9398,7 @@ theorem RuntimeFrame.value_reaches_ne_var_of_varsProtected_whenInitialized
     {store : ProgramStore} {env : Env} {current lifetime : Lifetime}
     {value : Value} {ty : Ty} {location : Location} {x : Name} :
     WellFormedEnv env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     ValueOwnerTargetsHeap value →
     WellFormedTy env ty lifetime →
@@ -9419,7 +9422,7 @@ theorem RuntimeFrame.reachesWhenInitialized_ne_var_of_varsProtected
     {partialValue : PartialValue} {partialTy : PartialTy}
     {location : Location} {x : Name} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     PartialValueOwnerTargetsHeap partialValue →
     (∀ y, y ∈ PartialTy.vars partialTy → WriteProhibited env (.var y)) →
@@ -9493,7 +9496,7 @@ theorem RuntimeFrame.value_reachesWhenInitialized_ne_var_of_varsProtected
     {store : ProgramStore} {env : Env} {current : Lifetime}
     {value : Value} {ty : Ty} {location : Location} {x : Name} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
     ValueOwnerTargetsHeap value →
     (∀ y, y ∈ Ty.vars ty → WriteProhibited env (.var y)) →
@@ -9515,7 +9518,7 @@ theorem RuntimeFrame.reachesWhenInitialized_ne_var_of_varsProtectedIn
     {partialValue : PartialValue} {partialTy : PartialTy}
     {location : Location} {x : Name} :
     WellFormedEnvWhenInitialized sourceEnv current →
-    SafeAbstractionWhenInitialized store sourceEnv →
+    SafeAbstraction store sourceEnv →
     StoreOwnerTargetsHeap store →
     PartialValueOwnerTargetsHeap partialValue →
     PartialTyBorrowsWellFormedInSlotWhenInitialized
@@ -9544,7 +9547,7 @@ theorem RuntimeFrame.value_reachesWhenInitialized_ne_var_of_varsProtectedIn
     {current lifetime : Lifetime}
     {value : Value} {ty : Ty} {location : Location} {x : Name} :
     WellFormedEnvWhenInitialized sourceEnv current →
-    SafeAbstractionWhenInitialized store sourceEnv →
+    SafeAbstraction store sourceEnv →
     StoreOwnerTargetsHeap store →
     ValueOwnerTargetsHeap value →
     WellFormedTyWhenInitialized sourceEnv ty lifetime →
@@ -9823,7 +9826,7 @@ theorem snoc_box {store : ProgramStore} {root storage owned : Location}
 theorem of_lvalTyping_box {store : ProgramStore} {env : Env}
     {current : Lifetime} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ∀ {lv : LVal} {inner : PartialTy} {lifetime : Lifetime},
       LValTyping env lv (.box inner) lifetime →
       ∃ envSlot rootSlot leaf leafSlot,
@@ -10711,7 +10714,7 @@ theorem snoc_boxFull {env : Env} {store : ProgramStore}
 theorem of_lvalTyping_box {store : ProgramStore} {env : Env}
     {current : Lifetime} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ∀ {lv : LVal} {inner : PartialTy} {lifetime : Lifetime},
       LValTyping env lv (.box inner) lifetime →
       ∃ envSlot rootSlot leaf leafSlot,
@@ -11336,7 +11339,7 @@ abstractions are checked against the post-move environment so stale borrow
 annotations can remain as protection tokens. -/
 theorem safeAbstractionWhenInitialized_move_var_update {store : ProgramStore}
     {env : Env} {x : Name} {slot : EnvSlot} {ty : Ty} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     env.slotAt x = some slot →
     slot.ty = .ty ty →
     (∀ y envSlot value,
@@ -11349,7 +11352,7 @@ theorem safeAbstractionWhenInitialized_move_var_update {store : ProgramStore}
         (store.update (VariableProjection x)
           { value := .undef, lifetime := slot.lifetime })
         value envSlot.ty) →
-    SafeAbstractionWhenInitialized
+    SafeAbstraction
       (store.update (VariableProjection x)
         { value := .undef, lifetime := slot.lifetime })
       (env.update x { slot with ty := .undef ty }) := by
@@ -11409,7 +11412,7 @@ theorem preservation_move_var_step_runtime_whenInitialized_of_frames
     {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
     WellFormedEnvWhenInitialized env₁ current →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -11426,7 +11429,7 @@ theorem preservation_move_var_step_runtime_whenInitialized_of_frames
       ∀ ℓ, RuntimeFrame.ReachesWhenInitialized env₁ store oldValue envSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
     ValidRuntimeState store' (.val value) ∧
-      SafeAbstractionWhenInitialized store' env₂ ∧
+      SafeAbstraction store' env₂ ∧
       ValidPartialValueWhenInitialized env₂ store' (.value value) (.ty ty) := by
   intro _hwellFormed hsafe hvalidRuntime henvSlot hmove hnotWrite _htyping hstep
     hvalueFrame hotherFrames
@@ -11468,7 +11471,7 @@ theorem preservation_move_var_step_runtime_whenInitialized_of_frames
     exact ValidPartialValueWhenInitialized.move_env hmove hnotWrite
       (RuntimeFrame.validPartialValueWhenInitialized_update_of_not_reachesWhenInitialized
         hvalidStoreValue hvalueFrame)
-  have hsafeFinal : SafeAbstractionWhenInitialized store' env₂ := by
+  have hsafeFinal : SafeAbstraction store' env₂ := by
     rw [hstore']
     rcases hmove with ⟨moveSlot, struck, hmoveSlot, hstrike, henv₂⟩
     have hmoveSlotEq :
@@ -11513,13 +11516,13 @@ theorem preservation_move_var_multistep_runtime_whenInitialized_of_wellFormed
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {x : Name} {finalValue : Value} {ty : Ty} :
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
     TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
     MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
-    TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty := by
+    TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hmulti
   cases htyping with
   | move hLv hnotWrite _hmoveTyping =>
@@ -11580,17 +11583,17 @@ theorem preservation_move_var_multistep_runtime_of_wellFormed
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {x : Name} {finalValue : Value} {ty : Ty} :
     WellFormedEnv env₁ lifetime →
-    store ∼ₛ env₁ →
+    store ≈ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
     TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
     MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
-    TerminalStateSafe finalStore finalValue env₂ ty := by
+    FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hmulti
   cases htyping with
   | move hLv _hnotWrite _hmoveTyping =>
-      exact preservation_runtime_multistep_of_step_to_value
+      exact preservation_runtime_multistep_of_step_to_value_full
         (term := .move (.var x))
         (env := env₂)
         (ty := ty)
@@ -11657,16 +11660,16 @@ theorem preservation_move_deref_box_multistep_runtime_of_wellFormed
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {source : LVal} {finalValue : Value} {ty : Ty} :
     WellFormedEnv env₁ lifetime →
-    store ∼ₛ env₁ →
+    store ≈ₛ env₁ →
     ValidRuntimeState store (.move source.deref) →
     LValTyping env₁ source (.box (.ty ty)) valueLifetime →
     ¬ WriteProhibited env₁ source.deref →
     EnvMove env₁ source.deref env₂ →
     TermTyping env₁ typing lifetime (.move source.deref) ty env₂ →
     MultiStep store lifetime (.move source.deref) finalStore (.val finalValue) →
-    TerminalStateSafe finalStore finalValue env₂ ty := by
+    FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove htyping hmulti
-  exact preservation_runtime_multistep_of_step_to_value
+  exact preservation_runtime_multistep_of_step_to_value_full
     (term := .move source.deref)
     (env := env₂)
     (ty := ty)
@@ -11808,97 +11811,104 @@ theorem preservation_move_deref_box_multistep_runtime_of_wellFormed
                   ownerLocation hownsLeaf
               have hsafeFinal :
                   store.update ownerLocation
-                      { ownerSlot with value := PartialValue.undef } ∼ₛ
+                      { ownerSlot with value := PartialValue.undef } ≈ₛ
                     env₂ := by
                 subst henv₂
-                refine safeAbstraction_update_var_partial_of_preserved
-                  henvBase hrootSlotFinal hrootValidFinal rfl ?domainMove ?preserveMove
-                · intro y hyBase
-                  have hvarNeLeaf : VariableProjection y ≠ ownerLocation := by
-                    intro hvarLeaf
-                    rcases hleafHeap with ⟨address, hheap⟩
-                    rw [← hvarLeaf] at hheap
-                    cases hheap
-                  constructor
-                  · intro hstoreDomain
-                    rcases hstoreDomain with ⟨slotY, hslotY⟩
-                    have hslotYStore :
-                        store.slotAt (VariableProjection y) = some slotY := by
+                have hfull :
+                    store.update ownerLocation
+                        { ownerSlot with value := PartialValue.undef } ≈ₛ
+                      env₁.update (LVal.base source.deref)
+                        { ty := struck, lifetime := moveSlot.lifetime } := by
+                  refine safeAbstraction_update_var_partial_of_preserved
+                    (by simpa [LVal.base] using henvBase)
+                    hrootSlotFinal hrootValidFinal rfl ?domainMove ?preserveMove
+                  · intro y hyBase
+                    have hvarNeLeaf : VariableProjection y ≠ ownerLocation := by
+                      intro hvarLeaf
+                      rcases hleafHeap with ⟨address, hheap⟩
+                      rw [← hvarLeaf] at hheap
+                      cases hheap
+                    constructor
+                    · intro hstoreDomain
+                      rcases hstoreDomain with ⟨slotY, hslotY⟩
+                      have hslotYStore :
+                          store.slotAt (VariableProjection y) = some slotY := by
+                        simpa [ProgramStore.update, hvarNeLeaf] using hslotY
+                      exact (hsafe.1 y).mp ⟨slotY, hslotYStore⟩
+                    · intro henvDomain
+                      rcases (hsafe.1 y).mpr henvDomain with ⟨slotY, hslotY⟩
+                      exact ⟨slotY, by
+                        simpa [ProgramStore.update, hvarNeLeaf] using hslotY⟩
+                  · intro y otherEnvSlot hyBase henvY
+                    rcases hsafe.2 y otherEnvSlot henvY with
+                      ⟨oldValue, hslotY, hvalidOld⟩
+                    have hvarNeLeaf : VariableProjection y ≠ ownerLocation := by
+                      intro hvarLeaf
+                      rcases hleafHeap with ⟨address, hheap⟩
+                      rw [← hvarLeaf] at hheap
+                      cases hheap
+                    have hslotYFinal :
+                        (store.update ownerLocation
+                          { ownerSlot with value := PartialValue.undef }).slotAt
+                          (VariableProjection y) =
+                        some { value := oldValue, lifetime := otherEnvSlot.lifetime } := by
                       simpa [ProgramStore.update, hvarNeLeaf] using hslotY
-                    exact (hsafe.1 y).mp ⟨slotY, hslotYStore⟩
-                  · intro henvDomain
-                    rcases (hsafe.1 y).mpr henvDomain with ⟨slotY, hslotY⟩
-                    exact ⟨slotY, by
-                      simpa [ProgramStore.update, hvarNeLeaf] using hslotY⟩
-                · intro y otherEnvSlot hyBase henvY
-                  rcases hsafe.2 y otherEnvSlot henvY with
-                    ⟨oldValue, hslotY, hvalidOld⟩
-                  have hvarNeLeaf : VariableProjection y ≠ ownerLocation := by
-                    intro hvarLeaf
-                    rcases hleafHeap with ⟨address, hheap⟩
-                    rw [← hvarLeaf] at hheap
-                    cases hheap
-                  have hslotYFinal :
-                      (store.update ownerLocation
-                        { ownerSlot with value := PartialValue.undef }).slotAt
-                        (VariableProjection y) =
-                      some { value := oldValue, lifetime := otherEnvSlot.lifetime } := by
-                    simpa [ProgramStore.update, hvarNeLeaf] using hslotY
-                  have hborrowsOld :
-                      PartialTyBorrowsWellFormedInSlot env₁ otherEnvSlot.lifetime
-                        otherEnvSlot.ty := by
-                    intro mutable targets hcontains
-                    exact hwellFormed.1 y otherEnvSlot mutable targets henvY
-                      ⟨otherEnvSlot, henvY, hcontains⟩
-                  have hvalueHeapOld : PartialValueOwnerTargetsHeap oldValue :=
-                    partialValueOwnerTargetsHeap_of_slot
-                      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hslotY
-                  have hvarYNeRoot :
-                      VariableProjection y ≠ VariableProjection (LVal.base source.deref) := by
-                    intro hvarEq
-                    exact hyBase (by cases hvarEq; rfl)
-                  have hrootNoOwnerReachOld :
-                      ∀ reached,
-                        RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty reached →
-                        reached ≠ VariableProjection (LVal.base source.deref) := by
-                    intro reached hreach
-                    exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
-                      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-                      hvalueHeapOld hborrowsOld hreach
-                  have holdOwnerNoReachLeaf :
-                      ∀ reached,
-                        RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty reached →
-                        reached ≠ ownerLocation :=
-                    StoreOwnerSpine.stored_var_not_reaches_leaf_of_not_reaches_root
-                      (ValidRuntimeState.validStore hvalidRuntime)
-                      (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-                      hslotY hborrowsOld hvalidOld hspine hvarYNeRoot
-                      hrootNoOwnerReachOld
-                  have hnotWriteRoot :
-                      ¬ WriteProhibited env₁ (.var (LVal.base source.deref)) :=
-                    not_writeProhibited_var_base hnotWrite
-                  have holdNoReachLeaf :
-                      ∀ reached,
-                        RuntimeFrame.Reaches store oldValue otherEnvSlot.ty reached →
-                        reached ≠ ownerLocation := by
-                    intro reached hreach hreached
-                    rcases RuntimeFrame.Reaches.owner_or_borrow hreach with howner | hdependency
-                    · exact holdOwnerNoReachLeaf reached howner hreached
-                    · exact
-                        (borrowDependency_not_protectedByBase_of_varsProtectedIn
-                          hwellFormed hsafe
-                          (ValidRuntimeState.validStore hvalidRuntime)
-                          (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
-                          hborrowsOld
-                          (by
-                            intro z hz
-                            exact writeProhibited_of_envSlot_var_in_type
-                              henvY rfl hz)
-                          hnotWriteRoot hnotWriteRoot hdependency)
-                        (by simpa [hreached] using hleafProtected)
-                  exact ⟨oldValue, hslotYFinal,
-                    RuntimeFrame.validPartialValue_update_of_not_reaches
-                      hvalidOld holdNoReachLeaf⟩
+                    have hborrowsOld :
+                        PartialTyBorrowsWellFormedInSlot env₁ otherEnvSlot.lifetime
+                          otherEnvSlot.ty := by
+                      intro mutable targets hcontains
+                      exact hwellFormed.1 y otherEnvSlot mutable targets henvY
+                        ⟨otherEnvSlot, henvY, hcontains⟩
+                    have hvalueHeapOld : PartialValueOwnerTargetsHeap oldValue :=
+                      partialValueOwnerTargetsHeap_of_slot
+                        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime) hslotY
+                    have hvarYNeRoot :
+                        VariableProjection y ≠ VariableProjection (LVal.base source.deref) := by
+                      intro hvarEq
+                      exact hyBase (by cases hvarEq; rfl)
+                    have hrootNoOwnerReachOld :
+                        ∀ reached,
+                          RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty reached →
+                          reached ≠ VariableProjection (LVal.base source.deref) := by
+                      intro reached hreach
+                      exact RuntimeFrame.reaches_ne_var_of_wellFormed_borrows
+                        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                        hvalueHeapOld hborrowsOld hreach
+                    have holdOwnerNoReachLeaf :
+                        ∀ reached,
+                          RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty reached →
+                          reached ≠ ownerLocation :=
+                      StoreOwnerSpine.stored_var_not_reaches_leaf_of_not_reaches_root
+                        (ValidRuntimeState.validStore hvalidRuntime)
+                        (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                        hslotY hborrowsOld hvalidOld hspine hvarYNeRoot
+                        hrootNoOwnerReachOld
+                    have hnotWriteRoot :
+                        ¬ WriteProhibited env₁ (.var (LVal.base source.deref)) :=
+                      not_writeProhibited_var_base hnotWrite
+                    have holdNoReachLeaf :
+                        ∀ reached,
+                          RuntimeFrame.Reaches store oldValue otherEnvSlot.ty reached →
+                          reached ≠ ownerLocation := by
+                      intro reached hreach hreached
+                      rcases RuntimeFrame.Reaches.owner_or_borrow hreach with howner | hdependency
+                      · exact holdOwnerNoReachLeaf reached howner hreached
+                      · exact
+                          (borrowDependency_not_protectedByBase_of_varsProtectedIn
+                            hwellFormed hsafe
+                            (ValidRuntimeState.validStore hvalidRuntime)
+                            (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                            hborrowsOld
+                            (by
+                              intro z hz
+                              exact writeProhibited_of_envSlot_var_in_type
+                                henvY rfl hz)
+                            hnotWriteRoot hnotWriteRoot hdependency)
+                          (by simpa [hreached] using hleafProtected)
+                    exact ⟨oldValue, hslotYFinal,
+                      RuntimeFrame.validPartialValue_update_of_not_reaches
+                        hvalidOld holdNoReachLeaf⟩
+                exact hfull
               exact ⟨validRuntimeState_move_step hvalidRuntime
                   (Step.move (lifetime := lifetime) hread hwrite),
                 hsafeFinal, hvalidValueFinal⟩)
@@ -11910,14 +11920,14 @@ theorem preservation_move_deref_box_multistep_runtime_whenInitialized_of_wellFor
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {source : LVal} {finalValue : Value} {ty : Ty} :
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     ValidRuntimeState store (.move source.deref) →
     LValTyping env₁ source (.box (.ty ty)) valueLifetime →
     ¬ WriteProhibited env₁ source.deref →
     EnvMove env₁ source.deref env₂ →
     TermTyping env₁ typing lifetime (.move source.deref) ty env₂ →
     MultiStep store lifetime (.move source.deref) finalStore (.val finalValue) →
-    TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty := by
+    TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hwellFormed hsafe hvalidRuntime hsourceBox hnotWrite hmove htyping hmulti
   exact preservation_runtime_multistep_of_step_to_value_whenInitialized
     (term := .move source.deref)
@@ -12074,7 +12084,7 @@ theorem preservation_move_deref_box_multistep_runtime_whenInitialized_of_wellFor
                 (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                   ownerLocation hownsLeaf
               have hsafeFinal :
-                  SafeAbstractionWhenInitialized
+                  SafeAbstraction
                     (store.update ownerLocation
                       { ownerSlot with value := PartialValue.undef })
                     env₂ := by
@@ -12189,14 +12199,14 @@ theorem safeAbstraction_drops_of_orphaned_values_early
     {store store' : ProgramStore} {env : Env} {current : Lifetime}
     {values : List PartialValue} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
     (∀ owned, owned ∈ partialValuesOwningLocations values →
       ¬ ProgramStore.Owns store owned) →
     Drops store values store' →
-    store' ∼ₛ env := by
+    store' ≈ₛ env := by
   intro hwellFormed hsafe hvalidStore hheap hdropValuesHeap
     hdropOwnersOrphaned hdrops
   have hdropValuesUnprotected :
@@ -12259,14 +12269,14 @@ theorem safeAbstractionWhenInitialized_drops_of_orphaned_values_early
     {store store' : ProgramStore} {env : Env} {current : Lifetime}
     {values : List PartialValue} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
     (∀ owned, owned ∈ partialValuesOwningLocations values →
       ¬ ProgramStore.Owns store owned) →
     Drops store values store' →
-    SafeAbstractionWhenInitialized store' env := by
+    SafeAbstraction store' env := by
   intro hwellFormed hsafe hvalidStore hheap hdropValuesHeap
     hdropOwnersOrphaned hdrops
   have hdropValuesUnprotected :
@@ -12399,7 +12409,7 @@ theorem preservation_assign_var_step_runtime_of_frames
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot}
     {envSlot : EnvSlot} {value : Value} {ty : Ty} :
     WellFormedEnv env' lifetime →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
@@ -12416,7 +12426,7 @@ theorem preservation_assign_var_step_runtime_of_frames
         some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue otherEnvSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
+    ValidRuntimeState store' (.val .unit) ∧ store' ≈ₛ env' ∧
       ValidValue store' .unit .unit := by
   intro hwellOut hsafe hvalidRuntime henvX hwriteEnv hvalidValue hread
     hwriteStore hdrops hvalueFrame hotherFrames
@@ -12447,7 +12457,7 @@ theorem preservation_assign_var_step_runtime_of_frames
     | mk oldValue oldLifetime =>
         cases hslotLifetime
         simp [ProgramStore.update]
-  have hsafeWrite : writtenStore ∼ₛ env' := by
+  have hsafeWrite : writtenStore ≈ₛ env' := by
     rw [henv']
     refine safeAbstraction_update_var_of_preserved henvX hslotXWrite
       hnewValidWrite rfl ?domain ?preserve
@@ -12524,7 +12534,7 @@ theorem preservation_assign_var_step_runtime_of_frames
     drops_storeOwnerTargetsHeap hdrops hwriteOwnerHeap
   have hrootFinal : HeapSlotsRootLifetime store' :=
     drops_heapSlotsRootLifetime hdrops hrootWrite
-  have hsafeFinal : store' ∼ₛ env' :=
+  have hsafeFinal : store' ≈ₛ env' :=
     safeAbstraction_drops_of_orphaned_values_early hwellOut hsafeWrite
       hwriteValidStore hwriteOwnerHeap hdropValuesHeap hdropOwnersOrphaned
       hdrops
@@ -12539,7 +12549,7 @@ theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot}
     {envSlot : EnvSlot} {value : Value} {ty : Ty} :
     WellFormedEnvWhenInitialized env' lifetime →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
@@ -12559,7 +12569,7 @@ theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
       ∀ ℓ, RuntimeFrame.ReachesWhenInitialized env store oldValue
         otherEnvSlot.ty ℓ → ℓ ≠ VariableProjection x) →
     ValidRuntimeState store' (.val .unit) ∧
-      SafeAbstractionWhenInitialized store' env' ∧
+      SafeAbstraction store' env' ∧
       ValidPartialValueWhenInitialized env' store' (.value .unit) (.ty .unit) := by
   intro hwellOut hsafe hvalidRuntime henvX hwriteEnv hnotWriteSource
     hnotWriteOut hvalidValue hread hwriteStore hdrops hvalueFrame hotherFrames
@@ -12611,7 +12621,7 @@ theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
     | mk oldValue oldLifetime =>
         cases hslotLifetime
         simp [ProgramStore.update]
-  have hsafeWrite : SafeAbstractionWhenInitialized writtenStore env' := by
+  have hsafeWrite : SafeAbstraction writtenStore env' := by
     rw [henv']
     refine safeAbstractionWhenInitialized_update_var_partial_of_preserved
       henvX hslotXWrite (by simpa [henv'] using hnewValidWrite) rfl
@@ -12705,7 +12715,7 @@ theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
     drops_storeOwnerTargetsHeap hdrops hwriteOwnerHeap
   have hrootFinal : HeapSlotsRootLifetime store' :=
     drops_heapSlotsRootLifetime hdrops hrootWrite
-  have hsafeFinal : SafeAbstractionWhenInitialized store' env' :=
+  have hsafeFinal : SafeAbstraction store' env' :=
     safeAbstractionWhenInitialized_drops_of_orphaned_values_early hwellOut
       hsafeWrite hwriteValidStore hwriteOwnerHeap hdropValuesHeap
       hdropOwnersOrphaned hdrops
@@ -12720,7 +12730,7 @@ theorem preservation_assign_var_step_runtime_whenInitialized_of_wellFormed
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {x : Name}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnvWhenInitialized env lifetime →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     LValTyping env (.var x) oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -12730,7 +12740,7 @@ theorem preservation_assign_var_step_runtime_whenInitialized_of_wellFormed
     WellFormedEnvWhenInitialized env' lifetime →
     ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
     Step store lifetime (.assign (.var x) (.val value)) store' (.val finalValue) →
-    TerminalStateSafeWhenInitialized store' finalValue env' .unit := by
+    TerminalStateSafe store' finalValue env' .unit := by
   intro hwellFormed hsafe hvalidRuntime hLhs _hshape hwellTy hwrite hnotWrite
     hwellOut hvalidValue hstep
   rcases LValTyping.var_inv hLhs with ⟨envSlot, henvSlot, _htyEq, _hlifetimeEq⟩
@@ -12809,7 +12819,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {x : Name}
     {oldTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnv env lifetime →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     LValTyping env (.var x) oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -12819,7 +12829,7 @@ theorem preservation_assign_var_step_runtime_of_wellFormed
     WellFormedEnv env' lifetime →
     ValidValue store value rhsTy →
     Step store lifetime (.assign (.var x) (.val value)) store' (.val finalValue) →
-    TerminalStateSafe store' finalValue env' .unit := by
+    FullTerminalStateSafe store' finalValue env' .unit := by
   intro hwellFormed hsafe hvalidRuntime hLhs _hshape hwellTy hwrite hnotWrite
     hwellOut hvalidValue hstep
   rcases LValTyping.var_inv hLhs with ⟨envSlot, henvSlot, htyEq, _hlifetimeEq⟩
@@ -13002,14 +13012,14 @@ theorem safeAbstraction_drops_of_orphaned_values
     {store store' : ProgramStore} {env : Env} {current : Lifetime}
     {values : List PartialValue} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ dropValue, dropValue ∈ values → PartialValueOwnerTargetsHeap dropValue) →
     (∀ owned, owned ∈ partialValuesOwningLocations values →
       ¬ ProgramStore.Owns store owned) →
     Drops store values store' →
-    store' ∼ₛ env := by
+    store' ≈ₛ env := by
   intro hwellFormed hsafe hvalidStore hheap hdropValuesHeap
     hdropOwnersOrphaned hdrops
   have hdropValuesUnprotected :
@@ -13083,7 +13093,7 @@ theorem droppedValueOwnersOrphaned_assign_deref
     {source : LVal} {lhsLocation : Location} {oldSlot : StoreSlot}
     {oldTy : PartialTy} {value : Value} :
     WellFormedEnv env lifetime →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     store.loc (.deref source) = some lhsLocation →
     store.slotAt lhsLocation = some oldSlot →
@@ -13150,7 +13160,7 @@ theorem safeAbstraction_update_owner_spine_of_frames
     {leaf : Location} {leafTy updatedTy : PartialTy}
     {path : Path} {rhsTy : Ty} {value : Value} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     env.slotAt x = some envSlot →
@@ -13170,7 +13180,7 @@ theorem safeAbstraction_update_owner_spine_of_frames
       ∀ location,
         RuntimeFrame.Reaches store oldValue otherEnvSlot.ty location →
         location ≠ leaf) →
-    store' ∼ₛ
+    store' ≈ₛ
       (writeEnv.update x { envSlot with ty := updatedTy }) := by
   intro hwellFormed hsafe hvalidStore hheap henvSlot hrootSlot hrootLifetime
     hspine hpathNonempty hupdate hstore' hnewValid hotherNoReachLeaf
@@ -13261,7 +13271,7 @@ theorem safeAbstractionWhenInitialized_update_owner_spine_of_frames
     {leaf : Location} {leafTy updatedTy : PartialTy}
     {path : Path} {rhsTy : Ty} {value : Value} :
     WellFormedEnvWhenInitialized env current →
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     env.slotAt x = some envSlot →
@@ -13284,7 +13294,7 @@ theorem safeAbstractionWhenInitialized_update_owner_spine_of_frames
         RuntimeFrame.ReachesWhenInitialized env store oldValue otherEnvSlot.ty
           location →
         location ≠ leaf) →
-    SafeAbstractionWhenInitialized store'
+    SafeAbstraction store'
       (writeEnv.update x { envSlot with ty := updatedTy }) := by
   intro _hwellFormed hsafe hvalidStore hheap henvSlot hrootSlot hrootLifetime
     hspine hpathNonempty hupdate hnotWriteSource hnotWriteUpdated hstore'
@@ -13478,7 +13488,7 @@ theorem stored_var_reaches_ne_owner_spine_leaf_of_noWrite
     {oldValue : PartialValue} {leaf : Location}
     {rootTy leafTy : PartialTy} {path : Path} :
     WellFormedEnv sourceEnv current →
-    store ∼ₛ sourceEnv →
+    store ≈ₛ sourceEnv →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     StoreOwnerSpine store (VariableProjection x) rootSlot rootTy
@@ -13541,7 +13551,7 @@ theorem term_value_reaches_ne_owner_spine_leaf_of_noWrite
     {value : Value} {rhsTy : Ty} {leaf : Location}
     {rootTy leafTy : PartialTy} {path : Path} :
     WellFormedEnv sourceEnv current →
-    store ∼ₛ sourceEnv →
+    store ≈ₛ sourceEnv →
     ValidRuntimeState store (.val value) →
     WellFormedTy sourceEnv rhsTy rhsLifetime →
     ValidValue store value rhsTy →
@@ -13596,7 +13606,7 @@ theorem stored_var_reachesWhenInitialized_ne_owner_spine_leaf_of_noWrite
     {oldValue : PartialValue} {leaf : Location}
     {rootTy leafTy : PartialTy} {path : Path} :
     WellFormedEnvWhenInitialized sourceEnv current →
-    SafeAbstractionWhenInitialized store sourceEnv →
+    SafeAbstraction store sourceEnv →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     StoreOwnerSpineWhenInitialized sourceEnv store (VariableProjection x) rootSlot
@@ -13664,7 +13674,7 @@ theorem term_value_reachesWhenInitialized_ne_owner_spine_leaf_of_noWrite
     {value : Value} {rhsTy : Ty} {leaf : Location}
     {rootTy leafTy : PartialTy} {path : Path} :
     WellFormedEnvWhenInitialized sourceEnv current →
-    SafeAbstractionWhenInitialized store sourceEnv →
+    SafeAbstraction store sourceEnv →
     ValidRuntimeState store (.val value) →
     WellFormedTyWhenInitialized sourceEnv rhsTy rhsLifetime →
     ValidPartialValueWhenInitialized sourceEnv store (.value value) (.ty rhsTy) →
@@ -13989,7 +13999,7 @@ theorem RuntimeFrame.loc_intrinsicRootView {store : ProgramStore} {env : Env}
     {lifetime : Lifetime} {location : Location} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     LValTyping env lv pt lifetime →
     store.loc lv = some location →
     ∃ root slotL viewTy slotLifetime,
@@ -14017,7 +14027,7 @@ where
   go {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
       {lv : LVal} {pt : PartialTy} {lifetime : Lifetime} {location : Location}
       (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env) (htyping : LValTyping env lv pt lifetime)
+      (hsafe : store ≈ₛ env) (htyping : LValTyping env lv pt lifetime)
       (hloc : store.loc lv = some location) :
       ∃ root slotL viewTy slotLifetime,
         ProtectedByBase store root location ∧
@@ -14241,7 +14251,7 @@ theorem RuntimeFrame.loc_deref_step_below {store : ProgramStore} {env : Env}
     {lifetime : Lifetime} {middle result : Location} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     LValTyping env (.deref u) pt lifetime →
     store.loc u = some middle →
     store.loc (.deref u) = some result →
@@ -14348,7 +14358,7 @@ theorem RuntimeFrame.locReads_below {store : ProgramStore} {env : Env}
     {lifetime : Lifetime} {readLocation result : Location} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     LValTyping env lv pt lifetime →
@@ -14407,7 +14417,7 @@ theorem RuntimeFrame.loc_protected_guarded_base {store : ProgramStore}
     {r : Name} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
@@ -14425,7 +14435,7 @@ where
       {G : Name → Prop} {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
       {location : Location} {r : Name}
       (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env) (hvalidStore : ValidStore store)
+      (hsafe : store ≈ₛ env) (hvalidStore : ValidStore store)
       (hheap : StoreOwnerTargetsHeap store)
       (hcollapse : ∀ container mutable ts t,
         env ⊢ container ↝ (.borrow mutable ts) →
@@ -14601,7 +14611,7 @@ theorem RuntimeFrame.locReads_protected_guarded_base {store : ProgramStore}
     {r : Name} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ container mutable ts t, env ⊢ container ↝ (.borrow mutable ts) →
@@ -14845,7 +14855,7 @@ theorem RuntimeFrame.loc_protected_runtimeGuarded_base {store : ProgramStore}
     {location : Location} {r : Name} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     RuntimeFrame.RuntimeSelectedBorrowSafe store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
@@ -14865,7 +14875,7 @@ where
       {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
       {location : Location} {r : Name}
       (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env)
+      (hsafe : store ≈ₛ env)
       (hselectedSafe : RuntimeFrame.RuntimeSelectedBorrowSafe store env)
       (hvalidStore : ValidStore store) (hheap : StoreOwnerTargetsHeap store)
       (hnotWP : ¬ WriteProhibited env (.var base₀))
@@ -15017,7 +15027,7 @@ theorem RuntimeFrame.loc_protected_runtimeGuardedWith_base
     {location : Location} {r : Name} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     RuntimeFrame.RuntimeSelectedBorrowSafeWith store env evidenceOf →
     ValidStore store →
     StoreOwnerTargetsHeap store →
@@ -15039,7 +15049,7 @@ where
       {lv : LVal} {pt : PartialTy} {lifetime : Lifetime}
       {location : Location} {r : Name}
       (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env)
+      (hsafe : store ≈ₛ env)
       (hselectedSafe :
         RuntimeFrame.RuntimeSelectedBorrowSafeWith store env evidenceOf)
       (hvalidStore : ValidStore store) (hheap : StoreOwnerTargetsHeap store)
@@ -15195,7 +15205,7 @@ theorem RuntimeFrame.locReads_protected_runtimeGuarded_base
     {location : Location} {r : Name} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     RuntimeFrame.RuntimeSelectedBorrowSafe store env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
@@ -15224,7 +15234,7 @@ theorem RuntimeFrame.locReads_protected_runtimeGuardedWith_base
     {location : Location} {r : Name} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     RuntimeFrame.RuntimeSelectedBorrowSafeWith store env evidenceOf →
     ValidStore store →
     StoreOwnerTargetsHeap store →
@@ -15886,7 +15896,7 @@ theorem heapLeaf_spine_of_loc {store : ProgramStore} {env : Env}
     {lifetime : Lifetime} {address : Nat} :
     LinearizedBy φ env →
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     LValTyping env lv (.ty lvTy) lifetime →
     store.loc lv = some (.heap address) →
     ∃ xRoot envSlot rootSlot spinePath leafSlot leafTy,
@@ -15902,7 +15912,7 @@ where
   go {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
       {lv : LVal} {lvTy : Ty} {lifetime : Lifetime} {address : Nat}
       (hφ : LinearizedBy φ env) (hwellFormed : WellFormedEnv env current)
-      (hsafe : store ∼ₛ env) (htyping : LValTyping env lv (.ty lvTy) lifetime)
+      (hsafe : store ≈ₛ env) (htyping : LValTyping env lv (.ty lvTy) lifetime)
       (hloc : store.loc lv = some (.heap address)) :
       ∃ xRoot envSlot rootSlot spinePath leafSlot leafTy,
         env.slotAt xRoot = some envSlot ∧

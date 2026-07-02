@@ -68,7 +68,7 @@ theorem terminatesAsValue_missingFree_bounded
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term := by
@@ -89,7 +89,7 @@ theorem terminatesAsValue_missingFree_bounded
         ValidRuntimeState store term →
         ValidStoreTyping store term currentTyping →
         WellFormedEnvWhenInitialized env lifetime →
-        SafeAbstractionWhenInitialized store env →
+        store ∼ₛ env →
         store.FiniteSupport →
         TerminatesAsValue store lifetime term)
     (motive_2 := fun env currentTyping blockLifetime terms _ty _env₂ _ =>
@@ -101,7 +101,7 @@ theorem terminatesAsValue_missingFree_bounded
         ValidRuntimeState store (.block blockLifetime terms) →
         ValidStoreTyping store (.block blockLifetime terms) currentTyping →
         WellFormedEnvWhenInitialized env blockLifetime →
-        SafeAbstractionWhenInitialized store env →
+        store ∼ₛ env →
         store.FiniteSupport →
         TerminatesAsValue store outerLifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
@@ -226,7 +226,7 @@ theorem terminatesAsValue_missingFree_bounded
         hwellFormed hsafe hfinite with
       ⟨midStore, value, hmultiRhs⟩
     have hterminalRhs :
-        TerminalStateSafeWhenInitialized midStore value _env₂ rhsTy :=
+        TerminalStateSafe midStore value _env₂ rhsTy :=
       preservation_bounded rhs.size (Nat.le_refl _) (SourceTerm.assign_inner hsource)
         (validRuntimeState_of_sourceTerm (SourceTerm.assign_inner hsource)
           hvalidRuntime)
@@ -258,7 +258,7 @@ theorem terminatesAsValue_missingFree_bounded
         hwellFormed hsafe hfinite with
       ⟨midStore, leftValue, hmultiLeft⟩
     have hterminalLeft :
-        TerminalStateSafeWhenInitialized midStore leftValue _env₂ lhsTy :=
+        TerminalStateSafe midStore leftValue _env₂ lhsTy :=
       preservation_bounded lhs.size (Nat.le_refl _) (SourceTerm.eq_lhs hsource)
         (validRuntimeState_of_sourceTerm (SourceTerm.eq_lhs hsource) hvalidRuntime)
         hvalidStoreTyping.eq_lhs hwellFormed hsafe hLhs hmultiLeft
@@ -312,7 +312,7 @@ theorem terminatesAsValue_missingFree_bounded
         hwellFormed hsafe hfinite with
       ⟨midStore, conditionValue, hmultiCondition⟩
     have hterminalCondition :
-        TerminalStateSafeWhenInitialized midStore conditionValue _env₂ .bool :=
+        TerminalStateSafe midStore conditionValue _env₂ .bool :=
       preservation_bounded condition.size (Nat.le_refl _)
         (SourceTerm.ite_condition hsource)
         (validRuntimeState_of_sourceTerm (SourceTerm.ite_condition hsource)
@@ -415,7 +415,7 @@ theorem terminatesAsValue_missingFree_bounded
             hwellFormed hsafe hfinite with
           ⟨midStore, value, hmultiHead⟩
         have hterminalHead :
-            TerminalStateSafeWhenInitialized midStore value _env₂ _termTy :=
+            TerminalStateSafe midStore value _env₂ _termTy :=
           preservation_bounded head.size (Nat.le_refl _) hsourceHead
             (validRuntimeState_block_head hvalidRuntime)
             (validStoreTyping_block_head hvalidStoreTyping)
@@ -443,7 +443,7 @@ theorem terminatesAsValue_missingFree_bounded
               (.block blockLifetime (next :: restTail)) :=
           validRuntimeState_seq_step hvalueBlockValid hseqStep
         have hsafeTailAfter :
-            SafeAbstractionWhenInitialized storeAfterDrop _env₂ :=
+            storeAfterDrop ∼ₛ _env₂ :=
           safeAbstraction_seq_value_drop_whenInitialized hterminalHead.2.1
             hvalueBlockValid hwellInner hdrops
         have htailStoreTyping :
@@ -471,7 +471,7 @@ theorem terminatesAsValue_missingFree {store : ProgramStore} {env₁ env₂ : En
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term := by
@@ -497,14 +497,14 @@ theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
   ProgressResult store lifetime term := by
   intro _hvalidRuntime hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htyping
-  exact progress_typing hvalidStoreTyping hslotsOutlive hsafe.whenInitialized
+  exact progress_typing hvalidStoreTyping hslotsOutlive hsafe
     hstoreProgress htyping
 
 /--
 Progress for the stale-aware initialized invariant.
 
 This is the form to use once a current-state preservation invariant supplies
-typing together with `SafeAbstractionWhenInitialized`: full borrow-target
+typing together with `SafeAbstraction`: full borrow-target
 resolution is required only when the current typing rule actually dereferences
 through those targets.
 -/
@@ -514,7 +514,7 @@ theorem typeAndBorrowProgress_whenInitialized {store : ProgramStore}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     EnvSlotsOutlive env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
@@ -530,7 +530,7 @@ theorem typeAndBorrowStep_whenInitialized {store : ProgramStore}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     EnvSlotsOutlive env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ¬ Terminal term →
@@ -552,7 +552,7 @@ theorem typeAndBorrowProgress_of_preservationInvariant {store : ProgramStore}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
@@ -570,7 +570,7 @@ theorem typeAndBorrowStep_of_preservationInvariant {store : ProgramStore}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
     ¬ Terminal term →
@@ -621,12 +621,12 @@ theorem typeAndBorrowSafety_of_preservation
       TermTyping env₁ typing lifetime term ty env₂ →
       (∀ finalStore finalValue,
         MultiStep store lifetime term finalStore (.val finalValue) →
-        TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty) →
+        TerminalStateSafe finalStore finalValue env₂ ty) →
       TerminatesAsValue store lifetime term →
       ProgressResult store lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty := by
+          TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hvalidRuntime hvalidStoreTyping hwellFormed hsafe hstoreProgress htyping
     hpreservation hterminates
   rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
@@ -653,7 +653,7 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
       ProgressResult store lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty := by
+          TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource hvalidRuntime hvalidStoreTyping hwellFormed
     hsafe hstoreProgress htyping hterminates
   exact typeAndBorrowSafety_of_preservation hvalidRuntime hvalidStoreTyping
@@ -691,7 +691,7 @@ theorem theorem_4_12_typeAndBorrowProgress_whenInitialized
       (hvalid : ValidRuntimeState store term)
       (hstoreTyping : ValidStoreTyping store term typing)
       (hslotsOutlive : EnvSlotsOutlive env₁ lifetime)
-      (hsafe : SafeAbstractionWhenInitialized store env₁)
+      (hsafe : store ∼ₛ env₁)
       (hstore : OperationalStoreProgress store)
     (htyping : ∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) :
     ProgressResult store lifetime term := by
@@ -709,7 +709,7 @@ theorem theorem_4_12_typeAndBorrowStep_whenInitialized
       (hvalid : ValidRuntimeState store term)
       (hstoreTyping : ValidStoreTyping store term typing)
       (hslotsOutlive : EnvSlotsOutlive env₁ lifetime)
-      (hsafe : SafeAbstractionWhenInitialized store env₁)
+      (hsafe : store ∼ₛ env₁)
       (hstore : OperationalStoreProgress store)
       (htyping : TermTyping env₁ typing lifetime term ty env₂)
       (hnotTerminal : ¬ Terminal term) :
@@ -727,7 +727,7 @@ theorem theorem_4_12_typeAndBorrowStep_of_preservationInvariant
       (hvalid : ValidRuntimeState store term)
       (hstoreTyping : ValidStoreTyping store term typing)
       (hwellFormed : WellFormedEnvWhenInitialized env₁ lifetime)
-      (hsafe : SafeAbstractionWhenInitialized store env₁)
+      (hsafe : store ∼ₛ env₁)
       (hstore : OperationalStoreProgress store)
       (htyping : TermTyping env₁ typing lifetime term ty env₂)
       (hnotTerminal : ¬ Terminal term) :
@@ -758,11 +758,11 @@ theorem theorem_4_12_typeAndBorrowSafety
       ProgressResult store lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty :=
+          TerminalStateSafe finalStore finalValue env₂ ty :=
   typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed hsafe
     (OperationalStoreProgress.of_finiteSupport hfinite) htyping
     (terminatesAsValue_missingFree hsource hfree hvalid hstoreTyping
-      (WellFormedEnv.whenInitialized hwellFormed) hsafe.whenInitialized hfinite
+      (WellFormedEnv.whenInitialized hwellFormed) hsafe hfinite
       htyping)
 
 /--
@@ -785,7 +785,7 @@ theorem theorem_4_12_typeAndBorrowSafety_total
       ProgressResult store lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafeWhenInitialized finalStore finalValue env₂ ty :=
+          TerminalStateSafe finalStore finalValue env₂ ty :=
   theorem_4_12_typeAndBorrowSafety hsource hfree hvalid hstoreTyping hwellFormed
     hsafe hfinite htyping
 

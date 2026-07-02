@@ -1093,7 +1093,7 @@ theorem ValidPartialValueEvidence.borrow_selected {store : ProgramStore}
       exact ⟨target, EvidenceSelectedBorrow.borrow rfl, hmem, hloc⟩
 
 /-- Safe abstraction with concrete runtime evidence for each root slot. -/
-def SafeAbstractionEvidence (store : ProgramStore) (env : Env) : Prop :=
+def FullSafeAbstractionEvidence (store : ProgramStore) (env : Env) : Prop :=
   (∀ x,
     (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
       ∃ slot, env.slotAt x = some slot) ∧
@@ -1104,9 +1104,9 @@ def SafeAbstractionEvidence (store : ProgramStore) (env : Env) : Prop :=
         some { value := value, lifetime := envSlot.lifetime } ∧
       ∃ _evidence : ValidPartialValueEvidence store value envSlot.ty, True
 
-theorem SafeAbstractionEvidence.safe {store : ProgramStore} {env : Env} :
-    SafeAbstractionEvidence store env →
-    store ∼ₛ env := by
+theorem FullSafeAbstractionEvidence.safe {store : ProgramStore} {env : Env} :
+    FullSafeAbstractionEvidence store env →
+    FullSafeAbstraction store env := by
   intro hsafe
   constructor
   · exact hsafe.1
@@ -1115,9 +1115,9 @@ theorem SafeAbstractionEvidence.safe {store : ProgramStore} {env : Env} :
     ⟨value, hstore, hevidence, _⟩
     exact ⟨value, hstore, hevidence.valid⟩
 
-theorem SafeAbstractionEvidence.of_safe {store : ProgramStore} {env : Env} :
-    store ∼ₛ env →
-    SafeAbstractionEvidence store env := by
+theorem FullSafeAbstractionEvidence.of_safe {store : ProgramStore} {env : Env} :
+    FullSafeAbstraction store env →
+    FullSafeAbstractionEvidence store env := by
   intro hsafe
   constructor
   · exact hsafe.1
@@ -1156,16 +1156,23 @@ def RuntimeSelectedBorrowSafeWith (store : ProgramStore) (env : Env)
       x = y
 
 /-- Safe abstraction plus a selected runtime alias invariant. -/
-def RuntimeSafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
-  SafeAbstractionEvidence store env ∧
+def RuntimeFullSafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
+  FullSafeAbstractionEvidence store env ∧
     ∃ evidenceOf : RuntimeEvidenceProvider store env,
       RuntimeSelectedBorrowSafeWith store env evidenceOf
 
-theorem RuntimeSafeAbstraction.safe {store : ProgramStore} {env : Env} :
-    RuntimeSafeAbstraction store env →
+theorem RuntimeFullSafeAbstraction.safe {store : ProgramStore} {env : Env} :
+    RuntimeFullSafeAbstraction store env →
+    FullSafeAbstraction store env := by
+  intro hsafe
+  exact FullSafeAbstractionEvidence.safe hsafe.1
+
+theorem RuntimeFullSafeAbstraction.whenInitialized
+    {store : ProgramStore} {env : Env} :
+    RuntimeFullSafeAbstraction store env →
     store ∼ₛ env := by
   intro hsafe
-  exact SafeAbstractionEvidence.safe hsafe.1
+  exact hsafe.safe.whenInitialized
 
 /-- Runtime-selected borrow safety over all possible evidence choices. -/
 def RuntimeSelectedBorrowSafe (store : ProgramStore) (env : Env) : Prop :=
@@ -1667,10 +1674,10 @@ The concrete preservation case supplies the variable-domain/slot facts for the
 updated store and proves the write avoids every owned cell and borrow-resolution
 dependency of each chosen root evidence object.
 -/
-theorem runtimeSafeAbstraction_update_of_evidence_frames
+theorem runtimeFullSafeAbstraction_update_of_evidence_frames
     {store : ProgramStore} {env : Env} {updated : Location}
     {newSlot : StoreSlot}
-    (_hsafeEvidence : SafeAbstractionEvidence store env)
+    (_hsafeEvidence : FullSafeAbstractionEvidence store env)
     (evidenceOf : RuntimeEvidenceProvider store env)
     (hselectedSafe : RuntimeSelectedBorrowSafeWith store env evidenceOf)
     (hdomain :
@@ -1711,7 +1718,7 @@ theorem runtimeSafeAbstraction_update_of_evidence_frames
         EvidenceBorrowDependency store
           (evidenceOf x envSlot value henv hstore) location →
         location ≠ updated) :
-    RuntimeSafeAbstraction (store.update updated newSlot) env := by
+    RuntimeFullSafeAbstraction (store.update updated newSlot) env := by
   classical
   have hframe :
       ∀ x envSlot value
@@ -1748,7 +1755,7 @@ theorem runtimeSafeAbstraction_update_of_evidence_frames
     fun x envSlot value henv hstore' =>
       Classical.choose (hframe x envSlot value henv hstore')
   have hsafeEvidence' :
-      SafeAbstractionEvidence (store.update updated newSlot) env := by
+      FullSafeAbstractionEvidence (store.update updated newSlot) env := by
     constructor
     · exact hdomain
     · intro x envSlot henv
@@ -2578,9 +2585,9 @@ must prove: surviving variable slots still line up with the environment, every
 root slot in the final store comes from the old store, and the drop avoids all
 owned cells and borrow-resolution dependencies of the chosen root evidence.
 -/
-theorem runtimeSafeAbstraction_drops_of_evidence_frames
+theorem runtimeFullSafeAbstraction_drops_of_evidence_frames
     {store store' : ProgramStore} {env : Env} {values : List PartialValue}
-    (_hsafeEvidence : SafeAbstractionEvidence store env)
+    (_hsafeEvidence : FullSafeAbstractionEvidence store env)
     (evidenceOf : RuntimeEvidenceProvider store env)
     (hselectedSafe : RuntimeSelectedBorrowSafeWith store env evidenceOf)
     (hdrops : Drops store values store')
@@ -2620,7 +2627,7 @@ theorem runtimeSafeAbstraction_drops_of_evidence_frames
         EvidenceBorrowDependency store
           (evidenceOf x envSlot value henv hstore) location →
         DropsAvoids store values location) :
-    RuntimeSafeAbstraction store' env := by
+    RuntimeFullSafeAbstraction store' env := by
   classical
   have hframe :
       ∀ x envSlot value
@@ -2652,7 +2659,7 @@ theorem runtimeSafeAbstraction_drops_of_evidence_frames
   let finalEvidenceOf : RuntimeEvidenceProvider store' env :=
     fun x envSlot value henv hstore' =>
       Classical.choose (hframe x envSlot value henv hstore')
-  have hsafeEvidence' : SafeAbstractionEvidence store' env := by
+  have hsafeEvidence' : FullSafeAbstractionEvidence store' env := by
     constructor
     · exact hdomain
     · intro x envSlot henv

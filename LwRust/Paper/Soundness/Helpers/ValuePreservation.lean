@@ -17,7 +17,7 @@ open Core
 theorem valuePreservation_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     ValidValue store value ty := by
@@ -39,7 +39,7 @@ theorem valuePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     ValidValue store value ty := by
@@ -50,7 +50,7 @@ theorem valuePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
 theorem valuePreservation_move_step_of_safe {store store' : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store value ty := by
@@ -72,7 +72,7 @@ theorem valuePreservation_move_step {store store' : ProgramStore} {env env₂ : 
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    FullSafeAbstraction store env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store value ty := by
@@ -90,7 +90,7 @@ the moved value's validity derivation in the pre-write store.
 theorem valuePreservation_move_step_of_not_reaches_of_safe {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {lv : LVal} {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     (∀ updated slot,
@@ -124,7 +124,7 @@ theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     (∀ updated slot,
@@ -139,7 +139,7 @@ theorem valuePreservation_move_step_of_not_reaches {store store' : ProgramStore}
 theorem valuePreservation_move_step_unit_post_of_safe {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {lv : LVal} {value : Value} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) .unit env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .unit := by
@@ -155,7 +155,7 @@ theorem valuePreservation_move_step_unit_post {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) .unit env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .unit := by
@@ -166,7 +166,7 @@ theorem valuePreservation_move_step_unit_post {store store' : ProgramStore}
 theorem valuePreservation_move_step_int_post_of_safe {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {lv : LVal} {value : Value} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) .int env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .int := by
@@ -182,7 +182,7 @@ theorem valuePreservation_move_step_int_post {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.move lv) .int env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .int := by
@@ -225,6 +225,29 @@ theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
       | borrow _hmem _hloc =>
           rfl
 
+theorem copy_value_nonOwner_whenInitialized {env : Env} {store : ProgramStore}
+    {value : Value} {ty : Ty} :
+    CopyTy ty →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
+    valueOwnedLocation? value = none := by
+  intro hcopy hvalid
+  cases hcopy with
+  | unit =>
+      cases hvalid
+      rfl
+  | int =>
+      cases hvalid
+      rfl
+  | bool =>
+      cases hvalid
+      rfl
+  | immBorrow =>
+      cases hvalid with
+      | borrowLive _hinitialized _hmem _hloc =>
+          rfl
+      | borrowStale _hstale =>
+          rfl
+
 /-- Lemma 9.8, `R-Copy` valid-state preservation fragment, safe-only form. -/
 theorem validState_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
@@ -240,14 +263,14 @@ theorem validState_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
   | copy hLv hcopy _hreadProhibited =>
       cases hstep with
       | copy hread =>
-          rcases readPreservation_of_safe hsafe hLv with
+          rcases readPreservation_of_safe_whenInitialized hsafe hLv with
             ⟨readValue, runtimeSlot, hreadPreserved, hslotValue, hvalidValue⟩
           rw [hread] at hreadPreserved
           injection hreadPreserved with hslotEq
           cases hslotEq
           cases hslotValue
           have hnonOwner : valueOwnedLocation? value = none :=
-            copy_value_nonOwner hcopy hvalidValue
+            copy_value_nonOwner_whenInitialized hcopy hvalidValue
           exact ⟨hvalidStore,
             validTerm_value_nonOwner hnonOwner,
             by
@@ -536,10 +559,18 @@ theorem validRuntimeState_copy_step_of_safe {store : ProgramStore} {env env₂ :
   have htermHeap : TermOwnerTargetsHeap (.val value) := by
     cases htyping with
     | copy hLv hcopy hreadProhibited =>
+        have hnonOwner : valueOwnedLocation? value = none := by
+          cases hstep with
+          | copy hread =>
+              rcases readPreservation_of_safe_whenInitialized hsafe hLv with
+                ⟨readValue, runtimeSlot, hreadPreserved, hslotValue, hvalidValue⟩
+              rw [hread] at hreadPreserved
+              injection hreadPreserved with hslotEq
+              cases hslotEq
+              cases hslotValue
+              exact copy_value_nonOwner_whenInitialized hcopy hvalidValue
         exact termOwnerTargetsHeap_value_nonOwner
-          (copy_value_nonOwner hcopy
-            (valuePreservation_copy_step_of_safe hsafe
-              (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep))
+          hnonOwner
   exact ⟨validState_copy_step_of_safe hsafe hvalidRuntime.1 htyping hstep,
     storeOwnersAllocated_copy_step
       (ValidRuntimeState.storeOwnersAllocated hvalidRuntime) hstep,
@@ -879,14 +910,14 @@ theorem validRuntimeState_box_step_of_validValueWhenInitialized
 theorem storePreservation_copy_step_of_safe {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     store ∼ₛ env₂ ∧ ValidValue store value ty := by
   intro hsafe htyping hstep
   cases htyping with
   | copy hLv hcopy hreadProhibited =>
-      exact ⟨hsafe,
+      exact ⟨hsafe.whenInitialized,
         valuePreservation_copy_step_of_safe (typing := typing) hsafe
           (TermTyping.copy (typing := typing) hLv hcopy hreadProhibited) hstep⟩
 
@@ -895,7 +926,7 @@ theorem storePreservation_copy_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
     store ∼ₛ env₂ ∧ ValidValue store value ty := by
@@ -934,7 +965,7 @@ value-preservation facts for a copy step.
 theorem preservation_copy_step_runtime_of_safe {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.copy lv) →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
@@ -943,7 +974,7 @@ theorem preservation_copy_step_runtime_of_safe {store : ProgramStore} {env env�
   intro hsafe hvalidRuntime htyping hstep
   rcases storePreservation_copy_step_of_safe hsafe htyping hstep with
     ⟨hsafe₂, hvalidValue⟩
-  exact ⟨validRuntimeState_copy_step_of_safe hsafe hvalidRuntime htyping hstep,
+  exact ⟨validRuntimeState_copy_step_of_safe hsafe.whenInitialized hvalidRuntime htyping hstep,
     hsafe₂, hvalidValue⟩
 
 /--
@@ -956,7 +987,7 @@ theorem preservation_copy_step_runtime {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {current lifetime : Lifetime} {lv : LVal}
     {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.copy lv) →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     Step store lifetime (.copy lv) store (.val value) →
@@ -1034,7 +1065,7 @@ theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStor
     {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
     WellFormedEnvWhenInitialized env₁ current →
-    store ∼ₛ env₁ →
+    store ≈ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -1049,7 +1080,7 @@ theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStor
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue envSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
+    ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env₂ ∧
       ValidValue store' value ty := by
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
     hvalueFrame hotherFrames
@@ -1095,8 +1126,9 @@ theorem preservation_move_var_step_runtime_of_frames {store store' : ProgramStor
         cases hslotEq
         exact hvalidOld)
       (hotherFrames y envSlot oldValue hyx henvY hstoreY)
-  exact preservation_move_var_step_runtime hwellFormed hsafe hvalidRuntime
-    henvSlot hmove htyping hstep hvalidValue hpreserveOld
+  exact ⟨validRuntimeState_move_step hvalidRuntime hstep,
+    storePreservation_move_var_step_full hsafe henvSlot hmove hstep hpreserveOld,
+    hvalidValue⟩
 
 /--
 Lemma 4.11, `R-Box` one-step preservation fragment, factored around the
@@ -1117,7 +1149,7 @@ theorem preservation_box_redex_runtime_of_validValue {store store' : ProgramStor
       cases hbox
       exact ⟨validRuntimeState_box_step_of_validValue hvalidRuntime hoperandValid
             (Step.box (lifetime := lifetime) hfresh rfl),
-          safeAbstraction_boxAt hfresh hsafe,
+          safeAbstractionWhenInitialized_boxAt hfresh hsafe,
           validValue_boxAt_ref hfresh hoperandValid⟩
 
 /-- Weak-runtime `R-Box` one-step preservation fragment. -/
@@ -1125,12 +1157,12 @@ theorem preservation_box_redex_runtime_of_validValueWhenInitialized
     {store store' : ProgramStore}
     {env : Env} {lifetime : Lifetime}
     {value : Value} {ty : Ty} {ref : Reference} :
-    SafeAbstractionWhenInitialized store env →
+    SafeAbstraction store env →
     ValidRuntimeState store (.box (.val value)) →
     ValidPartialValueWhenInitialized env store (.value value) (.ty ty) →
     Step store lifetime (.box (.val value)) store' (.val (.ref ref)) →
     ValidRuntimeState store' (.val (.ref ref)) ∧
-      SafeAbstractionWhenInitialized store' env ∧
+      SafeAbstraction store' env ∧
       ValidPartialValueWhenInitialized env store' (.value (.ref ref))
         (.ty (.box ty)) := by
   intro hsafe hvalidRuntime hoperandValid hstep
@@ -1203,7 +1235,7 @@ and value-preservation facts for a variable declaration step.
 -/
 theorem preservation_declare_redex_runtime_of_validValue {store store' : ProgramStore}
     {env : Env} {lifetime : Lifetime} {x : Name} {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     env.fresh x →
     ValidRuntimeState store (.letMut x (.val value)) →
     ValidValue store value ty →
@@ -1213,14 +1245,14 @@ theorem preservation_declare_redex_runtime_of_validValue {store store' : Program
       ValidValue store' .unit .unit := by
   intro hsafe hfresh hvalidRuntime hvalidValue hstep
   have hfreshStore : store.fresh (VariableProjection x) :=
-    safeAbstraction_store_fresh_var hsafe hfresh
+    safeAbstraction_store_fresh_var hsafe.whenInitialized hfresh
   cases hstep with
   | declare hstore' =>
       subst hstore'
       have hsafe' :
           store.declare x lifetime value ∼ₛ
             env.update x { ty := .ty ty, lifetime := lifetime } := by
-        exact safeAbstraction_declare hsafe hfresh
+        exact (safeAbstraction_declare hsafe hfresh
           (validPartialValue_declare hfreshStore hvalidValue)
           (by
             intro y envSlot oldValue _hyx henv hstoreSlot
@@ -1229,7 +1261,7 @@ theorem preservation_declare_redex_runtime_of_validValue {store store' : Program
             rw [hstoreSlot] at hsafeSlot
             injection hsafeSlot with hslotEq
             cases hslotEq
-            exact validPartialValue_declare hfreshStore hsafeValid)
+            exact validPartialValue_declare hfreshStore hsafeValid)).whenInitialized
       exact ⟨validRuntimeState_declare_step_of_validValue
           hvalidRuntime hfreshStore hvalidValue (Step.declare (lifetime := lifetime) rfl),
         hsafe',
@@ -1245,7 +1277,7 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
     {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {x : Name} {value : Value} :
     ValidStoreTyping store (.letMut x (.val value)) typing →
-    store ∼ₛ env₁ →
+    store ≈ₛ env₁ →
     ValidRuntimeState store (.letMut x (.val value)) →
     TermTyping env₁ typing lifetime (.letMut x (.val value)) .unit env₃ →
     Step store lifetime (.letMut x (.val value)) store' (.val .unit) →
@@ -1294,8 +1326,8 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     hread hwrite hdrops hnewValid hpreserveOther
   exact ⟨validRuntimeState_assign_step_old_nonOwner (lifetime := lifetime)
       hnonOwner hvalidRuntime hvalidValue hread hwrite hdrops,
-    storePreservation_assign_var_old_nonOwner_of_preserved hsafe henvX hwriteEnv
-      hnonOwner hread hwrite hdrops hnewValid hpreserveOther,
+    (storePreservation_assign_var_old_nonOwner_of_preserved hsafe henvX hwriteEnv
+      hnonOwner hread hwrite hdrops hnewValid hpreserveOther).whenInitialized,
     ValidPartialValue.unit⟩
 
 /--
@@ -1312,7 +1344,7 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
@@ -1363,14 +1395,14 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
       exact RuntimeFrame.validPartialValue_update_of_not_reaches hvalidOld
         (hotherFrames y otherEnvSlot oldValue hyx henvY hstoreY)
   exact preservation_assign_var_old_nonOwner_step_runtime_of_preserved
-    (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
+    (lifetime := lifetime) hsafe.whenInitialized hvalidRuntime henvX hwriteEnv hnonOwner
     hvalidValue hread hwrite hdrops hnewValid hpreserveOther
 
 theorem preservation_assign_var_envShape_step_runtime_of_frames
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
@@ -1394,7 +1426,8 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
   intro hsafe hvalidRuntime henvX hwriteEnv hshape hvalidValue
     hread hwrite hdrops hvalueFrame hotherFrames
   have hnonOwner : PartialValueNonOwner oldSlot.value :=
-    safeAbstraction_var_read_nonOwner_of_envShape hsafe henvX hread hshape
+    safeAbstraction_var_read_nonOwner_of_envShape
+      hsafe.whenInitialized henvX hread hshape
   exact preservation_assign_var_old_nonOwner_step_runtime_of_frames
     (lifetime := lifetime) hsafe hvalidRuntime henvX hwriteEnv hnonOwner
     hvalidValue hread hwrite hdrops hvalueFrame hotherFrames
@@ -1433,7 +1466,7 @@ theorem preservation_blockB_value_step_runtime_no_slots
 theorem preservation_copy_multistep_runtime_of_safe {store finalStore : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {lv : LVal} {finalValue : Value} {ty : Ty} :
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.copy lv) →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
@@ -1460,7 +1493,7 @@ theorem preservation_copy_multistep_runtime {store finalStore : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {finalValue : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ∼ₛ env →
+    store ≈ₛ env →
     ValidRuntimeState store (.copy lv) →
     TermTyping env typing lifetime (.copy lv) ty env₂ →
     MultiStep store lifetime (.copy lv) finalStore (.val finalValue) →
@@ -1612,19 +1645,19 @@ theorem preservation_box_context_terminal_multistep_runtime_whenInitialized
     (∀ {midStore value},
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
-      SafeAbstractionWhenInitialized store env₁ →
+      SafeAbstraction store env₁ →
       TermTyping env₁ typing lifetime term ty env₂ →
       MultiStep store lifetime term midStore (.val value) →
       ValidRuntimeState midStore (.val value) ∧
-        SafeAbstractionWhenInitialized midStore env₂ ∧
+        SafeAbstraction midStore env₂ ∧
         ValidPartialValueWhenInitialized env₂ midStore (.value value) (.ty ty)) →
     ValidRuntimeState store (.box term) →
     ValidStoreTyping store (.box term) typing →
-    SafeAbstractionWhenInitialized store env₁ →
+    SafeAbstraction store env₁ →
     TermTyping env₁ typing lifetime (.box term) (.box ty) env₂ →
     MultiStep store lifetime (.box term) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧
-      SafeAbstractionWhenInitialized finalStore env₂ ∧
+      SafeAbstraction finalStore env₂ ∧
       ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
         (.ty (.box ty)) := by
   intro hinnerPreservation hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
@@ -1649,7 +1682,7 @@ theorem preservation_declare_multistep_runtime {store finalStore : ProgramStore}
     {env₁ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
     {x : Name} {value finalValue : Value} :
     ValidStoreTyping store (.letMut x (.val value)) typing →
-    store ∼ₛ env₁ →
+    store ≈ₛ env₁ →
     ValidRuntimeState store (.letMut x (.val value)) →
     TermTyping env₁ typing lifetime (.letMut x (.val value)) .unit env₃ →
     MultiStep store lifetime (.letMut x (.val value)) finalStore (.val finalValue) →

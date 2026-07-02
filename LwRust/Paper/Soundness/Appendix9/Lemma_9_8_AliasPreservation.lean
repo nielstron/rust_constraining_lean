@@ -19,6 +19,6 @@ Status: **mechanized** for the structural/redex fragments as the `validState`/
   owner-allocation invariant the concrete store model needs.
 
 The end-to-end multistep "`S₂ ▷ v` valid" statement is folded into the
-`ValidRuntimeState finalStore (.val finalValue)` conjunct of `TerminalStateSafe`,
+`ValidRuntimeState finalStore (.val finalValue)` conjunct of `FullTerminalStateSafe`,
 established alongside Preservation (Lemma 4.11) for the runtime cases.
 -/

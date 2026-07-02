@@ -54,7 +54,7 @@ theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
-      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .bool :=
+      TerminalStateSafe finalStore finalValue Env.empty .bool :=
   emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
     scalarCopyComparison_missingFree
 
@@ -95,7 +95,7 @@ theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
-      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
+      TerminalStateSafe finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
     ifThenElseInt_missingFree
 
@@ -137,7 +137,7 @@ theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
-      TerminalStateSafeWhenInitialized finalStore finalValue Env.empty .int :=
+      TerminalStateSafe finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
     ifEqThenElseInt_missingFree
 
