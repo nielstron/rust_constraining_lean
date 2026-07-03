@@ -4515,10 +4515,9 @@ theorem LValTyping.ownerSpine_or_runtimeSelected_boxedSuffix_whenInitialized
               exact False.elim (hstale hinitialized)
 
 theorem LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
-    {store : ProgramStore} {env : Env} {current : Lifetime} {φ : Name → Nat}
+    {store : ProgramStore} {env : Env} {current : Lifetime}
     {source : LVal} {suffix : List Unit} {leafTy : Ty}
     {sourceLifetime : Lifetime} {location : Location} {slot : EnvSlot} :
-    LinearizedBy φ env →
     WellFormedEnvWhenInitialized env current →
     SafeAbstraction store env →
     StoreOwnerTargetsHeap store →
@@ -4536,7 +4535,7 @@ theorem LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitial
       LVal.path source ++ (() :: suffix) ≠ []) ∨
     RuntimeLocationPathSelected store env slot.ty
       (LVal.path source ++ (() :: suffix)) location := by
-  intro hφ hwellFormed hsafe hheap htyping hslot hloc
+  intro hwellFormed hsafe hheap htyping hslot hloc
   induction source generalizing suffix leafTy sourceLifetime location slot with
   | var x =>
       rcases LValTyping.var_inv htyping with
@@ -6095,6 +6094,7 @@ theorem EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized
     {written readPrefix target : LVal}
     {writtenTy : Ty} {readPrefixTy : PartialTy}
     {envSlot : EnvSlot} {rootSlot leafSlot : StoreSlot} {leaf : Location} :
+    Linearizable env →
     WellFormedEnvWhenInitialized env lifetime →
     SafeAbstraction store env →
     ValidStore store →
@@ -6110,10 +6110,10 @@ theorem EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized
     store.loc readPrefix = some leaf →
     EnvMayReadThrough env readPrefix target →
     EnvMayReadThrough env written target := by
-  intro hwellFormed hsafe hvalidStore hheap _hwrittenTyping _henvSlot
+  intro hlinear hwellFormed hsafe hvalidStore hheap _hwrittenTyping _henvSlot
     _hrootSlot hwrittenSpine hreadPrefixTyping _hwrittenLoc
     hreadPrefixLoc hmayRead
-  rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
+  rcases hlinear with ⟨φ, hφ⟩
   exact
     EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized.go
       hwellFormed hsafe hvalidStore hheap hφ hwrittenSpine
@@ -6217,7 +6217,7 @@ where
                     simpa [prependPath] using hreadPrefixLoc
                   rcases
                       LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
-                        hφ hwellFormed hsafe hheap hsource hsourceEnvSlot
+                        hwellFormed hsafe hheap hsource hsourceEnvSlot
                         hderefLoc with
                     howner | hselected
                   · rcases howner with
@@ -6441,6 +6441,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
     {lv readPrefix dependencyTarget : LVal}
     {lvTy rhsTy : Ty} {readPrefixTy : PartialTy} {rank : Nat}
     {envSlot : EnvSlot} {rootSlot leafSlot : StoreSlot} {leaf : Location} :
+    Linearizable env →
     WellFormedEnvWhenInitialized env lifetime →
     SafeAbstraction store env →
     ValidStore store →
@@ -6459,12 +6460,12 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location
     ∃ written,
       EnvWriteEffectiveWrite rank env lv rhsTy result written ∧
         EnvMayReadThrough env written dependencyTarget := by
-  intro hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
+  intro hlinear hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
     hwrite hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
   have hmayReadOwner :
       EnvMayReadThrough env lv dependencyTarget :=
     EnvMayReadThrough.ownerSpine_of_same_location_whenInitialized
-      hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
+      hlinear hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
       hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
   have heffective :
       EnvWriteEffectiveWrite rank env lv rhsTy result lv :=
@@ -6480,6 +6481,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_locati
     {mutable : Bool} {targets : List LVal}
     {targetTy rhsTy : Ty} {readPrefixTy : PartialTy} {rank : Nat}
     {writtenLocation : Location} :
+    Linearizable env →
     WellFormedEnvWhenInitialized env lifetime →
     SafeAbstraction store env →
     ValidStore store →
@@ -6494,9 +6496,9 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_locati
     ∃ written,
       EnvWriteEffectiveWrite rank env (.deref source) rhsTy result written ∧
         EnvMayReadThrough env written dependencyTarget := by
-  intro hwellFormed hsafe hvalidStore hheap hsourceBorrow htargets hwrite
+  intro hlinear hwellFormed hsafe hvalidStore hheap hsourceBorrow htargets hwrite
     hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
-  rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
+  rcases hlinear with ⟨φ, hφ⟩
   exact
     envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location_whenInitialized.go
       hwellFormed hsafe hvalidStore hheap hφ
@@ -6545,6 +6547,7 @@ where
             (StoreOwnerSpineWhenInitialized.nil hrootSlot hrootValid)
         exact
           envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_whenInitialized
+            (Linearizable.of_linearizedBy hφ)
             hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot
             hspine hwrite hreadPrefixTyping hvarLoc hreadPrefixLoc hmayRead
     | deref source =>
@@ -6579,6 +6582,7 @@ where
                   simpa [LVal.base, LVal.path_deref_cons] using hsnoc
                 exact
                   envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_whenInitialized
+                    (Linearizable.of_linearizedBy hφ)
                     hwellFormed hsafe hvalidStore hheap
                     (LValTyping.box hsource)
                     (by simpa [LVal.base] using henvBase)
@@ -6594,7 +6598,7 @@ where
                 simpa [prependPath] using hlvLoc
               rcases
                   LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
-                    hφ hwellFormed hsafe hheap hsource hsourceEnvSlot
+                    hwellFormed hsafe hheap hsource hsourceEnvSlot
                     hderefLoc with
                 howner | hselected
               · rcases howner with
@@ -6972,6 +6976,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
     {lv readPrefix dependencyTarget : LVal}
     {lvTy rhsTy : Ty} {readPrefixTy : PartialTy} {rank : Nat}
     {writtenLocation : Location} :
+    Linearizable env →
     WellFormedEnvWhenInitialized env lifetime →
     SafeAbstraction store env →
     ValidStore store →
@@ -6985,9 +6990,9 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
     ∃ written,
       EnvWriteEffectiveWrite rank env lv rhsTy result written ∧
         EnvMayReadThrough env written dependencyTarget := by
-  intro hwellFormed hsafe hvalidStore hheap hLv hwrite hreadPrefixTyping
+  intro hlinear hwellFormed hsafe hvalidStore hheap hLv hwrite hreadPrefixTyping
     hlvLoc hreadPrefixLoc hmayRead
-  rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
+  rcases hlinear with ⟨φ, hφ⟩
   cases lv with
   | var x =>
       rcases LValTyping.var_inv hLv with
@@ -7010,6 +7015,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
           (StoreOwnerSpineWhenInitialized.nil hrootSlot hrootValid)
       exact
         envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_whenInitialized
+          (Linearizable.of_linearizedBy hφ)
           hwellFormed hsafe hvalidStore hheap hLv henvSlot hrootSlot hspine
           hwrite hreadPrefixTyping hvarLoc hreadPrefixLoc hmayRead
   | deref source =>
@@ -7044,6 +7050,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
                 simpa [LVal.base, LVal.path_deref_cons] using hsnoc
               exact
                   envWriteEffectiveWrite_mayReadThrough_source_of_ownerSpine_same_location_whenInitialized
+                    (Linearizable.of_linearizedBy hφ)
                     hwellFormed hsafe hvalidStore hheap (LValTyping.box hsource)
                     (by simpa [LVal.base] using henvBase)
                     (by simpa [LVal.base] using hrootSlot)
@@ -7058,6 +7065,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitia
           hsource htargets =>
           exact
             envWriteEffectiveWrite_mayReadThrough_source_of_borrow_deref_same_location_whenInitialized
+              (Linearizable.of_linearizedBy hφ)
               hwellFormed hsafe hvalidStore hheap hsource htargets hwrite
               hreadPrefixTyping hlvLoc hreadPrefixLoc hmayRead
 
@@ -7067,6 +7075,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_locReads_whenInitialized
     {lv dependencyTarget : LVal}
     {lvTy dependencyTy rhsTy : Ty} {rank : Nat}
     {writtenLocation : Location} :
+    Linearizable env →
     WellFormedEnvWhenInitialized env lifetime →
     SafeAbstraction store env →
     ValidStore store →
@@ -7079,7 +7088,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_locReads_whenInitialized
     ∃ written,
       EnvWriteEffectiveWrite rank env lv rhsTy result written ∧
         EnvMayReadThrough env written dependencyTarget := by
-  intro hwellFormed hsafe hvalidStore hheap hLv hwrite hdependencyTarget
+  intro hlinear hwellFormed hsafe hvalidStore hheap hLv hwrite hdependencyTarget
     hlvLoc hreads
   rcases RuntimeFrame.LocReads.typed_envMayReadThrough_prefix
       hdependencyTarget hreads with
@@ -7087,7 +7096,7 @@ theorem envWriteEffectiveWrite_mayReadThrough_source_of_locReads_whenInitialized
       hreadPrefixLoc, hmayReadTarget⟩
   rcases
       envWriteEffectiveWrite_mayReadThrough_source_of_same_location_whenInitialized
-        hwellFormed hsafe hvalidStore hheap hLv hwrite hreadPrefixTyping
+        hlinear hwellFormed hsafe hvalidStore hheap hLv hwrite hreadPrefixTyping
         hlvLoc hreadPrefixLoc hmayReadTarget with
     ⟨written, heffective, hmayRead⟩
   exact ⟨written, heffective, hmayRead⟩
@@ -8006,15 +8015,14 @@ theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed
     ShapeCompatible env oldTy (.ty rhsTy) →
     WellFormedTyWhenInitialized env rhsTy rhsWellLifetime →
     EnvWrite 0 env (.deref source) rhsTy env' →
-    (∃ φ, LinearizedBy φ env ∧ EnvWriteRhsBorrowTargetsBelow φ env' rhsTy) →
     ¬ WriteProhibited env' (.deref source) →
     WellFormedEnvWhenInitialized env' lifetime →
     ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
     Step store lifetime (.assign (.deref source) (.val value)) store'
       (.val finalValue) →
-    TerminalStateSafe store' finalValue env' .unit := by
+  TerminalStateSafe store' finalValue env' .unit := by
   intro hwellFormed hsafe hvalidRuntime hsourceBox _hshape hwellTy hwrite
-    _hranked hnotWrite hwellOut hvalidValue hstep
+    hnotWrite hwellOut hvalidValue hstep
   rcases assign_step_components hstep with
     ⟨writtenStore, oldSlot, lhsLocation, hread, hwriteStore, hdrops,
       hlhsLoc, hlhsSlot, _hwriteStoreEq, hresult⟩
@@ -8089,10 +8097,10 @@ theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed
                 (.var (LVal.base source)) := by
             simpa [LVal.base] using
               (not_writeProhibited_var_base hnotWrite)
-          have hnotWriteSource :
-              ¬ WriteProhibited env (.var (LVal.base source)) :=
-            not_writeProhibited_var_of_update_self hwellFormed.2.2.2
-              hnotWriteObserver
+          have hnoOtherSource :
+              ∀ y, y ≠ LVal.base source →
+                ¬ WriteProhibitedVia env y (.var (LVal.base source)) :=
+            not_writeProhibitedVia_of_update_self hnotWriteObserver
           have hrhsVarsUpdated :
               ∀ z, z ∈ PartialTy.vars (.ty rhsTy) →
                 z ∈ PartialTy.vars updatedTy :=
@@ -8117,7 +8125,7 @@ theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed
                 location ≠ lhsLocation :=
             term_value_reachesWhenInitialized_ne_owner_spine_leaf_of_noWrite
               hwellFormed hsafe hvalidRuntimeValue hwellTy hvalidValue hspine
-              hvarsObserver hnotWriteSource hnotWriteObserver
+              hvarsObserver hnoOtherSource hnotWriteObserver
           have hnewValid :
               ValidPartialValueWhenInitialized env writtenStore (.value value)
                 (.ty rhsTy) := by
@@ -8163,7 +8171,7 @@ theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed
                 (ValidRuntimeState.validStore hvalidRuntime)
                 (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                 hspine hyx henvY hslotY hvalidOld hvarsOther
-                hnotWriteSource hnotWriteObserver
+                hnoOtherSource hnotWriteObserver
           have hsafeWrite :
               SafeAbstraction writtenStore
                 (env.update (LVal.base source)
@@ -8175,7 +8183,7 @@ theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed
                   (ValidRuntimeState.validStore hvalidRuntime)
                   (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                   henvBase hrootSlot hrootLifetime hspine hpathNonempty
-                  hupdatePath hnotWriteSource hnotWriteObserver rfl
+                  hupdatePath hnotWriteObserver rfl
                   (by simpa [hwriteEq] using hnewValid) hotherNoReachLeaf
           have hvalueHeap : ValueOwnerTargetsHeap value :=
             TermOwnerTargetsHeap.value
@@ -8288,6 +8296,7 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
     {source : LVal} {mutable : Bool} {targets : List LVal}
     {targetTy : PartialTy} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnvWhenInitialized env lifetime →
+    CoherentWhenInitialized env →
     SafeAbstraction store env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env source (.ty (.borrow mutable targets)) borrowLifetime →
@@ -8303,8 +8312,12 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
     Step store lifetime (.assign (.deref source) (.val value)) store'
       (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  intro hwellFormed hsafe hvalidRuntime hsourceBorrow htargets
+  intro hwellFormed hcoh hsafe hvalidRuntime hsourceBorrow htargets
     _hshape hwellTy hwrite hnoStale hranked hnotWrite hwellOut hvalidValue hstep
+  rcases hranked with ⟨φ, hφ, hbelowRhs⟩
+  have hφOut : LinearizedBy φ env' :=
+    EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
+      hwrite hφ hbelowRhs
   rcases assign_step_components hstep with
     ⟨writtenStore, oldSlot, lhsLocation, hread, hwriteStore, hdrops,
       hlhsLoc, hlhsSlot, hwriteStoreEq, hresult⟩
@@ -8430,7 +8443,6 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
         have hselectedMap :
             EnvSameShapeStrengthening
               (env.update x { sourceSlot with ty := .ty rhsTy }) env' := by
-          rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
           have hlhsLocVar :
               store.loc source.deref = some (VariableProjection x) := by
             simpa [hxUpdated] using hlhsLoc
@@ -8452,10 +8464,6 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
               (store.update lhsLocation
                 { oldSlot with value := PartialValue.value value })
               (.value value) (.ty rhsTy) := by
-          rcases hranked with ⟨φ, hφ, hbelowRhs⟩
-          have hφOut : LinearizedBy φ env' :=
-            EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
-              hwrite hφ hbelowRhs
           rcases hselectedMap.1 x resultSlot hresultSlot with
             ⟨newSourceSlot, hnewSourceSlot, _hnewLifetime, hnewStrength,
               hnewShape⟩
@@ -8513,7 +8521,7 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
             (fun {targets} hinit =>
               borrowTargetsInitialized_back_of_envStrengthens
                 (EnvSameShapeStrengthening.envStrengthens hglobalMap)
-                hwellFormed.2.2.1 hwellFormed.2.2.2 hinit)
+                hcoh (Linearizable.of_linearizedBy hφ) hinit)
             hnewValid
         exact validPartialValueWhenInitialized_strengthen hnewValidResultEnv
           hstrength
@@ -8534,7 +8542,6 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
         subst hmappedSourceSlotEq
         have hvalidStore := ValidRuntimeState.validStore hvalidRuntime
         have hheap := ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime
-        rcases hranked with ⟨φ, hφ, hbelowRhs⟩
         by_cases howner :
             RuntimeFrame.OwnerReaches store oldValue sourceSlot.ty lhsLocation
         · have hownsTrans :
@@ -8703,7 +8710,7 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
               (fun {targets} hinit =>
                 borrowTargetsInitialized_back_of_envStrengthens
                   (EnvSameShapeStrengthening.envStrengthens hglobalMap)
-                  hwellFormed.2.2.1 hwellFormed.2.2.2 hinit)
+                  hcoh (Linearizable.of_linearizedBy hφ) hinit)
               hrootValid
           exact validPartialValueWhenInitialized_strengthen hrootValidResultEnv
             hstrengthStrong
@@ -8738,8 +8745,8 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
               LValTyping.borrow hsourceBorrow htargetsFull
             rcases
                 envWriteEffectiveWrite_mayReadThrough_source_of_locReads_whenInitialized
-                  hwellFormed hsafe hvalidStore hheap hLhsTyping hwrite htTyping
-                  hlhsLoc hreads with
+                  (Linearizable.of_linearizedBy hφ) hwellFormed hsafe
+                  hvalidStore hheap hLhsTyping hwrite htTyping hlhsLoc hreads with
               ⟨written, heffective, hmayRead⟩
             rcases PartialTyContains.mono_strengthens_sameShape hcontains
                 hstrength hsameShape with
@@ -8765,7 +8772,7 @@ theorem preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFor
               (fun {targets} hinit =>
                 borrowTargetsInitialized_back_of_envStrengthens
                   (EnvSameShapeStrengthening.envStrengthens hglobalMap)
-                  hwellFormed.2.2.1 hwellFormed.2.2.2 hinit)
+                  hcoh (Linearizable.of_linearizedBy hφ) hinit)
               holdValid
           exact validPartialValueWhenInitialized_strengthen holdValidResultEnv
             hstrength
@@ -9163,6 +9170,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
     {lifetime targetLifetime rhsWellLifetime : Lifetime} {source : LVal}
     {oldTy : Ty} {value finalValue : Value} {rhsTy : Ty} :
     WellFormedEnvWhenInitialized env lifetime →
+    CoherentWhenInitialized env →
     SafeAbstraction store env →
     ValidRuntimeState store (.assign (.deref source) (.val value)) →
     LValTyping env source (.ty (.box oldTy)) targetLifetime →
@@ -9177,8 +9185,12 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
     Step store lifetime (.assign (.deref source) (.val value)) store'
       (.val finalValue) →
     TerminalStateSafe store' finalValue env' .unit := by
-  intro hwellFormed hsafe hvalidRuntime hsourceFull _hshape hwellTy hwrite
+  intro hwellFormed hcoh hsafe hvalidRuntime hsourceFull _hshape hwellTy hwrite
     hnoStale hranked hnotWrite hwellOut hvalidValue hstep
+  rcases hranked with ⟨φ, hφ, hbelowRhs⟩
+  have hφOut : LinearizedBy φ env' :=
+    EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
+      hwrite hφ hbelowRhs
   rcases assign_step_components hstep with
     ⟨writtenStore, oldSlot, lhsLocation, hread, hwriteStore, hdrops,
       hlhsLoc, hlhsSlot, _hwriteStoreEq, hresult⟩
@@ -9194,11 +9206,10 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
     LValTyping.boxFull hsourceFull
   rcases LValTyping.base_slot_exists hsourceFull with
     ⟨sourceEnvSlot, hsourceEnvSlot⟩
-  rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
   rcases
       LValTyping.ownerSpine_or_runtimeLocationSelected_boxedSuffix_whenInitialized
         (suffix := []) (leafTy := oldTy)
-        hφ hwellFormed hsafe
+        hwellFormed hsafe
         (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
         hsourceFull hsourceEnvSlot
         (by simpa [prependPath, boxedSuffixTy] using hlhsLoc) with
@@ -9260,10 +9271,10 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
               (.var (LVal.base source)) := by
           simpa [LVal.base] using
             (not_writeProhibited_var_base hnotWrite)
-        have hnotWriteSource :
-            ¬ WriteProhibited env (.var (LVal.base source)) :=
-          not_writeProhibited_var_of_update_self hwellFormed.2.2.2
-            hnotWriteObserver
+        have hnoOtherSource :
+            ∀ y, y ≠ LVal.base source →
+              ¬ WriteProhibitedVia env y (.var (LVal.base source)) :=
+          not_writeProhibitedVia_of_update_self hnotWriteObserver
         have hrhsVarsUpdated :
             ∀ z, z ∈ PartialTy.vars (.ty rhsTy) →
               z ∈ PartialTy.vars updatedTy :=
@@ -9288,7 +9299,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
               location ≠ lhsLocation :=
           term_value_reachesWhenInitialized_ne_owner_spine_leaf_of_noWrite
             hwellFormed hsafe hvalidRuntimeValue hwellTy hvalidValue hspine
-            hvarsObserver hnotWriteSource hnotWriteObserver
+            hvarsObserver hnoOtherSource hnotWriteObserver
         have hnewValid :
             ValidPartialValueWhenInitialized env writtenStore (.value value)
               (.ty rhsTy) := by
@@ -9334,7 +9345,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
               (ValidRuntimeState.validStore hvalidRuntime)
               (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
               hspine hyx henvY hslotY hvalidOld hvarsOther
-              hnotWriteSource hnotWriteObserver
+              hnoOtherSource hnotWriteObserver
         have hsafeWrite :
             SafeAbstraction writtenStore
               (env.update (LVal.base source)
@@ -9346,7 +9357,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                 (ValidRuntimeState.validStore hvalidRuntime)
                 (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
                 hsourceEnvSlot hrootSlot hrootLifetime hspine hpathNonempty
-                hupdatePath hnotWriteSource hnotWriteObserver rfl
+                hupdatePath hnotWriteObserver rfl
                 (by simpa [hwriteEq] using hnewValid) hotherNoReachLeaf
         have hvalueHeap : ValueOwnerTargetsHeap value :=
           TermOwnerTargetsHeap.value
@@ -9549,7 +9560,6 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
           have hselectedMap :
               EnvSameShapeStrengthening
                 (env.update x { sourceSlot with ty := .ty rhsTy }) env' := by
-            rcases hwellFormed.2.2.2 with ⟨φ, hφ⟩
             have hlhsLocVar :
                 store.loc source.deref = some (VariableProjection x) := by
               simpa [hxUpdated] using hlhsLoc
@@ -9565,10 +9575,6 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                 (store.update lhsLocation
                   { oldSlot with value := PartialValue.value value })
                 (.value value) (.ty rhsTy) := by
-            rcases hranked with ⟨φ, hφ, hbelowRhs⟩
-            have hφOut : LinearizedBy φ env' :=
-              EnvWrite.preserves_linearizedBy_of_rhsBorrowTargetsBelow_all
-                hwrite hφ hbelowRhs
             rcases hselectedMap.1 x resultSlot hresultSlot with
               ⟨newSourceSlot, hnewSourceSlot, _hnewLifetime, hnewStrength,
                 hnewShape⟩
@@ -9626,7 +9632,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
               (fun {targets} hinit =>
                 borrowTargetsInitialized_back_of_envStrengthens
                   (EnvSameShapeStrengthening.envStrengthens hglobalMap)
-                  hwellFormed.2.2.1 hwellFormed.2.2.2 hinit)
+                  hcoh (Linearizable.of_linearizedBy hφ) hinit)
               hnewValid
           exact validPartialValueWhenInitialized_strengthen hnewValidResultEnv
             hstrength
@@ -9647,7 +9653,6 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
           subst sourceSlot
           have hvalidStore := ValidRuntimeState.validStore hvalidRuntime
           have hheap := ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime
-          rcases hranked with ⟨φ, hφ, hbelowRhs⟩
           by_cases howner :
               RuntimeFrame.OwnerReaches store oldValue mappedSourceSlot.ty
                 lhsLocation
@@ -9811,7 +9816,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                 (fun {targets} hinit =>
                   borrowTargetsInitialized_back_of_envStrengthens
                     (EnvSameShapeStrengthening.envStrengthens hglobalMap)
-                    hwellFormed.2.2.1 hwellFormed.2.2.2 hinit)
+                    hcoh (Linearizable.of_linearizedBy hφ) hinit)
                 hrootValid
             exact validPartialValueWhenInitialized_strengthen hrootValidResultEnv
               hstrengthStrong
@@ -9838,8 +9843,9 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                 ⟨tTy, tLt, htTyping, _houtlives, _hbase⟩
               rcases
                   envWriteEffectiveWrite_mayReadThrough_source_of_locReads_whenInitialized
-                    hwellFormed hsafe hvalidStore hheap hLhsTyping hwrite
-                    htTyping hlhsLoc hreads with
+                    (Linearizable.of_linearizedBy hφ) hwellFormed hsafe
+                    hvalidStore hheap hLhsTyping hwrite htTyping hlhsLoc
+                    hreads with
                 ⟨written, heffective, hmayRead⟩
               rcases PartialTyContains.mono_strengthens_sameShape hcontains
                   hstrength hsameShape with
@@ -9865,7 +9871,7 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                 (fun {targets} hinit =>
                   borrowTargetsInitialized_back_of_envStrengthens
                     (EnvSameShapeStrengthening.envStrengthens hglobalMap)
-                    hwellFormed.2.2.1 hwellFormed.2.2.2 hinit)
+                    hcoh (Linearizable.of_linearizedBy hφ) hinit)
                 holdValid
             exact validPartialValueWhenInitialized_strengthen holdValidResultEnv
               hstrength
@@ -10122,7 +10128,7 @@ theorem preservation_blockB_value_multistep_runtime_of_runtimeDrop
                           intro dependency hdependency
                           have hslotParent : envSlot.lifetime ≤ lifetime :=
                             LifetimeChild.parent_of_outlives_child_ne hchild
-                              (hwellBody.2.1 x envSlot henvSlot)
+                              (hwellBody.2 x envSlot henvSlot)
                               hsurvives
                           exact borrowDependency_dropsAvoids_lifetime
                             hwellBody hsafe
@@ -10702,7 +10708,7 @@ theorem preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDr
                       intro dependency hdependency
                       have hslotParent : envSlot.lifetime ≤ lifetime :=
                         LifetimeChild.parent_of_outlives_child_ne hchild
-                          (hwellBody.2.1 x envSlot henvSlot)
+                          (hwellBody.2 x envSlot henvSlot)
                           hsurvives
                       exact borrowDependencyWhenInitialized_dropsAvoids_lifetime
                         hwellBody hsafe
@@ -10895,6 +10901,7 @@ theorem preservation_bounded
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
+    CoherentWhenInitialized env₁ →
     SafeAbstraction store env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
@@ -10903,10 +10910,10 @@ theorem preservation_bounded
       finalValue with
   | zero =>
       intro hsize _hsource _hvalidRuntime _hvalidStoreTyping _hwellFormed
-        _hsafe _htyping _hmulti
+        _hcoh _hsafe _htyping _hmulti
       cases term <;> simp [Term.size] at hsize
   | succ fuel ihFuel =>
-  intro hsize hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+  intro hsize hsource hvalidRuntime hvalidStoreTyping hwellFormed hcoh hsafe
     htyping hmulti
   refine (TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
@@ -10917,6 +10924,7 @@ theorem preservation_bounded
         ValidRuntimeState store term →
         ValidStoreTyping store term currentTyping →
         WellFormedEnvWhenInitialized env lifetime →
+        CoherentWhenInitialized env →
         SafeAbstraction store env →
         MultiStep store lifetime term finalStore (.val finalValue) →
         WellFormedEnvWhenInitialized env₂ lifetime ∧
@@ -10931,6 +10939,7 @@ theorem preservation_bounded
         ValidRuntimeState store (.block blockLifetime terms) →
         ValidStoreTyping store (.block blockLifetime terms) currentTyping →
         WellFormedEnvWhenInitialized env blockLifetime →
+        CoherentWhenInitialized env →
         SafeAbstraction store env →
         WellFormedTy env₂ ty outerLifetime →
         MultiStep store outerLifetime (.block blockLifetime terms)
@@ -10940,12 +10949,12 @@ theorem preservation_bounded
     ?const ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign
     ?singleton ?cons htyping hsize rfl hsource store finalStore finalValue
-    hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti).2
+    hvalidRuntime hvalidStoreTyping hwellFormed hcoh hsafe hmulti).2
   -- T-Val: a value is already terminal.
   case const =>
     intro _env _typing _lifetime _value _ty hvalueTyping _hsize htypingEq _hsource
       store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
-      hsafe hmulti
+      _hcoh hsafe hmulti
     cases htypingEq
     have htermTyping : TermTyping _env typing _lifetime (.val _value) _ty _env :=
       TermTyping.const hvalueTyping
@@ -10958,7 +10967,7 @@ theorem preservation_bounded
   case copy =>
     intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
       _hsize htypingEq _hsource store finalStore finalValue hvalidRuntime
-      hvalidStoreTyping hwellFormed hsafe hmulti
+      hvalidStoreTyping hwellFormed _hcoh hsafe hmulti
     cases htypingEq
     have htermTyping : TermTyping _env typing _lifetime (.copy _lv) _ty _env :=
       TermTyping.copy hLv hcopy hnotRead
@@ -11042,7 +11051,7 @@ theorem preservation_bounded
   case move =>
     intro _env₁ _env₂ _typing _lifetime _valueLifetime _lv _ty hLv hnotWrite
       hmove _hsize htypingEq _hsource store finalStore finalValue hvalidRuntime
-      hvalidStoreTyping hwellFormed hsafe hmulti
+      hvalidStoreTyping hwellFormed _hcoh hsafe hmulti
     cases htypingEq
     have htermTyping : TermTyping _env₁ typing _lifetime (.move _lv) _ty _env₂ :=
       TermTyping.move hLv hnotWrite hmove
@@ -11087,7 +11096,7 @@ theorem preservation_bounded
   case mutBorrow =>
     intro _env _typing _lifetime _valueLifetime _lv _ty hLv hmutable hnotWrite
       _hsize htypingEq _hsource store finalStore finalValue hvalidRuntime
-      _hvalidStoreTyping _hwellFormed hsafe hmulti
+      _hvalidStoreTyping _hwellFormed _hcoh hsafe hmulti
     cases htypingEq
     have htermTyping :
         TermTyping _env typing _lifetime (.borrow true _lv) (.borrow true [_lv]) _env :=
@@ -11125,7 +11134,7 @@ theorem preservation_bounded
   case immBorrow =>
     intro _env _typing _lifetime _valueLifetime _lv _ty hLv hnotRead _hsize htypingEq
       _hsource store finalStore finalValue hvalidRuntime _hvalidStoreTyping
-      _hwellFormed hsafe hmulti
+      _hwellFormed _hcoh hsafe hmulti
     cases htypingEq
     have htermTyping :
         TermTyping _env typing _lifetime (.borrow false _lv) (.borrow false [_lv]) _env :=
@@ -11163,7 +11172,7 @@ theorem preservation_bounded
   case box =>
     intro _env₁ _env₂ _typing _lifetime _term _ty hterm ih hsize htypingEq hsource
       store finalStore finalValue hvalidRuntime hvalidStoreTyping hwellFormed
-      hsafe hmulti
+      hcoh hsafe hmulti
     cases htypingEq
     have htermTyping : TermTyping _env₁ typing _lifetime (.box _term) (.box _ty) _env₂ :=
       TermTyping.box hterm
@@ -11175,7 +11184,7 @@ theorem preservation_bounded
         exact (ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
           rfl (SourceTerm.box_inner hsource)
           store midStore value hvalidInner hvalidStoreTypingInner
-          hwellFormed hsafeInner hmultiInner).2)
+          hwellFormed hcoh hsafeInner hmultiInner).2)
       hvalidRuntime hvalidStoreTyping hsafe htermTyping hmulti
     have hwellOut : WellFormedEnvWhenInitialized _env₂ _lifetime :=
       (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
@@ -11185,7 +11194,7 @@ theorem preservation_bounded
   case block =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
       hblockChild hterms hwellTy hdrop ih hsize htypingEq hsource store finalStore
-      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
+      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hcoh hsafe hmulti
     cases htypingEq
     have htermTyping :
         TermTyping _env₁ typing _lifetime (.block _blockLifetime _terms) _ty _env₃ :=
@@ -11200,13 +11209,13 @@ theorem preservation_bounded
           hvalidRuntime hvalidStoreTyping
           (WellFormedEnvWhenInitialized.weaken hwellFormed
             (LifetimeChild.outlives hblockChild))
-          hsafe hwellTy hmulti
+          hcoh hsafe hwellTy hmulti
     exact And.intro hwellOut hterminal
   -- T-LetMut
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm
-      hfreshOut _hcoh henv₃ ih hsize htypingEq hsource store finalStore finalValue
-      hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
+      hfreshOut hcohObl henv₃ ih hsize htypingEq hsource store finalStore
+      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hcoh hsafe hmulti
     cases htypingEq
     rcases multistep_declare_to_value_inv hmulti with
       ⟨midStore, value, hinnerMulti, hdeclareStep⟩
@@ -11214,12 +11223,13 @@ theorem preservation_bounded
         rfl (SourceTerm.declare_inner hsource) store midStore value
         (validRuntimeState_declare_inner hvalidRuntime)
         (validStoreTyping_declare_inner hvalidStoreTyping)
-        hwellFormed hsafe hinnerMulti with
+        hwellFormed hcoh hsafe hinnerMulti with
       ⟨hwellInner, hterminalInner⟩
     rcases hterminalInner with ⟨hvalidInner, hsafeInner, hvalidValue⟩
     cases hdeclareStep with
     | declare hstore =>
-        have htermTyping := TermTyping.declare hfresh hterm hfreshOut _hcoh henv₃
+        have htermTyping :=
+          TermTyping.declare hfresh hterm hfreshOut hcohObl henv₃
         have hwellOut :=
           (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
             hwellFormed htermTyping).1
@@ -11281,9 +11291,9 @@ theorem preservation_bounded
   -- T-Assign
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy _rhs
-      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hnoStale hranked hcoh
-      hcontained hnotWrite _ih hsize htypingEq hsource store finalStore
-      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
+      _rhsTy hRhs hLhsPost hshape hwellTy hwrite hnoStale hranked hcohOut
+      hrhsTargets hnotWrite _ih hsize htypingEq hsource store finalStore
+      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hcoh hsafe hmulti
     cases htypingEq
     rcases multistep_assign_to_value_inv hmulti with
       ⟨midStore, value, hinnerMulti, hassignStep⟩
@@ -11291,16 +11301,19 @@ theorem preservation_bounded
         rfl (SourceTerm.assign_inner hsource) store midStore value
         (validRuntimeState_assign_inner hvalidRuntime)
         (validStoreTyping_assign_inner hvalidStoreTyping)
-        hwellFormed hsafe hinnerMulti with
+        hwellFormed hcoh hsafe hinnerMulti with
       ⟨hwellInner, hterminalInner⟩
     rcases hterminalInner with
       ⟨hvalidInner, hsafeInner, hvalidValue⟩
     have htermTyping :=
-      TermTyping.assign hRhs hLhsPost hshape hwellTy hwrite
-        hnoStale hranked hcoh hcontained hnotWrite
+      TermTyping.assign hRhs hLhsPost hshape hwellTy hwrite hnoStale
+        hranked hcohOut hrhsTargets hnotWrite
     have hwellOut :=
       (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
         hwellFormed htermTyping).1
+    have hcohInner : CoherentWhenInitialized _env₂ :=
+      typingPreservesCoherentWhenInitialized_of_sourceTerm
+        (SourceTerm.assign_inner hsource) hwellFormed hcoh hRhs
     have hterminal :
         TerminalStateSafe finalStore finalValue _env₃ .unit := by
       cases _lhs with
@@ -11318,11 +11331,12 @@ theorem preservation_bounded
                 hwellInner
                 hsafeInner
                 (validRuntimeState_assign_value_of_value hvalidInner)
-                hsourceBox hshape hwellTy.whenInitialized hwrite hranked
-                hnotWrite hwellOut hvalidValue hassignStep
+                hsourceBox hshape hwellTy.whenInitialized hwrite hnotWrite
+                hwellOut hvalidValue hassignStep
           | boxFull hsourceFull =>
               exact preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed
                 hwellInner
+                hcohInner
                 hsafeInner
                 (validRuntimeState_assign_value_of_value hvalidInner)
                 hsourceFull hshape hwellTy.whenInitialized hwrite hnoStale
@@ -11330,6 +11344,7 @@ theorem preservation_bounded
           | borrow hsourceBorrow htargets =>
               exact preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFormed
                 hwellInner
+                hcohInner
                 hsafeInner
                 (validRuntimeState_assign_value_of_value hvalidInner)
                 hsourceBorrow htargets hshape hwellTy.whenInitialized hwrite
@@ -11339,7 +11354,7 @@ theorem preservation_bounded
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm _ih hsize htypingEq hsource
       outerLifetime store finalStore finalValue hchild hvalidRuntime
-      hvalidStoreTyping hwellFormed hsafe hwellTy hmulti
+      hvalidStoreTyping hwellFormed hcoh hsafe hwellTy hmulti
     cases htypingEq
     rcases multistep_block_head_to_value_inv hmulti with
       ⟨midStore, value, hinnerMulti, hblockValueMulti⟩
@@ -11347,7 +11362,7 @@ theorem preservation_bounded
         rfl (SourceTerm.block_head hsource) store midStore value
         (validRuntimeState_block_singleton_inner hvalidRuntime)
         (validStoreTyping_block_singleton_inner hvalidStoreTyping)
-        hwellFormed hsafe hinnerMulti with
+        hwellFormed hcoh hsafe hinnerMulti with
       ⟨hwellInner, hterminalInner⟩
     exact preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop
       (validRuntimeState_block_singleton_value_of_value hterminalInner.1)
@@ -11358,7 +11373,7 @@ theorem preservation_bounded
     intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
       _hterm hrest _ihHead _ihRest hsize htypingEq hsource outerLifetime store
       finalStore finalValue hchild hvalidRuntime hvalidStoreTyping hwellFormed
-      hsafe hwellTy hmulti
+      hcoh hsafe hwellTy hmulti
     cases htypingEq
     cases _rest with
     | nil =>
@@ -11374,8 +11389,11 @@ theorem preservation_bounded
             rfl hsourceHead store midStore value
             (validRuntimeState_block_head hvalidRuntime)
             (validStoreTyping_block_head hvalidStoreTyping)
-            hwellFormed hsafe hinnerMulti with
+            hwellFormed hcoh hsafe hinnerMulti with
           ⟨hwellInner, hterminalInner⟩
+        have hcohInner : CoherentWhenInitialized _env₂ :=
+          typingPreservesCoherentWhenInitialized_of_sourceTerm
+            hsourceHead hwellFormed hcoh _hterm
         have hvalueBlockValid :
             ValidRuntimeState midStore
               (.block _lifetime (.val value :: next :: restTail)) :=
@@ -11411,7 +11429,7 @@ theorem preservation_bounded
               (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
               rfl hsourceTail outerLifetime storeAfter finalStore
               finalValue hchild hvalidTailAfter htailStoreTyping hwellInner
-              hsafeTailAfter hwellTy htailMulti)
+              hcohInner hsafeTailAfter hwellTy htailMulti)
           (by
             intro blockTerm blockRest storeAfter termAfter hterms hstep _htailMulti
             cases hterms
@@ -11429,15 +11447,16 @@ theorem preservation
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
+    CoherentWhenInitialized env₁ →
     store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hcoh hsafe
     htyping hmulti
   exact preservation_bounded term.size (Nat.le_refl _) hsource
     hvalidRuntime hvalidStoreTyping (WellFormedEnv.whenInitialized hwellFormed)
-    hsafe htyping
+    hcoh hsafe htyping
     hmulti
 
 end Paper
@@ -11460,11 +11479,12 @@ theorem lemma_4_11_preservation
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hcoh : CoherentWhenInitialized env₁)
     (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     TerminalStateSafe finalStore finalValue env₂ ty :=
   _root_.LwRust.Paper.preservation hsource hvalid hstoreTyping hwellFormed
-    hsafe htyping hmulti
+    hcoh hsafe htyping hmulti
 
 end LwRust.Paper.Soundness

@@ -92,18 +92,18 @@ theorem invalidBorrowExample_rejected :
               cases htail2 with
               | singleton hassign =>
                   cases hdeclareX with
-                  | declare _freshX hinitX _freshXOut _cohX hxEnv =>
+                  | declare _freshX hinitX _hfreshOutX _hcohX hxEnv =>
                       cases hinitX with
                       | const _ =>
                           cases hdeclareY with
-                          | declare _freshY hinitY _freshYOut _cohY hyEnv =>
+                          | declare _freshY hinitY _hfreshOutY _hcohY hyEnv =>
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
                                     | assign _hRhs _hLhsPost _hshape _hwell
-                                        hwrite _hnoStale _hranked _hcoherent
-                                        _hrhsTargets hnotWrite =>
+                                        hwrite _hnoStale _hranked _hrhsTargets
+                                        _hrhsTargetsWf hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue

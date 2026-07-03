@@ -195,7 +195,8 @@ theorem boxIntDeclareCoherence :
 theorem declareBox_typing :
     TermTyping Env.empty StoreTyping.empty blockLifetime
       (.letMut "p" (.box (.val (.int 0)))) .unit blockBoxIntEnv := by
-  refine TermTyping.declare ?fresh ?init ?freshOut boxIntDeclareCoherence ?env
+  refine TermTyping.declare (env₂ := Env.empty) (ty := .box .int)
+    ?fresh ?init ?freshOut boxIntDeclareCoherence ?env
   · simp [Env.fresh, Env.empty]
   · exact TermTyping.box (TermTyping.const ValueTyping.int)
   · simp [Env.fresh, Env.empty]
@@ -307,6 +308,11 @@ theorem blockBoxInt_coherent : Coherent blockBoxIntEnv := by
   intro _lv _mutable _targets _borrowLifetime htyping
   exact False.elim (blockBoxInt_no_borrow_lval htyping)
 
+theorem blockBoxInt_coherentWhenInitialized :
+    CoherentWhenInitialized blockBoxIntEnv := by
+  intro lv mutable targets borrowLifetime htyping _hinitialized
+  exact blockBoxInt_coherent lv mutable targets borrowLifetime htyping
+
 theorem blockBoxInt_rhsTargetsWellFormed_int :
     EnvWriteRhsTargetsWellFormed blockBoxIntEnv .int := by
   intro _x _slot _mutable _targets _target _hslot _hcontains _htarget hrhs
@@ -323,11 +329,10 @@ theorem assignDeref_typing :
     WellFormedTy.int
     blockBoxInt_write_deref_same
     blockBoxInt_noStale
-    ?rank
-    blockBoxInt_coherent
+    ⟨fun _ => 0, blockBoxInt_linearized, blockBoxInt_rhsBorrowBelow_int⟩
+    blockBoxInt_coherentWhenInitialized
     blockBoxInt_rhsTargetsWellFormed_int
     (blockBoxInt_not_writeProhibited _)
-  exact ⟨fun _ => 0, blockBoxInt_linearized, blockBoxInt_rhsBorrowBelow_int⟩
 
 theorem declaredBoxWriteProgram_terms_typing :
     TermListTyping Env.empty StoreTyping.empty blockLifetime
@@ -517,10 +522,11 @@ theorem declareBorrow_typing :
     TermTyping blockBoxIntEnv StoreTyping.empty blockLifetime
       (.letMut "r" (.borrow true (.deref (.var "p")))) .unit
       blockBorrowEnv := by
-  refine TermTyping.declare ?fresh borrowDeref_typing ?freshOut
-    borrowDeclareCoherence ?env
+  refine TermTyping.declare (env₂ := blockBoxIntEnv)
+    (ty := .borrow true [.deref (.var "p")]) ?fresh borrowDeref_typing
+    ?freshOut borrowDeclareCoherence ?env
   · simp [Env.fresh, blockBoxIntEnv, Env.update, Env.empty]
-  · simp [Env.fresh, blockBoxIntEnv, Env.update, Env.empty]
+  · simp [Env.fresh, blockBoxIntEnv, blockBorrowEnv, Env.update, Env.empty]
   · rfl
 
 theorem declaredBoxBorrowProgram_terms_typing :

@@ -1279,7 +1279,7 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
       ValidValue store' .unit .unit := by
   intro hvalidStoreTyping hsafe hvalidRuntime htyping hstep
   cases htyping with
-  | declare hfresh hinit _hfreshOut _hcoh henv₃ =>
+  | declare hfresh hinit _hfreshOut _hcohObl henv₃ =>
       cases hinit with
       | const hvalueTyping =>
           rcases hvalidStoreTyping value (by simp [termValues]) with

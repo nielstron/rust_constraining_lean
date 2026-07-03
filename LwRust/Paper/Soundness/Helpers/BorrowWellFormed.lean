@@ -47,10 +47,6 @@ theorem lvalTyping_empty_false {lv : LVal} {p : PartialTy} {lf : Lifetime}
       | boxFull hb => exact ih hb
       | borrow hb _ => exact ih hb
 
-theorem coherent_empty : Coherent Env.empty := by
-  intro lv m T bLf hty
-  exact (lvalTyping_empty_false hty).elim
-
 theorem coherentWhenInitialized_empty : CoherentWhenInitialized Env.empty := by
   intro lv m T bLf hty _htargets
   exact (lvalTyping_empty_false hty).elim
@@ -61,23 +57,16 @@ theorem linearizable_empty : Linearizable Env.empty :=
 @[simp] theorem wellFormedEnvWhenInitialized_empty (lifetime : Lifetime) :
     WellFormedEnvWhenInitialized Env.empty lifetime := by
   exact ⟨containedBorrowsWellFormedWhenInitialized_empty,
-    envSlotsOutlive_empty lifetime, coherentWhenInitialized_empty,
-    linearizable_empty⟩
+    envSlotsOutlive_empty lifetime⟩
 
 @[simp] theorem wellFormedEnv_empty (lifetime : Lifetime) :
     WellFormedEnv Env.empty lifetime := by
-  exact ⟨containedBorrowsWellFormed_empty, envSlotsOutlive_empty lifetime,
-    coherent_empty, linearizable_empty⟩
+  exact ⟨containedBorrowsWellFormed_empty, envSlotsOutlive_empty lifetime⟩
 
 theorem wellFormedEnv_empty_all :
     ∀ lifetime, WellFormedEnv Env.empty lifetime := by
   intro lifetime
   exact wellFormedEnv_empty lifetime
-
-theorem Coherent.whenInitialized {env : Env} :
-    Coherent env → CoherentWhenInitialized env := by
-  intro hcoherent lv mutable targets borrowLifetime htyping _htargets
-  exact hcoherent lv mutable targets borrowLifetime htyping
 
 theorem ContainedBorrowsWellFormed.whenInitialized {env : Env} :
     ContainedBorrowsWellFormed env →
@@ -91,8 +80,7 @@ theorem WellFormedEnv.whenInitialized {env : Env} {lifetime : Lifetime} :
     WellFormedEnv env lifetime →
     WellFormedEnvWhenInitialized env lifetime := by
   intro hwell
-  exact ⟨ContainedBorrowsWellFormed.whenInitialized hwell.1,
-    hwell.2.1, Coherent.whenInitialized hwell.2.2.1, hwell.2.2.2⟩
+  exact ⟨ContainedBorrowsWellFormed.whenInitialized hwell.1, hwell.2⟩
 
 theorem LValTyping.update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
     env.fresh x →
@@ -347,15 +335,14 @@ theorem WellFormedEnv.weaken {env : Env} {outer inner : Lifetime} :
     outer ≤ inner →
     WellFormedEnv env inner := by
   intro hwell houterInner
-  exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2.1 houterInner, hwell.2.2.1, hwell.2.2.2⟩
+  exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2 houterInner⟩
 
 theorem WellFormedEnvWhenInitialized.weaken {env : Env} {outer inner : Lifetime} :
     WellFormedEnvWhenInitialized env outer →
     outer ≤ inner →
     WellFormedEnvWhenInitialized env inner := by
   intro hwell houterInner
-  exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2.1 houterInner,
-    hwell.2.2.1, hwell.2.2.2⟩
+  exact ⟨hwell.1, EnvSlotsOutlive.weaken hwell.2 houterInner⟩
 
 theorem BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed {env : Env}
     {targets : List LVal} {slotLifetime lifetime : Lifetime} :
@@ -382,7 +369,7 @@ theorem EnvContains.borrowTargetsWellFormed {env : Env} {x : Name}
   exact BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed
     (hwellFormed.1 x slot mutable targets hslot
       ⟨slot, hslot, hcontainsTy⟩)
-    (hwellFormed.2.1 x slot hslot)
+    (hwellFormed.2 x slot hslot)
 
 theorem BorrowTargetsWellFormed.member {env : Env} {targets : List LVal}
     {lifetime : Lifetime} :
@@ -801,63 +788,14 @@ theorem mem_foldr_max_succ {l : List Name} {φ : Name → Nat} {v : Name}
   | head as => exact le_max_left _ _
   | tail b _hmem ih => exact le_trans ih (le_max_right _ _)
 
-/-- Explicit declaration-coherence obligation.
-
-`WellFormedTy` carries the paper's per-target borrow invariant.  The mechanised
-`Coherent` invariant is stronger: it asks for joint target-list typing for every
-borrow that can be reached by lvalue typing.  A fresh declaration of a full type
-therefore needs this extra closure fact; it is named here rather than hidden as a
-local proof hole inside `WellFormedEnv.update_fresh_ty`.
-
-This is not merely syntactic coherence of borrows contained in `ty`: after
-declaring `x : &targets`, lvals such as `*x` can expose the joint target-list
-union, and if that union is itself a borrow then `Coherent` needs coherence for
-that exposed borrow as well.  The eventual proof should thread a lvalue-level
-"declared type is coherent under the current environment" invariant through
-term typing, not derive it from `WellFormedTy` alone.
-
-As stated, this obligation is stronger than `WellFormedTy`: for example,
-`WellFormedTy.borrow` accepts `&[]` vacuously, while
-`LValTargetsTyping.nil_false` shows that no empty target list is jointly
-typeable.  The valid replacement requires the lvalue-level
-`FreshUpdateCoherenceObligations` side condition below. -/
-theorem Coherent.update_fresh_ty {env : Env} {x : Name}
-    {ty : Ty} {lifetime : Lifetime} :
-    Coherent env →
-    env.fresh x →
-    FreshUpdateCoherenceObligations env x ty lifetime →
-    Coherent (env.update x { ty := .ty ty, lifetime := lifetime })
-    := by
-  intro hcoh hfresh hobligations lv mutable targets borrowLifetime htyping
-  by_cases hbase : LVal.base lv = x
-  · rcases hobligations.fresh_root_coherent hbase htyping with
-      ⟨targetTy, targetLifetime, htargets⟩
-    exact ⟨.ty targetTy, targetLifetime, htargets.toMaybe⟩
-  · rcases hobligations.old_root_transport hbase htyping with
-      ⟨oldBorrowLifetime, htypingOld⟩
-    rcases hcoh lv mutable targets oldBorrowLifetime htypingOld with
-      ⟨targetTy, targetLifetime, htargetsOld⟩
-    exact ⟨targetTy, targetLifetime,
-      LValTargetsMaybeTyping.update_fresh
-        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh htargetsOld⟩
-
-theorem Coherent.update_fresh_ty_of_obligations {env : Env} {x : Name}
-    {ty : Ty} {lifetime : Lifetime} :
-    Coherent env →
-    env.fresh x →
-    FreshUpdateCoherenceObligations env x ty lifetime →
-    Coherent (env.update x { ty := .ty ty, lifetime := lifetime }) := by
-  exact Coherent.update_fresh_ty
-
 theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime} :
     WellFormedEnv env lifetime →
     WellFormedTy env ty lifetime →
     env.fresh x →
-    FreshUpdateCoherenceObligations env x ty lifetime →
     WellFormedEnv (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
-  intro hwellEnv hwellTy hfresh hcohObligations
-  refine ⟨?_, ?_, ?_, ?_⟩
+  intro hwellEnv hwellTy hfresh
+  refine ⟨?_, ?_⟩
   · intro y envSlot mutable targets hslot hcontains
     by_cases hy : y = x
     · subst hy
@@ -899,46 +837,17 @@ theorem WellFormedEnv.update_fresh_ty {env : Env} {x : Name}
           simpa [Env.update] using hslot
         exact h.symm
       subst hslotEq
-      exact LifetimeOutlives.refl lifetime
+      simpa using LifetimeOutlives.refl lifetime
     · have hslotOld : env.slotAt y = some envSlot := by
         simpa [Env.update, hy] using hslot
-      exact hwellEnv.2.1 y envSlot hslotOld
-  · exact Coherent.update_fresh_ty hwellEnv.2.2.1 hfresh hcohObligations
-  · -- Linearizable: rank the fresh variable strictly above the variables of its
-    -- slot type (a finite list); existing ranks unchanged.
-    obtain ⟨φ, hφ⟩ := hwellEnv.2.2.2
-    have hfreshEq : env.slotAt x = none := hfresh
-    have hxnotin : x ∉ Ty.vars ty := by
-      intro hx
-      obtain ⟨s, hs⟩ := wellFormedTy_vars_in_env hwellTy x hx
-      rw [hfreshEq] at hs
-      exact absurd hs (by simp)
-    refine ⟨fun n => if n = x then
-      (Ty.vars ty).foldr (fun w acc => max (φ w + 1) acc) 0 else φ n, ?_⟩
-    intro y slot hslot v hv
-    by_cases hy : y = x
-    · have hslotEq : slot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
-        rw [hy] at hslot
-        simpa [Env.update] using hslot.symm
-      have hvty : v ∈ Ty.vars ty := by
-        rw [hslotEq] at hv; simpa [PartialTy.vars] using hv
-      have hvx : v ≠ x := fun h => hxnotin (h ▸ hvty)
-      simp only [if_neg hvx, if_pos hy]
-      exact lt_of_lt_of_le (Nat.lt_succ_self _) (mem_foldr_max_succ hvty)
-    · have hslotOld : env.slotAt y = some slot := by
-        simpa [Env.update, hy] using hslot
-      obtain ⟨s, hs⟩ := containedBorrows_slot_vars_in_env hwellEnv.1 hslotOld v hv
-      have hvx : v ≠ x := by
-        intro h; rw [h, hfreshEq] at hs; exact absurd hs (by simp)
-      simp only [if_neg hy, if_neg hvx]
-      exact hφ y slot hslotOld v hv
+      exact hwellEnv.2 y envSlot hslotOld
 
 /--
 Fresh full-type update preserving well-formedness with the declaration
 coherence gap made explicit.
 
-This is the proved replacement for uses that should not depend on the false
-bare `Coherent.update_fresh_ty` obligation.
+This is the proved replacement for uses that should not depend on a strict
+global coherence update obligation.
 -/
 theorem WellFormedEnv.update_fresh_ty_of_coherenceObligations {env : Env} {x : Name}
     {ty : Ty} {lifetime : Lifetime} :
@@ -947,81 +856,8 @@ theorem WellFormedEnv.update_fresh_ty_of_coherenceObligations {env : Env} {x : N
     env.fresh x →
     FreshUpdateCoherenceObligations env x ty lifetime →
     WellFormedEnv (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
-  intro hwellEnv hwellTy hfresh hcohObligations
-  refine ⟨?_, ?_, ?_, ?_⟩
-  · intro y envSlot mutable targets hslot hcontains
-    by_cases hy : y = x
-    · subst hy
-      have hslotEq :
-          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
-        have h :
-            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
-          simpa [Env.update] using hslot
-        exact h.symm
-      subst hslotEq
-      rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
-      have hcontainedEq :
-          containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
-        have h :
-            { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
-          simpa [Env.update] using hcontainedSlot
-        exact h.symm
-      subst hcontainedEq
-      exact borrowTargetsWellFormedInSlot_update_fresh
-        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
-        (borrowTargetsWellFormedInSlot_of_wellFormedTy_contains hwellTy hcontainsTy)
-    · have hslotOld : env.slotAt y = some envSlot := by
-        simpa [Env.update, hy] using hslot
-      have hcontainsOld : env ⊢ y ↝ Ty.borrow mutable targets := by
-        rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
-        have hcontainedOld : env.slotAt y = some containedSlot := by
-          simpa [Env.update, hy] using hcontainedSlot
-        exact ⟨containedSlot, hcontainedOld, hcontainsTy⟩
-      exact borrowTargetsWellFormedInSlot_update_fresh
-        (slot := { ty := .ty ty, lifetime := lifetime }) hfresh
-        (hwellEnv.1 y envSlot mutable targets hslotOld hcontainsOld)
-  · intro y envSlot hslot
-    by_cases hy : y = x
-    · subst hy
-      have hslotEq :
-          envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
-        have h :
-            { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
-          simpa [Env.update] using hslot
-        exact h.symm
-      subst hslotEq
-      exact LifetimeOutlives.refl lifetime
-    · have hslotOld : env.slotAt y = some envSlot := by
-        simpa [Env.update, hy] using hslot
-      exact hwellEnv.2.1 y envSlot hslotOld
-  · exact Coherent.update_fresh_ty_of_obligations
-      hwellEnv.2.2.1 hfresh hcohObligations
-  · obtain ⟨φ, hφ⟩ := hwellEnv.2.2.2
-    have hfreshEq : env.slotAt x = none := hfresh
-    have hxnotin : x ∉ Ty.vars ty := by
-      intro hx
-      obtain ⟨s, hs⟩ := wellFormedTy_vars_in_env hwellTy x hx
-      rw [hfreshEq] at hs
-      exact absurd hs (by simp)
-    refine ⟨fun n => if n = x then
-      (Ty.vars ty).foldr (fun w acc => max (φ w + 1) acc) 0 else φ n, ?_⟩
-    intro y slot hslot v hv
-    by_cases hy : y = x
-    · have hslotEq : slot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
-        rw [hy] at hslot
-        simpa [Env.update] using hslot.symm
-      have hvty : v ∈ Ty.vars ty := by
-        rw [hslotEq] at hv; simpa [PartialTy.vars] using hv
-      have hvx : v ≠ x := fun h => hxnotin (h ▸ hvty)
-      simp only [if_neg hvx, if_pos hy]
-      exact lt_of_lt_of_le (Nat.lt_succ_self _) (mem_foldr_max_succ hvty)
-    · have hslotOld : env.slotAt y = some slot := by
-        simpa [Env.update, hy] using hslot
-      obtain ⟨s, hs⟩ := containedBorrows_slot_vars_in_env hwellEnv.1 hslotOld v hv
-      have hvx : v ≠ x := by
-        intro h; rw [h, hfreshEq] at hs; exact absurd hs (by simp)
-      simp only [if_neg hy, if_neg hvx]
-      exact hφ y slot hslotOld v hv
+  intro hwellEnv hwellTy hfresh _hcohObligations
+  exact WellFormedEnv.update_fresh_ty hwellEnv hwellTy hfresh
 
 /-- Updating a variable slot without changing its allocation lifetime preserves Definition 4.8(ii). -/
 theorem EnvSlotsOutlive.update_same_lifetime {env : Env} {x : Name}
@@ -1595,7 +1431,6 @@ theorem borrowInvariance_result_extension {env₂ : Env} {gamma : Name}
     WellFormedEnv env₂ lifetime →
     WellFormedTy env₂ ty lifetime →
     env₂.fresh gamma →
-    FreshUpdateCoherenceObligations env₂ gamma ty lifetime →
     WellFormedEnv (env₂.update gamma { ty := .ty ty, lifetime := lifetime }) lifetime := by
   exact WellFormedEnv.update_fresh_ty
 
@@ -1694,7 +1529,7 @@ theorem LValTyping.lifetime_outlives {env : Env} {current : Lifetime} :
       LValTargetsTyping env targets ty lifetime →
       lifetime ≤ current) := by
   intro hwellEnv
-  exact LValTyping.lifetime_outlives_of_slots hwellEnv.2.1
+  exact LValTyping.lifetime_outlives_of_slots hwellEnv.2
 
 theorem LValTyping.lifetime_outlives_one {env : Env} {current : Lifetime}
     {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
@@ -1749,7 +1584,7 @@ theorem LValTyping.base_outlives_one {env : Env} {current : Lifetime}
     LValTyping env lv ty lifetime →
     LValBaseOutlives env lv current := by
   intro hwellEnv htyping
-  exact LValTyping.base_outlives_one_of_slots hwellEnv.2.1 htyping
+  exact LValTyping.base_outlives_one_of_slots hwellEnv.2 htyping
 
 theorem LValTargetsTyping.borrowTargetsWellFormed_of_slots {env : Env}
     {targets : List LVal} {ty : PartialTy} {targetLifetime current : Lifetime} :
@@ -1800,29 +1635,6 @@ theorem LValTargetsTyping.targets_ne_nil {env : Env} {targets : List LVal}
   cases htargets with
   | singleton => simp
   | cons => simp
-
-theorem copyTy_result_wellFormed_of_coherent_slots {env : Env} {lv : LVal}
-    {ty : Ty} {valueLifetime lifetime : Lifetime} :
-    Coherent env →
-    EnvSlotsOutlive env lifetime →
-    BorrowTargetsInitialized env (match ty with | .borrow _ targets => targets | _ => []) →
-    LValTyping env lv (.ty ty) valueLifetime →
-    CopyTy ty →
-    WellFormedTy env ty lifetime := by
-  intro _hcoherent houtlives hinitialized _hLv hcopy
-  cases hcopy with
-  | unit | int =>
-      constructor
-  | immBorrow =>
-      rename_i targets
-      exact WellFormedTy.borrow
-        (BorrowTargetsWellFormed.intro (by
-          intro target hmem
-          rcases hinitialized target hmem with
-            ⟨targetTy, targetLifetime, htargetTyping⟩
-          exact ⟨targetTy, targetLifetime, htargetTyping,
-            LValTyping.lifetime_outlives_one_of_slots houtlives htargetTyping,
-            LValTyping.base_outlives_one_of_slots houtlives htargetTyping⟩))
 
 theorem LValTyping.var_inv {env : Env} {x : Name}
     {ty : PartialTy} {lifetime : Lifetime} :

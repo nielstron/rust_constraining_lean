@@ -792,8 +792,8 @@ theorem progress_assign_value_typing_of_safe {store : ProgramStore} {env env₂ 
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hsafe hstore htyping
   cases htyping with
-  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
-      _hcontained _hnotWriteProhibited =>
+  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hnoStale _hranked
+      _hcoh _hrhsTargets _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
@@ -811,8 +811,8 @@ theorem progress_assign_value_typing_whenInitialized {store : ProgramStore}
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hsafe hstore htyping
   cases htyping with
-  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hranked _hcoh
-      _hcontained _hnotWriteProhibited =>
+  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hnoStale _hranked
+      _hcoh _hrhsTargets _hnotWriteProhibited =>
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
@@ -878,7 +878,7 @@ theorem progress_declare_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.letMut x (.val value)) := by
   intro htyping
   cases htyping with
-  | declare _hfresh _hinit _hfreshOut _hcoh _henv =>
+  | declare _hfresh _hinit _henv =>
       exact Or.inr ⟨store.declare x lifetime value, .val .unit, Step.declare rfl⟩
 
 /-- Lemma 4.10, composed `T-Box` progress case. -/
@@ -960,8 +960,7 @@ theorem WellFormedEnv.of_outlives {env : Env} {outer inner : Lifetime} :
     WellFormedEnv env inner := by
   intro hwf houtlives
   exact ⟨hwf.1,
-    fun x slot hslot => LifetimeOutlives.trans (hwf.2.1 x slot hslot) houtlives,
-    hwf.2.2.1, hwf.2.2.2⟩
+    fun x slot hslot => LifetimeOutlives.trans (hwf.2 x slot hslot) houtlives⟩
 
 /--
 Lemma 4.10, Progress.
@@ -1040,17 +1039,18 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       (EnvSlotsOutlive.weaken houtlives (LifetimeChild.outlives hchild)) hsafe hstore
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm hfreshOut
-      hcoh henv ih hsize hvst hwf hsafe hstore
-    exact progress_declare_typing (TermTyping.declare hfresh hterm hfreshOut hcoh henv)
+      hcohObl henv ih hsize hvst hwf hsafe hstore
+    exact progress_declare_typing
+      (TermTyping.declare hfresh hterm hfreshOut hcohObl henv)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-      hRhs hLhsPost hshape hwfTy hwrite hnoStale hranked hcoh hcontained hnotWrite
+      hRhs hLhsPost hshape hwfTy hwrite hnoStale hranked hcoh hrhsTargets hnotWrite
       ih hsize hvst hwf hsafe hstore
     exact progress_assign_typing_whenInitialized hsafe hstore
-      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hnoStale hranked hcoh
-        hcontained hnotWrite)
+      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hnoStale
+        hranked hcoh hrhsTargets hnotWrite)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
   case singleton =>
@@ -1116,7 +1116,7 @@ theorem progress_whenInitialized {store : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
   intro _hvalidState hvalidStoreTyping hwellFormed hsafe hstore htyping
-  exact progress_typing hvalidStoreTyping hwellFormed.2.1 hsafe hstore htyping
+  exact progress_typing hvalidStoreTyping hwellFormed.2 hsafe hstore htyping
 
 /--
 Initialized-invariant progress for the mechanised runtime-validity package.
@@ -1151,7 +1151,7 @@ theorem progress {store : ProgramStore} {env₁ env₂ : Env}
     TermTyping env₁ typing lifetime term ty env₂ →
     ProgressResult store lifetime term := by
   intro _hvalidState hvalidStoreTyping hwellFormed hsafe hstore htyping
-  exact progress_typing hvalidStoreTyping hwellFormed.2.1 hsafe
+  exact progress_typing hvalidStoreTyping hwellFormed.2 hsafe
     hstore htyping
 
 /-- Lemma 4.10, Progress for the mechanised runtime-validity package. -/

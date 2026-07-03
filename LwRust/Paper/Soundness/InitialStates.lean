@@ -104,12 +104,13 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     exact ih htypingEq
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty
-      _hfresh _hterm _hfreshOut _hcoh _henv₃ ih htypingEq candidate hmem
+      _hfresh _hterm _hfreshOut _hcohObl _henv₃ ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-      _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hnoStale _hranked
-      _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
+      _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hnoStale
+      _hranked _hcoh _hrhsTargets _hnotWrite ih
+      htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
@@ -258,7 +259,7 @@ theorem emptyInitial_progress {term : Term} {lifetime : Lifetime}
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
       _hrefs⟩
-  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _).2.1
+  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _).2
     hsafe hstoreProgress htyping
 
 /--
@@ -276,7 +277,8 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact preservation hsource hvalidRuntime hvalidStoreTyping
-    (wellFormedEnv_empty lifetime) hsafe htyping hmulti
+    (wellFormedEnv_empty lifetime) coherentWhenInitialized_empty
+    hsafe htyping hmulti
 
 /--
 **Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.
@@ -310,7 +312,8 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed _) hsafe hstoreProgress htyping hterminates
+    (hwellFormed _) coherentWhenInitialized_empty hsafe hstoreProgress
+    htyping hterminates
 
 /--
 **Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.
@@ -495,6 +498,7 @@ theorem sourceInitial_typeAndBorrowSafety_of_preservation
     (sourceInitialRuntimeState_valid hsource)
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty _)
+    coherentWhenInitialized_empty
     safeAbstraction_empty
     operationalStoreProgress_empty
     htyping
@@ -682,7 +686,7 @@ theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed lifetime) hsafe
+    (hwellFormed lifetime) coherentWhenInitialized_empty hsafe
     ProgramStore.finiteSupport_empty htyping).2
 
 end Paper

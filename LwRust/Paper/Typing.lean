@@ -1091,13 +1091,11 @@ their base slots live as conservative protection tokens.
 -/
 def WellFormedEnvWhenInitialized (env : Env) (lifetime : Lifetime) : Prop :=
   ContainedBorrowsWellFormedWhenInitialized env ∧
-    EnvSlotsOutlive env lifetime ∧
-    CoherentWhenInitialized env ∧ Linearizable env
+    EnvSlotsOutlive env lifetime
 
-/-- Definition 4.8, well-formed environment, with the maintained invariants. -/
+/-- Definition 4.8, well-formed environment. -/
 def WellFormedEnv (env : Env) (lifetime : Lifetime) : Prop :=
-  ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime ∧
-    Coherent env ∧ Linearizable env
+  ContainedBorrowsWellFormed env ∧ EnvSlotsOutlive env lifetime
 
 /--
 Definition 4.13, borrow-safe environment.
@@ -1769,7 +1767,20 @@ mutual
         WellFormedTy env₂ ty lifetime →
         env₃ = env₂.dropLifetime blockLifetime →
         TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃
-    /-- T-Declare. -/
+    /-- T-Declare.
+
+    The paper rule requires `x ∉ dom(Γ₁)`.  The extra `env₂.fresh x` premise
+    mechanizes the paper's no-redeclaration intent (Section 5.2 explicitly
+    treats redeclaration as not permitted): the literal rule would allow the
+    shadow chain `let mut x = (let mut x = t)`, where `x` re-enters the
+    environment through the initializer itself.
+
+    `FreshUpdateCoherenceObligations` carries the target-list coherence of the
+    declared type.  It is believed derivable for source programs (the
+    initializer can only produce coherent types), but the derivation needs a
+    hereditary coherence invariant closed under the union types produced at
+    deref-through-borrow typing nodes, which neither paper develops; it is
+    retained as a proof-carried obligation. -/
     | declare {env₁ env₂ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {x : Name} {term : Term} {ty : Ty} :
         env₁.fresh x →
@@ -1778,7 +1789,38 @@ mutual
         FreshUpdateCoherenceObligations env₂ x ty lifetime →
         env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
         TermTyping env₁ typing lifetime (.letMut x term) .unit env₃
-    /-- T-Assign. -/
+    /-- T-Assign.
+
+    Two premises beyond the paper rule remain; both close gaps that the core
+    calculus (without conditionals or joins) still exhibits through the
+    multi-target fan-out of the paper's `write` function (Definition 3.23):
+
+    * `EnvWriteNoStaleBorrowTargets` — an effective write through one branch of
+      a multi-target borrow must not re-aim what a surviving borrow target
+      resolves through; `¬ writeProhibited` only inspects the base of `lhs`,
+      not the bases affected by the fan-out.
+    * `EnvWriteRhsTargetsWellFormed` — borrow targets installed from the RHS
+      must outlive each slot they are fanned into.  `Γ₂ ⊢ T₂ ≽ m` bounds them
+      only by the *intersection* of the target lifetimes, which is weaker than
+      the longest-lived written slot.
+    * the rank witness — environment linearizability (the follow-up paper's
+      acyclicity invariant) is *not* preserved by the bare paper rule: the
+      follow-up proves its Lemma 4 only for a single-target borrow grammar,
+      and Definition 3.23's weak-update union can duplicate a loan into
+      several bases (`*p = &mut c` with `p : &mut [a, b]` leaves both `a` and
+      `b` mentioning `c`), after which a second fan-out write of a moved-out
+      duplicate re-installs a borrow into its own target's slot — a self
+      edge (`c ↝ &mut […, c]`).  The witness rules such writes out.
+    * `CoherentWhenInitialized env₃` — stale-aware target-list coherence of the
+      write result (strictly weaker than the previous mechanisation's strict
+      `Coherent env₃`).  Believed derivable for source programs — no
+      counterexample is known and the write itself only unions
+      shape-compatible lists — but the derivation requires a hereditary
+      coherence invariant closed under the union types produced at
+      deref-through-borrow typing nodes (heterogeneous merged target lists
+      such as `&[x, y]` with `x : int`, `y : unit` defeat the slot-level
+      formulation even though shape compatibility makes them unreachable),
+      which neither paper develops.  Retained as a proof-carried obligation. -/
     | assign {env₁ env₂ env₃ : Env} {typing : StoreTyping}
         {lifetime targetLifetime : Lifetime} {lhs : LVal}
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
@@ -1789,7 +1831,7 @@ mutual
         EnvWrite 0 env₂ lhs rhsTy env₃ →
         EnvWriteNoStaleBorrowTargets 0 env₂ lhs rhsTy env₃ →
         (∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ env₃ rhsTy) →
-        Coherent env₃ →
+        CoherentWhenInitialized env₃ →
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
@@ -1828,11 +1870,11 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hchild _hterms _hwellTy henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).dropLifetime)
-    (fun _hfresh _hterm _hfreshResult _hcoherence henvEq ih hfinite => by
+    (fun _hfresh _hterm _hfreshOut _hcohObl henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnoStale _hrank _hcoherence
-        _hcontained _hnotWrite ih hfinite =>
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnoStale _hranked _hcoh
+        _hrhsTargets _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>

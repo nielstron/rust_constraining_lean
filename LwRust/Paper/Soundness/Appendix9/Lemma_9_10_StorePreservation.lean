@@ -41,13 +41,14 @@ theorem lemma_9_10_storePreservation
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
       WellFormedEnv env₁ lifetime →
+      CoherentWhenInitialized env₁ →
       store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     SafeAbstraction finalStore env₂ := by
-    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+    intro hsource hvalid hstoreTyping hwellFormed hcoh hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hsafe htyping hmulti).2.1
+      hwellFormed hcoh hsafe htyping hmulti).2.1
 
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete
