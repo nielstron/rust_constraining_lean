@@ -36,41 +36,33 @@ stated; the deviation then documents the corrected claim).
   vs. genuinely additional):
 
   - *Rank witness* (`∃ φ, LinearizedBy φ ∧ EnvWriteRhsBorrowTargetsBelow`) —
-    **derivable in principle**: `Linearizable` is Definition 11 of
-    `lw_rust_followup.pdf`, whose Section 6 ("Semantical Invariant",
-    Lemmas 1–4) proves in prose that the typing rules preserve
-    linearizability from any linearizable start; the mechanised premise is
-    the rule-carried form of Lemma 4's (hand-wavy) assignment case.  The
-    second conjunct (fan-out mutable-conflict locality) goes beyond the
-    follow-up but is vacuous for the core, where multi-target borrows cannot
-    arise (paper Section 3.4).
-  - *Coherence obligations* (`Coherent env₃` on `T-Assign`,
-    `ContainedBorrowsWellFormed`, `FreshUpdateCoherenceObligations`) —
-    **derivable for core programs**: coherence concerns joint target-list
-    typing, and core target lists are singletons typed in the same
-    environment; the incoherent-`&[]` pathology cannot be produced by core
-    source programs from the empty environment.  For *arbitrary* well-formed
-    starting environments these are likely genuinely necessary, since such
-    environments admit pathologies the core never creates.  (`T-Assign`'s
-    coherence obligation was previously a bespoke structured
-    `EnvWriteCoherenceObligations` carrying old-/written-root transport fields;
-    since its sole purpose was to derive `Coherent env₃`, it has been flattened
-    to that strictly-more-local premise and the structure removed.)
+    **genuinely necessary; NOT derivable**.  `Linearizable` is Definition 11
+    of `lw_rust_followup.pdf`, whose Lemmas 1–4 prove in prose that the
+    typing rules preserve linearizability — but only for the follow-up's
+    *single-target* borrow grammar.  In FR proper, Definition 3.23's
+    weak-update union creates multi-target borrows even without
+    conditionals (`*q = &mut b` through `q : &mut [p]` turns `p : &mut [a]`
+    into `p : &mut [a, b]`), and a reachable two-stage fan-out duplication
+    followed by a fan-out write of a moved-out duplicate installs a borrow
+    into its own target's slot — a rank self edge.  The witness premise
+    rules such writes out; without it preservation is false as stated.
+  - *Coherence obligations* (`CoherentWhenInitialized env₃` on `T-Assign` —
+    weakened from the earlier strict `Coherent env₃` — and
+    `FreshUpdateCoherenceObligations` on `T-Declare`) —
+    **believed derivable for source programs, but the derivation is open**:
+    no counterexample is known (the write only unions shape-compatible
+    lists), yet a premise-free preservation proof requires a *hereditary*
+    coherence invariant closed under the union types produced at
+    deref-through-borrow typing nodes.  The naive slot-level formulation
+    provably does not lift: a slot-coherent environment can expose a merged
+    borrow `&[x, y]` with `x : int`, `y : unit` under a dereference, which
+    has no joint typing — such environments appear unreachable (recursive
+    shape compatibility blocks their creation), but neither paper develops
+    the metatheory to prove it.  The obligations are therefore retained as
+    proof-carried premises in the weakest known form.
 
-    *Update (now mechanised for `T-If`):* `ContainedBorrowsWellFormed` of the
-    `T-If` join is no longer a carried premise — it is **derived** by
-    `containedBorrowsWellFormed_join` from the kept join premises
-    (`EnvJoinSameShape`, `Coherent`, `Linearizable`) and the branch
-    invariants.  This rests on a now-proven, unconditional keystone:
-    single-lval typing determinism up to `eqv`
-    (`lvalTyping_eqv_of_linearizedBy`, by strong induction on the
-    linearization rank), an lvalue-typing transport across same-shape
-    strengthenings (`lvalTyping_transport_of_sameShapeStrengthening`), and a
-    base-slot lifetime bound (`lvalTyping_lifetime_le_baseSlot`).
-
-    `T-Assign`'s result CBWF is now **also derived** (by
-    `containedBorrowsWellFormed_assign`), but it is *not* derivable from the old
-    premises alone: a write through a multi-target mutable borrow `&mut[x,z]`
+    `T-Assign`'s result CBWF **is derived** (no longer a carried premise),
+    but it is *not* derivable from the paper's premises alone: a write through a multi-target mutable borrow `&mut[x,z]`
     whose targets have different lifetimes fans the RHS into both slots, while
     `targetLifetime` is only the *intersection* of the targets' lifetimes, so it
     cannot bound the RHS by the longer-lived slot — the broad result CBWF was
@@ -109,16 +101,12 @@ stated; the deviation then documents the corrected claim).
     Section 3.1 ambient assumption that block lifetimes reflect nesting,
     with immediate-child paths as the canonical labelling.
 
-  In summary, none of the obligations is a new semantic requirement for the
-  soundness of core programs; the residue of this deviation is the missing
-  formalised admissibility proof (essentially follow-up Section 6 plus
-  coherence propagation) and the two benign tightenings above.
-
- - For ITE, we enforce BorrowSafeEnv for the resulting merged environment, and that inserting the merged type of the returned value
-   into the merged environment remains borrow safe (TyBorrowSafeAgainstEnv, e.g. relevant if a borrow type is returned)..
-   This removes the edge case outlined in the paper that merging type- and borrow-safe
-   branches can result in an unsafe environment explicitly.
-   The type system thus rejects a few more programs.
+  In summary: the stale-retarget guard, the RHS-target lifetime bound, and
+  the rank witness close gaps where the printed claims are false as stated
+  (all three arise from Definition 3.23's multi-target write fan-out, which
+  exists in the core independently of conditionals); the coherence
+  obligations and the post-initialiser freshness are believed admissible for
+  source programs but lack a formalised admissibility proof.
 
 ## Improvements
 
@@ -156,13 +144,14 @@ These deviations from the paper should be kept.
   `FreshUpdateCoherenceObligations`.  A syntactically well-formed type such as
   an empty borrow target list can still be incoherent as an environment slot, so
   the declaration rule records the missing root-transport and fresh-root facts.
+  (See the coherence-obligations deviation above for why this is not yet
+  derived.)
 
 - **Assignment is strengthened.**  `T-Assign` rechecks that the lhs is typeable
   after typing the rhs, requires shape compatibility and rhs well-formedness at
   the target lifetime, and carries explicit rank/coherence obligations:
-  `EnvWriteRhsBorrowTargetsBelow`, a plain `Coherent env₃` (formerly the
-  structured `EnvWriteCoherenceObligations`, now flattened since its only use was
-  to derive `Coherent env₃`), and the
+  `EnvWriteRhsBorrowTargetsBelow`, a stale-aware `CoherentWhenInitialized env₃`
+  (weakened from the earlier strict `Coherent env₃`), and the
   minimal `EnvWriteRhsTargetsWellFormed` for the result (the RHS-origin borrow
   edges must outlive the slot they are injected into — strictly weaker than the
   broad result `ContainedBorrowsWellFormed`, which is *derived* from it via
@@ -178,11 +167,18 @@ These deviations from the paper should be kept.
   invariant: environment joins can merge target lists whose pointee types do not
   have a joint type.
 
-- **Well-formed environments carry extra borrow invariants.**  `WellFormedEnv`
-  is augmented with `Coherent` and `Linearizable`.  `Coherent` records joint
-  target-list typing for contained borrows when reborrowing needs it.
-  `Linearizable` comes from the follow-up material and gives a rank function
-  forbidding cyclic borrow references.
+- **Well-formed environments are exactly the paper's Definition 4.8.**
+  `WellFormedEnv` / `WellFormedEnvWhenInitialized` contain only the paper's two
+  ingredients (contained borrows well-formed, slots outlive the current
+  lifetime).  The coherence and linearizability facts formerly carried as
+  invariant conjuncts are instead threaded through preservation: coherence via
+  the static walk `typingPreservesCoherentWhenInitialized_of_sourceTerm`
+  (rooted in the rule-carried obligations and discharged at the empty
+  environment), and rank facts via the assignment rank witness.  Facts the old
+  conjuncts supplied elsewhere are re-derived; notably the
+  Linearizable-dependent update-self lemma (false for two-part-well-formed
+  environments, which admit self-borrows) is replaced by witness-carrying
+  `WriteProhibitedVia` chain lemmas that transport across writes.
 
 - **Progress exposes the finite-store operational assumption.**
   `OperationalStoreProgress` packages the paper's finite-store totality facts
