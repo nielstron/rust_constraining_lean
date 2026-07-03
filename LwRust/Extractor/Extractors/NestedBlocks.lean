@@ -600,6 +600,40 @@ theorem extractProgram_wellTyped_of_completion
 
 end TypedExtraction
 
+/--
+At a block-body statement boundary, the extractor does not drop an enclosing
+constraint: the extracted block is itself one of the generated completions.
+-/
+theorem extractProgram_completedStatementBoundary_completes
+    {lifetime : Lifetime} {pre : List Term} :
+    CompletesProgram
+      (Generated.PartialTerm.blockTerms lifetime
+        (Generated.PartialTerms.elems pre none))
+      (extractProgram
+        (Generated.PartialTerm.blockTerms lifetime
+          (Generated.PartialTerms.elems pre none))) := by
+  simpa [CompletesProgram, extractProgram, extractTerm, extractTerms] using
+    (Generated.CompletesTerm.ctermBlock_blockTerms
+      (Generated.CompletesTerms.elemsDone
+        (pre := pre) (suffix := [missingTerm])))
+
+/--
+Soundness at a completed-statement boundary: if the extracted block checks,
+there is a well-typed completion of the partial block.
+-/
+theorem extractProgram_completedStatementBoundary_sound
+    {lifetime : Lifetime} {pre : List Term}
+    (hExtracted : ProgramWellTyped
+      (extractProgram
+        (Generated.PartialTerm.blockTerms lifetime
+          (Generated.PartialTerms.elems pre none)))) :
+    Completable ProgramWellTyped CompletesProgram
+      (Generated.PartialTerm.blockTerms lifetime
+        (Generated.PartialTerms.elems pre none)) := by
+  exact ⟨_,
+    extractProgram_completedStatementBoundary_completes,
+    hExtracted⟩
+
 theorem extractor_wellTyped_conservative :
     Conservative ProgramWellTyped CompletesProgram extractProgram := by
   intro p hInvalid full hCompletion hFull
