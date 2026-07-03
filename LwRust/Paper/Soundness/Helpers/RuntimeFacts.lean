@@ -537,7 +537,6 @@ theorem writeLeafTy_mono {env : Env} {q : List Unit} {a : PartialTy} {rhsTy : Ty
                 (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape))
           | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
-          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | borrow _ _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
       | box _ => simp [PartialTy.sameShape] at hshape
       | undef _ => simp [PartialTy.sameShape] at hshape
@@ -555,7 +554,6 @@ theorem writeLeafTy_mono {env : Env} {q : List Unit} {a : PartialTy} {rhsTy : Ty
           | unit => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | int => simp [PartialTy.sameShape, Ty.sameShape] at hshape
           | box _ => simp [PartialTy.sameShape, Ty.sameShape] at hshape
-          | bool => simp [PartialTy.sameShape, Ty.sameShape] at hshape
       | box _ => simp [PartialTy.sameShape] at hshape
       | undef _ => simp [PartialTy.sameShape] at hshape
 
@@ -1775,8 +1773,6 @@ theorem validPartialValueWhenInitialized_full_value {env : Env}
       exact ⟨.unit, rfl, ValidPartialValueWhenInitialized.unit⟩
   | int =>
       exact ⟨.int _, rfl, ValidPartialValueWhenInitialized.int⟩
-  | bool =>
-      exact ⟨.bool _, rfl, ValidPartialValueWhenInitialized.bool⟩
   | borrowLive hinitialized hmem hloc =>
       exact ⟨.ref { location := _, owner := false }, rfl,
         ValidPartialValueWhenInitialized.borrowLive hinitialized hmem hloc⟩
@@ -1838,8 +1834,6 @@ theorem validPartialValue_full_value {store : ProgramStore}
       exact ⟨.unit, rfl, ValidPartialValue.unit⟩
   | int =>
       exact ⟨.int _, rfl, ValidPartialValue.int⟩
-  | bool =>
-      exact ⟨.bool _, rfl, ValidPartialValue.bool⟩
   | borrow hmem hloc =>
       exact ⟨.ref { location := _, owner := false }, rfl,
         ValidPartialValue.borrow hmem hloc⟩

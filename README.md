@@ -1,9 +1,7 @@
 # Rust Constraining Formalization
 
 Lean mechanisation of the core FR calculus from the paper "A Lightweight Formalism for Reference Lifetimes and
-Borrowing in Rust" (`Paper`), extended with if/else constructs and diverging panic statements.
-
-It additionally includes a formalization of the extractor and completion definitions from the Rust Constraining paper (`Extractor`) and shows that the extractor is indeed complete. The main argument is around the fact that follow-up statements can only add conflicts to the type- and borrow system and thus partial code is usually more permissible than the completed code.
+Borrowing in Rust" (`Paper`).
 
 ## Deviations from the Paper
 
@@ -127,40 +125,6 @@ stated; the deviation then documents the corrected claim).
 This section notes down changes done to the paper that strengthen its results or otherwise were necessary for correctness.
 These deviations from the paper should be kept.
 
-- **`T-Eq` keeps the paper's ghost-slot check, rule-carried.**  The paper
-  types the right operand in `Γ₂[γ ↦ ⟨T₁⟩^l]` for an anonymous fresh `γ` and
-  erases `γ` afterwards, so borrows inside the left operand's result type keep
-  prohibiting conflicting uses while the right operand is typed.  The
-  mechanised rule carries exactly that ghost derivation as a premise (the
-  paper's precision filter), *plus* the eliminated form — the right operand
-  typed in plain `Γ₂` — which is what the metatheory threads.  In the paper
-  the eliminated form is implied by the ghost form via fresh-slot thinning,
-  but that implication is unprovable here: the ghost slot has no runtime
-  counterpart, so its derivation cannot be threaded through preservation
-  (safe abstraction `S ∼ Γ` demands two-way domain agreement), and a general
-  thinning metatheorem is in the same family as the false environment
-  weakening of `Examples/ThinningFalse.lean` (target-list borrow types make
-  dereferences environment-sensitive).  Following the
-  rule-carried-obligation convention, the monotonicity
-  fact is carried as a premise rather than proven; no precision is lost
-  relative to the paper, and right operands conflicting with lhs-result
-  borrows are rejected as the paper intends.
-
-- **Divergence-aware conditionals (`T-IfDiv`), modelling real Rust.**  The
-  paper's `T-If` always joins both branch environments; rustc instead lets a
-  `panic!()`-terminated branch type at `!` and contribute nothing to the
-  borrow-state merge.  `TermTyping.iteDiverging` adds exactly this rule: if
-  the else-branch is fully type-checked *and* syntactically diverges
-  (`Term.Diverges`, the counterpart of `!`-propagation; `Term.missing` plays
-  the role of `panic!()`), the conditional's result type and environment are
-  the live branch's.  No new terms and no semantics changes are involved;
-  in preservation the dead-branch path is discharged by
-  `diverges_multistep_not_value` (a diverging branch never reaches a value),
-  and all other metatheory cases defer to the premise IHs.  This is what lets
-  the conservative extractor rebuild `if c { … } else { …; panic!() }` around
-  a truncated branch the way `ast_copier` does
-  (`LwRust/Extractor/Extractors/NestedBlocks.lean`).
-
 - **Lemma 4.11 (Preservation) carries a premises the paper does not
   have.**
    `BorrowSafeEnv Γ₁` — *likely paper bug:* the printed lemma appears false
@@ -229,15 +193,15 @@ These deviations from the paper should be kept.
   which implies it (`OperationalStoreProgress.of_finiteSupport`), is preserved
   by reduction (`FiniteSupport.step`), and powers the reachable-state results.
 
-- **Theorem 4.12 is proven in the paper's total form for missing-free source
-  terms.**  `terminatesAsValue_missingFree` constructs the terminal multistep by
-  recursion over the typing derivation, using preservation of evaluated
-  subterms to recover the safe abstraction needed by later operations.
-  `step_size_lt` records the operational reason this works: every missing-free
-  step strictly decreases syntax size.  `theorem_4_12_typeAndBorrowSafety_total`
-  and `emptyInitial_typeAndBorrowSafety_total` conclude the paper's claim for
-  `Term.MissingFree` programs — execution reaches a terminal value and that
-  state is safe — with termination proven rather than assumed.
+- **Theorem 4.12 is proven in the paper's total form for source terms.**
+  `terminatesAsValue` constructs the terminal multistep by recursion over the
+  typing derivation, using preservation of evaluated subterms to recover the
+  safe abstraction needed by later operations.  `step_size_lt` records the
+  operational reason this works: every step strictly decreases syntax size.
+  `theorem_4_12_typeAndBorrowSafety_total` and
+  `emptyInitial_typeAndBorrowSafety_total` conclude the paper's claim for
+  source programs — execution reaches a terminal value and that state is safe
+  — with termination proven rather than assumed.
 
 - **Write fan-out requires initialized typed leaves.**  `WriteBorrowTargets`
   carries an initialized full-lvalue typing witness for each concrete fan-out
@@ -270,14 +234,11 @@ These deviations from the paper should be kept.
   store typing to environment/lifetime well-formedness.  They are proof
   interface obligations, not extra source typing rules.
 
-- **Theorem 4.12 proves terminal execution for missing-free source terms.**  The
-  integrated syntax still contains generated `.missing`, which is intentionally
-  well typed and self-loops.  The lower-level `typeAndBorrowSafety` bridge keeps
-  an explicit `TerminatesAsValue` witness for such generated terms, while
-  `theorem_4_12_typeAndBorrowSafety_total` and
-  `emptyInitial_typeAndBorrowSafety_total` derive the terminal run from
-  `Term.MissingFree`.  The nontermination-friendly component remains exposed as
-  progress.
+- **Theorem 4.12 also exposes the conditional bridge.**  The lower-level
+  `typeAndBorrowSafety` theorem accepts an explicit `TerminatesAsValue`
+  witness, while `theorem_4_12_typeAndBorrowSafety_total` and
+  `emptyInitial_typeAndBorrowSafety_total` derive the terminal run for source
+  programs.  The nontermination-friendly component remains exposed as progress.
 
 - **Progress exposes the finite-store operational assumption.**
   `OperationalStoreProgress` packages fresh-allocation, drop, assignment, and

@@ -1154,7 +1154,7 @@ theorem valueTyping_result_wellFormed_of_refs {env : Env} {typing : StoreTyping}
     WellFormedTy env ty lifetime := by
   intro hrefs htyping
   cases htyping with
-  | unit | int | bool => constructor
+  | unit | int => constructor
   | ref hlookup =>
       exact hrefs _ _ hlookup
 
@@ -1170,11 +1170,10 @@ consult the store typing: any store typing types them identically.
 theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
     {typing typing' : StoreTyping} {lifetime : Lifetime} {term : Term}
     {ty : Ty} :
-    (∀ ghost, StoreTyping.TypeNameFresh typing' ghost) →
     SourceTerm term →
     TermTyping env₁ typing lifetime term ty env₂ →
     TermTyping env₁ typing' lifetime term ty env₂ := by
-  intro hfreshTyping hsource htyping
+  intro hsource htyping
   exact TermTyping.rec
     (motive_1 := fun env _t l term ty env₂ _ =>
       SourceTerm term → TermTyping env typing' l term ty env₂)
@@ -1185,10 +1184,8 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
       have hsourceValue : SourceValue value :=
         hsource value (by simp [termValues])
       cases hvalueTyping with
-      | unit | int | bool => exact TermTyping.const (by constructor)
+      | unit | int => exact TermTyping.const (by constructor)
       | ref _hlookup => exact absurd hsourceValue (by simp [SourceValue]))
-    (fun hwellTy hloanFree _hsource =>
-      TermTyping.missing hwellTy hloanFree)
     (fun hLv hcopy hread _hsource =>
       TermTyping.copy hLv hcopy hread)
     (fun hLv hwrite hmove _hsource =>
@@ -1208,31 +1205,6 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
         hnotWrite ih hsource =>
       TermTyping.assign (ih (SourceTerm.assign_inner hsource)) hLhsPost
         hshape hwf hwrite hnoStale hranked hcoh hcontained hnotWrite)
-    (fun _hLhs hfresh htypeFresh htyFresh _hstoreFresh _hghostRhs hnotMention henvEq
-        hcopyL hcopyR hshape ihL ihGhost hsource =>
-      TermTyping.eq (ihL (SourceTerm.eq_lhs hsource)) hfresh
-        htypeFresh htyFresh (hfreshTyping _)
-        (ihGhost (SourceTerm.eq_rhs hsource))
-        hnotMention henvEq hcopyL hcopyR hshape)
-    (fun _hcondition _htrue _hfalse hjoin henvJoin hwellJoin
-        hcoherent hlinear ihCondition ihTrue ihFalse hsource =>
-      TermTyping.ite (ihCondition (SourceTerm.ite_condition hsource))
-        (ihTrue (SourceTerm.ite_trueBranch hsource))
-        (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hjoin henvJoin hwellJoin hcoherent hlinear)
-    (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
-        hsource =>
-      TermTyping.iteDiverging (ihCondition (SourceTerm.ite_condition hsource))
-        (ihTrue (SourceTerm.ite_trueBranch hsource))
-        (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hdiverges)
-    (fun _hcondition _htrue _hfalse hdiverges ihCondition ihTrue ihFalse
-        hsource =>
-      TermTyping.iteTrueDiverging
-        (ihCondition (SourceTerm.ite_condition hsource))
-        (ihTrue (SourceTerm.ite_trueBranch hsource))
-        (ihFalse (SourceTerm.ite_falseBranch hsource))
-        hdiverges)
     (fun _hterm ih hsource =>
       TermListTyping.singleton (ih (SourceTerm.block_head hsource)))
     (fun _hterm _hrest ihHead ihRest hsource =>
@@ -1561,8 +1533,6 @@ theorem ValidPartialValueWhenInitialized.update_fresh_env_of_vars_fresh
       exact ValidPartialValueWhenInitialized.unit
   | int =>
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
   | undefOf hinner hstrength =>
@@ -2086,9 +2056,6 @@ theorem wellFormedTy_of_containedBorrowTargets {env : Env}
         intro mutable targets hcontains
         exact htargets mutable targets (PartialTyContains.tyBox hcontains))))
     (by
-      intro _htargets
-      exact WellFormedTy.bool)
-    (by
       intro _ty _ih
       trivial)
     (by
@@ -2128,9 +2095,6 @@ theorem wellFormedTyWhenInitialized_of_containedBorrowTargets {env : Env}
       exact WellFormedTyWhenInitialized.box (ih (by
         intro mutable targets hcontains
         exact htargets mutable targets (PartialTyContains.tyBox hcontains))))
-    (by
-      intro _htargets
-      exact WellFormedTyWhenInitialized.bool)
     (by
       intro _ty _ih
       trivial)
@@ -2189,7 +2153,7 @@ theorem copyTy_result_wellFormed {env : Env} {lv : LVal}
     WellFormedTy env ty lifetime := by
   intro hwellFormed hLv hcopy
   cases hcopy with
-  | unit | int | bool => constructor
+  | unit | int => constructor
   | immBorrow =>
       rename_i targets
       have htargets : BorrowTargetsWellFormed env targets lifetime := by
@@ -2209,8 +2173,6 @@ theorem copyTy_result_wellFormedWhenInitialized {env : Env} {lv : LVal}
       exact WellFormedTyWhenInitialized.unit
   | int =>
       exact WellFormedTyWhenInitialized.int
-  | bool =>
-      exact WellFormedTyWhenInitialized.bool
   | immBorrow =>
       rename_i targets
       have htargetsAtValueLifetime :
@@ -2799,8 +2761,6 @@ theorem ValidPartialValueWhenInitialized.update_env_of_not_pathConflicts
       exact ValidPartialValueWhenInitialized.unit
   | int =>
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
   | undefOf hinner hstrength =>
@@ -2999,7 +2959,7 @@ theorem WellFormedTy.move_of_no_pathConflicts {env env' : Env}
     WellFormedTy env' ty lifetime := by
   intro hmove hnotWrite hwellTy hnotConflicts
   induction hwellTy with
-  | unit | int | bool => constructor
+  | unit | int => constructor
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.move_of_no_pathConflicts
@@ -3062,7 +3022,7 @@ theorem Strike.vars_subset :
                         (by simpa [PartialTy.vars] using hv)
                     simpa [PartialTy.vars, Ty.vars] using hv'
                 | ty _ | undef _ => simp [Strike] at h
-            | unit | int | bool | borrow _ _ =>
+            | unit | int | borrow _ _ =>
                 cases struck <;> simp [Strike] at h
         | undef _ => simp [Strike] at h
 
@@ -3125,7 +3085,7 @@ theorem Strike.isBoxUndef :
                     show IsBoxUndef struck'
                     exact ih h'
                 | ty _ | undef _ => simp [Strike] at h
-            | unit | int | bool | borrow _ _ =>
+            | unit | int | borrow _ _ =>
                 cases struck <;> simp [Strike] at h
         | undef _ => simp [Strike] at h
 
@@ -3196,8 +3156,6 @@ theorem ValidPartialValueWhenInitialized.move_env {env env' : Env}
       exact ValidPartialValueWhenInitialized.unit
   | int =>
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
   | undefOf hinner hstrength =>
@@ -3381,7 +3339,7 @@ theorem WellFormedTyWhenInitialized.move_of_no_pathConflicts
     WellFormedTyWhenInitialized env' ty lifetime := by
   intro hmove hnotWrite hwellTy hnotConflicts
   induction hwellTy with
-  | unit | int | bool =>
+  | unit | int =>
       constructor
   | borrow htargets =>
       exact WellFormedTyWhenInitialized.borrow
@@ -3899,7 +3857,7 @@ theorem WellFormedTy.dropLifetime_child_of_transport
     WellFormedTy (env.dropLifetime child) ty parent := by
   intro hchild htransport hwellTy
   induction hwellTy with
-  | unit | int | bool => constructor
+  | unit | int => constructor
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.dropLifetime_child_of_transport
@@ -4346,7 +4304,7 @@ theorem WellFormedTyWhenInitialized.dropLifetime_child_of_transport
     WellFormedTyWhenInitialized (env.dropLifetime child) ty parent := by
   intro hchild hwellBody htransport hwellTy
   induction hwellTy with
-  | unit | int | bool =>
+  | unit | int =>
       constructor
   | borrow htargets =>
       exact WellFormedTyWhenInitialized.borrow
@@ -4467,8 +4425,6 @@ theorem ty_eqv_imp_strengthens : ∀ {a b : Ty},
       cases b <;> first | exact PartialTyStrengthens.reflex | simp [Ty.eqv] at h
   | .int, b, h => by
       cases b <;> first | exact PartialTyStrengthens.reflex | simp [Ty.eqv] at h
-  | .bool, b, h => by
-      cases b <;> first | exact PartialTyStrengthens.reflex | simp [Ty.eqv] at h
   | .borrow m ta, b, h => by
       cases b with
       | borrow m' tb =>
@@ -4476,7 +4432,6 @@ theorem ty_eqv_imp_strengthens : ∀ {a b : Ty},
           exact PartialTyStrengthens.borrow hsub
       | unit => simp [Ty.eqv] at h
       | int => simp [Ty.eqv] at h
-      | bool => simp [Ty.eqv] at h
       | box _ => simp [Ty.eqv] at h
   | .box a0, b, h => by
       cases b with
@@ -4485,7 +4440,6 @@ theorem ty_eqv_imp_strengthens : ∀ {a b : Ty},
             (ty_eqv_imp_strengthens (a := a0) (b := b0) (by simpa [Ty.eqv] using h))
       | unit => simp [Ty.eqv] at h
       | int => simp [Ty.eqv] at h
-      | bool => simp [Ty.eqv] at h
       | borrow _ _ => simp [Ty.eqv] at h
 
 /-- Antisymmetry of the strengthening preorder on full types, modulo `eqv`. -/
@@ -4494,7 +4448,6 @@ theorem ty_eqv_of_le_le : ∀ {a b : Ty},
     PartialTyStrengthens (.ty b) (.ty a) → Ty.eqv a b
   | .unit, _, hab, _ => by cases hab; exact Ty.eqv_refl _
   | .int, _, hab, _ => by cases hab; exact Ty.eqv_refl _
-  | .bool, _, hab, _ => by cases hab; exact Ty.eqv_refl _
   | .borrow m ta, _, hab, hba => by
       cases hab with
       | reflex => exact Ty.eqv_refl _
@@ -5218,7 +5171,6 @@ theorem lvalTyping_transport_of_sameShapeStrengthening {source result : Env}
             exact ⟨.ty tyJ, lfJ, LValTyping.borrow htypU htJ, hcmp.1, hcmp.2⟩
         | unit => cases hstrU
         | int => cases hstrU
-        | bool => cases hstrU
         | box _ => cases hstrU
     | box _ => simp [PartialTy.sameShape] at hshapeU
     | undef _ => simp [PartialTy.sameShape] at hshapeU
@@ -5875,9 +5827,6 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             exact ⟨hwellFormed,
               WellFormedTy.whenInitialized
                 (valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping)⟩)
-        (fun {_env _typing _lifetime _ty} hwellTy _hloanFree _hsize
-            _htypingEq hwellFormed =>
-          ⟨hwellFormed, WellFormedTy.whenInitialized hwellTy⟩)
         (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
             _hsize _htypingEq hwellFormed =>
           ⟨hwellFormed,
@@ -5956,75 +5905,6 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
                 hcoh3,
                 Linearizable.of_linearizedBy hlin3By⟩,
                 WellFormedTyWhenInitialized.unit⟩)
-        (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-              _lhsTy _rhsTy}
-            _hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs hnotMention
-            henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize htypingEq
-            hwellFormed =>
-          by
-            subst htypingEq
-            let leftResult := ihL
-              (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-              rfl hwellFormed
-            have hRhsErased : TermTyping _env₂ _typing _lifetime _rhs _rhsTy
-                (_envGhost.erase _ghost) :=
-            TermTyping.erase_ghost
-                (env := _env₂)
-                (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
-                hfresh htypeFresh
-                (by
-                  intro hmem
-                  exact htyFresh (Ty.vars_subset_allVars hmem))
-                hstoreFresh hnotMention hghostRhs
-            have rightResult :=
-              ihFuel
-                (env₁ := _env₂)
-                (env₂ := _envGhost.erase _ghost)
-                (typing := _typing)
-                (lifetime := _lifetime)
-                (term := _rhs)
-                (ty := _rhsTy)
-                (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-                hrefs leftResult.1 hRhsErased
-            exact ⟨by simpa [henvEq] using rightResult.1,
-              WellFormedTyWhenInitialized.bool⟩)
-        (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-              _trueBranch _falseBranch _trueTy _falseTy _joinTy}
-            _hcondition _htrue _hfalse _hjoin _henvJoin
-            hwellJoin hcoherent hlinear
-            ihCondition ihTrue ihFalse hsize htypingEq hwellFormed =>
-          let conditionResult := ihCondition
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq hwellFormed
-          let trueResult := ihTrue
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1
-          let falseResult := ihFalse
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1
-          wellFormedWhenInitialized_iteJoin_of_obligations
-            _henvJoin trueResult.1 falseResult.1 hwellJoin
-            (Coherent.whenInitialized hcoherent) hlinear)
-        (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-              _trueBranch _falseBranch _trueTy _falseTy}
-            _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
-            hsize htypingEq hwellFormed =>
-          let conditionResult := ihCondition
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq hwellFormed
-          ihTrue
-          (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          htypingEq conditionResult.1)
-        (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-              _trueBranch _falseBranch _trueTy _falseTy}
-            _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue ihFalse
-            hsize htypingEq hwellFormed =>
-          let conditionResult := ihCondition
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq hwellFormed
-          ihFalse
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1)
         (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih hsize
             htypingEq hwellFormed =>
           ih
@@ -6076,9 +5956,6 @@ theorem typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations_core_
             exact ⟨hwellFormed,
               WellFormedTy.whenInitialized
                 (valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping)⟩)
-        (fun {_env _typing _lifetime _ty} hwellTy _hloanFree _hsize
-            _htypingEq hwellFormed =>
-          ⟨hwellFormed, WellFormedTy.whenInitialized hwellTy⟩)
         (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
             _hsize _htypingEq hwellFormed =>
           ⟨hwellFormed,
@@ -6157,75 +6034,6 @@ theorem typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations_core_
                 hcoh3,
                 Linearizable.of_linearizedBy hlin3By⟩,
                 WellFormedTyWhenInitialized.unit⟩)
-        (fun {_env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-              _lhsTy _rhsTy}
-            _hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs hnotMention
-            henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize htypingEq
-            hwellFormed =>
-          by
-            subst htypingEq
-            let leftResult := ihL
-              (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-              rfl hwellFormed
-            have hRhsErased : TermTyping _env₂ _typing _lifetime _rhs _rhsTy
-                (_envGhost.erase _ghost) :=
-            TermTyping.erase_ghost
-                (env := _env₂)
-                (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
-                hfresh htypeFresh
-                (by
-                  intro hmem
-                  exact htyFresh (Ty.vars_subset_allVars hmem))
-                hstoreFresh hnotMention hghostRhs
-            have rightResult :=
-              ihFuel
-                (env₁ := _env₂)
-                (env₂ := _envGhost.erase _ghost)
-                (typing := _typing)
-                (lifetime := _lifetime)
-                (term := _rhs)
-                (ty := _rhsTy)
-                (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-                hrefs leftResult.1 hRhsErased
-            exact ⟨by simpa [henvEq] using rightResult.1,
-              WellFormedTyWhenInitialized.bool⟩)
-        (fun {_env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-              _trueBranch _falseBranch _trueTy _falseTy _joinTy}
-            _hcondition _htrue _hfalse _hjoin _henvJoin
-            hwellJoin hcoherent hlinear
-            ihCondition ihTrue ihFalse hsize htypingEq hwellFormed =>
-          let conditionResult := ihCondition
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq hwellFormed
-          let trueResult := ihTrue
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1
-          let falseResult := ihFalse
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1
-          wellFormedWhenInitialized_iteJoin_of_obligations
-            _henvJoin trueResult.1 falseResult.1 hwellJoin
-            (Coherent.whenInitialized hcoherent) hlinear)
-        (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-              _trueBranch _falseBranch _trueTy _falseTy}
-            _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue _ihFalse
-            hsize htypingEq hwellFormed =>
-          let conditionResult := ihCondition
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq hwellFormed
-          ihTrue
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1)
-        (fun {_env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-              _trueBranch _falseBranch _trueTy _falseTy}
-            _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue ihFalse
-            hsize htypingEq hwellFormed =>
-          let conditionResult := ihCondition
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq hwellFormed
-          ihFalse
-            (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            htypingEq conditionResult.1)
         (fun {_env₁ _env₂ _typing _lifetime _term _ty} _hterm ih hsize
             htypingEq hwellFormed =>
           ih
@@ -6267,8 +6075,7 @@ theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
   exact typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
     (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
     hwellFormed
-    (TermTyping.retype_of_sourceTerm
-      (fun ghost => StoreTyping.empty_typeNameFresh ghost) hsource htyping)
+    (TermTyping.retype_of_sourceTerm hsource htyping)
 
 theorem borrowInvarianceWhenInitialized_emptyStoreTyping
     {env₁ env₂ : Env} {lifetime : Lifetime} {term : Term} {ty : Ty} :
@@ -6357,7 +6164,6 @@ theorem sourceTerm_validStoreTyping_empty_any {store : ProgramStore}
   cases value with
   | unit => exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
   | int n => exact ⟨.int, ValueTyping.int, ValidPartialValue.int⟩
-  | bool b => exact ⟨.bool, ValueTyping.bool, ValidPartialValue.bool⟩
   | ref r => exact absurd hsourceValue (by simp [SourceValue])
 
 /--
@@ -6384,8 +6190,7 @@ theorem typingPreservesWellFormed_of_sourceTerm
   exact typingPreservesWellFormed_of_ruleCarriedObligations
     (fun env lifetime => storeTypingRefsWellFormed_empty env lifetime)
     hvalidState (sourceTerm_validStoreTyping_empty_any hsource) hwellFormed
-    hsafe (TermTyping.retype_of_sourceTerm
-      (fun ghost => StoreTyping.empty_typeNameFresh ghost) hsource htyping)
+    hsafe (TermTyping.retype_of_sourceTerm hsource htyping)
 
 /-- Lemma 4.9, Borrow Invariance, for source terms (no store-typing premise). -/
 theorem borrowInvariance_of_sourceTerm
@@ -8907,7 +8712,7 @@ theorem ValidPartialValueSkeleton.ownerDerefOfUndefAux
       ValidPartialValue store ownedSlot.value (.undef innerTy) := by
   intro hvalue hskel
   induction hskel generalizing owned outerTy with
-  | unit | int | bool | undef | borrow =>
+  | unit | int | undef | borrow =>
       cases hvalue
   | @box location slot inner hslot hinner =>
       cases hvalue
@@ -13428,7 +13233,7 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_borrow_dependency_fra
       ValidPartialValue (store.update updated newSlot) value ty := by
   intro value ty hvalid
   induction hvalid with
-  | unit | int | bool | undef =>
+  | unit | int | undef =>
       intro _howners _hdeps
       constructor
   | undefOf hinner hstrength =>
@@ -14223,7 +14028,7 @@ where
                     hselectedStrengthens,
                   hbound₂, hborrows₂, hcontains₂, rootEnvSlot₂, rootValue₂,
                   hrootEnvSlot₂, hrootValue₂, hdescent₂⟩
-            | unit | int | bool | undef =>
+            | unit | int | undef =>
                 cases hstrengthM
             | @box owned ownedSlot innerView hownedSlot hinnerView =>
                 cases hstrengthM
@@ -14278,7 +14083,7 @@ theorem RuntimeFrame.loc_deref_step_below {store : ProgramStore} {env : Env}
           exact ⟨root, root, ProtectedByBase.trans_owned hprotM hownsAt,
             hprotM,
             Or.inr ⟨rfl, ProgramStore.OwnsTransitively.direct hownsAt⟩⟩
-      | unit | int | bool | undef =>
+      | unit | int | undef =>
           cases hstrengthM
       | @borrow target₀Loc mutable' targets' witness hmemW hlocW =>
           cases hstrengthM
@@ -14306,7 +14111,7 @@ theorem RuntimeFrame.loc_deref_step_below {store : ProgramStore} {env : Env}
           exact ⟨root, root, ProtectedByBase.trans_owned hprotM hownsAt,
             hprotM,
             Or.inr ⟨rfl, ProgramStore.OwnsTransitively.direct hownsAt⟩⟩
-      | unit | int | bool | undef =>
+      | unit | int | undef =>
           cases hstrengthM
       | @borrow target₀Loc mutable' targets' witness hmemW hlocW =>
           cases hstrengthM
@@ -14339,7 +14144,7 @@ theorem RuntimeFrame.loc_deref_step_below {store : ProgramStore} {env : Env}
             ⟨root₂, _, _, _, hprot₂, hrank₂, _, _, _, _, _, _, _, _, _, _, _⟩
           exact ⟨root₂, root, hprot₂, hprotM,
             Or.inl (lt_of_le_of_lt hrank₂ hwitnessRank)⟩
-      | unit | int | bool | undef =>
+      | unit | int | undef =>
           cases hstrengthM
       | @box owned ownedSlot innerView hownedSlot _hinner =>
           cases hstrengthM
@@ -14482,7 +14287,7 @@ where
                   go hφ hwellFormed hsafe hvalidStore hheap hcollapse hsource
                     hMloc hprotM' hG
                 simpa [LVal.base] using hres
-            | unit | int | bool | undef =>
+            | unit | int | undef =>
                 cases hstrengthM
             | @borrow targetLoc mutable' targets' witness hmemW hlocW =>
                 cases hstrengthM
@@ -14513,7 +14318,7 @@ where
                   go hφ hwellFormed hsafe hvalidStore hheap hcollapse hsource
                     hMloc hprotM' hG
                 simpa [LVal.base] using hres
-            | unit | int | bool | undef =>
+            | unit | int | undef =>
                 cases hstrengthM
             | @borrow targetLoc mutable' targets' witness hmemW hlocW =>
                 cases hstrengthM
@@ -14556,7 +14361,7 @@ where
                   go hφ hwellFormed hsafe hvalidStore hheap hcollapse hsource
                     hMloc hprotM hGrootM
                 simpa [LVal.base] using hres
-            | unit | int | bool | undef =>
+            | unit | int | undef =>
                 cases hstrengthM
             | @box owned ownedSlot innerView hownedSlot _hinner =>
                 cases hstrengthM
@@ -14916,7 +14721,7 @@ where
             rootValue, hrootEnvSlot, hrootValue, hdescentM⟩
         rcases slotM with ⟨middleValue, middleLifetime⟩
         cases hvalidM with
-        | unit | int | bool | undef =>
+        | unit | int | undef =>
             simp [ProgramStore.loc, hMloc, hslotM] at hloc
           | @undefOf _ _ hiddenOuter hskel hstrength =>
               rcases hsourceShape with ⟨inner, hshape⟩ | hsourceShape
@@ -15091,7 +14896,7 @@ where
             rootValue, hrootEnvSlot, hrootValue, hdescentM⟩
         rcases slotM with ⟨middleValue, middleLifetime⟩
         cases hvalidM with
-        | unit | int | bool | undef =>
+        | unit | int | undef =>
             simp [ProgramStore.loc, hMloc, hslotM] at hloc
           | @undefOf _ _ hiddenOuter hskel hstrength =>
               rcases hsourceShape with ⟨inner, hshape⟩ | hsourceShape
@@ -16013,7 +15818,7 @@ where
                       { value := rootValue, lifetime := rootEnvSlot.lifetime },
                       () :: spinePath, ownerSlot, innerView, hrootEnvSlot,
                       hrootValue, rfl, hspine, by simp⟩
-              | unit | int | bool | undef =>
+              | unit | int | undef =>
                   cases hstrengthM
               | @borrow targetLoc mutable' targets' witness hmemW hlocW =>
                   cases hstrengthM

@@ -22,8 +22,6 @@ theorem sourceValue_emptyStoreTyping {store : ProgramStore} {value : Value} :
       exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
   | int value =>
       exact ⟨.int, ValueTyping.int, ValidPartialValue.int⟩
-  | bool value =>
-      exact ⟨.bool, ValueTyping.bool, ValidPartialValue.bool⟩
   | ref ref =>
       cases hsource
 
@@ -55,8 +53,6 @@ theorem valueTyping_empty_sourceValue {value : Value} {ty : Ty} :
       trivial
   | int _ =>
       trivial
-  | bool _ =>
-      trivial
   | ref ref =>
       cases htyping with
       | ref hlookup =>
@@ -72,8 +68,8 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       typing = StoreTyping.empty → SourceTerm term)
     (motive_2 := fun _env typing lifetime terms _ty _env₂ _ =>
       typing = StoreTyping.empty → SourceTerm (.block lifetime terms))
-    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
+    ?const ?copy ?move ?mutBorrow ?immBorrow ?box ?block
+    ?declare ?assign
     ?singleton ?cons htyping rfl
   case const =>
     intro _env _typing _lifetime value _ty hvalueTyping htypingEq
@@ -82,10 +78,6 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     simp [termValues] at hmem
     subst hmem
     exact valueTyping_empty_sourceValue hvalueTyping
-  case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _htypingEq
-      candidate hmem
-    simp [termValues] at hmem
   case copy =>
     intro _env _typing _lifetime _valueLifetime _lv _ty _hLv _hcopy _hnotRead
       _htypingEq candidate hmem
@@ -119,50 +111,6 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hnoStale _hranked
       _hcoh _hcontained _hnotWrite ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
-  case eq =>
-    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy
-      _hLhs _hfresh _htypeFresh _htyFresh _hstoreFresh _hghostRhs _hnotMention
-      _henvEq
-      _hcopyL _hcopyR _hshape ihL ihGhost htypingEq candidate hmem
-    simp [termValues] at hmem
-    rcases hmem with hleft | hright
-    · exact ihL htypingEq candidate hleft
-    · exact ihGhost htypingEq candidate hright
-  case ite =>
-    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy _joinTy
-      _hcondition _htrue _hfalse _hjoin _henvJoin
-      _hwellJoin _hcoherent _hlinear ihCondition ihTrue ihFalse htypingEq
-      candidate hmem
-    simp [termValues] at hmem
-    rcases hmem with hconditionMem | hbranchMem
-    · exact ihCondition htypingEq candidate hconditionMem
-    · rcases hbranchMem with htrueMem | hfalseMem
-      · exact ihTrue htypingEq candidate htrueMem
-      · exact ihFalse htypingEq candidate hfalseMem
-  case iteDiverging =>
-    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy
-      _hcondition _htrue _hfalse _hdiverges
-      ihCondition ihTrue ihFalse htypingEq candidate hmem
-    simp [termValues] at hmem
-    rcases hmem with hconditionMem | hbranchMem
-    · exact ihCondition htypingEq candidate hconditionMem
-    · rcases hbranchMem with htrueMem | hfalseMem
-      · exact ihTrue htypingEq candidate htrueMem
-      · exact ihFalse htypingEq candidate hfalseMem
-  case iteTrueDiverging =>
-    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy
-      _hcondition _htrue _hfalse _hdiverges
-      ihCondition ihTrue ihFalse htypingEq candidate hmem
-    simp [termValues] at hmem
-    rcases hmem with hconditionMem | hbranchMem
-    · exact ihCondition htypingEq candidate hconditionMem
-    · rcases hbranchMem with htrueMem | hfalseMem
-      · exact ihTrue htypingEq candidate htrueMem
-      · exact ihFalse htypingEq candidate hfalseMem
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
       candidate hmem
@@ -718,25 +666,22 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     htyping
 
 /--
-**Theorem 4.12, empty-initial terminal-safety form.**  Any missing-free term
-typed from the empty initial environment and store typing has a safe terminal
-state.  The `MissingFree` premise is necessary because generated `.missing`
-syntax is well typed and diverges by self-loop.
+**Theorem 4.12, empty-initial terminal-safety form.**  Any term typed from the
+empty initial environment and store typing has a safe terminal state.
 -/
 theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
-    term.MissingFree →
     ∃ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore
           (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hfree
+  intro htyping
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hfree hvalidRuntime hvalidStoreTyping
+  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
     (hwellFormed lifetime) hsafe
     ProgramStore.finiteSupport_empty htyping).2
 

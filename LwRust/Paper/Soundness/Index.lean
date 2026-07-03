@@ -25,10 +25,8 @@ keep.  Move sources are lvalue-general where the paper permits them; moves
 through borrowed references are intentionally untypeable because `EnvMove`
 follows the paper's `Strike` definition.  The current shortcuts include
 restricted sequence/block drops.  Theorem 4.12 proves terminal safety and
-terminal existence for `Term.MissingFree` source terms; the lower-level bridge
-keeps the explicit terminal-run form for generated terms that may contain
-`.missing`.  Lemma 4.10 provides the local progress theorem used for
-nontermination-friendly safety statements.
+terminal existence for source terms in the core calculus.  Lemma 4.10 provides
+the local progress theorem used for nontermination-friendly safety statements.
 
 ## Section 4
 
@@ -36,7 +34,7 @@ nontermination-friendly safety statements.
 * `Lemma_4_9_BorrowInvariance`           — Lemma 4.9    (core wrapper proven)
 * `Lemma_4_10_Progress`                  — Lemma 4.10   (proven)
 * `Lemma_4_11_Preservation`              — Lemma 4.11   (general source-continuation wrapper)
-* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for `Term.MissingFree`)
+* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for source terms)
 * `InitialStates`                        — source-initial wrappers, deriving `SourceTerm` from typability
 
 ## Appendix 9

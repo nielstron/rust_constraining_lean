@@ -625,8 +625,6 @@ inductive ValidPartialValueEvidence (store : ProgramStore) :
       ValidPartialValueEvidence store (.value .unit) (.ty .unit)
   | int {value : Int} :
       ValidPartialValueEvidence store (.value (.int value)) (.ty .int)
-  | bool {value : Bool} :
-      ValidPartialValueEvidence store (.value (.bool value)) (.ty .bool)
   | undef {ty : Ty} :
       ValidPartialValueEvidence store .undef (.undef ty)
   | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty} :
@@ -659,7 +657,6 @@ def ValidPartialValueEvidence.valid {store : ProgramStore}
     ValidPartialValue store value ty
   | unit => ValidPartialValue.unit
   | int => ValidPartialValue.int
-  | bool => ValidPartialValue.bool
   | undef => ValidPartialValue.undef
   | undefOf hinner hstrength => ValidPartialValue.undefOf hinner hstrength
   | borrow _target hmem hloc => ValidPartialValue.borrow hmem hloc
@@ -674,7 +671,6 @@ theorem ValidPartialValueEvidence.exists_of_valid {store : ProgramStore}
   induction hvalid with
   | unit => exact ⟨ValidPartialValueEvidence.unit, trivial⟩
   | int => exact ⟨ValidPartialValueEvidence.int, trivial⟩
-  | bool => exact ⟨ValidPartialValueEvidence.bool, trivial⟩
   | undef => exact ⟨ValidPartialValueEvidence.undef, trivial⟩
   | undefOf hinner hstrength =>
       exact ⟨ValidPartialValueEvidence.undefOf hinner hstrength, trivial⟩
@@ -700,10 +696,6 @@ inductive ValidPartialValueEvidence.StrengthensSameShape
       StrengthensSameShape
         (ValidPartialValueEvidence.int (value := value))
         ValidPartialValueEvidence.int
-  | bool {value : Bool} :
-      StrengthensSameShape
-        (ValidPartialValueEvidence.bool (value := value))
-        ValidPartialValueEvidence.bool
   | undef {oldTy newTy : Ty} :
       StrengthensSameShape
         (ValidPartialValueEvidence.undef (ty := oldTy))
@@ -752,7 +744,6 @@ theorem ValidPartialValueEvidence.StrengthensSameShape.refl
   induction evidence with
   | unit => exact ValidPartialValueEvidence.StrengthensSameShape.unit
   | int => exact ValidPartialValueEvidence.StrengthensSameShape.int
-  | bool => exact ValidPartialValueEvidence.StrengthensSameShape.bool
   | undef => exact ValidPartialValueEvidence.StrengthensSameShape.undef
   | undefOf hinner _hstrength =>
       exact ValidPartialValueEvidence.StrengthensSameShape.undefOf
@@ -785,12 +776,6 @@ theorem ValidPartialValueEvidence.strengthen_sameShape_exists
       | reflex =>
           exact ⟨ValidPartialValueEvidence.int,
             ValidPartialValueEvidence.StrengthensSameShape.int⟩
-      | intoUndef _ => simp [PartialTy.sameShape] at hshape
-  | bool =>
-      cases hstrength with
-      | reflex =>
-          exact ⟨ValidPartialValueEvidence.bool,
-            ValidPartialValueEvidence.StrengthensSameShape.bool⟩
       | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | undef =>
       cases hstrength with
@@ -903,7 +888,6 @@ theorem EvidenceBorrowDependency.of_strengthensSameShape
   induction hrel with
   | unit => exact hdependency
   | int => exact hdependency
-  | bool => exact hdependency
   | undef => cases hdependency
   | undefOf => cases hdependency
   | borrow _hsubset =>
@@ -935,7 +919,6 @@ def EvidenceSelectedBorrow (store : ProgramStore) :
         Prop
   | _, _, ValidPartialValueEvidence.unit, _, _, _ => False
   | _, _, ValidPartialValueEvidence.int, _, _, _ => False
-  | _, _, ValidPartialValueEvidence.bool, _, _, _ => False
   | _, _, ValidPartialValueEvidence.undef, _, _, _ => False
   | _, _, ValidPartialValueEvidence.undefOf _ _, _, _, _ => False
   | _, _, ValidPartialValueEvidence.borrow (mutable := evidenceMutable)
@@ -1003,8 +986,6 @@ theorem contains {store : ProgramStore}
       simp [EvidenceSelectedBorrow] at hselected
   | int =>
       simp [EvidenceSelectedBorrow] at hselected
-  | bool =>
-      simp [EvidenceSelectedBorrow] at hselected
   | undef =>
       simp [EvidenceSelectedBorrow] at hselected
   | undefOf =>
@@ -1035,8 +1016,6 @@ theorem of_strengthensSameShape {store : ProgramStore}
   | unit =>
       simp [EvidenceSelectedBorrow] at hselected
   | int =>
-      simp [EvidenceSelectedBorrow] at hselected
-  | bool =>
       simp [EvidenceSelectedBorrow] at hselected
   | undef =>
       simp [EvidenceSelectedBorrow] at hselected
@@ -1232,7 +1211,6 @@ theorem validPartialValueSkeleton_update_of_not_owner_reaches {store : ProgramSt
   induction hvalid with
   | unit => intro _; exact ValidPartialValueSkeleton.unit
   | int => intro _; exact ValidPartialValueSkeleton.int
-  | bool => intro _; exact ValidPartialValueSkeleton.bool
   | undef => intro _; exact ValidPartialValueSkeleton.undef
   | borrow => intro _; exact ValidPartialValueSkeleton.borrow
   | undefOf hinner hstrength ih =>
@@ -1266,7 +1244,6 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
   induction hvalid with
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
-  | bool => intro _; exact ValidPartialValue.bool
   | undef => intro _; exact ValidPartialValue.undef
   | undefOf hinner hstrength =>
       intro hreach
@@ -1318,9 +1295,6 @@ theorem validPartialValueWhenInitialized_update_of_not_reaches
   | int =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      intro _hreach
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
@@ -1376,9 +1350,6 @@ theorem validPartialValueWhenInitialized_update_of_not_reachesWhenInitialized
   | int =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      intro _hreach
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
@@ -1434,7 +1405,7 @@ theorem validPartialValueWhenInitialized_update_of_owner_and_borrow_dependency_f
       ValidPartialValueWhenInitialized env (store.update updated newSlot) value ty := by
   intro value ty hvalid
   induction hvalid with
-  | unit | int | bool | undef =>
+  | unit | int | undef =>
       intro _howners _hdeps
       constructor
   | undefOf hinner hstrength =>
@@ -1531,14 +1502,6 @@ theorem validPartialValueEvidence_update_of_owner_and_evidence_dependency_frame
   | int =>
       intro _howners _hdeps
       refine ⟨ValidPartialValueEvidence.int, ?_⟩
-      constructor
-      · intro location hdep
-        cases hdep
-      · intro mutable targets target hselected
-        simp [EvidenceSelectedBorrow] at hselected
-  | bool =>
-      intro _howners _hdeps
-      refine ⟨ValidPartialValueEvidence.bool, ?_⟩
       constructor
       · intro location hdep
         cases hdep
@@ -1799,7 +1762,6 @@ theorem validPartialValueSkeleton_erase_of_not_owner_reaches {store : ProgramSto
   induction hvalid with
   | unit => intro _; exact ValidPartialValueSkeleton.unit
   | int => intro _; exact ValidPartialValueSkeleton.int
-  | bool => intro _; exact ValidPartialValueSkeleton.bool
   | undef => intro _; exact ValidPartialValueSkeleton.undef
   | borrow => intro _; exact ValidPartialValueSkeleton.borrow
   | undefOf hinner hstrength ih =>
@@ -1834,7 +1796,6 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
   induction hvalid with
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
-  | bool => intro _; exact ValidPartialValue.bool
   | undef => intro _; exact ValidPartialValue.undef
   | undefOf hinner hstrength =>
       intro hreach
@@ -1876,7 +1837,6 @@ theorem validPartialValueSkeleton_erase_to_store {store : ProgramStore}
   induction hvalid with
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
-  | bool => exact ValidPartialValueSkeleton.bool
   | undef => exact ValidPartialValueSkeleton.undef
   | borrow => exact ValidPartialValueSkeleton.borrow
   | undefOf _hinner hstrength ih =>
@@ -1894,7 +1854,6 @@ theorem validPartialValue_erase_to_store {store : ProgramStore}
   induction hvalid with
   | unit => exact ValidPartialValue.unit
   | int => exact ValidPartialValue.int
-  | bool => exact ValidPartialValue.bool
   | undef => exact ValidPartialValue.undef
   | undefOf hinner hstrength =>
       exact ValidPartialValue.undefOf
@@ -1984,9 +1943,6 @@ theorem validPartialValueWhenInitialized_erase_of_not_reachesWhenInitialized
   | int =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      intro _hreach
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
@@ -2216,7 +2172,6 @@ theorem validPartialValueSkeleton_drops_of_owner_frame
   induction hvalid with
   | unit => intro _howners; exact ValidPartialValueSkeleton.unit
   | int => intro _howners; exact ValidPartialValueSkeleton.int
-  | bool => intro _howners; exact ValidPartialValueSkeleton.bool
   | undef => intro _howners; exact ValidPartialValueSkeleton.undef
   | borrow => intro _howners; exact ValidPartialValueSkeleton.borrow
   | undefOf hinner hstrength ih =>
@@ -2265,9 +2220,6 @@ theorem validPartialValue_drops_of_owner_and_selected_dependency_frame
   | int =>
       intro _howners _hdeps
       exact ValidPartialValue.int
-  | bool =>
-      intro _howners _hdeps
-      exact ValidPartialValue.bool
   | undef =>
       intro _howners _hdeps
       exact ValidPartialValue.undef
@@ -2353,9 +2305,6 @@ theorem validPartialValue_drops_of_owner_and_evidence_dependency_frame
   | int =>
       intro _howners _hdeps
       exact ValidPartialValue.int
-  | bool =>
-      intro _howners _hdeps
-      exact ValidPartialValue.bool
   | undef =>
       intro _howners _hdeps
       exact ValidPartialValue.undef
@@ -2452,14 +2401,6 @@ theorem validPartialValueEvidence_drops_of_owner_and_evidence_dependency_frame
   | int =>
       intro _howners _hdeps
       refine ⟨ValidPartialValueEvidence.int, ?_⟩
-      constructor
-      · intro location hdep
-        cases hdep
-      · intro mutable targets target hselected
-        simp [EvidenceSelectedBorrow] at hselected
-  | bool =>
-      intro _howners _hdeps
-      refine ⟨ValidPartialValueEvidence.bool, ?_⟩
       constructor
       · intro location hdep
         cases hdep

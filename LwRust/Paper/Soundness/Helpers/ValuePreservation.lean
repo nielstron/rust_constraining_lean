@@ -217,9 +217,6 @@ theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
   | int =>
       cases hvalid
       rfl
-  | bool =>
-      cases hvalid
-      rfl
   | immBorrow =>
       cases hvalid with
       | borrow _hmem _hloc =>
@@ -236,9 +233,6 @@ theorem copy_value_nonOwner_whenInitialized {env : Env} {store : ProgramStore}
       cases hvalid
       rfl
   | int =>
-      cases hvalid
-      rfl
-  | bool =>
       cases hvalid
       rfl
   | immBorrow =>
@@ -1406,7 +1400,7 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite 0 env (.var x) ty env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
+    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →

@@ -57,11 +57,6 @@ theorem partialTyBorrowFree_ty {ty : Ty} :
   intro mutable targets hcontains
   cases hcontains
 
-@[simp] theorem tyBorrowFree_bool :
-    TyBorrowFree .bool := by
-  intro mutable targets hcontains
-  cases hcontains
-
 @[simp] theorem tyBorrowFree_box {ty : Ty} :
     TyBorrowFree ty →
     TyBorrowFree (.box ty) := by
@@ -801,9 +796,6 @@ theorem sourceValue_valueTyping_borrowFree {typing : StoreTyping} {value : Value
   | int _ =>
       cases htyping
       exact tyBorrowFree_int
-  | bool _ =>
-      cases htyping
-      exact tyBorrowFree_bool
   | ref _ =>
       cases hsource
 

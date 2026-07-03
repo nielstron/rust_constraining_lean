@@ -218,7 +218,7 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
       ValidPartialValue (store.update updated newSlot) v ty := by
   intro v ty hvalid
   induction hvalid with
-  | unit | int | bool | undef => intro _; constructor
+  | unit | int | undef => intro _; constructor
   | undefOf hinner hstrength =>
       intro hreach
       exact ValidPartialValue.undefOf
@@ -255,7 +255,7 @@ theorem validPartialValue_erase_of_not_reaches {store : ProgramStore}
       ValidPartialValue (store.erase erased) v ty := by
   intro v ty hvalid
   induction hvalid with
-  | unit | int | bool | undef => intro _; constructor
+  | unit | int | undef => intro _; constructor
   | undefOf hinner hstrength =>
       intro hreach
       exact ValidPartialValue.undefOf
@@ -400,13 +400,6 @@ theorem validRuntimeState_of_sourceTerm {store : ProgramStore} {context term : T
       cases hmem⟩,
     hvalid.2.1, hvalid.2.2.1, hvalid.2.2.2.1,
     sourceTerm_ownerTargetsHeap hsource⟩
-
-theorem sourceTerm_bool_value (value : Bool) :
-    SourceTerm (.val (.bool value)) := by
-  intro candidate hmem
-  simp [termValues] at hmem
-  subst hmem
-  trivial
 
 /--
 Direct variable writes transport from the environment where the variable has
@@ -1038,7 +1031,7 @@ theorem RuntimeFrame.validPartialValue_update_of_owner_and_selected_dependency_f
       ValidPartialValue (store.update updated newSlot) value ty := by
   intro value ty hvalid
   induction hvalid with
-  | unit | int | bool | undef =>
+  | unit | int | undef =>
       intro _howners _hdeps
       constructor
   | undefOf hinner hstrength =>
@@ -5452,7 +5445,7 @@ where
                     ⟨targetTy, targetLifetime, htargetTyping, _hstrength⟩
                   exact ⟨targetTy, targetLifetime, htargetTyping⟩
                 exact False.elim (hnotInitialized hinitialized)
-            | unit | int | bool | undef =>
+            | unit | int | undef =>
                 cases hstrengthM
             | @box owned ownedSlot innerView hownedSlot hinnerView =>
                 cases hstrengthM
@@ -10944,8 +10937,8 @@ theorem preservation_bounded
           finalStore (.val finalValue) →
         TerminalStateSafe finalStore finalValue
           (env₂.dropLifetime blockLifetime) ty)
-    ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
-    ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
+    ?const ?copy ?move ?mutBorrow ?immBorrow ?box ?block
+    ?declare ?assign
     ?singleton ?cons htyping hsize rfl hsource store finalStore finalValue
     hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti).2
   -- T-Val: a value is already terminal.
@@ -10961,12 +10954,6 @@ theorem preservation_bounded
         hvalidRuntime hvalidStoreTyping hsafe
         htermTyping hmulti
     exact And.intro hwellFormed hterminal
-  -- T-Missing: no run from `missing` reaches a value.
-  case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _hsize _htypingEq hsource
-      _store _finalStore _finalValue _hvalidRuntime _hvalidStoreTyping
-      _hwellFormed _hsafe hmulti
-    exact False.elim (multistep_missing_not_value hmulti)
   -- T-Copy
   case copy =>
     intro _env _typing _lifetime _valueLifetime _lv _ty hLv hcopy hnotRead
@@ -11013,14 +11000,12 @@ theorem preservation_bounded
                         cases hcopy with
                         | unit => exact Or.inl rfl
                         | int => exact Or.inr (Or.inl rfl)
-                        | bool => exact Or.inr (Or.inr (Or.inl rfl))
                         | immBorrow =>
-                            exact Or.inr (Or.inr (Or.inr ⟨false, _, rfl⟩)))
+                            exact Or.inr (Or.inr ⟨false, _, rfl⟩))
                   have hvalueOwnedNone : valueOwnedLocation? value = none := by
                     cases value with
                     | unit => rfl
                     | int _ => rfl
-                    | bool _ => rfl
                     | ref ref =>
                         cases ref with
                         | mk location owner =>
@@ -11350,230 +11335,6 @@ theorem preservation_bounded
                 hsourceBorrow htargets hshape hwellTy.whenInitialized hwrite
                 hnoStale hranked hnotWrite hwellOut hvalidValue hassignStep
     exact ⟨hwellOut, hterminal⟩
-  -- T-Eq
-  case eq =>
-    intro _env₁ _env₂ _env₃ _envGhost _ghost _typing _lifetime _lhs _rhs
-      _lhsTy _rhsTy _hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs
-      hnotMention henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize htypingEq hsource store
-      finalStore finalValue
-      hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
-    cases htypingEq
-    have hRhs : TermTyping _env₂ typing _lifetime _rhs _rhsTy
-        (_envGhost.erase _ghost) :=
-      TermTyping.erase_ghost
-        (env := _env₂)
-        (ghostSlot := { ty := .ty _lhsTy, lifetime := _lifetime })
-        hfresh htypeFresh
-        (by
-          intro hmem
-          exact htyFresh (Ty.vars_subset_allVars hmem))
-        hstoreFresh hnotMention hghostRhs
-    rcases multistep_eq_to_value_inv hmulti with
-      ⟨midStore, leftValue, rightStore, rightValue, hleftMulti, hrightMulti,
-        hredex⟩
-    have hsourceLeft : SourceTerm _lhs :=
-      SourceTerm.eq_lhs hsource
-    have hsourceRight : SourceTerm _rhs :=
-      SourceTerm.eq_rhs hsource
-    have hvalidLeft : ValidRuntimeState store _lhs :=
-      validRuntimeState_of_sourceTerm hsourceLeft hvalidRuntime
-    rcases ihL (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-        rfl hsourceLeft store midStore leftValue hvalidLeft
-        hvalidStoreTyping.eq_lhs hwellFormed hsafe hleftMulti with
-      ⟨hwellLeft, hterminalLeft⟩
-    have hvalidRight : ValidRuntimeState midStore _rhs :=
-      validRuntimeState_of_sourceTerm hsourceRight hterminalLeft.1
-    have hstoreTypingRight : ValidStoreTyping midStore _rhs typing :=
-      validStoreTyping_sourceTerm_of_validStoreTyping hsourceRight
-        hvalidStoreTyping.eq_rhs
-    have hrightResult :
-        WellFormedEnvWhenInitialized (_envGhost.erase _ghost) _lifetime ∧
-          TerminalStateSafe rightStore rightValue
-            (_envGhost.erase _ghost) _rhsTy := by
-      exact ⟨(typingPreservesWellFormedWhenInitialized_of_sourceTerm hsourceRight
-          hwellLeft hRhs).1,
-        ihFuel
-          (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          hsourceRight hvalidRight hstoreTypingRight hwellLeft
-          hterminalLeft.2.1 hRhs hrightMulti⟩
-    rcases hrightResult with
-      ⟨hwellRight, hterminalRight⟩
-    cases hredex with
-    | eqTrue =>
-        exact ⟨by simpa [henvEq] using hwellRight,
-          ⟨validRuntimeState_of_sourceTerm (sourceTerm_bool_value true)
-              hterminalRight.1,
-            by simpa [henvEq] using hterminalRight.2.1,
-            ValidPartialValueWhenInitialized.bool⟩⟩
-    | eqFalse _hne =>
-        exact ⟨by simpa [henvEq] using hwellRight,
-          ⟨validRuntimeState_of_sourceTerm (sourceTerm_bool_value false)
-              hterminalRight.1,
-            by simpa [henvEq] using hterminalRight.2.1,
-            ValidPartialValueWhenInitialized.bool⟩⟩
-  -- T-IfJoin: run the chosen branch's IH, then transport its
-  -- terminal state into the join environment.
-  case ite =>
-    intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime _condition
-      _trueBranch _falseBranch _trueTy _falseTy _joinTy _hcondition _htrue
-      _hfalse hjoin henvJoin hwellJoin hcoherent hlinear
-      ihCondition ihTrue ihFalse hsize htypingEq hsource
-      store finalStore finalValue hvalidRuntime
-      hvalidStoreTyping hwellFormed hsafe hmulti
-    cases htypingEq
-    rcases multistep_ite_to_value_inv hmulti with
-      ⟨midStore, hchosen⟩
-    have hsourceCondition : SourceTerm _condition :=
-      SourceTerm.ite_condition hsource
-    have hvalidCondition : ValidRuntimeState store _condition :=
-      validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
-    have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
-      hvalidStoreTyping.ite_condition
-    rcases hchosen with htrueChosen | hfalseChosen
-    · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
-      rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl hsourceCondition store midStore (.bool true)
-          hvalidCondition hstoreTypingCondition hwellFormed hsafe
-          _hconditionMulti with
-        ⟨hwellCondition, hterminalCondition⟩
-      have hsourceTrue : SourceTerm _trueBranch :=
-        SourceTerm.ite_trueBranch hsource
-      have hvalidTrue : ValidRuntimeState midStore _trueBranch :=
-        validRuntimeState_of_sourceTerm hsourceTrue hterminalCondition.1
-      have hstoreTypingTrue : ValidStoreTyping midStore _trueBranch typing :=
-        validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
-          hvalidStoreTyping.ite_trueBranch
-      rcases ihTrue (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl hsourceTrue midStore finalStore finalValue hvalidTrue
-          hstoreTypingTrue hwellCondition hterminalCondition.2.1 htrueMulti with
-        ⟨hwellTrue, hterminalTrue⟩
-      have hvalidFalse4 : ValidRuntimeState midStore _falseBranch :=
-        validRuntimeState_of_sourceTerm (SourceTerm.ite_falseBranch hsource)
-          hterminalCondition.1
-      have hwellFalse4 :=
-        (typingPreservesWellFormedWhenInitialized_of_sourceTerm
-          (SourceTerm.ite_falseBranch hsource) hwellCondition _hfalse).1
-      have hcontained :=
-        containedBorrowsWellFormedWhenInitialized_join henvJoin
-          hwellTrue.1 hwellFalse4.1
-      have hinitBack :
-          ∀ {targets : List LVal},
-            BorrowTargetsInitialized _env₅ targets →
-              BorrowTargetsInitialized _env₃ targets := by
-        intro targets hinitialized
-        exact borrowTargetsInitialized_back_of_envStrengthens
-          (EnvJoin.le_left henvJoin) hwellTrue.2.2.1 hwellTrue.2.2.2
-          hinitialized
-      exact TerminalStateSafe.strengthen_join_strengthening
-        hcontained (Coherent.whenInitialized hcoherent) hlinear
-        hinitBack (EnvJoin.le_left henvJoin)
-        (PartialTyUnion.left_strengthens hjoin) hwellTrue hterminalTrue
-    · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
-      rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl hsourceCondition store midStore (.bool false)
-          hvalidCondition hstoreTypingCondition hwellFormed hsafe
-          _hconditionMulti with
-        ⟨hwellCondition, hterminalCondition⟩
-      have hsourceFalse : SourceTerm _falseBranch :=
-        SourceTerm.ite_falseBranch hsource
-      have hvalidFalse : ValidRuntimeState midStore _falseBranch :=
-        validRuntimeState_of_sourceTerm hsourceFalse hterminalCondition.1
-      have hstoreTypingFalse : ValidStoreTyping midStore _falseBranch typing :=
-        validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
-          hvalidStoreTyping.ite_falseBranch
-      rcases ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl hsourceFalse midStore finalStore finalValue hvalidFalse
-          hstoreTypingFalse hwellCondition hterminalCondition.2.1 hfalseMulti with
-        ⟨hwellFalse, hterminalFalse⟩
-      have hvalidTrue3 : ValidRuntimeState midStore _trueBranch :=
-        validRuntimeState_of_sourceTerm (SourceTerm.ite_trueBranch hsource)
-          hterminalCondition.1
-      have hwellTrue3 :=
-        (typingPreservesWellFormedWhenInitialized_of_sourceTerm
-          (SourceTerm.ite_trueBranch hsource) hwellCondition _htrue).1
-      have hcontained :=
-        containedBorrowsWellFormedWhenInitialized_join henvJoin
-          hwellTrue3.1 hwellFalse.1
-      have hinitBack :
-          ∀ {targets : List LVal},
-            BorrowTargetsInitialized _env₅ targets →
-              BorrowTargetsInitialized _env₄ targets := by
-        intro targets hinitialized
-        exact borrowTargetsInitialized_back_of_envStrengthens
-          (EnvJoin.le_right henvJoin) hwellFalse.2.2.1 hwellFalse.2.2.2
-          hinitialized
-      exact TerminalStateSafe.strengthen_join_strengthening
-        hcontained (Coherent.whenInitialized hcoherent) hlinear
-        hinitBack (EnvJoin.le_right henvJoin)
-        (PartialTyUnion.right_strengthens hjoin) hwellFalse hterminalFalse
-  -- T-IfDiv: only the true branch can terminate.
-  case iteDiverging =>
-    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
-      ihCondition ihTrue _ihFalse hsize htypingEq hsource store finalStore
-      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe
-      hmulti
-    cases htypingEq
-    rcases multistep_ite_to_value_inv hmulti with
-      ⟨midStore, hchosen⟩
-    have hsourceCondition : SourceTerm _condition :=
-      SourceTerm.ite_condition hsource
-    have hvalidCondition : ValidRuntimeState store _condition :=
-      validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
-    have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
-      hvalidStoreTyping.ite_condition
-    rcases hchosen with htrueChosen | hfalseChosen
-    · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
-      rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl hsourceCondition store midStore (.bool true)
-          hvalidCondition hstoreTypingCondition hwellFormed hsafe
-          _hconditionMulti with
-        ⟨hwellCondition, hterminalCondition⟩
-      have hsourceTrue : SourceTerm _trueBranch :=
-        SourceTerm.ite_trueBranch hsource
-      have hvalidTrue : ValidRuntimeState midStore _trueBranch :=
-        validRuntimeState_of_sourceTerm hsourceTrue hterminalCondition.1
-      have hstoreTypingTrue : ValidStoreTyping midStore _trueBranch typing :=
-        validStoreTyping_sourceTerm_of_validStoreTyping hsourceTrue
-          hvalidStoreTyping.ite_trueBranch
-      exact ihTrue (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-        rfl hsourceTrue midStore finalStore finalValue hvalidTrue
-        hstoreTypingTrue hwellCondition hterminalCondition.2.1 htrueMulti
-    · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
-      exact absurd hfalseMulti (diverges_multistep_not_value hdiverges)
-  -- T-IfDivT: only the false branch can terminate.
-  case iteTrueDiverging =>
-    intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
-      _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
-      ihCondition _ihTrue ihFalse hsize htypingEq hsource store finalStore
-      finalValue hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti
-    cases htypingEq
-    rcases multistep_ite_to_value_inv hmulti with
-      ⟨midStore, hchosen⟩
-    have hsourceCondition : SourceTerm _condition :=
-      SourceTerm.ite_condition hsource
-    have hvalidCondition : ValidRuntimeState store _condition :=
-      validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime
-    have hstoreTypingCondition : ValidStoreTyping store _condition typing :=
-      hvalidStoreTyping.ite_condition
-    rcases hchosen with htrueChosen | hfalseChosen
-    · rcases htrueChosen with ⟨_hconditionMulti, htrueMulti⟩
-      exact absurd htrueMulti (diverges_multistep_not_value hdiverges)
-    · rcases hfalseChosen with ⟨_hconditionMulti, hfalseMulti⟩
-      rcases ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-          rfl hsourceCondition store midStore (.bool false)
-          hvalidCondition hstoreTypingCondition hwellFormed hsafe _hconditionMulti with
-        ⟨hwellCondition, hterminalCondition⟩
-      have hsourceFalse : SourceTerm _falseBranch :=
-        SourceTerm.ite_falseBranch hsource
-      have hvalidFalse : ValidRuntimeState midStore _falseBranch :=
-        validRuntimeState_of_sourceTerm hsourceFalse hterminalCondition.1
-      have hstoreTypingFalse : ValidStoreTyping midStore _falseBranch typing :=
-        validStoreTyping_sourceTerm_of_validStoreTyping hsourceFalse
-          hvalidStoreTyping.ite_falseBranch
-      exact ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-        rfl hsourceFalse midStore finalStore finalValue hvalidFalse
-        hstoreTypingFalse hwellCondition hterminalCondition.2.1 hfalseMulti
   -- Block list, singleton case.
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm _ih hsize htypingEq hsource

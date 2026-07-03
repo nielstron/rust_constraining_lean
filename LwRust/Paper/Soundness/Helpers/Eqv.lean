@@ -23,7 +23,6 @@ strong for those joins. -/
 def Ty.eqvX : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
-  | .bool, .bool => True
   | .borrow m₁ t₁, .borrow m₂ t₂ =>
       m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
   | .box t₁, .box t₂ => t₁ = t₂
