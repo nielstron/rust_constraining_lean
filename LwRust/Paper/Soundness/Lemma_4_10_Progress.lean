@@ -1,5 +1,4 @@
 import LwRust.Paper.Soundness.Helpers.ValuePreservation
-import LwRust.Paper.Soundness.Helpers.GhostErasure
 
 /-!
 # Lemma 4.10 (Progress)

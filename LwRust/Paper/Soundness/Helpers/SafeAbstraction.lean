@@ -21,8 +21,6 @@ inductive ValidPartialValueSkeleton : ProgramStore → PartialValue → PartialT
       ValidPartialValueSkeleton store (.value .unit) (.ty .unit)
   | int {store : ProgramStore} {value : Int} :
       ValidPartialValueSkeleton store (.value (.int value)) (.ty .int)
-  | bool {store : ProgramStore} {value : Bool} :
-      ValidPartialValueSkeleton store (.value (.bool value)) (.ty .bool)
   | undef {store : ProgramStore} {ty : Ty} :
       ValidPartialValueSkeleton store .undef (.undef ty)
   | borrow {store : ProgramStore} {location : Location} {mutable : Bool}
@@ -57,9 +55,6 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
   /-- V-Int. -/
   | int {store : ProgramStore} {value : Int} :
       ValidPartialValue store (.value (.int value)) (.ty .int)
-  /-- V-Bool, Section 6.1. -/
-  | bool {store : ProgramStore} {value : Bool} :
-      ValidPartialValue store (.value (.bool value)) (.ty .bool)
   /-- V-Undef. -/
   | undef {store : ProgramStore} {ty : Ty} :
       ValidPartialValue store .undef (.undef ty)
@@ -120,8 +115,6 @@ inductive ValidPartialValueWhenInitialized (env : Env) (store : ProgramStore) :
       ValidPartialValueWhenInitialized env store (.value .unit) (.ty .unit)
   | int {value : Int} :
       ValidPartialValueWhenInitialized env store (.value (.int value)) (.ty .int)
-  | bool {value : Bool} :
-      ValidPartialValueWhenInitialized env store (.value (.bool value)) (.ty .bool)
   | undef {ty : Ty} :
       ValidPartialValueWhenInitialized env store .undef (.undef ty)
   | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty} :
@@ -163,7 +156,6 @@ theorem ValidPartialValue.whenInitialized {env : Env} {store : ProgramStore}
   induction hvalid with
   | unit => exact ValidPartialValueWhenInitialized.unit
   | int => exact ValidPartialValueWhenInitialized.int
-  | bool => exact ValidPartialValueWhenInitialized.bool
   | undef => exact ValidPartialValueWhenInitialized.undef
   | undefOf hinner hstrength =>
       exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
@@ -187,7 +179,6 @@ theorem ValidPartialValueWhenInitialized.skeleton {env : Env}
   induction hvalid with
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
-  | bool => exact ValidPartialValueSkeleton.bool
   | undef => exact ValidPartialValueSkeleton.undef
   | undefOf hinner hstrength =>
       exact ValidPartialValueSkeleton.undefOf hinner hstrength
@@ -215,7 +206,6 @@ theorem ValidPartialValue.skeleton {store : ProgramStore}
   induction hvalid with
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
-  | bool => exact ValidPartialValueSkeleton.bool
   | undef => exact ValidPartialValueSkeleton.undef
   | undefOf hinner hstrength =>
       exact ValidPartialValueSkeleton.undefOf hinner hstrength
@@ -249,10 +239,6 @@ theorem ValidPartialValueSkeleton.no_owned_path_to_storage {store : ProgramStore
       simp [partialValueOwningLocations, valueOwningLocations,
         valueOwnedLocation?] at hmem
   | int =>
-      intro storage slot owned _hslot _hvalue hmem hpath
-      simp [partialValueOwningLocations, valueOwningLocations,
-        valueOwnedLocation?] at hmem
-  | bool =>
       intro storage slot owned _hslot _hvalue hmem hpath
       simp [partialValueOwningLocations, valueOwningLocations,
         valueOwnedLocation?] at hmem
@@ -536,13 +522,6 @@ theorem validPartialValue_strengthen {store : ProgramStore}
       | intoUndef hinner =>
           exact ValidPartialValue.undefOf ValidPartialValueSkeleton.int
             (PartialTyStrengthens.intoUndef hinner)
-  | bool =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.bool
-      | intoUndef hinner =>
-          exact ValidPartialValue.undefOf ValidPartialValueSkeleton.bool
-            (PartialTyStrengthens.intoUndef hinner)
   | undef =>
       intro hstrength
       cases hstrength with
@@ -618,14 +597,6 @@ theorem validPartialValueWhenInitialized_strengthen {env : Env}
       | intoUndef hinner =>
           exact ValidPartialValueWhenInitialized.undefOf
             ValidPartialValueSkeleton.int
-            (PartialTyStrengthens.intoUndef hinner)
-  | bool =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValueWhenInitialized.bool
-      | intoUndef hinner =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            ValidPartialValueSkeleton.bool
             (PartialTyStrengthens.intoUndef hinner)
   | undef =>
       intro hstrength
@@ -761,39 +732,6 @@ theorem ValidStoreTyping.mono {store : ProgramStore} {big sub : Term}
     ValidStoreTyping store sub typing :=
   fun value hmem => hvalid value (hsub value hmem)
 
-theorem ValidStoreTyping.eq_lhs {store : ProgramStore} {lhs rhs : Term}
-    {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.eq lhs rhs) typing) :
-    ValidStoreTyping store lhs typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
-theorem ValidStoreTyping.eq_rhs {store : ProgramStore} {lhs rhs : Term}
-    {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.eq lhs rhs) typing) :
-    ValidStoreTyping store rhs typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
-theorem ValidStoreTyping.ite_condition {store : ProgramStore}
-    {condition trueBranch falseBranch : Term} {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.ite condition trueBranch falseBranch)
-      typing) :
-    ValidStoreTyping store condition typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
-theorem ValidStoreTyping.ite_trueBranch {store : ProgramStore}
-    {condition trueBranch falseBranch : Term} {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.ite condition trueBranch falseBranch)
-      typing) :
-    ValidStoreTyping store trueBranch typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
-theorem ValidStoreTyping.ite_falseBranch {store : ProgramStore}
-    {condition trueBranch falseBranch : Term} {typing : StoreTyping}
-    (hvalid : ValidStoreTyping store (.ite condition trueBranch falseBranch)
-      typing) :
-    ValidStoreTyping store falseBranch typing :=
-  hvalid.mono fun value hmem => by simp [termValues, hmem]
-
 theorem validStoreTyping_sourceTerm_of_validStoreTyping
     {store store' : ProgramStore} {term : Term} {typing : StoreTyping} :
     SourceTerm term →
@@ -810,9 +748,6 @@ theorem validStoreTyping_sourceTerm_of_validStoreTyping
   | int _ =>
       cases hvalueTyping
       exact ValidPartialValue.int
-  | bool _ =>
-      cases hvalueTyping
-      exact ValidPartialValue.bool
   | ref _ =>
       cases hsourceValue
 
@@ -834,8 +769,6 @@ theorem validPartialValueSkeleton_owningLocation_allocated {store : ProgramStore
   | unit =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | int =>
-      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
-  | bool =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | undef =>
       simp [partialValueOwningLocations] at hmem
@@ -865,7 +798,7 @@ theorem validPartialValue_owningLocation_allocated {store : ProgramStore}
 theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
     {value : PartialValue} {ty : PartialTy} :
     ValidPartialValue store value ty →
-    (ty = .ty .unit ∨ ty = .ty .int ∨ ty = .ty .bool ∨
+    (ty = .ty .unit ∨ ty = .ty .int ∨
       ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner value := by
   intro hvalid hshape
@@ -874,43 +807,37 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
       exact partialValueNonOwner_unit
   | int =>
       exact partialValueNonOwner_int _
-  | bool =>
-      exact partialValueNonOwner_bool _
   | undef =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | undefOf =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | borrow =>
       exact partialValueNonOwner_borrowed _
   | box =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | boxFull =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
 
 theorem validPartialValueWhenInitialized_nonOwner_of_envShape {env : Env}
     {store : ProgramStore} {value : PartialValue} {ty : PartialTy} :
     ValidPartialValueWhenInitialized env store value ty →
-    (ty = .ty .unit ∨ ty = .ty .int ∨ ty = .ty .bool ∨
+    (ty = .ty .unit ∨ ty = .ty .int ∨
       ∃ mutable targets, ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner value := by
   intro hvalid hshape
@@ -919,20 +846,16 @@ theorem validPartialValueWhenInitialized_nonOwner_of_envShape {env : Env}
       exact partialValueNonOwner_unit
   | int =>
       exact partialValueNonOwner_int _
-  | bool =>
-      exact partialValueNonOwner_bool _
   | undef =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | undefOf =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | borrowLive =>
@@ -940,17 +863,15 @@ theorem validPartialValueWhenInitialized_nonOwner_of_envShape {env : Env}
   | borrowStale =>
       exact partialValueNonOwner_borrowed _
   | box =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
   | boxFull =>
-      rcases hshape with hunit | hint | hbool | hborrow
+      rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
-      · cases hbool
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
 
@@ -985,8 +906,6 @@ theorem validPartialValueWhenInitialized_owningLocation_allocated
   | unit =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | int =>
-      simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
-  | bool =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | undef =>
       simp [partialValueOwningLocations] at hmem
@@ -1376,8 +1295,6 @@ theorem validPartialValueWhenInitialized_transport_env
       exact ValidPartialValueWhenInitialized.unit
   | int =>
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
   | undefOf hinner hstrength =>
@@ -1728,7 +1645,7 @@ theorem safeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
     store ∼ₛ env →
     env.slotAt x = some envSlot →
     store.read (.var x) = some oldSlot →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
+    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     PartialValueNonOwner oldSlot.value := by
   intro hsafe henv hread hshape
@@ -2076,8 +1993,6 @@ theorem loc_update_of_loc {store : ProgramStore} {updatedLocation : Location}
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | int n =>
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
-                  | bool b =>
-                      simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | ref ref =>
                     simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                     have hupdatedSource :
@@ -2121,7 +2036,6 @@ theorem validPartialValueSkeleton_update_of_fresh {store : ProgramStore}
   induction hvalid with
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
-  | bool => exact ValidPartialValueSkeleton.bool
   | undef => exact ValidPartialValueSkeleton.undef
   | borrow => exact ValidPartialValueSkeleton.borrow
   | undefOf _hinner hstrength ih =>
@@ -2144,8 +2058,6 @@ theorem validPartialValue_update_of_fresh {store : ProgramStore}
       exact ValidPartialValue.unit
   | int =>
       exact ValidPartialValue.int
-  | bool =>
-      exact ValidPartialValue.bool
   | undef =>
       exact ValidPartialValue.undef
   | undefOf hinner hstrength =>
@@ -2172,8 +2084,6 @@ theorem validPartialValueWhenInitialized_update_of_fresh {env : Env}
       exact ValidPartialValueWhenInitialized.unit
   | int =>
       exact ValidPartialValueWhenInitialized.int
-  | bool =>
-      exact ValidPartialValueWhenInitialized.bool
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
   | undefOf hinner hstrength =>
@@ -2219,8 +2129,6 @@ theorem loc_declare_of_loc {store : ProgramStore} {x : Name}
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | int n =>
                       simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
-                  | bool b =>
-                      simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                   | ref ref =>
                     simp [ProgramStore.loc, hsource, hsourceSlot, hsourceValue] at hloc
                     have hdeclaredSource :
@@ -2264,7 +2172,6 @@ theorem validPartialValueSkeleton_declare {store : ProgramStore} {x : Name}
   induction hvalid with
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
-  | bool => exact ValidPartialValueSkeleton.bool
   | undef => exact ValidPartialValueSkeleton.undef
   | borrow => exact ValidPartialValueSkeleton.borrow
   | undefOf _hinner hstrength ih =>
@@ -2287,8 +2194,6 @@ theorem validPartialValue_declare {store : ProgramStore} {x : Name}
       exact ValidPartialValue.unit
   | int =>
       exact ValidPartialValue.int
-  | bool =>
-      exact ValidPartialValue.bool
   | undef =>
       exact ValidPartialValue.undef
   | undefOf hinner hstrength =>

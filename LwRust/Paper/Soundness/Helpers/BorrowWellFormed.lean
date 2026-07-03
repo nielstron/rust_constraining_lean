@@ -514,8 +514,6 @@ theorem WellFormedTy.weaken {env : Env} {ty : Ty} {outer inner : Lifetime} :
       exact WellFormedTy.unit
   | int =>
       exact WellFormedTy.int
-  | bool =>
-      exact WellFormedTy.bool
   | borrow htargets =>
       exact WellFormedTy.borrow
         (BorrowTargetsWellFormed.weaken htargets houtlives)
@@ -532,8 +530,6 @@ theorem WellFormedTy.whenInitialized {env : Env} {ty : Ty}
       exact WellFormedTyWhenInitialized.unit
   | int =>
       exact WellFormedTyWhenInitialized.int
-  | bool =>
-      exact WellFormedTyWhenInitialized.bool
   | borrow htargets =>
       exact WellFormedTyWhenInitialized.borrow
         (BorrowTargetsWellFormed.whenInitialized htargets)
@@ -551,8 +547,6 @@ theorem WellFormedTyWhenInitialized.weaken {env : Env} {ty : Ty}
       exact WellFormedTyWhenInitialized.unit
   | int =>
       exact WellFormedTyWhenInitialized.int
-  | bool =>
-      exact WellFormedTyWhenInitialized.bool
   | borrow htargets =>
       exact WellFormedTyWhenInitialized.borrow
         (BorrowTargetsWellFormedWhenInitialized.weaken htargets houtlives)
@@ -649,18 +643,17 @@ theorem LValTyping.base_slot_exists {env : Env} :
       | boxFull hb => simpa [LVal.base] using ih hb
       | borrow hb => simpa [LVal.base] using ih hb
 
-/-- A variable in a (partial) type's `vars` comes from a contained borrow whose
-target it is the base of.  (`Ty`/`PartialTy` are mutually inductive, so the proof
-goes through the shared recursor.) -/
-theorem partialTy_vars_mem_contains {pt : PartialTy} :
-    ∀ v, v ∈ PartialTy.vars pt →
+/-- A variable in a full type's `vars` comes from a contained borrow whose target
+it is the base of. -/
+theorem ty_vars_mem_contains {ty : Ty} :
+    ∀ v, v ∈ Ty.vars ty →
       ∃ mutable targets,
-        PartialTyContains pt (.borrow mutable targets) ∧
-        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v :=
-  PartialTy.rec
-    (motive_1 := fun t => ∀ v, v ∈ Ty.vars t →
+        PartialTyContains (.ty ty) (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v := by
+  exact Ty.rec
+    (motive_1 := fun ty => ∀ v, v ∈ Ty.vars ty →
       ∃ mutable targets,
-        PartialTyContains (.ty t) (.borrow mutable targets) ∧
+        PartialTyContains (.ty ty) (.borrow mutable targets) ∧
         ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v)
     (motive_2 := fun pt => ∀ v, v ∈ PartialTy.vars pt →
       ∃ mutable targets,
@@ -669,24 +662,67 @@ theorem partialTy_vars_mem_contains {pt : PartialTy} :
     (by intro v hv; simp [Ty.vars] at hv)
     (by intro v hv; simp [Ty.vars] at hv)
     (by
-      intro m tgts v hv
+      intro mutable targets v hv
       simp only [Ty.vars, List.mem_map] at hv
       obtain ⟨tgt, htgt, rfl⟩ := hv
-      exact ⟨m, tgts, PartialTyContains.here, tgt, htgt, rfl⟩)
+      exact ⟨mutable, targets, PartialTyContains.here, tgt, htgt, rfl⟩)
     (by
       intro inner ih v hv
-      simp only [Ty.vars] at hv
-      obtain ⟨m, tgts, hcontains, tgt, htgt, hbase⟩ := ih v hv
-      exact ⟨m, tgts, PartialTyContains.tyBox hcontains, tgt, htgt, hbase⟩)
-    (by intro v hv; simp [Ty.vars] at hv)
-    (by intro t ih v hv; exact ih v (by simpa [PartialTy.vars] using hv))
+      obtain ⟨mutable, targets, hcontains, tgt, htgt, hbase⟩ :=
+        ih v (by simpa [Ty.vars] using hv)
+      exact ⟨mutable, targets, PartialTyContains.tyBox hcontains,
+        tgt, htgt, hbase⟩)
     (by
-      intro p ih v hv
-      simp only [PartialTy.vars] at hv
-      obtain ⟨m, tgts, hcontains, w⟩ := ih v hv
-      exact ⟨m, tgts, PartialTyContains.box hcontains, w⟩)
-    (by intro s _ih v hv;
-        exact (List.not_mem_nil (show v ∈ ([] : List Name) from hv)).elim)
+      intro ty ih v hv
+      exact ih v (by simpa [PartialTy.vars] using hv))
+    (by
+      intro inner ih v hv
+      obtain ⟨mutable, targets, hcontains, tgt, htgt, hbase⟩ :=
+        ih v (by simpa [PartialTy.vars] using hv)
+      exact ⟨mutable, targets, PartialTyContains.box hcontains,
+        tgt, htgt, hbase⟩)
+    (by intro shape _ih v hv; simp [PartialTy.vars] at hv)
+    ty
+
+/-- A variable in a partial type's `vars` comes from a contained borrow whose
+target it is the base of. -/
+theorem partialTy_vars_mem_contains {pt : PartialTy} :
+    ∀ v, v ∈ PartialTy.vars pt →
+      ∃ mutable targets,
+        PartialTyContains pt (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v :=
+  PartialTy.rec
+    (motive_1 := fun ty => ∀ v, v ∈ Ty.vars ty →
+      ∃ mutable targets,
+        PartialTyContains (.ty ty) (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v)
+    (motive_2 := fun pt => ∀ v, v ∈ PartialTy.vars pt →
+      ∃ mutable targets,
+        PartialTyContains pt (.borrow mutable targets) ∧
+        ∃ tgt, tgt ∈ targets ∧ LVal.base tgt = v)
+    (by intro v hv; simp [Ty.vars] at hv)
+    (by intro v hv; simp [Ty.vars] at hv)
+    (by
+      intro mutable targets v hv
+      simp only [Ty.vars, List.mem_map] at hv
+      obtain ⟨tgt, htgt, rfl⟩ := hv
+      exact ⟨mutable, targets, PartialTyContains.here, tgt, htgt, rfl⟩)
+    (by
+      intro inner ih v hv
+      obtain ⟨mutable, targets, hcontains, tgt, htgt, hbase⟩ :=
+        ih v (by simpa [Ty.vars] using hv)
+      exact ⟨mutable, targets, PartialTyContains.tyBox hcontains,
+        tgt, htgt, hbase⟩)
+    (by
+      intro ty ih v hv
+      exact ih v (by simpa [PartialTy.vars] using hv))
+    (by
+      intro inner ih v hv
+      obtain ⟨mutable, targets, hcontains, tgt, htgt, hbase⟩ :=
+        ih v (by simpa [PartialTy.vars] using hv)
+      exact ⟨mutable, targets, PartialTyContains.box hcontains,
+        tgt, htgt, hbase⟩)
+    (by intro shape _ih v hv; simp [PartialTy.vars] at hv)
     pt
 
 theorem wellFormedTy_vars_in_env {env : Env} {ty : Ty} {lifetime : Lifetime} :
@@ -710,9 +746,6 @@ theorem wellFormedTyWhenInitialized_vars_in_env {env : Env} {ty : Ty}
       intro v hv
       simp [Ty.vars] at hv
   | int =>
-      intro v hv
-      simp [Ty.vars] at hv
-  | bool =>
       intro v hv
       simp [Ty.vars] at hv
   | borrow htargets =>
@@ -1778,7 +1811,7 @@ theorem copyTy_result_wellFormed_of_coherent_slots {env : Env} {lv : LVal}
     WellFormedTy env ty lifetime := by
   intro _hcoherent houtlives hinitialized _hLv hcopy
   cases hcopy with
-  | unit | int | bool =>
+  | unit | int =>
       constructor
   | immBorrow =>
       rename_i targets

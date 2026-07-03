@@ -146,14 +146,12 @@ theorem FiniteSupport.update {typing : StoreTyping}
 
 end StoreTyping
 
-/-- Definition 3.6, `copy(T)`, extended with `bool` (Section 6.1). -/
+/-- Definition 3.6, `copy(T)`. -/
 inductive CopyTy : Ty → Prop where
   | unit :
       CopyTy .unit
   | int :
       CopyTy .int
-  | bool :
-      CopyTy .bool
   | immBorrow {targets : List LVal} :
       CopyTy (.borrow false targets)
 
@@ -416,7 +414,6 @@ For borrow types, the target list contributes the live loan variables.
 def Ty.vars : Ty → List Name
   | .unit => []
   | .int => []
-  | .bool => []
   | .borrow _ targets => targets.map LVal.base
   | .box inner => Ty.vars inner
 
@@ -424,7 +421,6 @@ def Ty.vars : Ty → List Name
 def Ty.allVars : Ty → List Name
   | .unit => []
   | .int => []
-  | .bool => []
   | .borrow _ targets => targets.map LVal.base
   | .box inner => Ty.allVars inner
 
@@ -623,151 +619,6 @@ theorem LVal.eq_of_base_path :
         simpa [LVal.path, List.append_cancel_right_eq] using hpath
       exact congrArg LVal.deref (LVal.eq_of_base_path hbase hpath')
 
-/-- Syntactic occurrence of a variable name in an lvalue. -/
-def LVal.Mentions (x : Name) : LVal → Prop
-  | .var y => y = x
-  | .deref lv => LVal.Mentions x lv
-
-/-- The finite set of variable names syntactically mentioned by an lvalue. -/
-def LVal.names : LVal → Finset Name
-  | .var x => {x}
-  | .deref lv => LVal.names lv
-
-mutual
-  /-- Syntactic occurrence of a variable name in a term. -/
-  def Term.Mentions (x : Name) : Term → Prop
-    | .block _ terms => TermList.Mentions x terms
-    | .letMut y initialiser => y = x ∨ Term.Mentions x initialiser
-    | .assign lhs rhs => LVal.Mentions x lhs ∨ Term.Mentions x rhs
-    | .box operand => Term.Mentions x operand
-    | .borrow _ operand => LVal.Mentions x operand
-    | .move operand => LVal.Mentions x operand
-    | .copy operand => LVal.Mentions x operand
-    | .val _ => False
-    | .missing => False
-    | .eq lhs rhs => Term.Mentions x lhs ∨ Term.Mentions x rhs
-    | .ite condition trueBranch falseBranch =>
-        Term.Mentions x condition ∨ Term.Mentions x trueBranch ∨
-          Term.Mentions x falseBranch
-
-  /-- Syntactic occurrence of a variable name in a term list. -/
-  def TermList.Mentions (x : Name) : List Term → Prop
-    | [] => False
-    | term :: rest => Term.Mentions x term ∨ TermList.Mentions x rest
-end
-
-/- The finite set of variable names syntactically mentioned by a term. -/
-mutual
-  def Term.names : Term → Finset Name
-    | .block _ terms => TermList.names terms
-    | .letMut x initialiser => {x} ∪ Term.names initialiser
-    | .assign lhs rhs => LVal.names lhs ∪ Term.names rhs
-    | .box operand => Term.names operand
-    | .borrow _ operand => LVal.names operand
-    | .move operand => LVal.names operand
-    | .copy operand => LVal.names operand
-    | .val _ => ∅
-    | .missing => ∅
-    | .eq lhs rhs => Term.names lhs ∪ Term.names rhs
-    | .ite condition trueBranch falseBranch =>
-        Term.names condition ∪ Term.names trueBranch ∪ Term.names falseBranch
-
-  def TermList.names : List Term → Finset Name
-    | [] => ∅
-    | term :: rest => Term.names term ∪ TermList.names rest
-end
-
-theorem LVal.mentions_mem_names {x : Name} :
-    ∀ {lv : LVal}, LVal.Mentions x lv → x ∈ LVal.names lv
-  | .var y, hmentions => by
-      simp [LVal.Mentions, LVal.names] at hmentions ⊢
-      exact hmentions.symm
-  | .deref lv, hmentions => by
-      induction lv with
-      | var y =>
-          simp [LVal.Mentions, LVal.names] at hmentions ⊢
-          exact hmentions.symm
-      | deref lv ih =>
-          exact ih hmentions
-
-theorem Term.mentions_mem_names {x : Name} {term : Term}
-    (hmentions : Term.Mentions x term) : x ∈ Term.names term := by
-  revert hmentions
-  refine Term.rec
-    (motive_1 := fun term => Term.Mentions x term → x ∈ Term.names term)
-    (motive_2 := fun terms => TermList.Mentions x terms → x ∈ TermList.names terms)
-    ?block ?letMut ?assign ?box ?borrow ?move ?copy ?val ?missing ?eq ?ite
-    ?nil ?cons term
-  case block =>
-    intro _lifetime _terms ih hmentions
-    exact ih hmentions
-  case letMut =>
-    intro y _initialiser ih hmentions
-    rcases hmentions with hdecl | hinitialiser
-    · exact Finset.mem_union.mpr (Or.inl (by simp [hdecl]))
-    · exact Finset.mem_union.mpr (Or.inr (ih hinitialiser))
-  case assign =>
-    intro _lhs _rhs ih hmentions
-    rcases hmentions with hlhs | hrhs
-    · exact Finset.mem_union.mpr (Or.inl (LVal.mentions_mem_names hlhs))
-    · exact Finset.mem_union.mpr (Or.inr (ih hrhs))
-  case box =>
-    intro _operand ih hmentions
-    exact ih hmentions
-  case borrow =>
-    intro _mutable _operand hmentions
-    exact LVal.mentions_mem_names hmentions
-  case move =>
-    intro _operand hmentions
-    exact LVal.mentions_mem_names hmentions
-  case copy =>
-    intro _operand hmentions
-    exact LVal.mentions_mem_names hmentions
-  case val =>
-    intro _value hmentions
-    cases hmentions
-  case missing =>
-    intro hmentions
-    cases hmentions
-  case eq =>
-    intro _lhs _rhs ihLhs ihRhs hmentions
-    rcases hmentions with hlhs | hrhs
-    · exact Finset.mem_union.mpr (Or.inl (ihLhs hlhs))
-    · exact Finset.mem_union.mpr (Or.inr (ihRhs hrhs))
-  case ite =>
-    intro _condition _trueBranch _falseBranch ihCondition ihTrue ihFalse
-      hmentions
-    rcases hmentions with hcondition | htrue | hfalse
-    · exact Finset.mem_union.mpr (Or.inl
-        (Finset.mem_union.mpr (Or.inl (ihCondition hcondition))))
-    · exact Finset.mem_union.mpr (Or.inl
-        (Finset.mem_union.mpr (Or.inr (ihTrue htrue))))
-    · exact Finset.mem_union.mpr (Or.inr (ihFalse hfalse))
-  case nil =>
-    intro hmentions
-    cases hmentions
-  case cons =>
-    intro _head _tail ihHead ihTail hmentions
-    rcases hmentions with hhead | htail
-    · exact Finset.mem_union.mpr (Or.inl (ihHead hhead))
-    · exact Finset.mem_union.mpr (Or.inr (ihTail htail))
-
-theorem TermList.mentions_mem_names {x : Name} :
-    ∀ {terms : List Term}, TermList.Mentions x terms → x ∈ TermList.names terms
-  | [], hmentions => by
-      cases hmentions
-  | term :: rest, hmentions => by
-      rcases hmentions with hterm | hrest
-      · exact Finset.mem_union.mpr
-          (Or.inl (Term.mentions_mem_names hterm))
-      · exact Finset.mem_union.mpr
-          (Or.inr (TermList.mentions_mem_names hrest))
-
-theorem Term.not_mentions_of_not_mem_names {x : Name} {term : Term} :
-    x ∉ Term.names term → ¬ Term.Mentions x term := by
-  intro hnot hmentions
-  exact hnot (Term.mentions_mem_names hmentions)
-
 /-- Variables occurring (in live borrows) in a partial type.
 
 `undef` shadows are moved-out and carry no live borrow, mirroring
@@ -794,7 +645,6 @@ mutual
     cases ty with
     | unit => intro h; simpa [Ty.vars] using h
     | int => intro h; simpa [Ty.vars] using h
-    | bool => intro h; simpa [Ty.vars] using h
     | borrow mutable targets =>
         intro h
         simpa [Ty.vars, Ty.allVars] using h
@@ -817,136 +667,6 @@ mutual
         simpa [PartialTy.vars] using h
 end
 
-/-- A name does not occur in any borrow target inside an environment type,
-including the type shadows carried below `undef`. -/
-def Env.TypeNameFresh (env : Env) (x : Name) : Prop :=
-  ∀ y slot, env.slotAt y = some slot → x ∉ PartialTy.allVars slot.ty
-
-namespace StoreTyping
-
-/-- A name does not occur in any live borrow target inside store-typed values. -/
-def TypeNameFresh (typing : StoreTyping) (x : Name) : Prop :=
-  ∀ location ty, typing.tyOf location = some ty → x ∉ Ty.allVars ty
-
-@[simp] theorem empty_typeNameFresh (x : Name) :
-    TypeNameFresh StoreTyping.empty x := by
-  intro location ty hlookup
-  simp [StoreTyping.empty] at hlookup
-
-end StoreTyping
-
-/-- Finite environment domains mention only finitely many names inside slot types. -/
-theorem Env.FiniteSupport.typeNameSupport {env : Env} :
-    Env.FiniteSupport env →
-    ∃ support : Finset Name,
-      ∀ y slot x,
-        env.slotAt y = some slot →
-        x ∈ PartialTy.allVars slot.ty →
-        x ∈ support := by
-  rintro ⟨domain, hdomain⟩
-  let support : Finset Name :=
-    domain.biUnion (fun y =>
-      match env.slotAt y with
-      | some slot => (PartialTy.allVars slot.ty).toFinset
-      | none => ∅)
-  refine ⟨support, ?_⟩
-  intro y slot x hslot hmem
-  dsimp [support]
-  exact Finset.mem_biUnion.mpr ⟨y, hdomain y slot hslot, by
-    simp [hslot, hmem]⟩
-
-/-- Finite store-typing domains mention only finitely many variable names in types. -/
-theorem StoreTyping.FiniteSupport.typeNameSupport {typing : StoreTyping} :
-    StoreTyping.FiniteSupport typing →
-    ∃ support : Finset Name,
-      ∀ location ty x,
-        typing.tyOf location = some ty →
-        x ∈ Ty.allVars ty →
-        x ∈ support := by
-  rintro ⟨domain, hdomain⟩
-  let support : Finset Name :=
-    domain.biUnion (fun location =>
-      match typing.tyOf location with
-      | some ty => (Ty.allVars ty).toFinset
-      | none => ∅)
-  refine ⟨support, ?_⟩
-  intro location ty x hlookup hmem
-  dsimp [support]
-  exact Finset.mem_biUnion.mpr ⟨location, hdomain location ty hlookup, by
-    simp [hlookup, hmem]⟩
-
-/--
-Finite environment/store typing support gives a genuinely fresh equality ghost.
-
-The chosen name is fresh as an environment slot, absent from all names stored in
-environment/store types, absent from the left type, and absent from the right
-operand syntax.
--/
-theorem exists_fresh_eq_ghost {env : Env} {typing : StoreTyping}
-    {lhsTy : Ty} {rhs : Term} :
-    Env.FiniteSupport env →
-    StoreTyping.FiniteSupport typing →
-    ∃ ghost,
-      env.fresh ghost ∧
-      Env.TypeNameFresh env ghost ∧
-      ghost ∉ Ty.allVars lhsTy ∧
-      StoreTyping.TypeNameFresh typing ghost ∧
-      ¬ Term.Mentions ghost rhs := by
-  rintro ⟨envDomain, henvDomain⟩ ⟨typingDomain, htypingDomain⟩
-  let envTypeNames : Finset Name :=
-    envDomain.biUnion (fun y =>
-      match env.slotAt y with
-      | some slot => (PartialTy.allVars slot.ty).toFinset
-      | none => ∅)
-  let storeTypeNames : Finset Name :=
-    typingDomain.biUnion (fun location =>
-      match typing.tyOf location with
-      | some ty => (Ty.allVars ty).toFinset
-      | none => ∅)
-  let forbidden : Finset Name :=
-    envDomain ∪ envTypeNames ∪ storeTypeNames ∪
-      (Ty.allVars lhsTy).toFinset ∪ Term.names rhs
-  rcases Finset.exists_notMem forbidden with ⟨ghost, hghost⟩
-  have hnotEnvDomain : ghost ∉ envDomain := by
-    intro hmem
-    exact hghost (by simp [forbidden, hmem])
-  have hnotEnvTypeNames : ghost ∉ envTypeNames := by
-    intro hmem
-    exact hghost (by simp [forbidden, hmem])
-  have hnotStoreTypeNames : ghost ∉ storeTypeNames := by
-    intro hmem
-    exact hghost (by simp [forbidden, hmem])
-  have hnotLhsVarsFinset : ghost ∉ (Ty.allVars lhsTy).toFinset := by
-    intro hmem
-    exact hghost (by simp [forbidden, hmem])
-  have hnotRhsNames : ghost ∉ Term.names rhs := by
-    intro hmem
-    exact hghost (by simp [forbidden, hmem])
-  have henvFresh : env.fresh ghost := by
-    unfold Env.fresh
-    cases hslot : env.slotAt ghost with
-    | none => rfl
-    | some slot =>
-        exact False.elim (hnotEnvDomain (henvDomain ghost slot hslot))
-  have henvTypeFresh : Env.TypeNameFresh env ghost := by
-    intro y slot hslot hmem
-    exact hnotEnvTypeNames (by
-      dsimp [envTypeNames]
-      exact Finset.mem_biUnion.mpr ⟨y, henvDomain y slot hslot, by
-        simp [hslot, hmem]⟩)
-  have hnotLhsVars : ghost ∉ Ty.allVars lhsTy := by
-    intro hmem
-    exact hnotLhsVarsFinset (List.mem_toFinset.mpr hmem)
-  have hstoreTypeFresh : StoreTyping.TypeNameFresh typing ghost := by
-    intro location ty hlookup hmem
-    exact hnotStoreTypeNames (by
-      dsimp [storeTypeNames]
-      exact Finset.mem_biUnion.mpr
-        ⟨location, htypingDomain location ty hlookup, by
-          simp [hlookup, hmem]⟩)
-  exact ⟨ghost, henvFresh, henvTypeFresh, hnotLhsVars, hstoreTypeFresh,
-    Term.not_mentions_of_not_mem_names hnotRhsNames⟩
-
 /-- A fixed rank function witnessing linearizability of an environment. -/
 def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
   ∀ x slot, env.slotAt x = some slot →
@@ -968,7 +688,6 @@ keeping the `mutable` flag. -/
 def Ty.sameShape : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
-  | .bool, .bool => True
   | .borrow m₁ _, .borrow m₂ _ => m₁ = m₂
   | .box t₁, .box t₂ => Ty.sameShape t₁ t₂
   | _, _ => False
@@ -985,7 +704,6 @@ lists must be subset-equivalent (same set). -/
 def Ty.eqv : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
-  | .bool, .bool => True
   | .borrow m₁ t₁, .borrow m₂ t₂ =>
       m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
   | .box t₁, .box t₂ => Ty.eqv t₁ t₂
@@ -1441,13 +1159,6 @@ def EnvJoinSameShape (branch join : Env) : Prop :=
     join.slotAt x = some joinSlot →
     PartialTy.sameShape branchSlot.ty joinSlot.ty
 
-def LoopInvariantNameFresh (entry inv : Env) (condition body : Term) : Prop :=
-  ∀ erased checked,
-    Env.TypeNameFresh (entry.eraseMany erased) checked →
-    ¬ Term.Mentions checked condition →
-    ¬ Term.Mentions checked body →
-    Env.TypeNameFresh (inv.eraseMany erased) checked
-
 /-- A join is an upper bound of its left component. -/
 theorem EnvJoin.left_le {left right join : Env} :
   EnvJoin left right join →
@@ -1523,9 +1234,6 @@ inductive WellFormedTy : Env → Ty → Lifetime → Prop where
   /-- L-Int. -/
   | int {env : Env} {lifetime : Lifetime} :
       WellFormedTy env .int lifetime
-  /-- L-Bool, Section 6.1. -/
-  | bool {env : Env} {lifetime : Lifetime} :
-      WellFormedTy env .bool lifetime
   /-- L-Borrow. -/
   | borrow {env : Env} {mutable : Bool} {targets : List LVal}
       {lifetime : Lifetime} :
@@ -1548,8 +1256,6 @@ inductive WellFormedTyWhenInitialized : Env → Ty → Lifetime → Prop where
       WellFormedTyWhenInitialized env .unit lifetime
   | int {env : Env} {lifetime : Lifetime} :
       WellFormedTyWhenInitialized env .int lifetime
-  | bool {env : Env} {lifetime : Lifetime} :
-      WellFormedTyWhenInitialized env .bool lifetime
   | borrow {env : Env} {mutable : Bool} {targets : List LVal}
       {lifetime : Lifetime} :
       BorrowTargetsWellFormedWhenInitialized env targets lifetime →
@@ -1566,9 +1272,6 @@ inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
   /-- S-Int. -/
   | int {env : Env} :
       ShapeCompatible env (.ty .int) (.ty .int)
-  /-- S-Bool, Section 6.1. -/
-  | bool {env : Env} :
-      ShapeCompatible env (.ty .bool) (.ty .bool)
   /-- S-Box for fully initialized owner types. -/
   | tyBox {env : Env} {left right : Ty} :
       ShapeCompatible env (.ty left) (.ty right) →
@@ -2001,8 +1704,6 @@ inductive ValueTyping : StoreTyping → Value → Ty → Prop where
       ValueTyping typing .unit .unit
   | int {typing : StoreTyping} {value : Int} :
       ValueTyping typing (.int value) .int
-  | bool {typing : StoreTyping} {value : Bool} :
-      ValueTyping typing (.bool value) .bool
   | ref {typing : StoreTyping} {ref : Reference} {ty : Ty} :
       typing.tyOf ref.location = some ty →
       ValueTyping typing (.ref ref) ty
@@ -2014,7 +1715,6 @@ theorem ValueTyping.deterministic {typing : StoreTyping} {value : Value}
     left = right := by
   intro hleft hright
   cases hleft <;> cases hright
-  · rfl
   · rfl
   · rfl
   · rename_i hleftLookup hrightLookup
@@ -2029,14 +1729,6 @@ mutual
         {value : Value} {ty : Ty} :
         ValueTyping typing value ty →
         TermTyping env typing lifetime (.val value) ty env
-    /-- T-Missing: synthetic extractor placeholder.  The loan-freedom premise
-    keeps the placeholder from claiming a borrow of an existing place, which
-    would break borrow safety of the result environment. -/
-    | missing {env : Env} {typing : StoreTyping} {lifetime : Lifetime}
-        {ty : Ty} :
-        WellFormedTy env ty lifetime →
-        TyLoanFree ty →
-        TermTyping env typing lifetime .missing ty env
     /-- T-Copy. -/
     | copy {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
@@ -2101,97 +1793,6 @@ mutual
         EnvWriteRhsTargetsWellFormed env₃ rhsTy →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
-    /-- T-Eqal, Section 6.1.2, with the paper's ghost-slot check.
-
-    The right operand is typed only in `Γ₂[γ ↦ ⟨T₁⟩^l]`, where `γ` is a fresh
-    anonymous slot representing the left operand value that remains live while
-    the right operand is evaluated.  The result environment erases `γ` again.
-
-    The explicit non-occurrence premise records that the anonymous slot is not
-    source-addressable syntax.  It is what lets the metatheory thin the ghost
-    slot back out after it has done its borrow-conflict filtering job. -/
-    | eq {env₁ env₂ env₃ envGhost : Env} {ghost : Name}
-        {typing : StoreTyping} {lifetime : Lifetime}
-        {lhs rhs : Term} {lhsTy rhsTy : Ty} :
-        TermTyping env₁ typing lifetime lhs lhsTy env₂ →
-        env₂.fresh ghost →
-        Env.TypeNameFresh env₂ ghost →
-        ghost ∉ Ty.allVars lhsTy →
-        StoreTyping.TypeNameFresh typing ghost →
-        TermTyping
-          (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
-          typing lifetime rhs rhsTy envGhost →
-        ¬ Term.Mentions ghost rhs →
-        env₃ = envGhost.erase ghost →
-        CopyTy lhsTy →
-        CopyTy rhsTy →
-        ShapeCompatible env₃ (.ty lhsTy) (.ty rhsTy) →
-        TermTyping env₁ typing lifetime (.eq lhs rhs) .bool env₃
-    /-- T-If, Section 6.1.2.
-
-    The condition types as `bool`, both branches are typed in the
-    post-condition environment, and the resulting type/environment are the
-    joins (Definitions 3.8 and 3.10) of the branch results.
-
-    Legacy mechanisation obligations on the joined result, following the
-    repo's earlier convention of rule-carried obligations (cf. `T-Assign`).
-    `EnvJoinSameShape` is no longer a premise: join shape facts used by the
-    metatheory are derived internally from the weak initialized invariant and
-    the concrete join construction.
-
-    * `Coherent`, `Linearizable` — the result invariants needed to type
-      dereferences through joined borrow target lists.  The per-target
-      `ContainedBorrowsWellFormed` invariant is derived in the preservation
-      proof from the branch invariants plus these result obligations. -/
-    | ite {env₁ env₂ env₃ env₄ env₅ : Env} {typing : StoreTyping}
-        {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
-        {trueTy falseTy joinTy : Ty} :
-        TermTyping env₁ typing lifetime condition .bool env₂ →
-        TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
-        TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
-        PartialTyJoin (.ty trueTy) (.ty falseTy) (.ty joinTy) →
-        EnvJoin env₃ env₄ env₅ →
-        WellFormedTy env₅ joinTy lifetime →
-        Coherent env₅ →
-        Linearizable env₅ →
-        TermTyping env₁ typing lifetime (.ite condition trueBranch falseBranch)
-          joinTy env₅
-    /-- T-IfDiv: divergence-aware conditional merge.
-
-    Rust accepts `if c { t } else { …; panic!() }` even when the truncated
-    else-branch and the live branch disagree on moves or types: the
-    `panic!()`-terminated branch has the never type `!`, so control never
-    flows from it to the merge point and it contributes nothing to the
-    borrow-state join.  `Term.Diverges` is the syntactic counterpart of that
-    `!`-propagation.
-
-    The diverging branch is still fully type- and borrow-checked (premise
-    three) — this is what lets the extractor keep a truncated branch's
-    constraints — but the result type and environment are exactly the live
-    branch's, and none of `T-If`'s join obligations are needed because no
-    join happens. -/
-    | iteDiverging {env₁ env₂ env₃ env₄ : Env} {typing : StoreTyping}
-        {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
-        {trueTy falseTy : Ty} :
-        TermTyping env₁ typing lifetime condition .bool env₂ →
-        TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
-        TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
-        falseBranch.Diverges →
-        TermTyping env₁ typing lifetime
-          (.ite condition trueBranch falseBranch) trueTy env₃
-    /-- T-IfDivT: mirror image of `T-IfDiv` for a diverging true branch.
-
-    This models Rust's statement-level `if c { ...; panic!() }`: when the
-    true branch diverges, only the false branch can reach the merge point. -/
-    | iteTrueDiverging {env₁ env₂ env₃ env₄ : Env} {typing : StoreTyping}
-        {lifetime : Lifetime} {condition trueBranch falseBranch : Term}
-        {trueTy falseTy : Ty} :
-        TermTyping env₁ typing lifetime condition .bool env₂ →
-        TermTyping env₂ typing lifetime trueBranch trueTy env₃ →
-        TermTyping env₂ typing lifetime falseBranch falseTy env₄ →
-        trueBranch.Diverges →
-        TermTyping env₁ typing lifetime
-          (.ite condition trueBranch falseBranch) falseTy env₄
   inductive TermListTyping : Env → StoreTyping → Lifetime → List Term → Ty → Env → Prop where
     /-- T-Seq, singleton sequence. -/
     | singleton {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
@@ -2218,7 +1819,6 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (motive_2 := fun env _typing _lifetime _terms _ty result _ =>
       Env.FiniteSupport env → Env.FiniteSupport result)
     (fun _hvalue hfinite => hfinite)
-    (fun _hwellTy _hloanFree hfinite => hfinite)
     (fun _hlv _hcopy _hnotRead hfinite => hfinite)
     (fun _hlv _hnotWrite hmove hfinite =>
       EnvMove.finiteSupport hmove hfinite)
@@ -2234,83 +1834,10 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnoStale _hrank _hcoherence
         _hcontained _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
-    (fun _hlhs _hfresh _htypeFresh _hnotTy _hstoreFresh _hrhs
-        _hnotMentions henvEq _hcopyL _hcopyR _hshape ihLhs ihRhs hfinite => by
-      rw [henvEq]
-      exact (ihRhs (ihLhs hfinite).update).erase)
-    (fun _hcondition _htrue _hfalse _htyJoin henvJoin
-        _hwellTy _hcoherent _hlinear
-        ihCondition ihTrue _ihFalse hfinite =>
-      EnvJoin.finiteSupport_left henvJoin (ihTrue (ihCondition hfinite)))
-    (fun _hcondition _htrue _hfalse _hdiverges ihCondition ihTrue
-        _ihFalse hfinite =>
-      ihTrue (ihCondition hfinite))
-    (fun _hcondition _htrue _hfalse _hdiverges ihCondition _ihTrue
-        ihFalse hfinite =>
-      ihFalse (ihCondition hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>
       ihRest (ihTerm hfinite))
     htyping
-
-/--
-Derived equality typing rule that chooses the anonymous equality slot from
-finite support instead of requiring callers to name it and prove freshness.
-
-The RHS is still checked in the ghost-extended environment.  The continuation
-must work for the fresh ghost chosen by `exists_fresh_eq_ghost`.
--/
-theorem TermTyping.eq_finite {env₁ env₂ env₃ : Env}
-    {typing : StoreTyping} {lifetime : Lifetime}
-    {lhs rhs : Term} {lhsTy rhsTy : Ty} :
-    TermTyping env₁ typing lifetime lhs lhsTy env₂ →
-    Env.FiniteSupport env₁ →
-    StoreTyping.FiniteSupport typing →
-    (∀ ghost,
-      env₂.fresh ghost →
-      Env.TypeNameFresh env₂ ghost →
-      ghost ∉ Ty.allVars lhsTy →
-      StoreTyping.TypeNameFresh typing ghost →
-      ¬ Term.Mentions ghost rhs →
-      ∃ envGhost,
-        TermTyping
-          (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
-          typing lifetime rhs rhsTy envGhost ∧
-        env₃ = envGhost.erase ghost) →
-    CopyTy lhsTy →
-    CopyTy rhsTy →
-    ShapeCompatible env₃ (.ty lhsTy) (.ty rhsTy) →
-    TermTyping env₁ typing lifetime (.eq lhs rhs) .bool env₃ := by
-  intro hLhs hfiniteEnv hfiniteTyping hRhs hcopyL hcopyR hshape
-  have hfiniteEnv₂ : Env.FiniteSupport env₂ :=
-    hLhs.finiteSupport hfiniteEnv
-  rcases exists_fresh_eq_ghost (env := env₂) (typing := typing)
-      (lhsTy := lhsTy) (rhs := rhs) hfiniteEnv₂ hfiniteTyping with
-    ⟨ghost, hfresh, htypeFresh, htyFresh, hstoreFresh, hnotMention⟩
-  rcases hRhs ghost hfresh htypeFresh htyFresh hstoreFresh hnotMention with
-    ⟨envGhost, hRhsGhost, henvEq⟩
-  exact TermTyping.eq hLhs hfresh htypeFresh htyFresh hstoreFresh
-    hRhsGhost hnotMention henvEq hcopyL hcopyR hshape
-
-theorem BorrowSafeEnv.erase {env : Env} {ghost : Name} :
-    BorrowSafeEnv env →
-    BorrowSafeEnv (env.erase ghost) := by
-  intro hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
-    hx hy htargetMutable htargetOther hconflict
-  rcases hx with ⟨xSlot, hxSlot, hxContains⟩
-  rcases hy with ⟨ySlot, hySlot, hyContains⟩
-  have hxOrig : env ⊢ x ↝ (.borrow true targetsMutable) := by
-    by_cases hxGhost : x = ghost
-    · subst hxGhost
-      simp [Env.erase] at hxSlot
-    · exact ⟨xSlot, by simpa [Env.erase, hxGhost] using hxSlot, hxContains⟩
-  have hyOrig : env ⊢ y ↝ (Ty.borrow mutable targetsOther) := by
-    by_cases hyGhost : y = ghost
-    · subst hyGhost
-      simp [Env.erase] at hySlot
-    · exact ⟨ySlot, by simpa [Env.erase, hyGhost] using hySlot, hyContains⟩
-  exact hsafe x y mutable targetsMutable targetsOther targetMutable targetOther
-    hxOrig hyOrig htargetMutable htargetOther hconflict
 
 end Paper
 end LwRust
