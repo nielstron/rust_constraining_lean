@@ -3,7 +3,8 @@
 Status: `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remains green
 after adding the new strike/path and owner-chain extraction support, the
 owner-route collapse helpers, and the dereference-move runtime preservation
-helpers:
+helpers.  It also remains green after the direct-variable assignment
+owner-drop frame:
 
 - `LValTyping.strike_suffix` factors a strike at a typed lvalue into the
   remaining suffix over that lvalue's type.
@@ -28,14 +29,29 @@ helpers:
   `envSlot_partialTy_vars_writeProhibited`,
   `LValTyping.envWrite_var_to_source_of_no_conflicts`, and
   `validPartialValueWhenInitialized_envWrite_var_of_no_write`).
+- Direct-variable assignment runtime preservation is now proved:
+  `preservation_assign_var_step_runtime_whenInitialized_of_wellFormed`.
+  The new result-environment variable reach frame is
+  `lval_loc_var_conflict_or_writeProhibited_envWrite_var`,
+  `locReads_var_conflict_or_writeProhibited_envWrite_var`,
+  `borrowDependencyWhenInitialized_envWrite_var_writeProhibited`, and
+  `reachesWhenInitialized_var_ne_of_envWrite_var_not_writeProhibited`.
 
 The final `lake build` is not green yet because `preservation` is still not
-exported.  The remaining blocker is the assignment runtime frame: the existing
-initialized reachability exclusion still reports write prohibition in the
-source environment, while assignment needs the corresponding exclusion in the
-post-`EnvWrite` result environment (`env₃`) so the `¬ WriteProhibited env₃ lhs`
-premise can frame the RHS value and all surviving slots through the runtime
-write/drop.
+exported.  Current full-build failures are:
+
+- `Appendix9/Lemma_9_9_ValuePreservation.lean:37`: unknown identifier
+  `preservation`.
+- `Appendix9/Lemma_9_10_StorePreservation.lean:49`: unknown identifier
+  `preservation`.
+- `InitialStates.lean:278` and `InitialStates.lean:676`: unknown identifier
+  `preservation`.
+
+The remaining blocker is the dereference-assignment runtime frame: the direct
+variable case now has the needed result-environment reach exclusion, but the
+same idea still has to be generalized from `VariableProjection x` to the
+selected heap leaf under `EnvWrite.chain_guarded` for box/full-box/borrow
+assignments.
 
 ## 1. Deref move: struck owner spine after runtime write
 
@@ -74,11 +90,11 @@ does not yet expose a runtime lemma connecting the selected heap leaf from
 
 Concrete subgoals:
 
-- Generalize the initialized reachability frame one more step so the
-  borrow-reach cases conclude `WriteProhibited env₃ lhs` from
-  `EnvWrite.chain_guarded`, not `WriteProhibited env₂ lhs` from the source
-  environment.  The owner-reach cases are already covered by the owner-route
-  collapse helpers.
+- Generalize the initialized reachability frame from the now-proved direct
+  variable version to the selected heap leaf.  Borrow-reach cases must conclude
+  `WriteProhibited env₃ lhs` from `EnvWrite.chain_guarded`, not
+  `WriteProhibited env₂ lhs` from the source environment.  The owner-reach
+  cases are already covered by the owner-route collapse helpers.
 - Extract the concrete selected leaf from `Step.assign` and the lhs
   `LValTyping` derivation via `lvalTyping_defined_location_whenInitialized`.
 - Prove that the static `EnvWrite` changed either no slot or the single
@@ -93,29 +109,16 @@ Concrete subgoals:
 
 ## 3. Direct variable assign: old owner values
 
-Blocked helper:
+Completed helper:
 
 `preservation_assign_var_step_runtime_whenInitialized_of_wellFormed`
 
-Existing helper:
-
-`preservation_assign_var_old_nonOwner_step_runtime_whenInitialized_of_preserved`
-
-The existing helper covers old lhs values that are known non-owning.  That is
-enough for old shapes `.unit`, `.int`, and borrow types via
-`safeAbstraction_var_read_nonOwner_of_envShape`.  It is not enough for direct
-variable assignment where `ShapeCompatible env oldTy (.ty rhsTy)` permits
-`oldTy = .ty (.box T)` and `rhsTy = .box U`.  In that case the old slot can own a
-heap tree and the assignment step drops the overwritten value after the write.
-
-Concrete subgoals:
-
-- Finish the full old-owner direct-variable assignment frame over
-  `validRuntimeState_assign_step_of_postWriteDrop_invariants`.
-- Show owners in the old value become orphaned after the write, then are safely
-  removed by `Drops` (the orphaned-owner and drop-frame kernels are now proved).
-- Preserve the RHS value and all other variables through write plus drop using
-  the result-environment reach frame described above.
+The helper now covers old lhs values that own heap trees.  It writes the RHS
+value, frames the RHS and sibling slots using the post-`EnvWrite` variable
+reach exclusion, proves overwritten owners orphaned with
+`droppedValueOwnersOrphaned_assign`, and drops the old value through
+`safeAbstractionWhenInitialized_drops_of_orphaned_values_early` plus
+`validRuntimeState_assign_step_of_postWriteDrop_invariants`.
 
 ## 4. Singleton block final value lifetime drop
 
