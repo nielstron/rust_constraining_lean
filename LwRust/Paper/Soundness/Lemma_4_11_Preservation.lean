@@ -5917,6 +5917,185 @@ theorem typingPreservesWellFormed_of_sourceTerm
       exact ihRest (SourceTerm.block_tail hsource) hwell₂ hsafe₂)
     htyping hsource hwellFormed hsafe
 
+/-! ### Owner-chain acyclicity and the strike/write alignment
+
+The runtime counterpart of `Strike`: a move through boxes updates the leaf of
+an owner-reference chain, while the static environment strikes the box spine
+of the base slot's type.  Under store validity the chain cannot revisit its
+leaf, so every spine slot other than the leaf survives the write unchanged. -/
+
+/-- Owner-edge chains between locations, measured by length. -/
+inductive OwnsChain (store : ProgramStore) : Location → Nat → Location → Prop
+    where
+  | zero {location : Location} : OwnsChain store location 0 location
+  | succ {root mid next : Location} {n : Nat} :
+      OwnsChain store root n mid →
+      ProgramStore.OwnsAt store next mid →
+      OwnsChain store root (n + 1) next
+
+/-- Under owner uniqueness, chains from an unowned root to a fixed location
+have a unique length: backward steps are deterministic. -/
+theorem ownsChain_unique_length {store : ProgramStore} {root : Location}
+    (hvalidStore : ValidStore store)
+    (hrootUnowned : ¬ ProgramStore.Owns store root) :
+    ∀ {n₁ n₂ : Nat} {target : Location},
+      OwnsChain store root n₁ target →
+      OwnsChain store root n₂ target →
+      n₁ = n₂ := by
+  intro n₁
+  induction n₁ with
+  | zero =>
+      intro n₂ target h₁ h₂
+      cases h₁
+      cases h₂ with
+      | zero => rfl
+      | succ _ howns => exact absurd ⟨_, howns⟩ hrootUnowned
+  | succ n ih =>
+      intro n₂ target h₁ h₂
+      cases h₁ with
+      | succ hchain₁ howns₁ =>
+          cases h₂ with
+          | zero => exact absurd ⟨_, howns₁⟩ hrootUnowned
+          | succ hchain₂ howns₂ =>
+              have hmid := hvalidStore _ _ _ howns₁ howns₂
+              subst hmid
+              rw [ih hchain₁ hchain₂]
+
+/-- Variable locations are never owned when owner targets live on the heap. -/
+theorem var_not_owned {store : ProgramStore} {x : Name}
+    (hheap : StoreOwnerTargetsHeap store) :
+    ¬ ProgramStore.Owns store (.var x) := by
+  intro howns
+  rcases hheap _ howns with ⟨address, haddr⟩
+  cases haddr
+
+/-- The runtime owner chain below a value, following a strike path to the
+written leaf. -/
+inductive OwnerChainAt (store : ProgramStore) :
+    PartialValue → Path → Location → Prop where
+  | here {location : Location} :
+      OwnerChainAt store
+        (.value (.ref { location := location, owner := true }))
+        [()] location
+  | there {location leaf : Location} {slot : StoreSlot} {rest : Path} :
+      store.slotAt location = some slot →
+      OwnerChainAt store slot.value (() :: rest) leaf →
+      OwnerChainAt store
+        (.value (.ref { location := location, owner := true }))
+        (() :: () :: rest) leaf
+
+/-- **Strike/write alignment.**  Updating the owner-chain leaf to `undef`
+realizes the struck type: the box spine survives slot-for-slot (the chain
+cannot revisit its leaf under store validity), and the struck subtree's
+`undef` is witnessed by the written leaf.  The conclusion is stated against
+an arbitrary result environment: the struck spine mentions no borrows. -/
+theorem validPartialValueWhenInitialized_strike_write
+    {env moved : Env} {store : ProgramStore} {rootLoc : Location}
+    (hvalidStore : ValidStore store)
+    (hrootUnowned : ¬ ProgramStore.Owns store rootLoc)
+    {leafLoc : Location} {leafSlot : StoreSlot} {k : Nat}
+    (hleafChain : OwnsChain store rootLoc k leafLoc)
+    (hleafSlot : store.slotAt leafLoc = some leafSlot) :
+    ∀ {path : Path} {source struck : PartialTy} {value : PartialValue}
+      {cur : Location} {j : Nat},
+      Strike path source struck →
+      ValidPartialValueWhenInitialized env store value source →
+      OwnerChainAt store value path leafLoc →
+      (∃ lifetime, store.slotAt cur = some ⟨value, lifetime⟩) →
+      OwnsChain store rootLoc j cur →
+      k = j + path.length →
+      ValidPartialValueWhenInitialized moved
+        (store.update leafLoc { leafSlot with value := .undef })
+        value struck := by
+  intro path
+  induction path with
+  | nil =>
+      intro source struck value cur j _hstrike _hvalid hchain
+      cases hchain
+  | cons head rest ih =>
+      intro source struck value cur j hstrike hvalid hchain hcurSlot hcurChain
+        hlen
+      cases hchain with
+      | here =>
+          -- The write happens at this owner's target: the strike leaf.
+          cases source with
+          | ty tySource =>
+              cases tySource <;> cases struck <;> simp [Strike] at hstrike
+              rename_i T struckInner
+              cases struckInner <;> simp [Strike] at hstrike
+              subst hstrike
+              cases hvalid with
+              | boxFull hslot hinner =>
+                  refine ValidPartialValueWhenInitialized.box
+                    (slot := { leafSlot with value := .undef }) ?_
+                    ValidPartialValueWhenInitialized.undef
+                  simp [ProgramStore.update]
+          | box innerTy =>
+              cases struck <;> simp [Strike] at hstrike
+              rename_i struckInner
+              cases innerTy <;> cases struckInner <;>
+                simp [Strike] at hstrike
+              subst hstrike
+              cases hvalid with
+              | box hslot hinner =>
+                  refine ValidPartialValueWhenInitialized.box
+                    (slot := { leafSlot with value := .undef }) ?_
+                    ValidPartialValueWhenInitialized.undef
+                  simp [ProgramStore.update]
+          | undef shape =>
+              cases struck <;> simp [Strike] at hstrike
+      | there hslotNext hchainNext =>
+          rename_i location slot rest'
+          -- This spine slot is strictly above the leaf and survives.
+          rcases hcurSlot with ⟨curLifetime, hcurSlotEq⟩
+          have hownsNext : ProgramStore.OwnsAt store location cur :=
+            ⟨curLifetime, by simpa [owningRef] using hcurSlotEq⟩
+          have hnextChain : OwnsChain store rootLoc (j + 1) location :=
+            OwnsChain.succ hcurChain hownsNext
+          have hne : location ≠ leafLoc := by
+            intro hEq
+            subst hEq
+            have hlenEq :=
+              ownsChain_unique_length hvalidStore hrootUnowned
+                hleafChain hnextChain
+            simp only [List.length_cons] at hlen
+            omega
+          have hslotNext' :
+              (store.update leafLoc { leafSlot with value := .undef }).slotAt
+                location = some slot := by
+            simpa [ProgramStore.update, hne] using hslotNext
+          have hnextCurSlot :
+              ∃ lifetime, store.slotAt location = some ⟨slot.value, lifetime⟩ :=
+            ⟨slot.lifetime, by simpa using hslotNext⟩
+          have hnextLen : k = (j + 1) + (() :: rest').length := by
+            simp only [List.length_cons] at hlen ⊢
+            omega
+          cases source with
+          | ty tySource =>
+              cases tySource <;> cases struck <;> simp [Strike] at hstrike
+              cases hvalid with
+              | boxFull hslot hinner =>
+                  rename_i slotV
+                  have hslotEq : slotV = slot :=
+                    Option.some.inj (hslot.symm.trans hslotNext)
+                  subst hslotEq
+                  exact ValidPartialValueWhenInitialized.box hslotNext'
+                    (ih hstrike hinner hchainNext hnextCurSlot hnextChain
+                      hnextLen)
+          | box innerTy =>
+              cases struck <;> simp [Strike] at hstrike
+              cases hvalid with
+              | box hslot hinner =>
+                  rename_i slotV
+                  have hslotEq : slotV = slot :=
+                    Option.some.inj (hslot.symm.trans hslotNext)
+                  subst hslotEq
+                  exact ValidPartialValueWhenInitialized.box hslotNext'
+                    (ih hstrike hinner hchainNext hnextCurSlot hnextChain
+                      hnextLen)
+          | undef shape =>
+              cases struck <;> simp [Strike] at hstrike
+
 end Paper
 end LwRust
 
