@@ -2,9 +2,9 @@
 
 Status: `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remains green
 after adding the new strike/path and owner-chain extraction support, the
-owner-route collapse helpers, and the dereference-move runtime preservation
-helpers.  It also remains green after the direct-variable assignment
-owner-drop frame:
+owner-route collapse helpers, the dereference-move runtime preservation
+helpers, the direct-variable assignment owner-drop frame, and the first
+pure-owner dereference-assignment alignment kernel:
 
 - `LValTyping.strike_suffix` factors a strike at a typed lvalue into the
   remaining suffix over that lvalue's type.
@@ -36,6 +36,16 @@ owner-drop frame:
   `locReads_var_conflict_or_writeProhibited_envWrite_var`,
   `borrowDependencyWhenInitialized_envWrite_var_writeProhibited`, and
   `reachesWhenInitialized_var_ne_of_envWrite_var_not_writeProhibited`.
+- Pure partial-box dereference assignment now has a static/runtime descent
+  kernel:
+  `PathSelect`, `PathSelect.snoc_box`, `PathSelect.update_env_eq`,
+  `LValTyping.box_pathSelect`, `EnvWrite.deref_box_update_eq`, and
+  `validPartialValueWhenInitialized_updateAtPath_write`.  These replace the
+  old rank-zero owner-spine fact for the part of `EnvWrite` that descends
+  through actual owner boxes: the write result is a single root-slot update,
+  and the owner-chain leaf write realizes the `UpdateAtPath` result when the
+  RHS validity has already been framed in the result environment and updated
+  store.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Current full-build failures are:
@@ -47,11 +57,15 @@ exported.  Current full-build failures are:
 - `InitialStates.lean:278` and `InitialStates.lean:676`: unknown identifier
   `preservation`.
 
-The remaining blocker is the dereference-assignment runtime frame: the direct
-variable case now has the needed result-environment reach exclusion, but the
-same idea still has to be generalized from `VariableProjection x` to the
-selected heap leaf under `EnvWrite.chain_guarded` for box/full-box/borrow
-assignments.
+The remaining blocker is the dereference-assignment result-environment frame:
+the owner-chain leaf and pure-box `UpdateAtPath` alignment are now available,
+but the RHS value and surviving slots still have to be transported into the
+post-`EnvWrite` environment while excluding live borrow dependencies that reach
+the selected heap leaf.  This is the generalized
+`reachesWhenInitialized_*_ne_of_stored_not_writeProhibited` step under
+`EnvWrite.chain_guarded`; the direct-variable version is not strong enough
+because the runtime write location is a heap leaf while the static change is a
+guarded root/graft slot.
 
 ## 1. Deref move: struck owner spine after runtime write
 
@@ -90,16 +104,18 @@ does not yet expose a runtime lemma connecting the selected heap leaf from
 
 Concrete subgoals:
 
-- Generalize the initialized reachability frame from the now-proved direct
-  variable version to the selected heap leaf.  Borrow-reach cases must conclude
-  `WriteProhibited env₃ lhs` from `EnvWrite.chain_guarded`, not
-  `WriteProhibited env₂ lhs` from the source environment.  The owner-reach
-  cases are already covered by the owner-route collapse helpers.
+- Generalize the initialized reachability/result-environment frame from the
+  now-proved direct variable version to the selected heap leaf.  Borrow-reach
+  cases must conclude `WriteProhibited env₃ lhs` from
+  `EnvWrite.chain_guarded`, `LValTyping.exists_env3`, and the strict
+  `BorrowSafeEnv`/`TyBorrowSafeAgainstEnv` facts; owner-reach cases are covered
+  by the owner-route collapse helpers.
 - Extract the concrete selected leaf from `Step.assign` and the lhs
   `LValTyping` derivation via `lvalTyping_defined_location_whenInitialized`.
-- Prove that the static `EnvWrite` changed either no slot or the single
-  chain-guarded graft slot, and that this slot is the root whose runtime value
-  owns the selected leaf.
+- For the partial-box owner-chain case, use the new `PathSelect`/`EnvWrite`
+  kernel to show that static `EnvWrite` descends through boxes and changes the
+  owner root slot.  The full-box and borrow-hop assignment cases still need the
+  corresponding rebasing step under `EnvWrite.chain_guarded`.
 - Preserve the RHS value and unaffected environment slots after the runtime
   write using `validPartialValueWhenInitialized_update_of_not_live_reaches`.
   The existing variable frame is insufficient because the updated location is

@@ -7037,6 +7037,54 @@ def OwnerChainPrefix (store : ProgramStore) (root : Location)
       OwnsChain store root k leaf ∧
       k = path.length
 
+inductive PathSelect : Path → PartialTy → PartialTy → Prop where
+  | here {ty : PartialTy} :
+      PathSelect [] ty ty
+  | box {path : Path} {inner leaf : PartialTy} :
+      PathSelect path inner leaf →
+      PathSelect (() :: path) (.box inner) leaf
+  | boxFull {path : Path} {inner : Ty} {leaf : PartialTy} :
+      PathSelect path (.ty inner) leaf →
+      PathSelect (() :: path) (.ty (.box inner)) leaf
+
+theorem PathSelect.snoc_box :
+    ∀ {path : Path} {root inner : PartialTy},
+    PathSelect path root (.box inner) →
+    PathSelect (path ++ [()]) root inner
+  | [], root, inner, hselect => by
+      cases hselect
+      exact PathSelect.box PathSelect.here
+  | () :: path, root, inner, hselect => by
+      cases hselect with
+      | box hinner =>
+          simpa [List.cons_append] using
+            PathSelect.box (PathSelect.snoc_box hinner)
+      | boxFull hinner =>
+          simpa [List.cons_append] using
+            PathSelect.boxFull (PathSelect.snoc_box hinner)
+
+theorem PathSelect.update_env_eq {env env₂ : Env}
+    {path : Path} {root selected updatedTy : PartialTy} {rhsTy : Ty} :
+    PathSelect path root selected →
+    UpdateAtPath env path root rhsTy env₂ updatedTy →
+    env₂ = env := by
+  intro hselect
+  induction hselect generalizing env₂ updatedTy rhsTy with
+  | here =>
+      intro hupdate
+      cases hupdate
+      rfl
+  | box hinner ih =>
+      intro hupdate
+      cases hupdate with
+      | box hupdateInner =>
+          exact ih hupdateInner
+  | boxFull hinner ih =>
+      intro hupdate
+      cases hupdate with
+      | boxFull hupdateInner =>
+          exact ih hupdateInner
+
 theorem OwnerChainPrefix.extend {store : ProgramStore}
     {rootLoc location next : Location} {rootValue : PartialValue}
     {path : Path} {slot : StoreSlot} :
@@ -7162,6 +7210,59 @@ theorem lvalTyping_box_ownerChainPrefix_whenInitialized
           exact Or.inr ⟨k, by simpa [LVal.path] using hchain,
             by simpa [LVal.base] using howns,
             by simpa [LVal.path] using hlen⟩
+
+theorem LValTyping.box_pathSelect {env : Env} :
+    ∀ {lv : LVal} {inner : PartialTy} {lifetime : Lifetime}
+      {slot : EnvSlot},
+      LValTyping env lv (.box inner) lifetime →
+      env.slotAt (LVal.base lv) = some slot →
+      PathSelect (LVal.path lv) slot.ty (.box inner) := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro inner lifetime slot htyping hslot
+      rcases LValTyping.var_inv htyping with
+        ⟨envSlot, henvSlot, htyEq, _hlifetimeEq⟩
+      have hslotEq : slot = envSlot :=
+        Option.some.inj (hslot.symm.trans henvSlot)
+      subst hslotEq
+      rw [← htyEq]
+      exact PathSelect.here
+  | deref source ih =>
+      intro inner lifetime slot htyping hslot
+      cases htyping with
+      | box hsource =>
+          have hsourceSelect :
+              PathSelect (LVal.path source) slot.ty (.box (.box inner)) :=
+            ih hsource (by simpa [LVal.base] using hslot)
+          simpa [LVal.path] using PathSelect.snoc_box hsourceSelect
+
+theorem EnvWrite.deref_box_update_eq {env env' : Env} {source : LVal}
+    {oldTy : PartialTy} {targetLifetime : Lifetime} {rhsTy : Ty} :
+    LValTyping env source (.box oldTy) targetLifetime →
+    EnvWrite env source.deref rhsTy env' →
+    ∃ slot updatedTy,
+      env.slotAt (LVal.base source) = some slot ∧
+      UpdateAtPath env (LVal.path source.deref) slot.ty rhsTy env updatedTy ∧
+      env' = env.update (LVal.base source) { slot with ty := updatedTy } := by
+  intro hsource hwrite
+  cases hwrite with
+  | @intro writeEnv _writeLv writeSlot _writeTy updatedTy hslot hupdate =>
+      have hslotBase : env.slotAt (LVal.base source) = some writeSlot := by
+        simpa [LVal.base] using hslot
+      have hselectSource :
+          PathSelect (LVal.path source) writeSlot.ty (.box oldTy) :=
+        LValTyping.box_pathSelect hsource hslotBase
+      have hselectDeref :
+          PathSelect (LVal.path source.deref) writeSlot.ty oldTy := by
+        simpa [LVal.path] using PathSelect.snoc_box hselectSource
+      have henvEq :
+          writeEnv = env :=
+        PathSelect.update_env_eq hselectDeref (by
+          simpa [LVal.base] using hupdate)
+      subst henvEq
+      exact ⟨writeSlot, updatedTy, hslotBase, by simpa [LVal.base] using hupdate,
+        by simp [LVal.base]⟩
 
 theorem lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike
     {store : ProgramStore} {env : Env}
@@ -7431,6 +7532,132 @@ theorem validPartialValueWhenInitialized_strike_write
                       hnextLen)
           | undef shape =>
               cases struck <;> simp [Strike] at hstrike
+
+theorem validPartialValueWhenInitialized_updateAtPath_write
+    {env resultEnv : Env} {store : ProgramStore} {rootLoc : Location}
+    (hvalidStore : ValidStore store)
+    (hrootUnowned : ¬ ProgramStore.Owns store rootLoc)
+    {leafLoc : Location} {leafSlot : StoreSlot} {k : Nat}
+    (hleafChain : OwnsChain store rootLoc k leafLoc)
+    (hleafSlot : store.slotAt leafLoc = some leafSlot)
+    {rhsTy : Ty} {rhsValue : Value} :
+    ∀ {path : Path} {source updated : PartialTy} {value : PartialValue}
+      {cur : Location} {j : Nat},
+      UpdateAtPath env path source rhsTy env updated →
+      ValidPartialValueWhenInitialized env store value source →
+      OwnerChainAt store value path leafLoc →
+      (∃ lifetime, store.slotAt cur = some ⟨value, lifetime⟩) →
+      OwnsChain store rootLoc j cur →
+      k = j + path.length →
+      ValidPartialValueWhenInitialized resultEnv
+        (store.update leafLoc { leafSlot with value := .value rhsValue })
+        (.value rhsValue) (.ty rhsTy) →
+      ValidPartialValueWhenInitialized resultEnv
+        (store.update leafLoc { leafSlot with value := .value rhsValue })
+        value updated := by
+  intro path
+  induction path with
+  | nil =>
+      intro source updated value cur j _hupdate _hvalid hchain
+      cases hchain
+  | cons head rest ih =>
+      intro source updated value cur j hupdate hvalid hchain hcurSlot
+        hcurChain hlen hvalidRhs
+      cases hchain with
+      | here =>
+          cases source with
+          | ty tySource =>
+              cases tySource <;> cases hupdate
+              case borrow.mutBorrow hwrite =>
+                cases hvalid
+              case box.boxFull hinnerUpdate =>
+                cases hinnerUpdate
+                cases hvalid with
+                | boxFull hslot hinner =>
+                    refine ValidPartialValueWhenInitialized.boxFull
+                      (slot := { leafSlot with value := .value rhsValue }) ?_
+                      hvalidRhs
+                    simp [ProgramStore.update]
+          | box innerTy =>
+              cases hupdate
+              case box hinnerUpdate =>
+                cases hinnerUpdate
+                cases hvalid with
+                | box hslot hinner =>
+                    refine ValidPartialValueWhenInitialized.box
+                      (slot := { leafSlot with value := .value rhsValue }) ?_
+                      hvalidRhs
+                    simp [ProgramStore.update]
+          | undef shape =>
+              cases hupdate
+      | there hslotNext hchainNext =>
+          rename_i location slot rest'
+          rcases hcurSlot with ⟨curLifetime, hcurSlotEq⟩
+          have hownsNext : ProgramStore.OwnsAt store location cur :=
+            ⟨curLifetime, by simpa [owningRef] using hcurSlotEq⟩
+          have hnextChain : OwnsChain store rootLoc (j + 1) location :=
+            OwnsChain.succ hcurChain hownsNext
+          have hne : location ≠ leafLoc := by
+            intro hEq
+            subst hEq
+            have hlenEq :=
+              ownsChain_unique_length hvalidStore hrootUnowned
+                hleafChain hnextChain
+            simp only [List.length_cons] at hlen
+            omega
+          have hslotNext' :
+              (store.update leafLoc { leafSlot with value := .value rhsValue }).slotAt
+                location = some slot := by
+            simpa [ProgramStore.update, hne] using hslotNext
+          have hnextCurSlot :
+              ∃ lifetime, store.slotAt location = some ⟨slot.value, lifetime⟩ :=
+            ⟨slot.lifetime, by simpa using hslotNext⟩
+          have hnextLen : k = (j + 1) + (() :: rest').length := by
+            simp only [List.length_cons] at hlen ⊢
+            omega
+          cases source with
+          | ty tySource =>
+              cases tySource <;> cases hupdate
+              case borrow.mutBorrow hwrite =>
+                cases hvalid
+              case box.boxFull hinnerUpdate =>
+                rename_i innerTy updatedInner
+                cases hvalid with
+                | @boxFull ownerLocation ownerSlot ty hslotOwner hinner =>
+                    have hslotEq : ownerSlot = slot :=
+                      Option.some.inj (hslotOwner.symm.trans hslotNext)
+                    subst ownerSlot
+                    have hinnerFinal :
+                        ValidPartialValueWhenInitialized resultEnv
+                          (store.update leafLoc
+                            { leafSlot with value := .value rhsValue })
+                          slot.value updatedInner :=
+                      ih hinnerUpdate hinner hchainNext hnextCurSlot
+                        hnextChain hnextLen hvalidRhs
+                    cases updatedInner with
+                    | ty updatedTy =>
+                        exact ValidPartialValueWhenInitialized.boxFull
+                          hslotNext' hinnerFinal
+                    | box updatedInner =>
+                        exact ValidPartialValueWhenInitialized.box
+                          hslotNext' hinnerFinal
+                    | undef updatedTy =>
+                        exact ValidPartialValueWhenInitialized.box
+                          hslotNext' hinnerFinal
+          | box innerTy =>
+              cases hupdate
+              case box.box hinnerUpdate =>
+                cases hvalid with
+                | box hslot hinner =>
+                    rename_i slotV
+                    have hslotEq : slotV = slot :=
+                      Option.some.inj (hslot.symm.trans hslotNext)
+                    subst hslotEq
+                    exact ValidPartialValueWhenInitialized.box hslotNext'
+                      (ih hinnerUpdate hinner hchainNext hnextCurSlot
+                        hnextChain hnextLen hvalidRhs)
+          | undef shape =>
+              cases hupdate
 
 /-- Chains from unowned roots to a common target agree on root and length:
 backward owner steps are deterministic. -/
