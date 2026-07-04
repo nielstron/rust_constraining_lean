@@ -4647,6 +4647,7 @@ theorem EnvWrite.chain_guarded {env : Env}
     {oldTy : PartialTy} {targetLifetime : Lifetime} :
     EnvWrite env lhs rhsTy env₃ →
     LValTyping env lhs oldTy targetLifetime →
+    ShapeCompatible env oldTy (.ty rhsTy) →
     (∀ y, env₃.slotAt y = env.slotAt y) ∨
       ∃ b bslot graftTy,
         env.slotAt b = some bslot ∧
@@ -4656,8 +4657,9 @@ theorem EnvWrite.chain_guarded {env : Env}
         (∀ {mutable : Bool} {u : LVal},
           PartialTyContains graftTy (.borrow mutable u) →
           PartialTyContains (.ty rhsTy) (.borrow mutable u)) ∧
+        ShapeCompatible env bslot.ty graftTy ∧
         ChainGuard env (LVal.base lhs) b := by
-  intro hwrite hlv
+  intro hwrite hlv hshape
   exact EnvWrite.rec
     (motive_1 := fun path old ty result updated _ =>
       ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
@@ -4667,6 +4669,7 @@ theorem EnvWrite.chain_guarded {env : Env}
           PartialTyContains old (.borrow mutable u) →
           env ⊢ (LVal.base wcur) ↝ (.borrow mutable u)) →
         ChainGuard env (LVal.base lhs) (LVal.base wcur) →
+        ShapeCompatible env pt (.ty ty) →
         (updated = old ∧
           ((∀ y, result.slotAt y = env.slotAt y) ∨
             ∃ b bslot graftTy,
@@ -4677,15 +4680,19 @@ theorem EnvWrite.chain_guarded {env : Env}
               (∀ {mutable : Bool} {u : LVal},
                 PartialTyContains graftTy (.borrow mutable u) →
                 PartialTyContains (.ty ty) (.borrow mutable u)) ∧
+              ShapeCompatible env bslot.ty graftTy ∧
               ChainGuard env (LVal.base lhs) b)) ∨
         (result = env ∧
           (∀ {mutable : Bool} {u : LVal},
             PartialTyContains updated (.borrow mutable u) →
-            PartialTyContains (.ty ty) (.borrow mutable u))))
+            PartialTyContains (.ty ty) (.borrow mutable u)) ∧
+          ShapeCompatible env old updated ∧
+          (∀ T₀, old = .ty T₀ → ∃ T₁, updated = .ty T₁)))
     (motive_2 := fun lv ty result _ =>
       ∀ {pt : PartialTy} {lf : Lifetime},
         LValTyping env lv pt lf →
         ChainGuard env (LVal.base lhs) (LVal.base lv) →
+        ShapeCompatible env pt (.ty ty) →
         (∀ y, result.slotAt y = env.slotAt y) ∨
           ∃ b bslot graftTy,
             env.slotAt b = some bslot ∧
@@ -4695,49 +4702,62 @@ theorem EnvWrite.chain_guarded {env : Env}
             (∀ {mutable : Bool} {u : LVal},
               PartialTyContains graftTy (.borrow mutable u) →
               PartialTyContains (.ty ty) (.borrow mutable u)) ∧
+            ShapeCompatible env bslot.ty graftTy ∧
             ChainGuard env (LVal.base lhs) b)
     (by
       -- strong: the graft happens here; the environment part is untouched.
-      intro _old _ty wcur pt lf lfc _hwcur _hlhs _hcontainsW _hguard
-      refine Or.inr ⟨rfl, ?_⟩
-      intro mutable u hcontains
-      exact hcontains)
+      intro _old _ty wcur pt lf lfc hwcur hlhs _hcontainsW _hguard hshapePt
+      have hdet := LValTyping.deterministic hwcur
+        (by simpa [prependPath] using hlhs)
+      refine Or.inr ⟨rfl, fun hcontains => hcontains, ?_, ?_⟩
+      · exact hdet.1 ▸ hshapePt
+      · intro T₀ _hold
+        exact ⟨_ty, rfl⟩)
     (by
       -- box: the update stays inside the partial box.
       intro _env₂ _path _inner _updatedInner _ty _hinner ih
-        wcur pt lf lfc hwcur hlhs hcontainsW hguard
+        wcur pt lf lfc hwcur hlhs hcontainsW hguard hshapePt
       rcases ih (LValTyping.box hwcur)
           (by rw [prependPath_deref_comm]; exact hlhs)
           (by
             intro mutable u hcontains
             exact hcontainsW (PartialTyContains.box hcontains))
-          hguard with
-        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft⟩
+          hguard hshapePt with
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeInner, _htyRoot⟩
       · exact Or.inl ⟨by rw [hupdEq], hprops⟩
-      · refine Or.inr ⟨henvEq, ?_⟩
-        intro mutable u hcontains
-        cases hcontains with
-        | box hinner' => exact hgraft hinner'
+      · refine Or.inr ⟨henvEq, ?_, ShapeCompatible.box hshapeInner, ?_⟩
+        · intro mutable u hcontains
+          cases hcontains with
+          | box hinner' => exact hgraft hinner'
+        · intro T₀ hold
+          cases hold
     )
     (by
       -- boxFull: as box, through the rebox wrapper.
       intro _env₂ _path _inner _updatedInner _ty _hinner ih
-        wcur pt lf lfc hwcur hlhs hcontainsW hguard
+        wcur pt lf lfc hwcur hlhs hcontainsW hguard hshapePt
       rcases ih (LValTyping.boxFull hwcur)
           (by rw [prependPath_deref_comm]; exact hlhs)
           (by
             intro mutable u hcontains
             exact hcontainsW (PartialTyContains.tyBox hcontains))
-          hguard with
-        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft⟩
+          hguard hshapePt with
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeInner, htyRoot⟩
       · exact Or.inl ⟨by rw [hupdEq, partialTyRebox], hprops⟩
-      · exact Or.inr ⟨henvEq, fun hcontains =>
-          hgraft (PartialTyContains.partialTyRebox_borrow_inv hcontains)⟩)
+      · rcases htyRoot _ rfl with ⟨T₁, hT₁⟩
+        subst hT₁
+        exact Or.inr ⟨henvEq,
+          fun hcontains =>
+            hgraft (PartialTyContains.partialTyRebox_borrow_inv hcontains),
+          by
+            rw [partialTyRebox]
+            exact ShapeCompatible.tyBox hshapeInner,
+          fun T₀ _hold => ⟨.box T₁, by rw [partialTyRebox]⟩⟩)
     (by
       -- mutBorrow: the local type is unchanged; the nested write carries the
       -- change, one guard step deeper.
       intro _env₂ path target _ty _hwrite ih
-        wcur pt lf lfc hwcur hlhs hcontainsW hguard
+        wcur pt lf lfc hwcur hlhs hcontainsW hguard hshapePt
       refine Or.inl ⟨rfl, ?_⟩
       have hguardTarget : ChainGuard env (LVal.base lhs) (LVal.base target) :=
         ChainGuard.step hguard (hcontainsW PartialTyContains.here) rfl
@@ -4745,10 +4765,11 @@ theorem EnvWrite.chain_guarded {env : Env}
           LValTyping env (prependPath path target) pt lf :=
         LValTyping.rebase_hop hwcur path
           (by rw [prependPath_deref_comm]; exact hlhs)
-      exact ih hlhsRebased (by simpa using hguardTarget))
+      exact ih hlhsRebased (by simpa using hguardTarget) hshapePt)
     (by
       -- intro: assemble the per-slot characterization.
       intro _env₂ lv slot _ty updatedTy hslot hupdate ih pt lf hlv hguard
+        hshapePt
       have hcontainsW :
           ∀ {mutable : Bool} {u : LVal},
             PartialTyContains slot.ty (.borrow mutable u) →
@@ -4756,13 +4777,14 @@ theorem EnvWrite.chain_guarded {env : Env}
         intro mutable u hcontains
         exact ⟨slot, hslot, hcontains⟩
       rcases ih (wcur := .var (LVal.base lv)) (LValTyping.var hslot)
-          (by rw [prependPath_path_base]; exact hlv) hcontainsW hguard with
-        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft⟩
+          (by rw [prependPath_path_base]; exact hlv) hcontainsW hguard
+          hshapePt with
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeGraft, _htyRoot⟩
       · -- Chain slot: the update rewrites the slot to its own value.
         have hslotEta : { slot with ty := updatedTy } = slot := by
           rw [hupdEq]
         rcases hprops with hpointwise | ⟨b, bslot, graftTy, hb, hne, hbLook,
-            hbound, hgraftContains, hguardB⟩
+            hbound, hgraftContains, hshapeB, hguardB⟩
         · refine Or.inl ?_
           intro y
           by_cases hy : y = LVal.base lv
@@ -4781,7 +4803,7 @@ theorem EnvWrite.chain_guarded {env : Env}
             · have hyB : y ≠ b := fun h => hy (h.trans hbEq)
               simpa [Env.update, hy] using hne y hyB
           · refine Or.inr ⟨b, bslot, graftTy, hb, ?_, ?_, hbound,
-              hgraftContains, hguardB⟩
+              hgraftContains, hshapeB, hguardB⟩
             · intro y hy
               by_cases hyLv : y = LVal.base lv
               · subst hyLv
@@ -4791,7 +4813,7 @@ theorem EnvWrite.chain_guarded {env : Env}
             · simpa [Env.update, hbEq] using hbLook
       · -- Graft slot: the written base receives the grafted type.
         refine Or.inr ⟨LVal.base lv, slot, updatedTy, hslot, ?_, ?_, ?_,
-          hgraft, hguard⟩
+          hgraft, hshapeGraft, hguard⟩
         · intro y hy
           rw [show (_env₂.update (LVal.base lv)
               { slot with ty := updatedTy }).slotAt y = _env₂.slotAt y by
@@ -4800,7 +4822,7 @@ theorem EnvWrite.chain_guarded {env : Env}
         · simp [Env.update]
         · exact LValTyping.lifetime_le_of_base_outlives hcbwf hlv
             ⟨slot, hslot, LifetimeOutlives.refl _⟩)
-    hwrite hlv ChainGuard.base
+    hwrite hlv ChainGuard.base hshape
 
 end Paper
 end LwRust
