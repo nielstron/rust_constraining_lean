@@ -1,4 +1,4 @@
-import LwRust.Paper.Soundness.Helpers.BorrowSafety
+import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 
 /-!
 # Lemma 9.5 (Drop Preservation)

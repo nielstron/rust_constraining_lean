@@ -1,5 +1,84 @@
 # Phase D Hard Sites
 
+## 2026-07-04 Runtime Preservation Port Attempt
+
+What was completed in this pass:
+
+- `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean`
+  - Added `PartialTyDefined`.
+  - Added `Strike.not_defined`.
+  - Added `LValTyping.defined_of_envMove`.
+  - Added `TargetInitialized.of_envMove`.
+  - Added `ValidPartialValueWhenInitialized.move_env`.
+  - Added weak live-reach store-update framing:
+    `validPartialValueWhenInitialized_update_of_not_live_reaches`.
+  - Added the syntactic bridge from initialized runtime reads back to static
+    write conflicts:
+    `lval_loc_var_conflict_or_writeProhibited_whenInitialized`,
+    `locReads_var_conflict_or_writeProhibited_whenInitialized`,
+    `borrowDependencyWhenInitialized_var_writeProhibited`, and
+    `reachesWhenInitialized_var_ne_of_stored_not_writeProhibited`.
+  - Completed the first missing runtime helper:
+    `preservation_move_var_multistep_runtime_whenInitialized_of_wellFormed`.
+  - Verified with:
+
+```bash
+lake build LwRust.Paper.Soundness.Lemma_4_11_Preservation
+```
+
+- `LwRust/Paper/Soundness/Appendix9/Lemma_9_5_DropPreservation.lean`
+  - Fixed the stale `RuntimeFrame.validValue_drops_of_avoids_reaches`
+    reference by importing `Lemma_4_11_Preservation`, where the current
+    runtime-frame export lives.
+  - Verified with:
+
+```bash
+lake build LwRust.Paper.Soundness.Appendix9.Lemma_9_5_DropPreservation
+```
+
+- `LwRust/Paper/Soundness/InitialStates.lean`
+  - Replaced stale full-safe source-initial bridge calls with direct
+    `TerminalStateSafe` projections where no general preservation theorem is
+    needed.
+  - Replaced removed borrow-invariance wrapper calls with the completed static
+    walk `typingPreservesWellFormedWhenInitialized_of_sourceTerm`.
+  - The target still fails only at the exported `preservation` call sites while
+    that theorem is absent:
+
+```text
+error: Unknown identifier `preservation`
+```
+
+Current hard proof site:
+
+- `preservation_move_deref_box_multistep_runtime_whenInitialized_of_wellFormed`
+  and `preservation_move_deref_boxFull_multistep_runtime_whenInitialized_of_wellFormed`
+  are now the first unresolved runtime redex helpers.
+- The direct-variable move case is solved by reducing the store write to
+  `store.update (VariableProjection x) undef`, proving no initialized live
+  reach from any surviving slot can inspect `x`, and transporting validity
+  through `EnvMove`.
+- The dereference move cases need a different structural lemma.  The runtime
+  write updates the selected heap/interior location, while `EnvMove` changes
+  the base environment slot by `Strike`.  The missing lemma must show that a
+  base slot value valid at the source partial type remains valid at the struck
+  partial type after the selected runtime location is updated to `undef`.
+  Shape-wise this is a value/store counterpart of `Strike`:
+
+```lean
+ValidPartialValueWhenInitialized env store baseValue sourceTy →
+LValTyping env movedLv (.ty ty) valueLifetime →
+EnvMove env movedLv moved →
+store.write movedLv .undef = some store' →
+ValidPartialValueWhenInitialized moved store' baseValue struckTy
+```
+
+  More concretely, it should recurse over the `Strike` path and use
+  `LValLocationAbstractionWhenInitialized` to align each static `.box`/
+  `.ty (.box _)` spine step with the runtime owner reference.  At the struck
+  leaf it should use `ValidPartialValueWhenInitialized.undef`; for unrelated
+  subvalues it should use the new live-reach update frame.
+
 ## Current Compile Surface
 
 `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` is now a fresh small

@@ -309,9 +309,11 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed _) hsafe hstoreProgress
-    htyping hterminates
+  rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
+  exact ⟨typeAndBorrowProgress hvalidRuntime hvalidStoreTyping
+      (hwellFormed _).2 hsafe hstoreProgress htyping,
+    ⟨finalStore, finalValue, hmulti,
+      emptyInitial_preservation htyping hmulti⟩⟩
 
 /--
 **Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.
@@ -468,12 +470,9 @@ theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hsource htyping
-  exact borrowInvariance_emptyStoreTyping
-    (sourceInitialRuntimeState_valid hsource).1
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    (wellFormedEnv_empty lifetime)
-    safeAbstraction_empty
-    htyping
+  exact (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
+    (WellFormedEnv.whenInitialized (wellFormedEnv_empty lifetime))
+    htyping).1
 
 /--
 **Theorem 4.12.** Source-initial conditional type-and-borrow safety bridge from
@@ -492,15 +491,16 @@ theorem sourceInitial_typeAndBorrowSafety_of_preservation
           MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
           TerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource htyping hpreservation hterminates
-  exact typeAndBorrowSafety_of_preservation
-    (sourceInitialRuntimeState_valid hsource)
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    (wellFormedEnv_empty _)
-    safeAbstraction_empty
-    operationalStoreProgress_empty
-    htyping
-    hpreservation
-    hterminates
+  rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
+  exact ⟨typeAndBorrowProgress
+      (sourceInitialRuntimeState_valid hsource)
+      (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
+      (wellFormedEnv_empty _).2
+      safeAbstraction_empty
+      operationalStoreProgress_empty
+      htyping,
+    ⟨finalStore, finalValue, hmulti,
+      hpreservation finalStore finalValue hmulti⟩⟩
 
 /--
 **Theorem 4.12.** Source-initial type-and-borrow safety for a source value; the
@@ -639,15 +639,9 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
       TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hsource htyping
-  exact borrowInvariance_of_rankedAssign_and_declFreshCoherence
-    (by
-      intro env lifetime
-      exact storeTypingRefsWellFormed_empty env lifetime)
-    (sourceInitialRuntimeState_valid hsource).1
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    (wellFormedEnv_empty lifetime)
-    safeAbstraction_empty
-    htyping
+  exact (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
+    (WellFormedEnv.whenInitialized (wellFormedEnv_empty lifetime))
+    htyping).1
 
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried obligation route. -/
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
@@ -656,15 +650,9 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
       TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hsource htyping
-  exact borrowInvariance_of_ruleCarriedObligations
-    (by
-      intro env lifetime
-      exact storeTypingRefsWellFormed_empty env lifetime)
-    (sourceInitialRuntimeState_valid hsource).1
-    (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-    (wellFormedEnv_empty lifetime)
-    safeAbstraction_empty
-    htyping
+  exact (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
+    (WellFormedEnv.whenInitialized (wellFormedEnv_empty lifetime))
+    htyping).1
 
 /--
 **Theorem 4.12, empty-initial terminal-safety form.**  Any term typed from the
@@ -682,9 +670,18 @@ theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed lifetime) hsafe
-    ProgramStore.finiteSupport_empty htyping).2
+  rcases terminatesAsValue
+      (fun hsource' hvalidRuntime' hvalidStoreTyping' hwellFormed' hsafe'
+        htyping' hmulti' =>
+          (preservation hsource' hvalidRuntime' hvalidStoreTyping'
+            (wellFormedEnv_empty lifetime)
+            hsafe' htyping' hmulti'))
+      hsource hvalidRuntime hvalidStoreTyping
+      (WellFormedEnv.whenInitialized (hwellFormed lifetime))
+      hsafe ProgramStore.finiteSupport_empty htyping with
+    ⟨finalStore, finalValue, hmulti⟩
+  exact ⟨finalStore, finalValue, hmulti,
+    emptyInitial_preservation htyping hmulti⟩
 
 end Paper
 end LwRust

@@ -672,6 +672,82 @@ theorem WellFormedEnvWhenInitialized.move {env moved : Env}
   exact ⟨ContainedBorrowsWellFormedWhenInitialized.move hwell.1 hmove hnotWrite,
     EnvSlotsOutlive.move hmove hwell.2⟩
 
+/-- Partial types that still describe initialized storage, i.e. contain no
+`undef` leaf.  Moving strikes exactly one leaf to `undef`, so an initialized
+lvalue typing in the moved environment was already initialized in the source
+environment. -/
+def PartialTyDefined : PartialTy → Prop
+  | .ty _ => True
+  | .box inner => PartialTyDefined inner
+  | .undef _ => False
+
+theorem Strike.not_defined {path : Path} {source struck : PartialTy} :
+    Strike path source struck →
+    PartialTyDefined struck →
+    False := by
+  intro hstrike hdefined
+  induction path generalizing source struck with
+  | nil =>
+      cases source <;> cases struck <;>
+        simp [Strike, PartialTyDefined] at hstrike hdefined
+  | cons _ tail ih =>
+      cases source with
+      | ty sourceTy =>
+          cases sourceTy <;> cases struck <;>
+            simp [Strike, PartialTyDefined] at hstrike hdefined
+          exact ih hstrike hdefined
+      | box inner =>
+          cases struck <;> simp [Strike, PartialTyDefined] at hstrike hdefined
+          exact ih hstrike hdefined
+      | undef shape =>
+          cases struck <;> simp [Strike] at hstrike
+
+theorem LValTyping.defined_of_envMove {env moved : Env} {movedLv : LVal} :
+    EnvMove env movedLv moved →
+    ∀ {target : LVal} {pt : PartialTy} {lf : Lifetime},
+      PartialTyDefined pt →
+      LValTyping moved target pt lf →
+      LValTyping env target pt lf := by
+  intro hmove target pt lf hdefined htyping
+  induction htyping with
+  | var hslot =>
+      rename_i x slot
+      rcases hmove with ⟨sourceSlot, struck, hsourceSlot, hstrike, hmoved⟩
+      by_cases hx : x = LVal.base movedLv
+      · subst hx
+        have hslotEq : { sourceSlot with ty := struck } = slot :=
+          Option.some.inj (by simpa [hmoved, Env.update] using hslot)
+        have htyEq : struck = slot.ty := congrArg EnvSlot.ty hslotEq
+        exact False.elim
+          (Strike.not_defined hstrike (by simpa [← htyEq] using hdefined))
+      · exact .var (by simpa [hmoved, Env.update, hx] using hslot)
+  | box _ ih =>
+      exact .box (ih (by simpa [PartialTyDefined] using hdefined))
+  | boxFull _ ih =>
+      exact .boxFull (ih (by simp [PartialTyDefined]))
+  | borrow _ _ ihBorrow ihTarget =>
+      exact .borrow (ihBorrow (by simp [PartialTyDefined]))
+        (ihTarget (by simp [PartialTyDefined]))
+
+theorem TargetInitialized.of_envMove {env moved : Env} {movedLv target : LVal} :
+    EnvMove env movedLv moved →
+    TargetInitialized moved target →
+    TargetInitialized env target := by
+  intro hmove htarget
+  rcases htarget with ⟨targetTy, targetLifetime, htyping⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTyping.defined_of_envMove hmove (by simp [PartialTyDefined]) htyping⟩
+
+theorem ValidPartialValueWhenInitialized.move_env {env moved : Env}
+    {store : ProgramStore} {movedLv : LVal} {value : PartialValue}
+    {ty : PartialTy} :
+    EnvMove env movedLv moved →
+    ValidPartialValueWhenInitialized env store value ty →
+    ValidPartialValueWhenInitialized moved store value ty := by
+  intro hmove hvalid
+  exact validPartialValueWhenInitialized_transport_env
+    (fun htarget => TargetInitialized.of_envMove hmove htarget) hvalid
+
 theorem PartialTyBorrowsWellFormedInSlotWhenInitialized.box_inv {env : Env}
     {slotLifetime : Lifetime} {inner : PartialTy} :
     PartialTyBorrowsWellFormedInSlotWhenInitialized env slotLifetime (.box inner) →
@@ -1494,6 +1570,412 @@ theorem validPartialValueWhenInitialized_erase_of_not_live_reaches {env : Env}
         exact hslot
       · exact ih (fun reached hreached =>
           hreach reached (ReachesWhenInitialized.boxFullInner hslot hreached))
+
+theorem validPartialValueWhenInitialized_update_of_not_live_reaches {env : Env}
+    {store : ProgramStore} {updated : Location} {newSlot : StoreSlot} :
+    ∀ {v : PartialValue} {ty : PartialTy},
+      ValidPartialValueWhenInitialized env store v ty →
+      (∀ location, ReachesWhenInitialized env store v ty location →
+        location ≠ updated) →
+      ValidPartialValueWhenInitialized env (store.update updated newSlot) v ty := by
+  intro v ty hvalid
+  induction hvalid with
+  | unit =>
+      intro _hreach
+      exact ValidPartialValueWhenInitialized.unit
+  | int =>
+      intro _hreach
+      exact ValidPartialValueWhenInitialized.int
+  | undef =>
+      intro _hreach
+      exact ValidPartialValueWhenInitialized.undef
+  | undefOf hinner hstrength =>
+      intro hreach
+      exact ValidPartialValueWhenInitialized.undefOf
+        (RuntimeFrame.validPartialValueSkeleton_update_of_not_owner_reaches hinner
+          (fun location howner =>
+            hreach location
+              (ReachesWhenInitialized.undefOf hinner hstrength howner)))
+        hstrength
+  | borrowLive hinitialized hloc =>
+      intro hreach
+      refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
+      refine RuntimeFrame.loc_update_of_not_locReads hloc ?_
+      intro mid hmidReads
+      exact hreach mid
+        (ReachesWhenInitialized.borrow hinitialized hloc hmidReads)
+  | borrowStale hstale =>
+      intro _hreach
+      exact ValidPartialValueWhenInitialized.borrowStale hstale
+  | box hslot _hinner ih =>
+      intro hreach
+      rename_i location slot inner
+      have hlocNe : location ≠ updated :=
+        hreach location (ReachesWhenInitialized.boxHere hslot)
+      refine ValidPartialValueWhenInitialized.box (location := location)
+        (slot := slot) ?_ ?_
+      · rw [RuntimeFrame.ProgramStore.slotAt_update_ne hlocNe]
+        exact hslot
+      · exact ih (fun reached hreached =>
+          hreach reached (ReachesWhenInitialized.boxInner hslot hreached))
+  | boxFull hslot _hinner ih =>
+      intro hreach
+      rename_i location slot ty
+      have hlocNe : location ≠ updated :=
+        hreach location (ReachesWhenInitialized.boxFullHere hslot)
+      refine ValidPartialValueWhenInitialized.boxFull (location := location)
+        (slot := slot) ?_ ?_
+      · rw [RuntimeFrame.ProgramStore.slotAt_update_ne hlocNe]
+        exact hslot
+      · exact ih (fun reached hreached =>
+          hreach reached (ReachesWhenInitialized.boxFullInner hslot hreached))
+
+theorem lval_loc_var_conflict_or_writeProhibited_whenInitialized
+    {store : ProgramStore} {env : Env} {x : Name} :
+    SafeAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
+      LValTyping env lv partialTy lifetime →
+      store.loc lv = some (VariableProjection x) →
+      lv ⋈ (.var x) ∨ WriteProhibited env (.var x) := by
+  intro hsafe hheap lv partialTy lifetime htyping
+  induction htyping generalizing x with
+  | var hslot =>
+      rename_i y slot
+      intro hloc
+      left
+      change y = x
+      simpa [ProgramStore.loc, VariableProjection] using hloc
+  | box hsource ih =>
+      intro hloc
+      have hsourceAbs :
+          LValLocationAbstractionWhenInitialized env store _ (.box _) :=
+        lvalTyping_defined_location_whenInitialized hsafe hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+      cases hsourceValid with
+      | @box ownedLocation ownedSlot inner hownedSlot _hinnerValid =>
+          have hownedVar : ownedLocation = VariableProjection x := by
+            simpa [ProgramStore.loc, hsourceLoc, hsourceSlot] using hloc
+          have howns : ProgramStore.Owns store ownedLocation :=
+            ⟨sourceLocation, sourceLifetime, by
+              simpa [owningRef] using hsourceSlot⟩
+          rcases hheap ownedLocation howns with ⟨address, hheapLocation⟩
+          rw [hownedVar] at hheapLocation
+          cases hheapLocation
+  | boxFull hsource ih =>
+      intro hloc
+      have hsourceAbs :
+          LValLocationAbstractionWhenInitialized env store _ (.ty (.box _)) :=
+        lvalTyping_defined_location_whenInitialized hsafe hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+      cases hsourceValid with
+      | @boxFull ownedLocation ownedSlot inner hownedSlot _hinnerValid =>
+          have hownedVar : ownedLocation = VariableProjection x := by
+            simpa [ProgramStore.loc, hsourceLoc, hsourceSlot] using hloc
+          have howns : ProgramStore.Owns store ownedLocation :=
+            ⟨sourceLocation, sourceLifetime, by
+              simpa [owningRef] using hsourceSlot⟩
+          rcases hheap ownedLocation howns with ⟨address, hheapLocation⟩
+          rw [hownedVar] at hheapLocation
+          cases hheapLocation
+  | @borrow source target mutable borrowLifetime targetLifetime targetTy
+      hsource htarget ihSource ihTarget =>
+      intro hloc
+      have hsourceAbs :
+          LValLocationAbstractionWhenInitialized env store _
+            (.ty (.borrow _ _)) :=
+        lvalTyping_defined_location_whenInitialized hsafe hsource
+      rcases hsourceAbs with
+        ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+      rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+      cases hsourceValid with
+      | @borrowLive borrowedLocation mutable target hinitialized htargetLoc =>
+          have hborrowedVar : borrowedLocation = VariableProjection x := by
+            simpa [ProgramStore.loc, hsourceLoc, hsourceSlot] using hloc
+          have htargetVar : store.loc target = some (VariableProjection x) := by
+            simpa [hborrowedVar] using htargetLoc
+          rcases ihTarget htargetVar with htargetConflict | hwrite
+          · right
+            rcases LValTyping.contains_borrow hsource PartialTyContains.here with
+              ⟨holder, hcontains⟩
+            exact WriteProhibited.of_contains_conflict hcontains htargetConflict
+          · exact Or.inr hwrite
+      | @borrowStale borrowedLocation mutable target hstale =>
+          exact False.elim (hstale ⟨_, _, htarget⟩)
+
+theorem locReads_var_conflict_or_writeProhibited_whenInitialized
+    {store : ProgramStore} {env : Env} {x : Name} :
+    SafeAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
+      LValTyping env lv partialTy lifetime →
+      LocReads store lv (VariableProjection x) →
+      lv ⋈ (.var x) ∨ WriteProhibited env (.var x) := by
+  intro hsafe hheap lv partialTy lifetime htyping
+  induction htyping generalizing x with
+  | var hslot =>
+      intro hreads
+      cases hreads
+  | box hsource ih =>
+      intro hreads
+      cases hreads with
+      | here hloc =>
+          rcases lval_loc_var_conflict_or_writeProhibited_whenInitialized
+              hsafe hheap hsource hloc with hconflict | hwrite
+          · exact Or.inl hconflict
+          · exact Or.inr hwrite
+      | there hsourceReads =>
+          rcases ih hsourceReads with hconflict | hwrite
+          · exact Or.inl hconflict
+          · exact Or.inr hwrite
+  | boxFull hsource ih =>
+      intro hreads
+      cases hreads with
+      | here hloc =>
+          rcases lval_loc_var_conflict_or_writeProhibited_whenInitialized
+              hsafe hheap hsource hloc with hconflict | hwrite
+          · exact Or.inl hconflict
+          · exact Or.inr hwrite
+      | there hsourceReads =>
+          rcases ih hsourceReads with hconflict | hwrite
+          · exact Or.inl hconflict
+          · exact Or.inr hwrite
+  | @borrow source target mutable borrowLifetime targetLifetime targetTy
+      hsource htarget ihSource ihTarget =>
+      intro hreads
+      cases hreads with
+      | here hloc =>
+          rcases lval_loc_var_conflict_or_writeProhibited_whenInitialized
+              hsafe hheap hsource hloc with hconflict | hwrite
+          · exact Or.inl hconflict
+          · exact Or.inr hwrite
+      | there hsourceReads =>
+          rcases ihSource hsourceReads with hconflict | hwrite
+          · exact Or.inl hconflict
+          · exact Or.inr hwrite
+
+theorem borrowDependencyWhenInitialized_var_writeProhibited
+    {env : Env} {store : ProgramStore} {x holder : Name} :
+    SafeAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    ∀ {value : PartialValue} {partialTy : PartialTy} {dependency : Location},
+      (∀ {mutable : Bool} {target : LVal},
+        PartialTyContains partialTy (.borrow mutable target) →
+        env ⊢ holder ↝ (.borrow mutable target)) →
+      BorrowDependencyWhenInitialized env store value partialTy dependency →
+      dependency = VariableProjection x →
+      WriteProhibited env (.var x) := by
+  intro hsafe hheap value partialTy dependency hcontains hdependency
+  induction hdependency generalizing holder x with
+  | @borrow location dependency mutable target hinitialized hloc hreads =>
+      intro hdependencyEq
+      rcases hinitialized with ⟨targetTy, targetLifetime, htargetTyping⟩
+      have hreadsVar : LocReads store target (VariableProjection x) := by
+        simpa [hdependencyEq] using hreads
+      rcases locReads_var_conflict_or_writeProhibited_whenInitialized
+          hsafe hheap htargetTyping hreadsVar with hconflict | hwrite
+      · exact WriteProhibited.of_contains_conflict
+          (hcontains PartialTyContains.here) hconflict
+      · exact hwrite
+  | boxInner _hslot _hinner ih =>
+      intro hdependencyEq
+      exact ih (by
+        intro mutable target hcontainsInner
+        exact hcontains (PartialTyContains.box hcontainsInner))
+        hdependencyEq
+  | boxFullInner _hslot _hinner ih =>
+      intro hdependencyEq
+      exact ih (by
+        intro mutable target hcontainsInner
+        exact hcontains (PartialTyContains.tyBox hcontainsInner))
+        hdependencyEq
+
+theorem reachesWhenInitialized_var_ne_of_stored_not_writeProhibited
+    {env : Env} {store : ProgramStore} {x holder : Name}
+    {storage : Location} {value : PartialValue} {partialTy : PartialTy}
+    {lifetime : Lifetime} :
+    SafeAbstraction store env →
+    StoreOwnerTargetsHeap store →
+    store.slotAt storage = some { value := value, lifetime := lifetime } →
+    ValidPartialValueWhenInitialized env store value partialTy →
+    (∀ {mutable : Bool} {target : LVal},
+      PartialTyContains partialTy (.borrow mutable target) →
+      env ⊢ holder ↝ (.borrow mutable target)) →
+    ¬ WriteProhibited env (.var x) →
+    ∀ {location : Location},
+      ReachesWhenInitialized env store value partialTy location →
+      location ≠ VariableProjection x := by
+  intro hsafe hheap hstored hvalid hcontains hnotWrite location hreach
+  induction hreach generalizing storage holder lifetime with
+  | undefOf hskel hstrength howner =>
+      intro hlocation
+      have howns :=
+        RuntimeFrame.store_owns_of_ownerReaches_stored hstored
+          (OwnerReaches.undefOf hskel hstrength howner)
+      rcases hheap _ howns with ⟨address, hheapLocation⟩
+      rw [hlocation] at hheapLocation
+      cases hheapLocation
+  | boxHere hslot =>
+      intro hlocation
+      rename_i ownedLocation ownedSlot inner
+      have howns : ProgramStore.Owns store ownedLocation :=
+        ⟨storage, lifetime, by
+          simpa [owningRef] using hstored⟩
+      rcases hheap ownedLocation howns with ⟨address, hheapLocation⟩
+      rw [hlocation] at hheapLocation
+      cases hheapLocation
+  | boxInner hslot _hinner ih =>
+      intro hlocation
+      cases hvalid with
+      | box hvalidSlot hinnerValid =>
+          have hslotEq := Option.some.inj (hslot.symm.trans hvalidSlot)
+          subst hslotEq
+          exact ih hslot hinnerValid
+            (by
+              intro mutable target hcontainsInner
+              exact hcontains (PartialTyContains.box hcontainsInner))
+            hlocation
+  | boxFullHere hslot =>
+      intro hlocation
+      rename_i ownedLocation ownedSlot ty
+      have howns : ProgramStore.Owns store ownedLocation :=
+        ⟨storage, lifetime, by
+          simpa [owningRef] using hstored⟩
+      rcases hheap ownedLocation howns with ⟨address, hheapLocation⟩
+      rw [hlocation] at hheapLocation
+      cases hheapLocation
+  | boxFullInner hslot _hinner ih =>
+      intro hlocation
+      cases hvalid with
+      | boxFull hvalidSlot hinnerValid =>
+          have hslotEq := Option.some.inj (hslot.symm.trans hvalidSlot)
+          subst hslotEq
+          exact ih hslot hinnerValid
+            (by
+              intro mutable target hcontainsInner
+              exact hcontains (PartialTyContains.tyBox hcontainsInner))
+            hlocation
+  | borrow hinitialized hloc hreads =>
+      intro hlocation
+      subst hlocation
+      exact hnotWrite
+        (borrowDependencyWhenInitialized_var_writeProhibited
+          hsafe hheap hcontains
+          (BorrowDependencyWhenInitialized.borrow hinitialized hloc hreads) rfl)
+
+theorem preservation_move_var_multistep_runtime_whenInitialized_of_wellFormed
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
+    {x : Name} {finalValue : Value} {ty : Ty} :
+    WellFormedEnvWhenInitialized env₁ lifetime →
+    store ∼ₛ env₁ →
+    ValidRuntimeState store (.move (.var x)) →
+    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    EnvMove env₁ (.var x) env₂ →
+    TermTyping env₁ typing lifetime (.move (.var x)) ty env₂ →
+    MultiStep store lifetime (.move (.var x)) finalStore (.val finalValue) →
+    TerminalStateSafe finalStore finalValue env₂ ty := by
+  intro _hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hmulti
+  have hnotWrite : ¬ WriteProhibited env₁ (.var x) := by
+    cases htyping with
+    | move _hLv hnotWrite _hmove => exact hnotWrite
+  exact preservation_runtime_multistep_of_step_to_value_whenInitialized
+    (env := env₂) (term := .move (.var x)) (ty := ty)
+    (by intro hterminal; simp [Terminal] at hterminal)
+    (by
+      intro _store' _term' hstep
+      cases hstep with
+      | move _hread _hwrite =>
+          exact ⟨_, rfl⟩)
+    (by
+      intro store' value hstep
+      cases hstep with
+      | move hread hwrite =>
+          rcases hsafe.2 x { ty := .ty ty, lifetime := valueLifetime }
+              henvSlot with
+            ⟨sourceValue, hsourceSlot, hvalidSource⟩
+          have hstoreXStep := by
+            simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
+          have hsourceSlotVar :
+              store.slotAt (Location.var x) =
+                some { value := sourceValue, lifetime := valueLifetime } := by
+            simpa [VariableProjection] using hsourceSlot
+          rw [hstoreXStep] at hsourceSlotVar
+          injection hsourceSlotVar with hslotEq
+          cases hslotEq
+          have hstoreX :
+              store.slotAt (VariableProjection x) =
+                some { value := .value value, lifetime := valueLifetime } := by
+            simpa [VariableProjection] using hstoreXStep
+          have hstore' :
+              store' =
+                store.update (VariableProjection x)
+                  { value := .undef, lifetime := valueLifetime } := by
+            rcases write_eq_update_of_read hread hwrite with
+              ⟨location, hloc, _hslot, hupdate⟩
+            have hlocEq : location = VariableProjection x := by
+              simpa [ProgramStore.loc, VariableProjection] using hloc.symm
+            subst hlocEq
+            simpa [VariableProjection] using hupdate
+          have hvalidValueBefore :
+              ValidPartialValueWhenInitialized env₁ store (.value value) (.ty ty) :=
+            hvalidSource
+          have hvalidValue :
+              ValidPartialValueWhenInitialized env₂ store'
+                (.value value) (.ty ty) := by
+            rw [hstore']
+            exact ValidPartialValueWhenInitialized.move_env hmove
+              (validPartialValueWhenInitialized_update_of_not_live_reaches
+                hvalidValueBefore
+                (fun location hreach =>
+                  reachesWhenInitialized_var_ne_of_stored_not_writeProhibited
+                    hsafe
+                    (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                    hstoreX hvalidValueBefore
+                    (by
+                      intro mutable target hcontains
+                      exact ⟨{ ty := .ty ty, lifetime := valueLifetime },
+                        henvSlot, hcontains⟩)
+                    hnotWrite hreach))
+          have hpreserveOld :
+              ∀ y envSlot oldValue,
+                y ≠ x →
+                env₁.slotAt y = some envSlot →
+                store.slotAt (VariableProjection y) =
+                  some { value := oldValue, lifetime := envSlot.lifetime } →
+                ValidPartialValueWhenInitialized env₂ store'
+                  oldValue envSlot.ty := by
+            intro y envSlot oldValue hyx henvY hstoreY
+            have hvalidOldBefore :
+                ValidPartialValueWhenInitialized env₁ store oldValue envSlot.ty := by
+              rcases hsafe.2 y envSlot henvY with
+                ⟨safeValue, hsafeSlot, hvalidSafe⟩
+              rw [hstoreY] at hsafeSlot
+              injection hsafeSlot with hslotEq
+              cases hslotEq
+              exact hvalidSafe
+            rw [hstore']
+            exact ValidPartialValueWhenInitialized.move_env hmove
+              (validPartialValueWhenInitialized_update_of_not_live_reaches
+                hvalidOldBefore
+                (fun location hreach =>
+                  reachesWhenInitialized_var_ne_of_stored_not_writeProhibited
+                    hsafe
+                    (ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime)
+                    hstoreY hvalidOldBefore
+                    (by
+                      intro mutable target hcontains
+                      exact ⟨envSlot, henvY, hcontains⟩)
+                    hnotWrite hreach))
+          exact preservation_move_var_step_runtime_whenInitialized_of_preserved
+            hsafe hvalidRuntime henvSlot hmove htyping
+            (Step.move (lifetime := lifetime) hread hwrite)
+            hvalidValue hpreserveOld)
+    hmulti
 
 theorem validPartialValueWhenInitialized_drops_of_avoids_live_reaches
     {env : Env} {store store' : ProgramStore}
