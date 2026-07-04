@@ -1928,6 +1928,78 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
       rw [hstoreAfterWrite]
       simpa [ProgramStore.update, VariableProjection, hyx] using hslot⟩
 
+theorem storePreservation_assign_var_old_nonOwner_whenInitialized_of_preserved
+    {store storeAfterWrite store' : ProgramStore} {env env' : Env}
+    {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
+    {value : Value} {ty : Ty} :
+    store ∼ₛ env →
+    env.slotAt x = some envSlot →
+    EnvWrite env (.var x) ty env' →
+    PartialValueNonOwner oldSlot.value →
+    store.read (.var x) = some oldSlot →
+    store.write (.var x) (.value value) = some storeAfterWrite →
+    Drops storeAfterWrite [oldSlot.value] store' →
+    ValidPartialValueWhenInitialized env' store' (.value value) (.ty ty) →
+    (∀ y otherEnvSlot,
+      y ≠ x →
+      env.slotAt y = some otherEnvSlot →
+      ∃ oldValue,
+        store'.slotAt (VariableProjection y) =
+          some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
+        ValidPartialValueWhenInitialized env' store' oldValue otherEnvSlot.ty) →
+    store' ∼ₛ env' := by
+  intro hsafe henvX hwriteEnv hnonOwner hread hwrite hdrops hnewValid
+    hpreserveOther
+  have hdropEq : store' = storeAfterWrite :=
+    drops_partialValue_nonOwner_eq hnonOwner hdrops
+  subst store'
+  have hstoreX : store.slotAt (VariableProjection x) = some oldSlot := by
+    simpa [ProgramStore.read, ProgramStore.loc, VariableProjection] using hread
+  have hlifetime : oldSlot.lifetime = envSlot.lifetime := by
+    rcases hsafe.2 x envSlot henvX with ⟨safeValue, hsafeSlot, _hvalid⟩
+    rw [hstoreX] at hsafeSlot
+    injection hsafeSlot with hslotEq
+    exact congrArg StoreSlot.lifetime hslotEq
+  have henv' :
+      env' = env.update x { envSlot with ty := .ty ty } :=
+    envWrite_zero_var_eq henvX hwriteEnv
+  have hstoreAfterWrite :
+      storeAfterWrite = store.update (VariableProjection x)
+        { oldSlot with value := .value value } :=
+    write_var_eq hstoreX hwrite
+  have hstoreXAfter :
+      storeAfterWrite.slotAt (VariableProjection x) =
+        some { value := .value value, lifetime := envSlot.lifetime } := by
+    rw [hstoreAfterWrite]
+    cases oldSlot with
+    | mk oldValue oldLifetime =>
+        cases hlifetime
+        simp [ProgramStore.update]
+  refine safeAbstractionWhenInitialized_update_var_partial_of_preserved
+    henvX hstoreXAfter ?newValid henv' ?domain ?preserveOther
+  · simpa [henv'] using hnewValid
+  · intro y hyx
+    constructor
+    · intro hstoreDomain
+      rcases hstoreDomain with ⟨slot, hslot⟩
+      have hslotStore : store.slotAt (VariableProjection y) = some slot := by
+        rw [hstoreAfterWrite] at hslot
+        simpa [ProgramStore.update, VariableProjection, hyx] using hslot
+      exact (hsafe.1 y).mp ⟨slot, hslotStore⟩
+    · intro henvDomain
+      rcases (hsafe.1 y).mpr henvDomain with ⟨slot, hslot⟩
+      exact ⟨slot, by
+        rw [hstoreAfterWrite]
+        simpa [ProgramStore.update, VariableProjection, hyx] using hslot⟩
+  · intro y otherEnvSlot hyx henvY
+    have henvY' :
+        env'.slotAt y = some otherEnvSlot := by
+      rw [henv']
+      simpa [Env.update, hyx] using henvY
+    rcases hpreserveOther y otherEnvSlot hyx henvY with
+      ⟨oldValue, hstoreY, hvalidOld⟩
+    exact ⟨oldValue, hstoreY, by simpa [henvY'] using hvalidOld⟩
+
 /-- Updating a fresh location does not change an already-defined lval location. -/
 theorem loc_update_of_loc {store : ProgramStore} {updatedLocation : Location}
     {newSlot : StoreSlot} {lv : LVal} {location : Location} :
@@ -2451,6 +2523,70 @@ theorem safeAbstractionWhenInitialized_move_var
           simpa [ProgramStore.update, VariableProjection, hyx] using hstore,
         (hpreserveOld y envSlot value hyx holdEnv hstore).whenInitialized⟩
 
+theorem safeAbstractionWhenInitialized_move_var_of_preserved
+    {store : ProgramStore} {env : Env}
+    {x : Name} {slot : EnvSlot} {ty : Ty} {oldValue : PartialValue} :
+    store ∼ₛ env →
+    env.slotAt x = some slot →
+    slot.ty = .ty ty →
+    store.slotAt (VariableProjection x) =
+      some { value := oldValue, lifetime := slot.lifetime } →
+    (∀ y envSlot value,
+      y ≠ x →
+      env.slotAt y = some envSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := value, lifetime := envSlot.lifetime } →
+      ValidPartialValueWhenInitialized
+        (env.update x { slot with ty := .undef ty })
+        (store.update (VariableProjection x)
+          { value := .undef, lifetime := slot.lifetime })
+        value envSlot.ty) →
+    store.update (VariableProjection x) { value := .undef, lifetime := slot.lifetime } ∼ₛ
+      env.update x { slot with ty := .undef ty } := by
+  intro hsafe henv hty hstoreSlot hpreserveOld
+  constructor
+  · intro y
+    constructor
+    · intro hstoreDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ slot with ty := .undef ty }, by simp [Env.update]⟩
+      · rcases hstoreDomain with ⟨runtimeSlot, hruntimeSlot⟩
+        have holdStore : ∃ oldSlot, store.slotAt (VariableProjection y) = some oldSlot := by
+          rcases runtimeSlot with ⟨slotValue, slotLifetime⟩
+          exact ⟨{ value := slotValue, lifetime := slotLifetime }, by
+            simpa [ProgramStore.update, VariableProjection, hyx] using hruntimeSlot⟩
+        rcases (hsafe.1 y).mp holdStore with ⟨envSlot, henvSlot⟩
+        exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+    · intro henvDomain
+      by_cases hyx : y = x
+      · subst hyx
+        exact ⟨{ value := .undef, lifetime := slot.lifetime }, by
+          simp [ProgramStore.update, VariableProjection]⟩
+      · rcases henvDomain with ⟨envSlot, henvSlot⟩
+        have holdEnv : ∃ envSlot, env.slotAt y = some envSlot := by
+          exact ⟨envSlot, by simpa [Env.update, hyx] using henvSlot⟩
+        rcases (hsafe.1 y).mpr holdEnv with ⟨runtimeSlot, hruntimeSlot⟩
+        exact ⟨runtimeSlot, by
+          simpa [ProgramStore.update, VariableProjection, hyx] using hruntimeSlot⟩
+  · intro y envSlot henvUpdated
+    by_cases hyx : y = x
+    · subst hyx
+      have henvSlot :
+          envSlot = { slot with ty := .undef ty } := by
+        simpa [Env.update] using henvUpdated.symm
+      subst henvSlot
+      exact ⟨.undef, by
+          simp [ProgramStore.update, VariableProjection],
+        by
+          exact ValidPartialValueWhenInitialized.undef⟩
+    · have holdEnv : env.slotAt y = some envSlot := by
+        simpa [Env.update, hyx] using henvUpdated
+      rcases hsafe.2 y envSlot holdEnv with ⟨value, hstore, _hvalid⟩
+      exact ⟨value, by
+          simpa [ProgramStore.update, VariableProjection, hyx] using hstore,
+        hpreserveOld y envSlot value hyx holdEnv hstore⟩
+
 /-- Lemma 9.10, variable `R-Move` store-preservation fragment. -/
 theorem storePreservation_move_var_step {store store' : ProgramStore}
     {env₁ env₂ : Env} {lifetime valueLifetime : Lifetime}
@@ -2500,6 +2636,60 @@ theorem storePreservation_move_var_step {store store' : ProgramStore}
           subst henv₂
           subst hstore'
           exact safeAbstractionWhenInitialized_move_var hsafe henvSlot rfl hstoreSlot
+            (by
+              intro y envSlot oldOtherValue hyx henv hslot
+              exact hpreserveOld y envSlot oldOtherValue hyx henv hslot)
+
+theorem storePreservation_move_var_step_whenInitialized_of_preserved
+    {store store' : ProgramStore}
+    {env₁ env₂ : Env} {lifetime valueLifetime : Lifetime}
+    {x : Name} {value : Value} {ty : Ty} :
+    store ∼ₛ env₁ →
+    env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
+    EnvMove env₁ (.var x) env₂ →
+    Step store lifetime (.move (.var x)) store' (.val value) →
+    (∀ y envSlot oldValue,
+      y ≠ x →
+      env₁.slotAt y = some envSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := envSlot.lifetime } →
+      ValidPartialValueWhenInitialized env₂ store' oldValue envSlot.ty) →
+    store' ∼ₛ env₂ := by
+  intro hsafe henvSlot hmove hstep hpreserveOld
+  cases hstep with
+  | move _hread hwrite =>
+      rcases hsafe.2 x _ henvSlot with
+        ⟨oldValue, hstoreSlot, _hvalidOld⟩
+      have hstore' :
+          store' =
+            store.update (VariableProjection x)
+              { value := .undef, lifetime := valueLifetime } := by
+        have hstoreSlotVar :
+            store.slotAt (.var x) =
+              some { value := oldValue, lifetime := valueLifetime } := by
+          simpa [VariableProjection] using hstoreSlot
+        simp [ProgramStore.write, ProgramStore.loc, hstoreSlotVar] at hwrite
+        exact hwrite.symm
+      rcases hmove with ⟨moveSlot, struck, hmoveSlot, hstrike, henv₂⟩
+      have hmoveSlotEq :
+          moveSlot = { ty := .ty ty, lifetime := valueLifetime } := by
+        simp [LVal.base] at hmoveSlot
+        rw [henvSlot] at hmoveSlot
+        injection hmoveSlot with hmoveSlotEq
+        exact hmoveSlotEq.symm
+      subst hmoveSlotEq
+      cases struck with
+      | ty struckTy =>
+          simp [Strike, LVal.path] at hstrike
+      | box struckInner =>
+          simp [Strike, LVal.path] at hstrike
+      | undef struckTy =>
+          simp [Strike, LVal.path] at hstrike
+          subst hstrike
+          subst henv₂
+          subst hstore'
+          exact safeAbstractionWhenInitialized_move_var_of_preserved hsafe
+            henvSlot rfl hstoreSlot
             (by
               intro y envSlot oldOtherValue hyx henv hslot
               exact hpreserveOld y envSlot oldOtherValue hyx henv hslot)
