@@ -4859,6 +4859,245 @@ theorem EnvWrite.chain_guarded {env : Env}
             ⟨slot, hslot, LifetimeOutlives.refl _⟩)
     hwrite hlv ChainGuard.base hshape
 
+/-- Borrows in the grafted type never target into the write chain: at the
+chain root they would write-prohibit the assigned lval through the grafted
+slot, and at deeper links they conflict with the chain's own mutable
+annotation, contradicting the written type's borrow safety. -/
+theorem graft_target_outside {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u)) :
+    ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      ¬ ChainGuard env (LVal.base lhs) (LVal.base u) := by
+  intro mutable u hcontains hguard
+  generalize hroot : LVal.base u = y at hguard
+  cases hguard with
+  | base =>
+      exact hnotWrite
+        (WriteProhibited.of_contains_conflict
+          ⟨{ bslot with ty := graftTy }, hbLook, hcontains⟩ hroot)
+  | step hz hcontZ hbaseG =>
+      exact htySafe.2 _ _ mutable u hcontZ (hgraftContains hcontains)
+        (hbaseG.trans hroot.symm)
+
+/-- Post-write typing existence: every source typing either survives the
+write verbatim, or re-types through the graft at a spine-mirrored type all of
+whose borrows point outside the chain and are source-typed. -/
+theorem LValTyping.exists_env3 {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hsafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hrhsTyped : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains (.ty rhsTy) (.borrow mutable u) →
+      ∃ T lf, LValTyping env u (.ty T) lf)
+    (hb : env.slotAt b = some bslot)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hmirror : MirrorShape env bslot.ty graftTy)
+    (hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {t : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env t pt lf →
+      LValTyping env₃ t pt lf ∨
+        ∃ pt' lf', LValTyping env₃ t pt' lf' ∧ MirrorShape env pt pt' ∧
+          (∀ {mutable : Bool} {u : LVal},
+            PartialTyContains pt' (.borrow mutable u) →
+            ¬ ChainGuard env (LVal.base lhs) (LVal.base u) ∧
+              ∃ T lf'', LValTyping env u (.ty T) lf'') := by
+  have hunchanged : ∀ x, ¬ ChainGuard env (LVal.base lhs) x →
+      env₃.slotAt x = env.slotAt x := by
+    intro x hxOut
+    exact hne x (fun h => hxOut (h ▸ hguardB))
+  intro t pt lf htyping
+  induction htyping with
+  | var hslot =>
+      rename_i y s
+      by_cases hy : y = b
+      · subst hy
+        have hsEq : s = bslot := Option.some.inj (hslot.symm.trans hb)
+        subst hsEq
+        refine Or.inr ⟨graftTy, _, .var hbLook, hmirror, ?_⟩
+        intro mutable u hcontains
+        exact ⟨graft_target_outside htySafe hnotWrite hbLook
+            hgraftContains hcontains,
+          hrhsTyped (hgraftContains hcontains)⟩
+      · exact Or.inl (.var ((hne y hy) ▸ hslot))
+  | box _ ih =>
+      rcases ih with hleft | ⟨pt', lf', hty', hmirror', houts⟩
+      · exact Or.inl (.box hleft)
+      · rcases MirrorShape.boxes_inv hmirror' with ⟨inner', hEq, hmirrorInner⟩
+        subst hEq
+        refine Or.inr ⟨inner', lf', .box hty', hmirrorInner, ?_⟩
+        intro mutable u hcontains
+        exact houts (PartialTyContains.box hcontains)
+  | boxFull _ ih =>
+      rcases ih with hleft | ⟨pt', lf', hty', hmirror', houts⟩
+      · exact Or.inl (.boxFull hleft)
+      · rcases MirrorShape.full_inv hmirror' with ⟨T'', hEq, hcompat⟩
+        subst hEq
+        cases hcompat with
+        | tyBox hcompatInner =>
+            refine Or.inr ⟨_, lf', .boxFull hty',
+              MirrorShape.full hcompatInner, ?_⟩
+            intro mutable u hcontains
+            exact houts (PartialTyContains.tyBox hcontains)
+  | borrow hw hu ihBorrow ihTarget =>
+      rename_i w u m blf tlf targetTy
+      rcases ihBorrow with hleftW | ⟨pt'w, blf', hty'w, hmirrorW, houtsW⟩
+      · rcases ihTarget with hleftU | ⟨pt'u, lf'u, hty'u, hmirrorU, houtsU⟩
+        · exact Or.inl (.borrow hleftW hleftU)
+        · rcases MirrorShape.full_inv hmirrorU with ⟨T'u, hEq, hcompatU⟩
+          subst hEq
+          exact Or.inr ⟨_, lf'u, .borrow hleftW hty'u,
+            MirrorShape.full hcompatU, houtsU⟩
+      · rcases MirrorShape.full_inv hmirrorW with ⟨Tw', hEqW, hcompatW⟩
+        subst hEqW
+        cases hcompatW with
+        | borrow hlu hru' hcompatTT =>
+            rename_i u' leftTy rightTy
+            rcases hlu with ⟨llf, hluTyping⟩
+            have hdetU := LValTyping.deterministic hu hluTyping
+            rcases houtsW PartialTyContains.here with
+              ⟨hu'Outside, T₃, lf₃, hu'Env⟩
+            rcases hru' with ⟨rlf, hru'Typing⟩
+            rcases LValTyping.transport_of_outside_chain hsafe hunchanged
+                hnotWrite hru'Typing hu'Outside with
+              ⟨hty₃, houts₂⟩
+            refine Or.inr ⟨.ty rightTy, rlf, .borrow hty'w hty₃,
+              MirrorShape.full ?_, ?_⟩
+            · have hTyEq : PartialTy.ty targetTy = .ty leftTy := hdetU.1
+              rw [show targetTy = leftTy from by
+                injection hTyEq]
+              exact hcompatTT
+            · intro mutable₂ u₂ hcontains₂
+              rcases houts₂ hcontains₂ with ⟨z, hzOutside, hzContains⟩
+              have hu₂Outside :
+                  ¬ ChainGuard env (LVal.base lhs) (LVal.base u₂) := by
+                intro hguard₂
+                exact chainGuard_contains_exclusion hsafe hunchanged
+                  hnotWrite hguard₂ hzOutside hzContains rfl
+              rcases hzContains with ⟨zslot, hzslot, hzContainsTy⟩
+              rcases hcbwf z zslot mutable₂ u₂ hzslot
+                  ⟨zslot, hzslot, hzContainsTy⟩ with
+                ⟨T₄, lf₄, hty₄, _hle₄, _hbase₄⟩
+              exact ⟨hu₂Outside, T₄, lf₄, hty₄⟩
+
+theorem LValTyping.transport_of_pointwise {env env₃ : Env}
+    (heq : ∀ y, env₃.slotAt y = env.slotAt y) :
+    ∀ {t : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env t pt lf →
+      LValTyping env₃ t pt lf := by
+  intro t pt lf htyping
+  induction htyping with
+  | var hslot => exact .var ((heq _) ▸ hslot)
+  | box _ ih => exact .box ih
+  | boxFull _ ih => exact .boxFull ih
+  | borrow _ _ ihBorrow ihTarget => exact .borrow ihBorrow ihTarget
+
+/-- **Definition 4.8(i) across T-Assign, strict.**  The borrow invariant is
+preserved by the strong-update write from exactly the rule premises plus the
+threaded borrow-safety facts (whose necessity the counterexamples above
+establish). -/
+theorem ContainedBorrowsWellFormed.envWrite {env : Env}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hsafe : BorrowSafeEnv env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlv : LValTyping env lhs oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs) :
+    ContainedBorrowsWellFormed env₃ := by
+  have hrhsTyped : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains (.ty rhsTy) (.borrow mutable u) →
+      ∃ T lf, LValTyping env u (.ty T) lf := by
+    intro mutable u hcontains
+    rcases borrowTargetsWellFormed_of_wellFormedTy_contains hwellTy hcontains
+      with ⟨T, lf, hty, _, _⟩
+    exact ⟨T, lf, hty⟩
+  rcases EnvWrite.chain_guarded hcbwf hwrite hlv hshape with
+    hpointwise | ⟨b, bslot, graftTy, hb, hne, hbLook, _hbound,
+      hgraftContains, hmirror, hguardB⟩
+  · -- Nothing changed: the invariant transports pointwise.
+    intro x slot₃ mutable t hslot₃ hcontains₃
+    rcases hcontains₃ with ⟨cslot, hcslot, hcontainsTy⟩
+    have hcslotEnv : env.slotAt x = some cslot := (hpointwise x) ▸ hcslot
+    rcases hcbwf x cslot mutable t hcslotEnv
+        ⟨cslot, hcslotEnv, hcontainsTy⟩ with
+      ⟨T, lf, hty, hle, hbase⟩
+    have hslotEq : slot₃ = cslot :=
+      Option.some.inj (hslot₃.symm.trans hcslot)
+    subst hslotEq
+    refine ⟨T, lf, LValTyping.transport_of_pointwise hpointwise hty, hle, ?_⟩
+    rcases hbase with ⟨bs, hbs, hbsle⟩
+    exact ⟨bs, (hpointwise _) ▸ hbs, hbsle⟩
+  · intro x slot₃ mutable t hslot₃ hcontains₃
+    rcases hcontains₃ with ⟨cslot, hcslot, hcontainsTy⟩
+    have hslotEq : cslot = slot₃ :=
+      Option.some.inj (hcslot.symm.trans hslot₃)
+    subst hslotEq
+    -- The target is source-typed: from the source invariant off the graft,
+    -- from the written type's well-formedness on it.
+    have hsource : ∃ T lf, LValTyping env t (.ty T) lf := by
+      by_cases hx : x = b
+      · subst hx
+        have hcslotEq : cslot = { bslot with ty := graftTy } :=
+          Option.some.inj (hcslot.symm.trans hbLook)
+        rw [hcslotEq] at hcontainsTy
+        exact hrhsTyped (hgraftContains hcontainsTy)
+      · have hcslotEnv : env.slotAt x = some cslot := (hne x hx) ▸ hcslot
+        rcases hcbwf x cslot mutable t hcslotEnv
+            ⟨cslot, hcslotEnv, hcontainsTy⟩ with
+          ⟨T, lf, hty, _, _⟩
+        exact ⟨T, lf, hty⟩
+    -- Existence in the result, then the strict write bounds.
+    rcases hsource with ⟨T, lf, hty⟩
+    have hexists : ∃ T' lf', LValTyping env₃ t (.ty T') lf' := by
+      rcases LValTyping.exists_env3 hcbwf hsafe htySafe hnotWrite
+          hrhsTyped hb hne hbLook hgraftContains hmirror hguardB hty with
+        hleft | ⟨pt', lf', hty', hmirror', _houts⟩
+      · exact ⟨T, lf, hleft⟩
+      · rcases MirrorShape.full_inv hmirror' with ⟨T', hEq, _⟩
+        subst hEq
+        exact ⟨T', lf', hty'⟩
+    rcases hexists with ⟨T', lf', hty₃⟩
+    have hbase₃ : LValBaseOutlives env₃ t cslot.lifetime :=
+      envWrite_contains_baseOutlives_strict hcbwf hwrite hlv hwellTy
+        hcslot hcontainsTy
+    have hbound₃ :=
+      (envWrite_typing_bound_strict hcbwf hwrite hlv hwellTy hty₃).1
+        cslot.lifetime hbase₃
+    
+    exact ⟨T', lf', hty₃, hbound₃, hbase₃⟩
+
+/-- **Definition 4.8 across T-Assign, strict.** -/
+theorem WellFormedEnv.envWrite {env : Env} {current : Lifetime}
+    (hwell : WellFormedEnv env current)
+    (hsafe : BorrowSafeEnv env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlv : LValTyping env lhs oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs) :
+    WellFormedEnv env₃ current :=
+  ⟨ContainedBorrowsWellFormed.envWrite hwell.1 hsafe htySafe hwrite hlv
+      hshape hwellTy hnotWrite,
+    EnvSlotsOutlive.write hwrite hwell.2⟩
+
 end Paper
 end LwRust
 
