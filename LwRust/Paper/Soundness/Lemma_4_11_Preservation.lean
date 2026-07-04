@@ -5081,6 +5081,54 @@ theorem ContainedBorrowsWellFormed.envWrite {env : Env}
     
     exact ⟨T', lf', hty₃, hbound₃, hbase₃⟩
 
+/-- Definition 4.13 across T-Assign: borrow safety is preserved because the
+written slot's new borrows come from the written type, whose conflicts with
+environment borrows are exactly what `TyBorrowSafeAgainstEnv` forbids. -/
+theorem BorrowSafeEnv.envWrite {env : Env}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hsafe : BorrowSafeEnv env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlv : LValTyping env lhs oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy)) :
+    BorrowSafeEnv env₃ := by
+  rcases EnvWrite.chain_guarded hcbwf hwrite hlv hshape with
+    hpointwise | ⟨b, bslot, graftTy, hb, hne, hbLook, _hbound,
+      hgraftContains, _hmirror, _hguardB⟩
+  · intro x y mutable targetMutable targetOther hx hy hconf
+    refine hsafe x y mutable targetMutable targetOther ?_ ?_ hconf
+    · rcases hx with ⟨s, hs, hcontains⟩
+      exact ⟨s, (hpointwise x) ▸ hs, hcontains⟩
+    · rcases hy with ⟨s, hs, hcontains⟩
+      exact ⟨s, (hpointwise y) ▸ hs, hcontains⟩
+  · have hclassify : ∀ {z : Name} {mutable : Bool} {u : LVal},
+        env₃ ⊢ z ↝ (.borrow mutable u) →
+        (z ≠ b ∧ env ⊢ z ↝ (.borrow mutable u)) ∨
+          (z = b ∧ PartialTyContains (.ty rhsTy) (.borrow mutable u)) := by
+      intro z mutable u hz
+      rcases hz with ⟨s, hs, hcontains⟩
+      by_cases hzb : z = b
+      · subst hzb
+        have hsEq : s = { bslot with ty := graftTy } :=
+          Option.some.inj (hs.symm.trans hbLook)
+        subst hsEq
+        exact Or.inr ⟨rfl, hgraftContains hcontains⟩
+      · exact Or.inl ⟨hzb, ⟨s, (hne z hzb) ▸ hs, hcontains⟩⟩
+    intro x y mutable targetMutable targetOther hx hy hconf
+    rcases hclassify hx with ⟨hxb, hxEnv⟩ | ⟨hxb, hxRhs⟩
+    · rcases hclassify hy with ⟨hyb, hyEnv⟩ | ⟨hyb, hyRhs⟩
+      · exact hsafe x y mutable targetMutable targetOther hxEnv hyEnv hconf
+      · exact absurd hconf
+          (fun h => htySafe.2 x targetMutable mutable targetOther hxEnv
+            hyRhs h)
+    · rcases hclassify hy with ⟨hyb, hyEnv⟩ | ⟨hyb, hyRhs⟩
+      · exact absurd hconf
+          (fun h => htySafe.1 targetMutable mutable targetOther y hxRhs
+            hyEnv h)
+      · exact hxb.trans hyb.symm
+
 /-- **Definition 4.8 across T-Assign, strict.** -/
 theorem WellFormedEnv.envWrite {env : Env} {current : Lifetime}
     (hwell : WellFormedEnv env current)
