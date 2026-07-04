@@ -2714,6 +2714,191 @@ theorem WellFormedEnvWhenInitialized.envWrite {env : Env} {current : Lifetime}
       hwellTy,
     EnvSlotsOutlive.write hwrite hwell.2⟩
 
+theorem LValBaseOutlives.move {env moved : Env} {lv target : LVal}
+    {lifetime : Lifetime} :
+    EnvMove env lv moved →
+    LValBaseOutlives env target lifetime →
+    LValBaseOutlives moved target lifetime := by
+  intro hmove hbase
+  rcases hbase with ⟨sourceSlot, hsourceSlot, houtlives⟩
+  rcases hmove with ⟨movedSlot, struck, hmovedSlot, _hstrike, hmoved⟩
+  subst hmoved
+  by_cases hbaseEq : LVal.base target = LVal.base lv
+  · have hslotEq : sourceSlot = movedSlot := by
+      rw [hbaseEq] at hsourceSlot
+      exact Option.some.inj (hsourceSlot.symm.trans hmovedSlot)
+    subst hslotEq
+    exact ⟨{ sourceSlot with ty := struck },
+      by simp [Env.update, hbaseEq], houtlives⟩
+  · exact ⟨sourceSlot, by simpa [Env.update, hbaseEq] using hsourceSlot,
+      houtlives⟩
+
+/-- The moved-out type stays well formed in the post-move environment: its
+loans cannot conflict with the moved place (they would write-prohibit it), so
+typings of its targets transport back to the source environment where the
+invariant bounds them. -/
+theorem WellFormedTyWhenInitialized.move {env moved : Env} {lv : LVal}
+    {ty : Ty} {lifetime : Lifetime} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    EnvMove env lv moved →
+    ¬ WriteProhibited env lv →
+    (∀ {mutable : Bool} {target : LVal},
+      PartialTyContains (.ty ty) (.borrow mutable target) →
+      env ⊢ (LVal.base lv) ↝ (.borrow mutable target) ∨
+        (∃ x, env ⊢ x ↝ (.borrow mutable target))) →
+    WellFormedTyWhenInitialized env ty lifetime →
+    WellFormedTyWhenInitialized moved ty lifetime := by
+  intro hcbwf hmove hnotWrite hcontained hwellTy
+  have hnoConflicts :
+      ∀ x mutable target,
+        moved ⊢ x ↝ (.borrow mutable target) →
+        ¬ target ⋈ lv := by
+    intro x mutable target hcontains hconflict
+    rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+    exact hnotWrite
+      (WriteProhibited.of_contains_conflict
+        (EnvMove.contains_borrow_source hmove hslot
+          ⟨slot, hslot, hcontainsTy⟩) hconflict)
+  induction hwellTy with
+  | unit => exact .unit
+  | int => exact .int
+  | borrow htargets =>
+      rename_i mutable' target' lifetime'
+      rcases htargets with ⟨hbase, hcond⟩
+      have hnoConflictTarget : ¬ target' ⋈ lv := by
+        intro hconflict
+        rcases hcontained (PartialTyContains.here) with hcont | ⟨x, hcont⟩
+        · exact hnotWrite
+            (WriteProhibited.of_contains_conflict hcont hconflict)
+        · exact hnotWrite
+            (WriteProhibited.of_contains_conflict hcont hconflict)
+      refine .borrow ⟨LValBaseOutlives.move hmove hbase, ?_⟩
+      rintro ⟨ty', lf', hty'⟩
+      have htyEnv : LValTyping env target' (.ty ty') lf' :=
+        LValTyping.move_to_source_of_no_conflicts hmove hnoConflicts
+          hnoConflictTarget hty'
+      rcases hcond ⟨_, _, htyEnv⟩ with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+      have hdet := LValTyping.deterministic htyEnv hty₀
+      exact ⟨ty', lf', hty', hdet.2 ▸ hle₀,
+        LValBaseOutlives.move hmove hbase₀⟩
+  | box _ ih =>
+      refine .box (ih ?_)
+      intro mutable target hcontains
+      exact hcontained (PartialTyContains.tyBox hcontains)
+
+/-- The static invariant walk: source-term typing preserves the two-part
+Definition 4.8 invariant and yields a well-formed result type, with no
+obligations beyond the rule premises. -/
+theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    SourceTerm term →
+    WellFormedEnvWhenInitialized env₁ lifetime →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnvWhenInitialized env₂ lifetime ∧
+      WellFormedTyWhenInitialized env₂ ty lifetime := by
+  intro hsource hwellFormed htyping
+  exact TermTyping.rec
+    (motive_1 := fun env _typing lifetime term ty env₂ _ =>
+      SourceTerm term →
+      WellFormedEnvWhenInitialized env lifetime →
+      WellFormedEnvWhenInitialized env₂ lifetime ∧
+        WellFormedTyWhenInitialized env₂ ty lifetime)
+    (motive_2 := fun env _typing blockLifetime terms ty env₂ _ =>
+      SourceTerm (.block blockLifetime terms) →
+      WellFormedEnvWhenInitialized env blockLifetime →
+      WellFormedEnvWhenInitialized env₂ blockLifetime ∧
+        WellFormedTyWhenInitialized env₂ ty blockLifetime)
+    (by
+      -- T-Const: source values are loan-free.
+      intro _env _typing _lifetime value _ty hvalue hsource hwell
+      exact ⟨hwell,
+        ValueTyping.wellFormedTyWhenInitialized_of_sourceValue
+          (hsource value (by simp [termValues])) hvalue⟩)
+    (by
+      -- T-Copy: the environment is unchanged; the copied type comes from a
+      -- typed lvalue.
+      intro _env _typing _lifetime _valueLifetime _lv _ty hLv _hcopy _hnotRead
+        _hsource hwell
+      exact ⟨hwell, LValTyping.wellFormedTyWhenInitialized hwell hLv⟩)
+    (by
+      -- T-Move.
+      intro _env₁ _env₂ _typing _lifetime _valueLifetime lv ty hLv hnotWrite
+        hmove _hsource hwell
+      refine ⟨WellFormedEnvWhenInitialized.move hwell hmove hnotWrite, ?_⟩
+      have hwellTy := LValTyping.wellFormedTyWhenInitialized hwell hLv
+      refine WellFormedTyWhenInitialized.move hwell.1 hmove hnotWrite ?_
+        hwellTy
+      intro mutable target hcontains
+      rcases LValTyping.contains_borrow hLv hcontains with ⟨x, hcont⟩
+      exact Or.inr ⟨x, hcont⟩)
+    (by
+      -- T-MutBorrow: the created borrow's target is the typed operand.
+      intro _env _typing _lifetime _valueLifetime lv _ty hLv _hmutable
+        _hnotWrite _hsource hwell
+      refine ⟨hwell, .borrow ⟨?_, ?_⟩⟩
+      · rcases LValTyping.base_slot_exists hLv with ⟨slot, hslot⟩
+        exact ⟨slot, hslot, hwell.2 _ slot hslot⟩
+      · rintro ⟨ty', lf', hty'⟩
+        refine ⟨ty', lf', hty',
+          LValTyping.lifetime_outlives_one hwell.2 hty', ?_⟩
+        rcases LValTyping.base_slot_exists hLv with ⟨slot, hslot⟩
+        exact ⟨slot, hslot, hwell.2 _ slot hslot⟩)
+    (by
+      -- T-ImmBorrow.
+      intro _env _typing _lifetime _valueLifetime lv _ty hLv _hnotRead
+        _hsource hwell
+      refine ⟨hwell, .borrow ⟨?_, ?_⟩⟩
+      · rcases LValTyping.base_slot_exists hLv with ⟨slot, hslot⟩
+        exact ⟨slot, hslot, hwell.2 _ slot hslot⟩
+      · rintro ⟨ty', lf', hty'⟩
+        refine ⟨ty', lf', hty',
+          LValTyping.lifetime_outlives_one hwell.2 hty', ?_⟩
+        rcases LValTyping.base_slot_exists hLv with ⟨slot, hslot⟩
+        exact ⟨slot, hslot, hwell.2 _ slot hslot⟩)
+    (by
+      -- T-Box.
+      intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih hsource hwell
+      have hresult := ih (SourceTerm.box_inner hsource) hwell
+      exact ⟨hresult.1, .box hresult.2⟩)
+    (by
+      -- T-Block.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
+        hchild _hterms hwellTy hdrop ih hsource hwell
+      have hbody := ih hsource
+        (WellFormedEnvWhenInitialized.weaken hwell
+          (LifetimeChild.outlives hchild))
+      exact block_preserves_wellFormedWhenInitialized hchild hbody.1
+        (WellFormedTy.whenInitialized hwellTy) hdrop)
+    (by
+      -- T-Declare.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hfresh _hterm
+        hfreshOut henv₃ ih hsource hwell
+      have hinner := ih (SourceTerm.declare_inner hsource) hwell
+      refine ⟨?_, .unit⟩
+      rw [henv₃]
+      exact WellFormedEnvWhenInitialized.update_fresh_ty hinner.1 hinner.2
+        hfreshOut)
+    (by
+      -- T-Assign: Definition 4.8 across the strong-update write.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
+        _rhs _rhsTy hRhs hLhsPost _hshape hwellTy hwrite _hnotWrite ih
+        hsource hwell
+      have hmid := ih (SourceTerm.assign_inner hsource) hwell
+      exact ⟨WellFormedEnvWhenInitialized.envWrite hmid.1 hwrite hLhsPost
+          hwellTy, .unit⟩)
+    (by
+      -- T-Seq singleton.
+      intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih hsource hwell
+      exact ih (SourceTerm.block_head hsource) hwell)
+    (by
+      -- T-Seq cons.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
+        _hterm _hrest ihHead ihRest hsource hwell
+      have hhead := ihHead (SourceTerm.block_head hsource) hwell
+      exact ihRest (SourceTerm.block_tail hsource) hhead.1)
+    htyping hsource hwellFormed
+
 end Paper
 end LwRust
 
