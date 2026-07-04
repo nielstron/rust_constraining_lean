@@ -4636,6 +4636,47 @@ theorem LValTyping.transport_of_outside_chain {env env₃ : Env} {lhs : LVal}
       exact ⟨.borrow (ihBorrow houtside).1 (ihTarget hguardU).1,
         (ihTarget hguardU).2⟩
 
+/-- Spine-mirroring shape relation: the two partial types share their
+partial-box spine, and the cores are full (or undef-vs-full) with
+shape-compatible types.  This is what the strong update actually produces,
+and unlike bare `ShapeCompatible` it inverts deterministically. -/
+inductive MirrorShape (env : Env) : PartialTy → PartialTy → Prop where
+  | boxes {inner inner' : PartialTy} :
+      MirrorShape env inner inner' →
+      MirrorShape env (.box inner) (.box inner')
+  | full {T T' : Ty} :
+      ShapeCompatible env (.ty T) (.ty T') →
+      MirrorShape env (.ty T) (.ty T')
+  | undefFull {T T' : Ty} :
+      ShapeCompatible env (.undef T) (.ty T') →
+      MirrorShape env (.undef T) (.ty T')
+
+theorem MirrorShape.of_compat_full_right {env : Env} {pt : PartialTy}
+    {T' : Ty} :
+    ShapeCompatible env pt (.ty T') →
+    MirrorShape env pt (.ty T') := by
+  intro hcompat
+  cases pt with
+  | ty T => exact .full hcompat
+  | undef T => exact .undefFull hcompat
+  | box inner =>
+      cases hcompat
+
+theorem MirrorShape.full_inv {env : Env} {T : Ty} {pt' : PartialTy} :
+    MirrorShape env (.ty T) pt' →
+    ∃ T', pt' = .ty T' ∧ ShapeCompatible env (.ty T) (.ty T') := by
+  intro hmirror
+  cases hmirror with
+  | full hcompat => exact ⟨_, rfl, hcompat⟩
+
+theorem MirrorShape.boxes_inv {env : Env} {inner : PartialTy}
+    {pt' : PartialTy} :
+    MirrorShape env (.box inner) pt' →
+    ∃ inner', pt' = .box inner' ∧ MirrorShape env inner inner' := by
+  intro hmirror
+  cases hmirror with
+  | boxes hinner => exact ⟨_, rfl, hinner⟩
+
 /-- Characterization of the strong-update write: either nothing changed
 (cyclic chains clobber their own graft), or exactly one slot `b` changed, its
 new type's borrows all come from the written type, the written lval's typing
@@ -4657,7 +4698,7 @@ theorem EnvWrite.chain_guarded {env : Env}
         (∀ {mutable : Bool} {u : LVal},
           PartialTyContains graftTy (.borrow mutable u) →
           PartialTyContains (.ty rhsTy) (.borrow mutable u)) ∧
-        ShapeCompatible env bslot.ty graftTy ∧
+        MirrorShape env bslot.ty graftTy ∧
         ChainGuard env (LVal.base lhs) b := by
   intro hwrite hlv hshape
   exact EnvWrite.rec
@@ -4680,14 +4721,13 @@ theorem EnvWrite.chain_guarded {env : Env}
               (∀ {mutable : Bool} {u : LVal},
                 PartialTyContains graftTy (.borrow mutable u) →
                 PartialTyContains (.ty ty) (.borrow mutable u)) ∧
-              ShapeCompatible env bslot.ty graftTy ∧
+              MirrorShape env bslot.ty graftTy ∧
               ChainGuard env (LVal.base lhs) b)) ∨
         (result = env ∧
           (∀ {mutable : Bool} {u : LVal},
             PartialTyContains updated (.borrow mutable u) →
             PartialTyContains (.ty ty) (.borrow mutable u)) ∧
-          ShapeCompatible env old updated ∧
-          (∀ T₀, old = .ty T₀ → ∃ T₁, updated = .ty T₁)))
+          MirrorShape env old updated))
     (motive_2 := fun lv ty result _ =>
       ∀ {pt : PartialTy} {lf : Lifetime},
         LValTyping env lv pt lf →
@@ -4702,17 +4742,15 @@ theorem EnvWrite.chain_guarded {env : Env}
             (∀ {mutable : Bool} {u : LVal},
               PartialTyContains graftTy (.borrow mutable u) →
               PartialTyContains (.ty ty) (.borrow mutable u)) ∧
-            ShapeCompatible env bslot.ty graftTy ∧
+            MirrorShape env bslot.ty graftTy ∧
             ChainGuard env (LVal.base lhs) b)
     (by
       -- strong: the graft happens here; the environment part is untouched.
       intro _old _ty wcur pt lf lfc hwcur hlhs _hcontainsW _hguard hshapePt
       have hdet := LValTyping.deterministic hwcur
         (by simpa [prependPath] using hlhs)
-      refine Or.inr ⟨rfl, fun hcontains => hcontains, ?_, ?_⟩
-      · exact hdet.1 ▸ hshapePt
-      · intro T₀ _hold
-        exact ⟨_ty, rfl⟩)
+      exact Or.inr ⟨rfl, fun hcontains => hcontains,
+        MirrorShape.of_compat_full_right (hdet.1 ▸ hshapePt)⟩)
     (by
       -- box: the update stays inside the partial box.
       intro _env₂ _path _inner _updatedInner _ty _hinner ih
@@ -4723,14 +4761,12 @@ theorem EnvWrite.chain_guarded {env : Env}
             intro mutable u hcontains
             exact hcontainsW (PartialTyContains.box hcontains))
           hguard hshapePt with
-        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeInner, _htyRoot⟩
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeInner⟩
       · exact Or.inl ⟨by rw [hupdEq], hprops⟩
-      · refine Or.inr ⟨henvEq, ?_, ShapeCompatible.box hshapeInner, ?_⟩
-        · intro mutable u hcontains
-          cases hcontains with
-          | box hinner' => exact hgraft hinner'
-        · intro T₀ hold
-          cases hold
+      · refine Or.inr ⟨henvEq, ?_, MirrorShape.boxes hshapeInner⟩
+        intro mutable u hcontains
+        cases hcontains with
+        | box hinner' => exact hgraft hinner'
     )
     (by
       -- boxFull: as box, through the rebox wrapper.
@@ -4742,17 +4778,16 @@ theorem EnvWrite.chain_guarded {env : Env}
             intro mutable u hcontains
             exact hcontainsW (PartialTyContains.tyBox hcontains))
           hguard hshapePt with
-        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeInner, htyRoot⟩
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeInner⟩
       · exact Or.inl ⟨by rw [hupdEq, partialTyRebox], hprops⟩
-      · rcases htyRoot _ rfl with ⟨T₁, hT₁⟩
+      · rcases MirrorShape.full_inv hshapeInner with ⟨T₁, hT₁, hcompat⟩
         subst hT₁
         exact Or.inr ⟨henvEq,
           fun hcontains =>
             hgraft (PartialTyContains.partialTyRebox_borrow_inv hcontains),
           by
             rw [partialTyRebox]
-            exact ShapeCompatible.tyBox hshapeInner,
-          fun T₀ _hold => ⟨.box T₁, by rw [partialTyRebox]⟩⟩)
+            exact MirrorShape.full (ShapeCompatible.tyBox hcompat)⟩)
     (by
       -- mutBorrow: the local type is unchanged; the nested write carries the
       -- change, one guard step deeper.
@@ -4779,7 +4814,7 @@ theorem EnvWrite.chain_guarded {env : Env}
       rcases ih (wcur := .var (LVal.base lv)) (LValTyping.var hslot)
           (by rw [prependPath_path_base]; exact hlv) hcontainsW hguard
           hshapePt with
-        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeGraft, _htyRoot⟩
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft, hshapeGraft⟩
       · -- Chain slot: the update rewrites the slot to its own value.
         have hslotEta : { slot with ty := updatedTy } = slot := by
           rw [hupdEq]
