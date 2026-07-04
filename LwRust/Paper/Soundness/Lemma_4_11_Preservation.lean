@@ -4534,6 +4534,128 @@ theorem WellFormedTy.move {env moved : Env} {lv : LVal}
       intro mutable target hcontains
       exact hcontained (PartialTyContains.tyBox hcontains)
 
+/-! ### The write-chain guard kernel
+
+Partial types are unary spines, so a slot type contains at most one borrow
+annotation (`PartialTyContains.borrow_unique`).  `ChainGuard` captures the
+slots reachable from the written base through environment-contained mutable
+annotations — exactly the write chain plus the grafted slot.  In a borrow-safe
+environment, an annotation held OUTSIDE the chain can never target INTO it:
+at the chain root that would write-prohibit the assigned lval in the result,
+and at deeper links borrow safety forces the holder onto the chain.  This is
+what lets strict typings transport across the write without any existence
+recursion.
+-/
+
+theorem PartialTyContains.borrow_unique {pt : PartialTy} {mutable mutable' : Bool}
+    {target target' : LVal} :
+    PartialTyContains pt (.borrow mutable target) →
+    PartialTyContains pt (.borrow mutable' target') →
+    mutable = mutable' ∧ target = target' := by
+  intro hleft
+  generalize hβ : Ty.borrow mutable target = β at hleft
+  induction hleft with
+  | here =>
+      intro hright
+      cases hβ
+      cases hright with
+      | here => exact ⟨rfl, rfl⟩
+  | tyBox _ ih =>
+      intro hright
+      cases hright with
+      | tyBox hinner => exact ih hβ hinner
+  | box _ ih =>
+      intro hright
+      cases hright with
+      | box hinner => exact ih hβ hinner
+
+/-- Slots reachable from `root` through environment-contained mutable borrow
+annotations. -/
+inductive ChainGuard (env : Env) (root : Name) : Name → Prop where
+  | base : ChainGuard env root root
+  | step {z y : Name} {g : LVal} :
+      ChainGuard env root z →
+      env ⊢ z ↝ (.borrow true g) →
+      LVal.base g = y →
+      ChainGuard env root y
+
+/-- No annotation held outside the chain targets into the chain. -/
+theorem chainGuard_contains_exclusion {env env₃ : Env} {lhs : LVal}
+    (hsafe : BorrowSafeEnv env)
+    (hunchanged : ∀ x, ¬ ChainGuard env (LVal.base lhs) x →
+      env₃.slotAt x = env.slotAt x)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs) :
+    ∀ {y : Name}, ChainGuard env (LVal.base lhs) y →
+      ∀ {x : Name} {mutable : Bool} {u : LVal},
+        ¬ ChainGuard env (LVal.base lhs) x →
+        env ⊢ x ↝ (.borrow mutable u) →
+        LVal.base u = y →
+        False := by
+  intro y hguard
+  induction hguard with
+  | base =>
+      intro x mutable u hxOutside hcont hbase
+      apply hnotWrite
+      have hcont₃ : env₃ ⊢ x ↝ (.borrow mutable u) := by
+        rcases hcont with ⟨slot, hslot, hcontainsTy⟩
+        exact ⟨slot, (hunchanged x hxOutside) ▸ hslot, hcontainsTy⟩
+      exact WriteProhibited.of_contains_conflict hcont₃ hbase
+  | step hz hcontZ hbaseG ih =>
+      intro x mutable u hxOutside hcont hbase
+      rename_i z y' g
+      have hconflict : g ⋈ u := by
+        show LVal.base g = LVal.base u
+        rw [hbaseG, hbase]
+      have hxz : z = x := hsafe z x mutable g u hcontZ hcont hconflict
+      exact hxOutside (hxz ▸ hz)
+
+/-- A typing derivation rooted outside the chain stays outside the chain, so
+it transports unchanged across the write.  The induction also threads that
+every borrow annotation in the resulting type has an outside holder, which is
+what keeps hop targets outside. -/
+theorem LValTyping.transport_of_outside_chain {env env₃ : Env} {lhs : LVal}
+    (hsafe : BorrowSafeEnv env)
+    (hunchanged : ∀ x, ¬ ChainGuard env (LVal.base lhs) x →
+      env₃.slotAt x = env.slotAt x)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs) :
+    ∀ {t : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env t pt lf →
+      ¬ ChainGuard env (LVal.base lhs) (LVal.base t) →
+      LValTyping env₃ t pt lf ∧
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains pt (.borrow mutable u) →
+          ∃ z, ¬ ChainGuard env (LVal.base lhs) z ∧
+            env ⊢ z ↝ (.borrow mutable u)) := by
+  intro t pt lf htyping
+  induction htyping with
+  | var hslot =>
+      rename_i y s
+      intro houtside
+      refine ⟨.var ((hunchanged _ houtside) ▸ hslot), ?_⟩
+      intro mutable u hcontains
+      exact ⟨y, houtside, ⟨s, hslot, hcontains⟩⟩
+  | box _ ih =>
+      intro houtside
+      refine ⟨.box (ih houtside).1, ?_⟩
+      intro mutable u hcontains
+      exact (ih houtside).2 (PartialTyContains.box hcontains)
+  | boxFull _ ih =>
+      intro houtside
+      refine ⟨.boxFull (ih houtside).1, ?_⟩
+      intro mutable u hcontains
+      exact (ih houtside).2 (PartialTyContains.tyBox hcontains)
+  | borrow hw hu ihBorrow ihTarget =>
+      intro houtside
+      rename_i w u m blf tlf tty
+      rcases (ihBorrow houtside).2 PartialTyContains.here with
+        ⟨z, hzOutside, hcont⟩
+      have hguardU : ¬ ChainGuard env (LVal.base lhs) (LVal.base u) := by
+        intro hguard
+        exact chainGuard_contains_exclusion hsafe hunchanged hnotWrite
+          hguard hzOutside hcont rfl
+      exact ⟨.borrow (ihBorrow houtside).1 (ihTarget hguardU).1,
+        (ihTarget hguardU).2⟩
+
 end Paper
 end LwRust
 
