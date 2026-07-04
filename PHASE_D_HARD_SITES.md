@@ -61,6 +61,20 @@ partial-box dereference-assignment runtime preservation wrapper:
   static fact needed by dereference assignment: along a box-only selected path,
   RHS borrow annotations appear in the updated root slot of the post-write
   environment.
+- Added and compiled the pure full-box static companions
+  `PathSelect.snoc_boxFull`,
+  `EnvWrite.deref_boxFull_update_eq_of_select`, and
+  `EnvWrite.deref_boxFull_result_contains_of_select`.  These cover the
+  `tyBox` version of the same `PathSelect` owner path: once a
+  `PathSelect (LVal.path source) slot.ty (.ty (.box oldTy))` witness is
+  available, writing `source.deref` is characterized as a single root-slot
+  update and RHS borrows are contained in that updated result slot.
+- Added and compiled the runtime/static bridge for pure selected owner paths:
+  `OwnerChainPrefix.prepend_owner`,
+  `PathSelect.ownerChainPrefix_whenInitialized`, and
+  `PathSelect.exists_strike_undef`.  The full-box assignment proof uses the
+  last bridge to reuse the already-proved `Strike`/`OwnerChainAt` runtime
+  extractor rather than duplicating the lvalue descent.
 - Added and compiled the initialized lifetime-drop safe-abstraction wrappers
   `safeAbstractionWhenInitialized_dropLifetime_of_preserved`,
   `dropPreservation_lifetime_whenInitialized`, and the
@@ -90,6 +104,14 @@ partial-box dereference-assignment runtime preservation wrapper:
 - Added and compiled
   `preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed`.
   The pure partial-box dereference assignment case is now proved end-to-end.
+- Added and compiled
+  `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_frames`
+  and
+  `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed_of_select`.
+  This proves the full-box dereference assignment for the pure `PathSelect`
+  owner path.  The unqualified full-box helper is still pending because it
+  must split off the `UpdateAtPath.mutBorrow` route and dispatch that route to
+  the borrow-hop/re-rooting proof.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked after the compiled helper additions above; current
@@ -156,8 +178,11 @@ Concrete subgoals:
   `LValTyping` derivation via `lvalTyping_defined_location_whenInitialized`.
 - For the partial-box owner-chain case, use the new `PathSelect`/`EnvWrite`
   kernel to show that static `EnvWrite` descends through boxes and changes the
-  owner root slot.  Completed.  The full-box and borrow-hop assignment cases
-  still need the corresponding rebasing step under `EnvWrite.chain_guarded`.
+  owner root slot.  Completed.  The pure full-box owner path is also completed
+  via the `_of_select` wrapper.  The remaining work is the non-pure
+  `UpdateAtPath.mutBorrow` route: full-box paths that pass through a mutable
+  borrow must split to the same re-rooted proof as the direct borrow-hop
+  assignment helper.
 - Preserve the RHS value and unaffected environment slots after the runtime
   write using `validPartialValueWhenInitialized_update_of_not_live_reaches`.
   The existing variable frame is insufficient because the updated location is
@@ -197,10 +222,14 @@ The file already has stored-slot variants:
 - `dropsAvoids_of_reaches_stored_validPartialValueWhenInitialized`
 - `dropsAvoids_of_borrowDependencyWhenInitialized_unprotected_values`
 
-The missing bridge is a lifetime-drop-specific proof that values being dropped
-at the block lifetime cannot be protected by a dependency of a surviving slot or
-the terminal value.  The proof should use `LifetimeChild`, `EnvSlotsOutlive`,
-heap slots at root lifetime, and `lifetimeDropOwnersDisjoint_of_heapRootLifetime`.
+The missing bridge is still the value-level lifetime-drop-specific proof that
+values being dropped at the block lifetime cannot be protected by a dependency
+of the terminal value.  The stored-slot preservation path has the needed
+variants, but the terminal value branch still needs a
+`dropsAvoids_of_reaches_validPartialValueWhenInitialized`-style lemma for
+`DropsLifetime`.  The proof should use `LifetimeChild`, `EnvSlotsOutlive`, heap
+slots at root lifetime, `ValidRuntimeState.storeTermDisjoint`, and
+`lifetimeDropOwnersDisjoint_of_heapRootLifetime`.
 
 ## 5. Final induction and downstream callers
 
