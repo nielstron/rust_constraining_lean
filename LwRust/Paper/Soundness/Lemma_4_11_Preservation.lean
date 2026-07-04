@@ -470,26 +470,6 @@ theorem not_pathConflicts_of_not_writeProhibited_contains {env : Env}
   intro hnotWrite hcontains hconflict
   exact hnotWrite (WriteProhibited.of_contains_conflict hcontains hconflict)
 
-theorem EnvMove.preserves_linearizable {env moved : Env} {lv : LVal} :
-    Linearizable env →
-    EnvMove env lv moved →
-    Linearizable moved := by
-  rintro ⟨φ, hlinear⟩ hmove
-  refine ⟨φ, ?_⟩
-  intro x slot hslot v hv
-  rcases hmove with ⟨sourceSlot, struck, hsourceSlot, hstrike, hmoved⟩
-  subst hmoved
-  by_cases hx : x = LVal.base lv
-  · subst hx
-    have hslotEq : slot = { sourceSlot with ty := struck } := by
-      exact (Option.some.inj (by simpa [Env.update] using hslot)).symm
-    subst hslotEq
-    exact hlinear (LVal.base lv) sourceSlot hsourceSlot v
-      (Strike.vars_subset hstrike v hv)
-  · have hslotOld : env.slotAt x = some slot := by
-      simpa [Env.update, hx] using hslot
-    exact hlinear x slot hslotOld v hv
-
 theorem BorrowSafeEnv.move {env moved : Env} {lv : LVal} :
     BorrowSafeEnv env →
     EnvMove env lv moved →

@@ -46,9 +46,6 @@ theorem lvalTyping_empty_false {lv : LVal} {p : PartialTy} {lf : Lifetime}
       | boxFull hb => exact ih hb
       | borrow hb _ => exact ih hb
 
-theorem linearizable_empty : Linearizable Env.empty :=
-  ⟨fun _ => 0, by intro x slot hslot; simp [Env.empty] at hslot⟩
-
 @[simp] theorem wellFormedEnvWhenInitialized_empty (lifetime : Lifetime) :
     WellFormedEnvWhenInitialized Env.empty lifetime := by
   exact ⟨containedBorrowsWellFormedWhenInitialized_empty,

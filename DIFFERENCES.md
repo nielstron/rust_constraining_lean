@@ -28,41 +28,25 @@ versions added to the invariant are gone.
 
 ## Remaining differences
 
-### 1. T-Assign and T-Declare carry premises beyond the printed rules
+### 1. Rule premises relative to the printed figures
 
-Each is documented in the rule docstrings (`LwRust/Paper/Typing.lean`,
-`TermTyping.declare` / `TermTyping.assign`) together with the concrete gap it
-closes.  Three are *provably necessary* — the printed claims are false as
-stated without them — and all three stem from the multi-target fan-out of the
-paper's own `write` function (Definition 3.23), which exists in the core
-independently of conditionals (weak-update unions create multi-target borrow
-lists, e.g. `*q = &mut b` through `q : &mut [p]` turns `p : &mut [a]` into
-`p : &mut [a, b]`):
+Borrows are single-target (the follow-up paper's grammar): without
+conditionals there are no joins, so target lists — which only ever modelled
+join uncertainty — are gone, and the `write` function is the follow-up's
+strong update (no weak-update unions, no fan-out).  With that, every
+previously-necessary extra premise became removable:
 
-- `EnvWriteNoStaleBorrowTargets` (assign): a fan-out write affects bases other
-  than `base lhs`, which `¬ writeProhibited(Γ₃, w)` never inspects, so a
-  surviving borrow target could silently re-aim.
-- `EnvWriteRhsTargetsWellFormed` (assign): the paper's `Γ₂ ⊢ T₂ ≽ m` bounds
-  RHS-installed borrow targets only by the *intersection* of the written
-  targets' lifetimes; with heterogeneous target lifetimes the longer-lived
-  written slot is not bounded, breaking the result borrow invariant.
-- the rank witness `∃ φ, LinearizedBy φ env₂ ∧ EnvWriteRhsBorrowTargetsBelow φ
-  env₃ rhsTy` (assign): linearizability (the follow-up paper's acyclicity
-  invariant) is *not* preserved by the bare rule.  The follow-up's Lemma 4
-  covers only its single-target borrow grammar; in FR proper, a reachable
-  two-stage fan-out duplication followed by a fan-out write of a moved-out
-  duplicate installs a borrow into its own target's slot (a rank self edge).
-
-Two more are believed admissible for source programs but their derivations
-are open metatheory (neither paper develops it):
-
-- `env₂.fresh x` (declare): the literal rule admits the shadow chain
-  `let mut x = (let mut x = t)`; the paper's Section 5.2 explicitly treats
-  redeclaration as not permitted, so this mechanizes paper intent.
-- Historical target-list coherence premises from the stale-aware/multi-target
-  development are no longer live in the current single-target branch-free core.
-  The compatibility coherence side condition has been deleted rather than
-  threaded as a trivial invariant.
+- `T-Assign` carries exactly the paper's six premises (rhs typing, lvalue
+  typing, shape compatibility, rhs well-formedness at the target lifetime,
+  the environment write, and `¬ writeProhibited` on the result).  The
+  historical coherence, linearizability/rank, stale-target, and rhs-target
+  lifetime premises are all deleted; `Coherent`, `Linearizable`, and their
+  supporting definitions no longer exist in the development.
+- `T-Declare` carries one extra premise: `env₂.fresh x`.  The literal rule
+  admits the shadow chain `let mut x = (let mut x = t)`; the paper's
+  Section 5.2 explicitly treats redeclaration as not permitted, so this
+  mechanizes paper intent (the follow-up's T-Block states the same
+  assumption).
 
 `T-Block`'s `LifetimeChild` premise formalizes the paper's ambient lexical
 nesting assumption and is not a restriction.
@@ -79,12 +63,15 @@ over the same invariant, so the non-stuckness story is unaffected.
 
 ### 3. Non-initial preservation wrappers carry derived-invariant hypotheses
 
-Beyond `WellFormedEnvWhenInitialized` (paper Definition 4.8), the current
-preservation rebuild no longer carries the deleted compatibility coherence
-hypothesis.  `BorrowSafeEnv Γ₁` remains a likely paper bug fix (see README):
-the printed lemma appears false without it (`p ↦ &mut [*x]`,
-`q ↦ &mut [**x]` is well-formed but not borrow safe, and `*p = box 5` then
-dangles `q`).
+Beyond Definition 4.8, general (arbitrary starting state) preservation carries
+`BorrowSafeEnv Γ₁` (paper Definition 4.13) and, for the strict borrow
+invariant across assignment, the result-type compatibility
+`TyBorrowSafeAgainstEnv` of the written type (paper Lemma 4.9's conclusion).
+Both are necessary: the development contains machine-checked counterexamples
+(`strict_envWrite_target_preservation_counterexample`,
+`strict_assign_rule_result_counterexample`) showing strict preservation fails
+from Definition-4.8-only states.  Both hypotheses discharge at the empty
+initial environment, so the headline theorems match the paper's statements.
 
 ### 4. Assignment operational semantics order
 
@@ -106,20 +93,20 @@ package the paper's implicit finite heap model.
 Lifetimes are paths with prefix order, the canonical lexical-nesting model,
 rather than an arbitrary partial order.
 
-### 7. Corollary 4.14 is not reproduced
+### 7. Corollary 4.14 is not reproduced as a standalone theorem
 
 The paper's global borrow-safe-environment corollary is not established as a
-theorem; `BorrowSafeEnv` preservation across assignment is in fact false for
-the mechanised write relation (fan-out duplication installs the same loan
-under two bases).  The development uses local prohibitions and the
-rule-carried obligations instead.
+separate theorem; borrow safety is instead threaded as a preservation
+hypothesis/conclusion pair.  (The old fan-out counterexample to its
+preservation died with multi-target borrows.)
 
 ## Bottom line
 
-The mechanised language is now exactly the paper's core calculus, the
-environment invariant is exactly Definition 4.8, and the headline theorem is
-the paper's total Theorem 4.12 for source programs.  The typing rules carry
-five extra premises relative to the printed figures: three provably necessary
-(the printed system's preservation claims are false without them — all
-traceable to Definition 3.23's multi-target write fan-out), and two believed
-admissible but awaiting a hereditary-coherence admissibility proof.
+The mechanised language is now exactly the paper's core calculus with the
+follow-up's single-target borrow grammar and strong-update write, the
+environment invariant is exactly Definition 4.8, and coherence and
+linearizability are gone from the development entirely.  The typing rules
+carry a single extra premise relative to the printed figures
+(`env₂.fresh x` on `T-Declare`, mechanizing the papers' stated
+no-redeclaration assumption).  The strict collapse of the stale-aware
+runtime predicates is in progress (see §2).

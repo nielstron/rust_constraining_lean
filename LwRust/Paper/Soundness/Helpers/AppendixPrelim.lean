@@ -358,29 +358,5 @@ theorem ty_sameShape_of_strengthens {a b : Ty}
     | boxIntoUndef _ _ => trivial
   simpa using aux h
 
-theorem lvalTyping_vars_rank_lt {env : Env} {φ : Name → Nat}
-    {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
-    LinearizedBy φ env →
-    LValTyping env lv ty lifetime →
-    ∀ v, v ∈ PartialTy.vars ty → φ v < φ (LVal.base lv) := by
-  intro hlin htyping
-  induction htyping with
-  | var hslot =>
-      intro v hv
-      exact hlin _ _ hslot v hv
-  | box _ ih =>
-      intro v hv
-      exact ih v (by simpa [PartialTy.vars] using hv)
-  | boxFull _ ih =>
-      intro v hv
-      exact ih v (by simpa [PartialTy.vars, Ty.vars] using hv)
-  | borrow hborrow htarget ihBorrow ihTarget =>
-      rename_i lvTarget target mutable borrowLifetime targetLifetime targetTy
-      intro v hv
-      have htargetBase :
-          LVal.base target ∈ PartialTy.vars (.ty (.borrow mutable target)) := by
-        simp [PartialTy.vars, Ty.vars]
-      exact Nat.lt_trans (ihTarget v hv) (ihBorrow (LVal.base target) htargetBase)
-
 end Paper
 end LwRust

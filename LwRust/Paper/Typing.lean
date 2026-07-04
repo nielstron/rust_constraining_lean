@@ -440,22 +440,6 @@ mutual
         simpa [PartialTy.vars] using h
 end
 
-/-- A fixed rank function witnessing linearizability of an environment. -/
-def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
-  ∀ x slot, env.slotAt x = some slot →
-    ∀ v, v ∈ PartialTy.vars slot.ty → φ v < φ x
-
-/--
-Definition 11 of `lw_rust_followup`, Linearizable typing.
-
-An environment is linearizable when there is a rank function `φ` on variables
-such that every variable strictly outranks all live borrow-target variables
-occurring in its slot type.  This forbids cyclic borrow references and is the
-well-foundedness condition that makes the `LValTyping` recursion terminate.
--/
-def Linearizable (env : Env) : Prop :=
-  ∃ φ : Name → Nat, LinearizedBy φ env
-
 /-- Structural shape equality of full types, ignoring borrow *target lists* but
 keeping the `mutable` flag. -/
 def Ty.sameShape : Ty → Ty → Prop
@@ -706,11 +690,6 @@ def EnvSlotsOutlive (env : Env) (lifetime : Lifetime) : Prop :=
   ∀ x slot,
     env.slotAt x = some slot →
     slot.lifetime ≤ lifetime
-
-theorem Linearizable.of_linearizedBy {φ : Name → Nat} {env : Env} :
-    LinearizedBy φ env → Linearizable env := by
-  intro hφ
-  exact ⟨φ, hφ⟩
 
 /--
 Weaker environment invariant that permits stale loan annotations while keeping
