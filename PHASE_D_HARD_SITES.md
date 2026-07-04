@@ -3,8 +3,8 @@
 Status: `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remains green
 after adding the new strike/path and owner-chain extraction support, the
 owner-route collapse helpers, the dereference-move runtime preservation
-helpers, the direct-variable assignment owner-drop frame, and the first
-pure-owner dereference-assignment alignment kernel:
+helpers, the direct-variable assignment owner-drop frame, and the pure
+partial-box dereference-assignment runtime preservation wrapper:
 
 - `LValTyping.strike_suffix` factors a strike at a typed lvalue into the
   remaining suffix over that lvalue's type.
@@ -73,6 +73,23 @@ pure-owner dereference-assignment alignment kernel:
   reach-exclusion frames: one for the RHS value and one for every unchanged
   sibling slot.  This isolates the remaining assignment work to the generalized
   post-`EnvWrite` reach frame.
+- Added and compiled the pure root-update post-`EnvWrite` chain-leaf reach
+  frame:
+  `LValTyping.update_var_to_source_of_no_conflicts`,
+  `lval_loc_chain_leaf_conflict_or_writeProhibited_update_var_whenInitialized`,
+  `locReads_chain_leaf_conflict_or_writeProhibited_update_var_whenInitialized`,
+  `borrowDependencyWhenInitialized_chain_leaf_update_var_writeProhibited`, and
+  `reachesWhenInitialized_chain_leaf_ne_of_update_var_not_writeProhibited`.
+  This covers the `PathSelect` owner path where the static write result is a
+  single update at `LVal.base lhs`; it does not cover
+  `UpdateAtPath.mutBorrow` re-rooting.
+- Added and compiled `ownerReaches_ownsChain_value` and
+  `ownerReaches_value_ne_chain_leaf_of_unowned_root`, which exclude RHS owner
+  roots from the selected heap leaf using term-store disjointness,
+  `ValueOwnerTargetsHeap`, and `ownsChain_unique`.
+- Added and compiled
+  `preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed`.
+  The pure partial-box dereference assignment case is now proved end-to-end.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked after the compiled helper additions above; current
@@ -85,19 +102,14 @@ full-build failures are:
 - `InitialStates.lean:278` and `InitialStates.lean:676`: unknown identifier
   `preservation`.
 
-The remaining blocker is now narrower: the RHS value and surviving slots can be
-transported into the post-`EnvWrite` environment, but the post-`EnvWrite`
-reachability frame for the selected heap leaf is still missing.  The needed
-lemma is the generalized
-`reachesWhenInitialized_*_ne_of_stored_not_writeProhibited` step under
-`EnvWrite.chain_guarded`: for borrow dependencies in the result environment,
-`EnvWrite.contains_borrow_source` gives a source typing for the borrowed target,
-but the current source-environment `locReads_chain_leaf_*` lemma can still
-return `WriteProhibited env lhs`; the missing strengthening must conclude
-`WriteProhibited env₃ lhs` directly (or force base conflict) by following the
-owner-route collapse through each selected segment.  The direct-variable frame
-is still insufficient because the runtime write location is a heap leaf while
-the static change is a guarded root/graft slot.
+The remaining assignment blocker is the non-pure write-chain case.  The
+post-`EnvWrite` reachability frame is now proved for the `PathSelect` owner
+path where the changed static slot is `LVal.base lhs`; the still-missing step
+is the `UpdateAtPath.mutBorrow` re-rooting case needed by full-box paths that
+pass through a mutable borrow and by the direct borrow-hop assignment helper.
+That case must restart the runtime owner-chain extraction at the borrowed
+target's base variable and use `EnvWrite.chain_guarded` to relate the final
+guarded static slot to the re-rooted runtime leaf.
 
 ## 1. Deref move: struck owner spine after runtime write
 
@@ -122,7 +134,6 @@ exclusion.
 
 Blocked helpers:
 
-- `preservation_assign_deref_box_step_runtime_whenInitialized_of_wellFormed`
 - `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed`
 - `preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFormed`
 
@@ -137,17 +148,16 @@ does not yet expose a runtime lemma connecting the selected heap leaf from
 Concrete subgoals:
 
 - Generalize the initialized reachability/result-environment frame from the
-  now-proved direct variable version to the selected heap leaf.  Borrow-reach
-  cases must conclude `WriteProhibited env₃ lhs` from
-  `EnvWrite.chain_guarded`, `LValTyping.exists_env3`, and the strict
-  `BorrowSafeEnv`/`TyBorrowSafeAgainstEnv` facts; owner-reach cases are covered
-  by the owner-route collapse helpers.
+  now-proved direct variable version to the selected heap leaf.  The pure
+  root-update version is complete; the remaining borrow-reach cases are the
+  `UpdateAtPath.mutBorrow` cases that re-root the runtime descent at the borrow
+  target's base variable while still concluding `WriteProhibited env₃ lhs`.
 - Extract the concrete selected leaf from `Step.assign` and the lhs
   `LValTyping` derivation via `lvalTyping_defined_location_whenInitialized`.
 - For the partial-box owner-chain case, use the new `PathSelect`/`EnvWrite`
   kernel to show that static `EnvWrite` descends through boxes and changes the
-  owner root slot.  The full-box and borrow-hop assignment cases still need the
-  corresponding rebasing step under `EnvWrite.chain_guarded`.
+  owner root slot.  Completed.  The full-box and borrow-hop assignment cases
+  still need the corresponding rebasing step under `EnvWrite.chain_guarded`.
 - Preserve the RHS value and unaffected environment slots after the runtime
   write using `validPartialValueWhenInitialized_update_of_not_live_reaches`.
   The existing variable frame is insufficient because the updated location is
