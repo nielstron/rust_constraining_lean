@@ -46,9 +46,37 @@ pure-owner dereference-assignment alignment kernel:
   and the owner-chain leaf write realizes the `UpdateAtPath` result when the
   RHS validity has already been framed in the result environment and updated
   store.
+- Added and compiled two strict post-write environment transport helpers:
+  `TargetInitialized.envWrite` and
+  `validPartialValueWhenInitialized_envWrite_of_result_contains`.  These move
+  initialized target typings and initialized value validity from the source
+  environment to the post-`EnvWrite` environment using
+  `EnvWrite.chain_guarded`, `LValTyping.exists_env3`, `BorrowSafeEnv`, and
+  `TyBorrowSafeAgainstEnv`.  The stale-borrow branch is discharged from
+  `EnvWrite.contains_borrow_source`: result annotations are either RHS-origin
+  and strictly well-formed in the source environment, or source-slot-origin and
+  covered by `ContainedBorrowsWellFormed`.
+- Added and compiled `PathSelect.update_contains_rhs` and
+  `EnvWrite.deref_box_result_contains`.  These record the pure owner-path
+  static fact needed by dereference assignment: along a box-only selected path,
+  RHS borrow annotations appear in the updated root slot of the post-write
+  environment.
+- Added and compiled the initialized lifetime-drop safe-abstraction wrappers
+  `safeAbstractionWhenInitialized_dropLifetime_of_preserved`,
+  `dropPreservation_lifetime_whenInitialized`, and the
+  `dropLifetime_*_whenInitialized` domain helpers.  These are prerequisites for
+  the singleton `R-BlockB` lifetime-drop proof.
+- Added and compiled
+  `preservation_assign_deref_box_step_runtime_whenInitialized_of_frames`, a
+  framed pure-box dereference-assignment helper.  It proves the entire runtime
+  assignment/write/drop step once supplied with the two result-environment
+  reach-exclusion frames: one for the RHS value and one for every unchanged
+  sibling slot.  This isolates the remaining assignment work to the generalized
+  post-`EnvWrite` reach frame.
 
 The final `lake build` is not green yet because `preservation` is still not
-exported.  Current full-build failures are:
+exported.  Rechecked after the compiled helper additions above; current
+full-build failures are:
 
 - `Appendix9/Lemma_9_9_ValuePreservation.lean:37`: unknown identifier
   `preservation`.
@@ -57,15 +85,19 @@ exported.  Current full-build failures are:
 - `InitialStates.lean:278` and `InitialStates.lean:676`: unknown identifier
   `preservation`.
 
-The remaining blocker is the dereference-assignment result-environment frame:
-the owner-chain leaf and pure-box `UpdateAtPath` alignment are now available,
-but the RHS value and surviving slots still have to be transported into the
-post-`EnvWrite` environment while excluding live borrow dependencies that reach
-the selected heap leaf.  This is the generalized
+The remaining blocker is now narrower: the RHS value and surviving slots can be
+transported into the post-`EnvWrite` environment, but the post-`EnvWrite`
+reachability frame for the selected heap leaf is still missing.  The needed
+lemma is the generalized
 `reachesWhenInitialized_*_ne_of_stored_not_writeProhibited` step under
-`EnvWrite.chain_guarded`; the direct-variable version is not strong enough
-because the runtime write location is a heap leaf while the static change is a
-guarded root/graft slot.
+`EnvWrite.chain_guarded`: for borrow dependencies in the result environment,
+`EnvWrite.contains_borrow_source` gives a source typing for the borrowed target,
+but the current source-environment `locReads_chain_leaf_*` lemma can still
+return `WriteProhibited env lhs`; the missing strengthening must conclude
+`WriteProhibited env₃ lhs` directly (or force base conflict) by following the
+owner-route collapse through each selected segment.  The direct-variable frame
+is still insufficient because the runtime write location is a heap leaf while
+the static change is a guarded root/graft slot.
 
 ## 1. Deref move: struck owner spine after runtime write
 
