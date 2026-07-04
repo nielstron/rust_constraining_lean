@@ -62,9 +62,9 @@ theorem lemma_9_10_assign_var_envShape_frame
     store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) ty env' →
+    EnvWrite env (.var x) ty env' →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
+      ∃ mutable target, envSlot.ty = .ty (.borrow mutable target)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
     store.write (.var x) (.value value) = some storeAfterWrite →

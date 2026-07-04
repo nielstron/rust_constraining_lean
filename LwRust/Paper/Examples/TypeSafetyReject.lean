@@ -19,7 +19,7 @@ def invalidBorrowIntSlot : EnvSlot :=
   { ty := .ty .int, lifetime := InvalidBorrowExample.l }
 
 def invalidBorrowYSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [InvalidBorrowExample.x]),
+  { ty := .ty (Ty.borrow true InvalidBorrowExample.x),
     lifetime := InvalidBorrowExample.l }
 
 /--
@@ -92,18 +92,17 @@ theorem invalidBorrowExample_rejected :
               cases htail2 with
               | singleton hassign =>
                   cases hdeclareX with
-                  | declare _freshX hinitX _hfreshOutX _hcohX hxEnv =>
+                  | declare _freshX hinitX _hfreshOutX hxEnv =>
                       cases hinitX with
                       | const _ =>
                           cases hdeclareY with
-                          | declare _freshY hinitY _hfreshOutY _hcohY hyEnv =>
+                          | declare _freshY hinitY _hfreshOutY hyEnv =>
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
                                     | assign _hRhs _hLhsPost _hshape _hwell
-                                        hwrite _hnoStale _hranked _hrhsTargets
-                                        _hrhsTargetsWf hnotWrite =>
+                                        hwrite hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue
@@ -115,57 +114,16 @@ theorem invalidBorrowExample_rejected :
                                           | strong =>
                                           exact hnotWrite (by
                                             left
-                                            refine ⟨"y", [InvalidBorrowExample.x],
-                                              InvalidBorrowExample.x, ?_,
-                                              by simp, by simp [PathConflicts]⟩
+                                            refine ⟨"y", InvalidBorrowExample.x, ?_,
+                                              by simp [PathConflicts]⟩
                                             refine ⟨
                                               { ty := .ty (Ty.borrow true
-                                                  [InvalidBorrowExample.x]),
+                                                  InvalidBorrowExample.x),
                                                 lifetime := InvalidBorrowExample.l },
                                               ?_, PartialTyContains.here⟩
                                             simp [Env.update, InvalidBorrowExample.x,
                                               InvalidBorrowExample.l, LVal.base])
               | cons _hhead htail => cases htail
-
-/-! ### The minimal RHS-target obligation rejects the multi-target fan-out
-counterexample.
-
-The broad `ContainedBorrowsWellFormed` of the assign result was load-bearing
-exactly because writing through a multi-target borrow `&mut[x,z]` whose targets
-have different lifetimes fans the RHS into a longer-lived slot, and the lhs's
-`targetLifetime` is only the *intersection* of the targets' lifetimes.  The
-minimal replacement `EnvWriteRhsTargetsWellFormed` is UNSATISFIABLE in exactly
-that situation: here the result slot `x @ [0]` holds a borrow of `w @ [0,0]`
-(the RHS edge), and `[0,0]` does not outlive `[0]`, so the obligation fails — it
-rejects the dangling write, confirming the replacement is sound, not merely
-derivable. -/
-def fanoutRejectSlotX : EnvSlot :=
-  { ty := .ty (.borrow true [.var "w"]), lifetime := ([0] : Lifetime) }
-
-def fanoutRejectSlotW : EnvSlot :=
-  { ty := .ty .int, lifetime := ([0, 0] : Lifetime) }
-
-def fanoutRejectEnv : Env :=
-  { slotAt := fun n =>
-      if n = "x" then some fanoutRejectSlotX
-      else if n = "w" then some fanoutRejectSlotW else none }
-
-example :
-    ¬ EnvWriteRhsTargetsWellFormed fanoutRejectEnv (.borrow true [.var "w"]) := by
-  intro h
-  obtain ⟨tTy, tLf, htyp, hle, _⟩ :=
-    h "x" fanoutRejectSlotX true [.var "w"] (.var "w")
-      (by simp [fanoutRejectEnv])
-      (PartialTyContains.here)
-      (by simp)
-      ⟨true, [.var "w"], PartialTyContains.here, by simp⟩
-  rcases LValTyping.var_inv htyp with ⟨slot, hslot, _hty, hlf⟩
-  simp only [fanoutRejectEnv, if_neg (by decide : ("w" : Name) ≠ "x")] at hslot
-  injection hslot with hslotEq
-  subst hslotEq
-  rw [← hlf] at hle
-  simp [fanoutRejectSlotW, fanoutRejectSlotX, LifetimeOutlives,
-    Core.Lifetime.contains] at hle
 
 end Paper
 end LwRust

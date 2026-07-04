@@ -125,7 +125,7 @@ theorem terminatesAsValue_bounded
       _hsize _hsource store _hvalidRuntime _hvalidStoreTyping
       _hwellFormed _hcoh hsafe _hfinite
     have htermTyping :
-        TermTyping _env _typing _lifetime (.borrow true lv) (.borrow true [lv]) _env :=
+        TermTyping _env _typing _lifetime (.borrow true lv) (.borrow true lv) _env :=
       TermTyping.mutBorrow hLv hmutable hnotWrite
     rcases progress_borrow_typing_whenInitialized hsafe htermTyping with hterminal |
       ⟨store', term', hstep⟩
@@ -138,7 +138,7 @@ theorem terminatesAsValue_bounded
       _hsize _hsource store _hvalidRuntime _hvalidStoreTyping
       _hwellFormed _hcoh hsafe _hfinite
     have htermTyping :
-        TermTyping _env _typing _lifetime (.borrow false lv) (.borrow false [lv]) _env :=
+        TermTyping _env _typing _lifetime (.borrow false lv) (.borrow false lv) _env :=
       TermTyping.immBorrow hLv hnotRead
     rcases progress_borrow_typing_whenInitialized hsafe htermTyping with hterminal |
       ⟨store', term', hstep⟩
@@ -177,7 +177,7 @@ theorem terminatesAsValue_bounded
       hcoh hsafe hfinite
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty _hfresh hinner
-      _hfreshOut _hcohObl _henv ih hsize hsource store hvalidRuntime
+      _hfreshOut _henv ih hsize hsource store hvalidRuntime
       hvalidStoreTyping hwellFormed hcoh hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.declare_inner hsource)
@@ -191,8 +191,7 @@ theorem terminatesAsValue_bounded
         (MultiStep.trans (Step.declare rfl) MultiStep.refl)⟩
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime lhs _oldTy rhs
-      rhsTy hRhs hLhsPost hshape hwellTy hwrite _hnoStale _hranked _hcohOut
-      _hrhsTargets hnotWrite ih hsize hsource store hvalidRuntime
+      rhsTy hRhs hLhsPost hshape hwellTy hwrite hnotWrite ih hsize hsource store hvalidRuntime
       hvalidStoreTyping hwellFormed hcoh hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.assign_inner hsource)

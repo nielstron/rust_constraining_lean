@@ -194,15 +194,15 @@ theorem valuePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {lv : LVal}
     {mutable : Bool} {location : Location} :
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv]) env₂ →
+      (.borrow mutable lv) env₂ →
     Step store lifetime (.borrow mutable lv) store
       (.val (.ref { location := location, owner := false })) →
     ValidValue store (.ref { location := location, owner := false })
-      (.borrow mutable [lv]) := by
+      (.borrow mutable lv) := by
   intro _htyping hstep
   cases hstep with
   | borrow hloc =>
-      exact ValidPartialValue.borrow (by simp) hloc
+      exact ValidPartialValue.borrow hloc
 
 /-- Copyable runtime values never contain owning references. -/
 theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
@@ -219,7 +219,7 @@ theorem copy_value_nonOwner {store : ProgramStore} {value : Value} {ty : Ty} :
       rfl
   | immBorrow =>
       cases hvalid with
-      | borrow _hmem _hloc =>
+      | borrow _hloc =>
           rfl
 
 theorem copy_value_nonOwner_whenInitialized {env : Env} {store : ProgramStore}
@@ -237,7 +237,7 @@ theorem copy_value_nonOwner_whenInitialized {env : Env} {store : ProgramStore}
       rfl
   | immBorrow =>
       cases hvalid with
-      | borrowLive _hinitialized _hmem _hloc =>
+      | borrowLive _hinitialized _hloc =>
           rfl
       | borrowStale _hstale =>
           rfl
@@ -933,12 +933,12 @@ theorem storePreservation_borrow_step {store : ProgramStore} {env env₂ : Env}
     {mutable : Bool} {location : Location} :
     store ∼ₛ env →
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv]) env₂ →
+      (.borrow mutable lv) env₂ →
     Step store lifetime (.borrow mutable lv) store
       (.val (.ref { location := location, owner := false })) →
     store ∼ₛ env₂ ∧
       ValidValue store (.ref { location := location, owner := false })
-        (.borrow mutable [lv]) := by
+        (.borrow mutable lv) := by
   intro hsafe htyping hstep
   cases htyping with
   | mutBorrow hLv hmutable hnotWrite =>
@@ -1002,13 +1002,13 @@ theorem preservation_borrow_step_runtime {store : ProgramStore} {env env₂ : En
     store ∼ₛ env →
     ValidRuntimeState store (.borrow mutable lv) →
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv]) env₂ →
+      (.borrow mutable lv) env₂ →
     Step store lifetime (.borrow mutable lv) store
       (.val (.ref { location := location, owner := false })) →
     ValidRuntimeState store (.val (.ref { location := location, owner := false })) ∧
       store ∼ₛ env₂ ∧
       ValidValue store (.ref { location := location, owner := false })
-        (.borrow mutable [lv]) := by
+        (.borrow mutable lv) := by
   intro hsafe hvalidRuntime htyping hstep
   rcases storePreservation_borrow_step hsafe htyping hstep with
     ⟨hsafe₂, hvalidValue⟩
@@ -1279,7 +1279,7 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
       ValidValue store' .unit .unit := by
   intro hvalidStoreTyping hsafe hvalidRuntime htyping hstep
   cases htyping with
-  | declare hfresh hinit _hfreshOut _hcohObl henv₃ =>
+  | declare hfresh hinit _hfreshOut henv₃ =>
       cases hinit with
       | const hvalueTyping =>
           rcases hvalidStoreTyping value (by simp [termValues]) with
@@ -1300,7 +1300,7 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_preserved
     store ∼ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) ty env' →
+    EnvWrite env (.var x) ty env' →
     PartialValueNonOwner oldSlot.value →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
@@ -1341,7 +1341,7 @@ theorem preservation_assign_var_old_nonOwner_step_runtime_of_frames
     store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) ty env' →
+    EnvWrite env (.var x) ty env' →
     PartialValueNonOwner oldSlot.value →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
@@ -1399,7 +1399,7 @@ theorem preservation_assign_var_envShape_step_runtime_of_frames
     store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
-    EnvWrite 0 env (.var x) ty env' →
+    EnvWrite env (.var x) ty env' →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
       ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
@@ -1503,10 +1503,10 @@ theorem preservation_borrow_multistep_runtime {store finalStore : ProgramStore}
     store ∼ₛ env →
     ValidRuntimeState store (.borrow mutable lv) →
     TermTyping env typing lifetime (.borrow mutable lv)
-      (.borrow mutable [lv]) env₂ →
+      (.borrow mutable lv) env₂ →
     MultiStep store lifetime (.borrow mutable lv) finalStore (.val finalValue) →
     ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
-      ValidValue finalStore finalValue (.borrow mutable [lv]) := by
+      ValidValue finalStore finalValue (.borrow mutable lv) := by
   intro hsafe hvalidRuntime htyping hmulti
   exact preservation_runtime_multistep_of_step_to_value
     (by intro hterminal; simp [Terminal] at hterminal)

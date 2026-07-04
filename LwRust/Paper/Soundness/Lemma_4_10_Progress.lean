@@ -792,8 +792,7 @@ theorem progress_assign_value_typing_of_safe {store : ProgramStore} {env env₂ 
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hsafe hstore htyping
   cases htyping with
-  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hnoStale _hranked
-      _hcoh _hrhsTargets _hnotWriteProhibited =>
+  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hnoStale =>
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
@@ -811,8 +810,7 @@ theorem progress_assign_value_typing_whenInitialized {store : ProgramStore}
     ProgressResult store lifetime (.assign lhs (.val value)) := by
   intro hsafe hstore htyping
   cases htyping with
-  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hnoStale _hranked
-      _hcoh _hrhsTargets _hnotWriteProhibited =>
+  | assign hRhs hLhsPost hshape _hwf _hwriteEnv _hnoStale =>
       cases hRhs with
       | const _hvalue =>
           rcases read_defined_of_allocated
@@ -1039,18 +1037,17 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       (EnvSlotsOutlive.weaken houtlives (LifetimeChild.outlives hchild)) hsafe hstore
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm hfreshOut
-      hcohObl henv ih hsize hvst hwf hsafe hstore
+      henv ih hsize hvst hwf hsafe hstore
     exact progress_declare_typing
-      (TermTyping.declare hfresh hterm hfreshOut hcohObl henv)
+      (TermTyping.declare hfresh hterm hfreshOut henv)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing lifetime _targetLifetime _lhs _oldTy _rhs _rhsTy
-      hRhs hLhsPost hshape hwfTy hwrite hnoStale hranked hcoh hrhsTargets hnotWrite
+      hRhs hLhsPost hshape hwfTy hwrite hnoStale
       ih hsize hvst hwf hsafe hstore
     exact progress_assign_typing_whenInitialized hsafe hstore
-      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hnoStale
-        hranked hcoh hrhsTargets hnotWrite)
+      (TermTyping.assign hRhs hLhsPost hshape hwfTy hwrite hnoStale)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_assign_inner hvst) hwf hsafe hstore)
   case singleton =>

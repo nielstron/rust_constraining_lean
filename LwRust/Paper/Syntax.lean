@@ -42,7 +42,7 @@ mutual
   inductive Ty where
     | unit
     | int
-    | borrow (mutable : Bool) (targets : List LVal)
+    | borrow (mutable : Bool) (target : LVal)
     | box (element : Ty)
     deriving BEq, Repr
 

@@ -15,16 +15,15 @@ open Core
 /-! ### Exact type equivalence (`eqvX`)
 
 `eqvX` is stricter than `Ty.eqv`: box contents must be syntactically equal.
-Exact target-list determinism is intentionally not stated here: target-list
-joins may reorder borrow-target lists under boxes, so `eqvX` would be too
-strong for those joins. -/
+Borrow targets are single lvalues in the branch-free core, so borrow equivalence
+records exact target equality. -/
 
 /-- Exact type equivalence: like `Ty.eqv` but `box` contents must be *equal*. -/
 def Ty.eqvX : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
   | .borrow m₁ t₁, .borrow m₂ t₂ =>
-      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
+      m₁ = m₂ ∧ t₁ = t₂
   | .box t₁, .box t₂ => t₁ = t₂
   | _, _ => False
 
