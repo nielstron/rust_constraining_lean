@@ -1,7 +1,9 @@
 # Phase D Hard Sites
 
 Status: `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remains green
-after adding the new strike/path and owner-chain extraction support:
+after adding the new strike/path and owner-chain extraction support, the
+owner-route collapse helpers, and the dereference-move runtime preservation
+helpers:
 
 - `LValTyping.strike_suffix` factors a strike at a typed lvalue into the
   remaining suffix over that lvalue's type.
@@ -12,10 +14,28 @@ after adding the new strike/path and owner-chain extraction support:
   `lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike` derive the
   runtime chain prefix, root/leaf slots, and root/leaf validity directly from
   `SafeAbstraction`, `LValTyping`, and `Strike`.
+- `ownsChain_unique`, `ownsChain_append`, `ownerReaches_ownsChain_stored`, and
+  `ownerReaches_stored_ne_chain_leaf` discharge owner-reach sibling cases for
+  chain-leaf writes.
+- `preservation_move_deref_box_multistep_runtime_whenInitialized_of_wellFormed`
+  and
+  `preservation_move_deref_boxFull_multistep_runtime_whenInitialized_of_wellFormed`
+  are now proved and compile.
+- Direct-variable assignment support now includes the post-write orphaned-owner
+  drop frame (`safeAbstractionWhenInitialized_drops_of_orphaned_values_early`,
+  `droppedValueOwnersOrphaned_assign`) plus result-environment static transport
+  facts (`envWrite_var_rhs_vars_writeProhibited`,
+  `envSlot_partialTy_vars_writeProhibited`,
+  `LValTyping.envWrite_var_to_source_of_no_conflicts`, and
+  `validPartialValueWhenInitialized_envWrite_var_of_no_write`).
 
 The final `lake build` is not green yet because `preservation` is still not
-exported.  The next blocker is no longer owner-chain acyclicity itself, but the
-initialized reachability frame needed after writing the selected heap leaf.
+exported.  The remaining blocker is the assignment runtime frame: the existing
+initialized reachability exclusion still reports write prohibition in the
+source environment, while assignment needs the corresponding exclusion in the
+post-`EnvWrite` result environment (`env₃`) so the `¬ WriteProhibited env₃ lhs`
+premise can frame the RHS value and all surviving slots through the runtime
+write/drop.
 
 ## 1. Deref move: struck owner spine after runtime write
 
@@ -31,21 +51,10 @@ The old proof used `StoreOwnerSpineWhenInitialized.valid_after_strike_nonempty`.
 The fresh file now has the direct `Strike`/`OwnerChainAt` replacement and the
 runtime lvalue-chain extractors listed above.
 
-Remaining concrete subgoals:
-
-- Use `lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike` on the
-  source lvalue, extend the returned prefix by the final `.boxFull` edge, then
-  feed the resulting `OwnerChainAt`/`OwnsChain` into
-  `validPartialValueWhenInitialized_strike_write`.
-- Generalize the solved variable reachability frame
-  `reachesWhenInitialized_var_ne_of_stored_not_writeProhibited` from
-  `VariableProjection x` to the selected heap leaf of an owner chain.  Owner
-  reaches should be discharged by `ValidPartialValueWhenInitialized.
-  no_storage_ownership_cycle`/`ValidStore`; live borrow reaches need the
-  corresponding `¬ WriteProhibited env source.deref` conflict exclusion.
-- Use that generalized frame for the moved value and for all other safe
-  abstraction slots via `validPartialValueWhenInitialized_update_of_not_live_reaches`,
-  then transport through `ValidPartialValueWhenInitialized.move_env`.
+Completed: both dereference move helpers are proved.  The owner-chain witness is
+extracted from the runtime lvalue computation, the struck static slot is aligned
+with `EnvMove`, and all other slots are framed with the chain-leaf reach
+exclusion.
 
 ## 2. Deref assign: runtime leaf and static graft alignment
 
@@ -65,6 +74,11 @@ does not yet expose a runtime lemma connecting the selected heap leaf from
 
 Concrete subgoals:
 
+- Generalize the initialized reachability frame one more step so the
+  borrow-reach cases conclude `WriteProhibited env₃ lhs` from
+  `EnvWrite.chain_guarded`, not `WriteProhibited env₂ lhs` from the source
+  environment.  The owner-reach cases are already covered by the owner-route
+  collapse helpers.
 - Extract the concrete selected leaf from `Step.assign` and the lhs
   `LValTyping` derivation via `lvalTyping_defined_location_whenInitialized`.
 - Prove that the static `EnvWrite` changed either no slot or the single
@@ -96,12 +110,12 @@ heap tree and the assignment step drops the overwritten value after the write.
 
 Concrete subgoals:
 
-- Build the full old-owner direct-variable assignment frame over
+- Finish the full old-owner direct-variable assignment frame over
   `validRuntimeState_assign_step_of_postWriteDrop_invariants`.
 - Show owners in the old value become orphaned after the write, then are safely
-  removed by `Drops`.
+  removed by `Drops` (the orphaned-owner and drop-frame kernels are now proved).
 - Preserve the RHS value and all other variables through write plus drop using
-  the existing reach/drop-avoidance lemmas.
+  the result-environment reach frame described above.
 
 ## 4. Singleton block final value lifetime drop
 
