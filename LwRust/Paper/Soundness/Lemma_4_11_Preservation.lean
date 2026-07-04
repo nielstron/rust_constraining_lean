@@ -2088,6 +2088,352 @@ theorem preservation_block_terminal_multistep_runtime_whenInitialized_of_first_s
   · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
     exact hblockB value store' hterms hdrops htail
 
+/-! ### Lifetime-tree facts and static invariant transports (single-target)
+
+Support for the static walk `typingPreservesWellFormedWhenInitialized_of_sourceTerm`:
+fresh-declaration update and block lifetime-drop transports for the two-part
+`WellFormedEnvWhenInitialized` invariant.
+-/
+
+theorem LifetimeChild.parent_of_outlives_child_ne {parent child slot : Lifetime} :
+    LifetimeChild parent child →
+    slot ≤ child →
+    slot ≠ child →
+    slot ≤ parent := by
+  intro hchild hslot hne
+  rcases hchild with ⟨label, hpath⟩
+  have hslotPrefix : slot.path <+: child.path := by
+    simpa [LifetimeOutlives, Core.Lifetime.contains] using hslot
+  have hparentPrefix : parent.path <+: child.path := by
+    simp [hpath]
+  have hslotLenLeChild : slot.path.length ≤ child.path.length :=
+    hslotPrefix.length_le
+  have hslotLenNeChild : slot.path.length ≠ child.path.length := by
+    intro hlen
+    have hpathEq : slot.path = child.path := hslotPrefix.eq_of_length hlen
+    apply hne
+    cases slot
+    cases child
+    simp at hpathEq ⊢
+    exact hpathEq
+  have hslotLenLtChild : slot.path.length < child.path.length :=
+    Nat.lt_of_le_of_ne hslotLenLeChild hslotLenNeChild
+  have hslotLenLeParent : slot.path.length ≤ parent.path.length := by
+    rw [hpath, List.length_append] at hslotLenLtChild
+    simp at hslotLenLtChild
+    exact hslotLenLtChild
+  have hslotParentPrefix : slot.path <+: parent.path :=
+    List.prefix_of_prefix_length_le hslotPrefix hparentPrefix hslotLenLeParent
+  simpa [LifetimeOutlives, Core.Lifetime.contains] using hslotParentPrefix
+
+/-- Forgetting a lifetime drop: a typing in the dropped environment also types
+in the original environment. -/
+theorem LValTyping.of_dropLifetime {env : Env} {child : Lifetime} :
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping (env.dropLifetime child) lv pt lf →
+      LValTyping env lv pt lf := by
+  intro lv pt lf htyping
+  induction htyping with
+  | var hslot =>
+      exact .var (Env.dropLifetime_slotAt_eq_some.mp hslot).1
+  | box _ ih => exact .box ih
+  | boxFull _ ih => exact .boxFull ih
+  | borrow _ _ ihBorrow ihTarget => exact .borrow ihBorrow ihTarget
+
+/-- With the initialized borrow invariant, a typing lifetime is bounded by any
+lifetime the base slot outlives: variable and box steps inherit the base slot
+lifetime, and a borrow hop's result lifetime is bounded by the hop's borrow
+lifetime through the slot invariant. -/
+theorem LValTyping.lifetime_le_of_base_outlives_whenInitialized {env : Env}
+    {parent : Lifetime} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env lv pt lf →
+      LValBaseOutlives env lv parent →
+      lf ≤ parent := by
+  intro hcbwf lv pt lf htyping
+  induction htyping with
+  | var hslot =>
+      intro hbase
+      rcases hbase with ⟨slot', hslot', hle⟩
+      have hEq : _ = slot' := Option.some.inj (hslot.symm.trans hslot')
+      exact hEq ▸ hle
+  | box _ ih => exact ih
+  | boxFull _ ih => exact ih
+  | borrow hw hu ihBorrow _ihTarget =>
+      intro hbase
+      have hlfw := ihBorrow hbase
+      have hslotWF :=
+        LValTyping.partialTyBorrowsWellFormedInSlotWhenInitialized hcbwf hw
+          PartialTyContains.here
+      rcases hslotWF.2 ⟨_, _, hu⟩ with ⟨ty₀, lf₀, hty₀, hle₀, _hbase₀⟩
+      have hdet := LValTyping.deterministic hu hty₀
+      exact LifetimeOutlives.trans (hdet.2 ▸ hle₀) hlfw
+
+/-- Reverse fresh-update transport: a typing in the updated environment whose
+base is not the fresh name already types in the original environment (borrow
+hops stay away from the fresh name because their targets have live base slots
+in the original environment). -/
+theorem LValTyping.of_update_fresh {env : Env} {x : Name} {slot : EnvSlot} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    env.fresh x →
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping (env.update x slot) lv pt lf →
+      LVal.base lv ≠ x →
+      LValTyping env lv pt lf := by
+  intro hcbwf hfresh lv pt lf htyping
+  induction htyping with
+  | var hslot' =>
+      intro hne
+      rename_i y s
+      have hne' : y ≠ x := hne
+      exact .var (by simpa [Env.update, hne'] using hslot')
+  | box _ ih =>
+      intro hne
+      exact .box (ih hne)
+  | boxFull _ ih =>
+      intro hne
+      exact .boxFull (ih hne)
+  | borrow hw hu ihBorrow ihTarget =>
+      intro hne
+      rename_i w u m blf tlf tty
+      have hwOld := ihBorrow hne
+      have hslotWF :=
+        LValTyping.partialTyBorrowsWellFormedInSlotWhenInitialized hcbwf hwOld
+          PartialTyContains.here
+      rcases hslotWF.1 with ⟨baseSlot, hbaseSlot, _⟩
+      have hbaseNe : LVal.base u ≠ x := by
+        intro h
+        unfold Env.fresh at hfresh
+        rw [h, hfresh] at hbaseSlot
+        cases hbaseSlot
+      exact .borrow hwOld (ihTarget hbaseNe)
+
+theorem LValBaseOutlives.base_ne_of_fresh {env : Env} {x : Name}
+    {target : LVal} {lifetime : Lifetime} :
+    env.fresh x →
+    LValBaseOutlives env target lifetime →
+    LVal.base target ≠ x := by
+  intro hfresh hbase h
+  rcases hbase with ⟨baseSlot, hbaseSlot, _⟩
+  unfold Env.fresh at hfresh
+  rw [h, hfresh] at hbaseSlot
+  cases hbaseSlot
+
+theorem LValBaseOutlives.update_of_base_ne {env : Env} {x : Name}
+    {slot : EnvSlot} {target : LVal} {lifetime : Lifetime} :
+    LVal.base target ≠ x →
+    LValBaseOutlives env target lifetime →
+    LValBaseOutlives (env.update x slot) target lifetime := by
+  intro hne hbase
+  rcases hbase with ⟨baseSlot, hbaseSlot, hle⟩
+  exact ⟨baseSlot, by simpa [Env.update, hne] using hbaseSlot, hle⟩
+
+theorem BorrowTargetsWellFormedInSlotWhenInitialized.update_fresh {env : Env}
+    {x : Name} {slot : EnvSlot} {slotLifetime : Lifetime} {target : LVal} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    env.fresh x →
+    BorrowTargetsWellFormedInSlotWhenInitialized env slotLifetime target →
+    BorrowTargetsWellFormedInSlotWhenInitialized (env.update x slot)
+      slotLifetime target := by
+  intro hcbwf hfresh htarget
+  rcases htarget with ⟨hbase, hcond⟩
+  have hbaseNe := LValBaseOutlives.base_ne_of_fresh hfresh hbase
+  refine ⟨LValBaseOutlives.update_of_base_ne hbaseNe hbase, ?_⟩
+  rintro ⟨ty', lf', hty'⟩
+  have htyOld := LValTyping.of_update_fresh hcbwf hfresh hty' hbaseNe
+  rcases hcond ⟨_, _, htyOld⟩ with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+  exact ⟨ty₀, lf₀, LValTyping.update_fresh_one hfresh hty₀, hle₀,
+    LValBaseOutlives.update_of_base_ne hbaseNe hbase₀⟩
+
+theorem borrowTargetsWellFormedInSlotWhenInitialized_of_wellFormedTyWhenInitialized_contains
+    {env : Env} {ty : Ty} {lifetime : Lifetime} {mutable : Bool}
+    {target : LVal} :
+    WellFormedTyWhenInitialized env ty lifetime →
+    PartialTyContains (.ty ty) (.borrow mutable target) →
+    BorrowTargetsWellFormedInSlotWhenInitialized env lifetime target := by
+  intro hwellTy hcontains
+  induction hwellTy with
+  | unit => cases hcontains
+  | int => cases hcontains
+  | borrow htargets =>
+      cases hcontains with
+      | here => exact htargets
+  | box _ ih =>
+      cases hcontains with
+      | tyBox hcontains' => exact ih hcontains'
+
+theorem ContainedBorrowsWellFormedWhenInitialized.update_fresh_ty
+    {env : Env} {x : Name} {ty : Ty} {lifetime : Lifetime} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    WellFormedTyWhenInitialized env ty lifetime →
+    env.fresh x →
+    ContainedBorrowsWellFormedWhenInitialized
+      (env.update x { ty := .ty ty, lifetime := lifetime }) := by
+  intro hcontained hwellTy hfresh y envSlot mutable target hslot hcontains
+  by_cases hy : y = x
+  · subst hy
+    have hslotEq :
+        envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+      have h :
+          { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+        simpa [Env.update] using hslot
+      exact h.symm
+    subst hslotEq
+    rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+    have hcontainedEq :
+        containedSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+      have h :
+          { ty := PartialTy.ty ty, lifetime := lifetime } = containedSlot := by
+        simpa [Env.update] using hcontainedSlot
+      exact h.symm
+    subst hcontainedEq
+    exact BorrowTargetsWellFormedInSlotWhenInitialized.update_fresh
+      hcontained hfresh
+      (borrowTargetsWellFormedInSlotWhenInitialized_of_wellFormedTyWhenInitialized_contains
+        hwellTy hcontainsTy)
+  · have hslotOld : env.slotAt y = some envSlot := by
+      simpa [Env.update, hy] using hslot
+    have hcontainsOld : env ⊢ y ↝ Ty.borrow mutable target := by
+      rcases hcontains with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+      have hcontainedOld : env.slotAt y = some containedSlot := by
+        simpa [Env.update, hy] using hcontainedSlot
+      exact ⟨containedSlot, hcontainedOld, hcontainsTy⟩
+    exact BorrowTargetsWellFormedInSlotWhenInitialized.update_fresh
+      hcontained hfresh
+      (hcontained y envSlot mutable target hslotOld hcontainsOld)
+
+theorem WellFormedEnvWhenInitialized.update_fresh_ty {env : Env} {x : Name}
+    {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnvWhenInitialized env lifetime →
+    WellFormedTyWhenInitialized env ty lifetime →
+    env.fresh x →
+    WellFormedEnvWhenInitialized
+      (env.update x { ty := .ty ty, lifetime := lifetime }) lifetime := by
+  intro hwellEnv hwellTy hfresh
+  refine ⟨ContainedBorrowsWellFormedWhenInitialized.update_fresh_ty
+      hwellEnv.1 hwellTy hfresh, ?_⟩
+  intro y envSlot hslot
+  by_cases hy : y = x
+  · subst hy
+    have hslotEq :
+        envSlot = { ty := PartialTy.ty ty, lifetime := lifetime } := by
+      have h :
+          { ty := PartialTy.ty ty, lifetime := lifetime } = envSlot := by
+        simpa [Env.update] using hslot
+      exact h.symm
+    subst hslotEq
+    exact LifetimeOutlives.refl lifetime
+  · have hslotOld : env.slotAt y = some envSlot := by
+      simpa [Env.update, hy] using hslot
+    exact hwellEnv.2 y envSlot hslotOld
+
+/-- Forward lifetime-drop transport for typings whose base outlives the parent
+lifetime. -/
+theorem LValTyping.dropLifetime_child_whenInitialized {env : Env}
+    {parent child : Lifetime} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormedWhenInitialized env →
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env lv pt lf →
+      LValBaseOutlives env lv parent →
+      LValTyping (env.dropLifetime child) lv pt lf := by
+  intro hchild hcbwf lv pt lf htyping
+  induction htyping with
+  | var hslot =>
+      intro hbase
+      rcases hbase with ⟨slot', hslot', hle⟩
+      have hEq : _ = slot' := Option.some.inj (hslot.symm.trans hslot')
+      refine .var (Env.dropLifetime_slotAt_eq_some.mpr ⟨hslot, ?_⟩)
+      intro hlifetimeEq
+      exact LifetimeChild.not_child_outlives_parent hchild
+        (hlifetimeEq ▸ hEq ▸ hle)
+  | box _ ih =>
+      intro hbase
+      exact .box (ih hbase)
+  | boxFull _ ih =>
+      intro hbase
+      exact .boxFull (ih hbase)
+  | borrow hw hu ihBorrow ihTarget =>
+      intro hbase
+      have hslotWF :=
+        LValTyping.partialTyBorrowsWellFormedInSlotWhenInitialized hcbwf hw
+          PartialTyContains.here
+      have hlfw :=
+        LValTyping.lifetime_le_of_base_outlives_whenInitialized hcbwf hw hbase
+      rcases hslotWF.2 ⟨_, _, hu⟩ with ⟨ty₀, lf₀, hty₀, _hle₀, hbase₀⟩
+      have hbaseU : LValBaseOutlives env _ parent :=
+        LValBaseOutlives.weaken hbase₀ hlfw
+      exact .borrow (ihBorrow hbase) (ihTarget hbaseU)
+
+theorem BorrowTargetsWellFormedInSlotWhenInitialized.dropLifetime_child
+    {env : Env} {parent child slotLifetime : Lifetime} {target : LVal} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormedWhenInitialized env →
+    slotLifetime ≤ parent →
+    BorrowTargetsWellFormedInSlotWhenInitialized env slotLifetime target →
+    BorrowTargetsWellFormedInSlotWhenInitialized (env.dropLifetime child)
+      slotLifetime target := by
+  intro hchild hcbwf hslotLe htarget
+  rcases htarget with ⟨hbase, hcond⟩
+  refine ⟨LValBaseOutlives.dropLifetime_child hchild hslotLe hbase, ?_⟩
+  rintro ⟨ty', lf', hty'⟩
+  have htyOld := LValTyping.of_dropLifetime hty'
+  rcases hcond ⟨_, _, htyOld⟩ with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+  exact ⟨ty₀, lf₀,
+    LValTyping.dropLifetime_child_whenInitialized hchild hcbwf hty₀
+      (LValBaseOutlives.weaken hbase₀ hslotLe), hle₀,
+    LValBaseOutlives.dropLifetime_child hchild hslotLe hbase₀⟩
+
+theorem ContainedBorrowsWellFormedWhenInitialized.dropLifetime_child
+    {env : Env} {parent child : Lifetime} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormedWhenInitialized env →
+    EnvSlotsOutlive env child →
+    ContainedBorrowsWellFormedWhenInitialized (env.dropLifetime child) := by
+  intro hchild hcbwf hout x slot mutable target hslot hcontains
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨hold, hne⟩
+  have hcontOld : env ⊢ x ↝ Ty.borrow mutable target :=
+    EnvContains.dropLifetime_of_contains hcontains
+  have hslotParent : slot.lifetime ≤ parent :=
+    LifetimeChild.parent_of_outlives_child_ne hchild (hout x slot hold) hne
+  exact BorrowTargetsWellFormedInSlotWhenInitialized.dropLifetime_child
+    hchild hcbwf hslotParent (hcbwf x slot mutable target hold hcontOld)
+
+theorem WellFormedTyWhenInitialized.dropLifetime_child {env : Env}
+    {parent child : Lifetime} {ty : Ty} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormedWhenInitialized env →
+    WellFormedTyWhenInitialized env ty parent →
+    WellFormedTyWhenInitialized (env.dropLifetime child) ty parent := by
+  intro hchild hcbwf hwellTy
+  induction hwellTy with
+  | unit => exact .unit
+  | int => exact .int
+  | borrow htargets =>
+      exact .borrow
+        (BorrowTargetsWellFormedInSlotWhenInitialized.dropLifetime_child
+          hchild hcbwf (LifetimeOutlives.refl _) htargets)
+  | box _ ih => exact .box (ih hchild)
+
+theorem block_preserves_wellFormedWhenInitialized {env₂ env₃ : Env}
+    {lifetime blockLifetime : Lifetime} {ty : Ty} :
+    LifetimeChild lifetime blockLifetime →
+    WellFormedEnvWhenInitialized env₂ blockLifetime →
+    WellFormedTyWhenInitialized env₂ ty lifetime →
+    env₃ = env₂.dropLifetime blockLifetime →
+    WellFormedEnvWhenInitialized env₃ lifetime ∧
+      WellFormedTyWhenInitialized env₃ ty lifetime := by
+  intro hchild hwellBody hwellTy hdrop
+  subst hdrop
+  refine ⟨⟨ContainedBorrowsWellFormedWhenInitialized.dropLifetime_child hchild
+      hwellBody.1 hwellBody.2, ?_⟩,
+    WellFormedTyWhenInitialized.dropLifetime_child hchild hwellBody.1 hwellTy⟩
+  intro x slot hslot
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨hold, hne⟩
+  exact LifetimeChild.parent_of_outlives_child_ne hchild
+    (hwellBody.2 x slot hold) hne
+
 end Paper
 end LwRust
 
