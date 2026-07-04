@@ -2899,6 +2899,328 @@ theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
       exact ihRest (SourceTerm.block_tail hsource) hhead.1)
     htyping hsource hwellFormed
 
+/-! ### Strict collapse: foundation twins
+
+Strict counterparts of the initialized-conditional projection and bound
+lemmas.  With single-target borrows and no joins, moved-out borrow targets
+cannot arise, so the strict (paper) predicates are maintainable and the
+conditional family becomes obsolete.
+-/
+
+theorem LValTyping.partialTyBorrowsWellFormedInSlot {env : Env} :
+    ContainedBorrowsWellFormed env →
+    ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
+      LValTyping env lv partialTy lifetime →
+      PartialTyBorrowsWellFormedInSlot env lifetime partialTy := by
+  intro hcontained lv partialTy lifetime htyping
+  induction htyping with
+  | var hslot =>
+      intro mutable target hcontains
+      exact hcontained _ _ mutable target hslot ⟨_, hslot, hcontains⟩
+  | box _ ih =>
+      exact PartialTyBorrowsWellFormedInSlot.box_inv ih
+  | boxFull _ ih =>
+      intro mutable target hcontains
+      exact ih (PartialTyContains.tyBox hcontains)
+  | borrow _ _ _ ihTarget =>
+      exact ihTarget
+
+theorem wellFormedTy_of_partialTyBorrows
+    {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    PartialTyBorrowsWellFormedInSlot env lifetime (.ty ty) →
+    WellFormedTy env ty lifetime := by
+  exact Ty.rec
+    (motive_1 := fun ty =>
+      PartialTyBorrowsWellFormedInSlot env lifetime (.ty ty) →
+      WellFormedTy env ty lifetime)
+    (motive_2 := fun _partialTy => True)
+    (by
+      intro _hborrows
+      exact WellFormedTy.unit)
+    (by
+      intro _hborrows
+      exact WellFormedTy.int)
+    (by
+      intro mutable target hborrows
+      exact WellFormedTy.borrow
+        (BorrowTargetsWellFormedInSlot.toBorrowTargetsWellFormed
+          (hborrows PartialTyContains.here) (LifetimeOutlives.refl _)))
+    (by
+      intro inner ih hborrows
+      exact WellFormedTy.box
+        (ih (by
+          intro mutable target hcontains
+          exact hborrows (PartialTyContains.tyBox hcontains))))
+    (by intro _type _ih; trivial)
+    (by intro _inner _ih; trivial)
+    (by intro _shape _ih; trivial)
+    ty
+
+theorem LValTyping.wellFormedTy {env : Env}
+    {current : Lifetime} {lv : LVal} {ty : Ty} {lifetime : Lifetime} :
+    WellFormedEnv env current →
+    LValTyping env lv (.ty ty) lifetime →
+    WellFormedTy env ty current := by
+  intro hwell htyping
+  have hselected :
+      PartialTyBorrowsWellFormedInSlot env lifetime (.ty ty) :=
+    LValTyping.partialTyBorrowsWellFormedInSlot hwell.1 htyping
+  have hty : WellFormedTy env ty lifetime :=
+    wellFormedTy_of_partialTyBorrows hselected
+  exact WellFormedTy.weaken hty
+    (LValTyping.lifetime_outlives_one hwell.2 htyping)
+
+/-- Strict twin of the initialized lifetime bound: with the strict borrow
+invariant the hop case reads the target's typing bound directly. -/
+theorem LValTyping.lifetime_le_of_base_outlives {env : Env}
+    {parent : Lifetime} :
+    ContainedBorrowsWellFormed env →
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env lv pt lf →
+      LValBaseOutlives env lv parent →
+      lf ≤ parent := by
+  intro hcbwf lv pt lf htyping
+  induction htyping with
+  | var hslot =>
+      intro hbase
+      rcases hbase with ⟨slot', hslot', hle⟩
+      have hEq : _ = slot' := Option.some.inj (hslot.symm.trans hslot')
+      exact hEq ▸ hle
+  | box _ ih => exact ih
+  | boxFull _ ih => exact ih
+  | borrow hw hu ihBorrow _ihTarget =>
+      intro hbase
+      have hlfw := ihBorrow hbase
+      have hslotWF :=
+        LValTyping.partialTyBorrowsWellFormedInSlot hcbwf hw
+          PartialTyContains.here
+      rcases hslotWF with ⟨ty₀, lf₀, hty₀, hle₀, _hbase₀⟩
+      have hdet := LValTyping.deterministic hu hty₀
+      exact LifetimeOutlives.trans (hdet.2 ▸ hle₀) hlfw
+
+/-- Strict forward lifetime-drop transport. -/
+theorem LValTyping.dropLifetime_child_of_base_outlives {env : Env}
+    {parent child : Lifetime} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormed env →
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env lv pt lf →
+      LValBaseOutlives env lv parent →
+      LValTyping (env.dropLifetime child) lv pt lf := by
+  intro hchild hcbwf lv pt lf htyping
+  induction htyping with
+  | var hslot =>
+      intro hbase
+      rcases hbase with ⟨slot', hslot', hle⟩
+      have hEq : _ = slot' := Option.some.inj (hslot.symm.trans hslot')
+      refine .var (Env.dropLifetime_slotAt_eq_some.mpr ⟨hslot, ?_⟩)
+      intro hlifetimeEq
+      exact LifetimeChild.not_child_outlives_parent hchild
+        (hlifetimeEq ▸ hEq ▸ hle)
+  | box _ ih =>
+      intro hbase
+      exact .box (ih hbase)
+  | boxFull _ ih =>
+      intro hbase
+      exact .boxFull (ih hbase)
+  | borrow hw hu ihBorrow ihTarget =>
+      intro hbase
+      have hslotWF :=
+        LValTyping.partialTyBorrowsWellFormedInSlot hcbwf hw
+          PartialTyContains.here
+      have hlfw :=
+        LValTyping.lifetime_le_of_base_outlives hcbwf hw hbase
+      rcases hslotWF with ⟨ty₀, lf₀, hty₀, _hle₀, hbase₀⟩
+      have hbaseU : LValBaseOutlives env _ parent :=
+        LValBaseOutlives.weaken hbase₀ hlfw
+      exact .borrow (ihBorrow hbase) (ihTarget hbaseU)
+
+theorem BorrowTargetsWellFormedInSlot.dropLifetime_child
+    {env : Env} {parent child slotLifetime : Lifetime} {target : LVal} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormed env →
+    slotLifetime ≤ parent →
+    BorrowTargetsWellFormedInSlot env slotLifetime target →
+    BorrowTargetsWellFormedInSlot (env.dropLifetime child)
+      slotLifetime target := by
+  intro hchild hcbwf hslotLe htarget
+  rcases htarget with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+  exact ⟨ty₀, lf₀,
+    LValTyping.dropLifetime_child_of_base_outlives hchild hcbwf hty₀
+      (LValBaseOutlives.weaken hbase₀ hslotLe), hle₀,
+    LValBaseOutlives.dropLifetime_child hchild hslotLe hbase₀⟩
+
+theorem ContainedBorrowsWellFormed.dropLifetime_child
+    {env : Env} {parent child : Lifetime} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormed env →
+    EnvSlotsOutlive env child →
+    ContainedBorrowsWellFormed (env.dropLifetime child) := by
+  intro hchild hcbwf hout x slot mutable target hslot hcontains
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨hold, hne⟩
+  have hcontOld : env ⊢ x ↝ Ty.borrow mutable target :=
+    EnvContains.dropLifetime_of_contains hcontains
+  have hslotParent : slot.lifetime ≤ parent :=
+    LifetimeChild.parent_of_outlives_child_ne hchild (hout x slot hold) hne
+  exact BorrowTargetsWellFormedInSlot.dropLifetime_child
+    hchild hcbwf hslotParent (hcbwf x slot mutable target hold hcontOld)
+
+theorem WellFormedTy.dropLifetime_child {env : Env}
+    {parent child : Lifetime} {ty : Ty} :
+    LifetimeChild parent child →
+    ContainedBorrowsWellFormed env →
+    WellFormedTy env ty parent →
+    WellFormedTy (env.dropLifetime child) ty parent := by
+  intro hchild hcbwf hwellTy
+  induction hwellTy with
+  | unit => exact .unit
+  | int => exact .int
+  | borrow htargets =>
+      rcases htargets with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+      exact .borrow ⟨ty₀, lf₀,
+        LValTyping.dropLifetime_child_of_base_outlives hchild hcbwf hty₀
+          hbase₀, hle₀,
+        LValBaseOutlives.dropLifetime_child hchild
+          (LifetimeOutlives.refl _) hbase₀⟩
+  | box _ ih => exact .box (ih hchild)
+
+theorem block_preserves_wellFormed {env₂ env₃ : Env}
+    {lifetime blockLifetime : Lifetime} {ty : Ty} :
+    LifetimeChild lifetime blockLifetime →
+    WellFormedEnv env₂ blockLifetime →
+    WellFormedTy env₂ ty lifetime →
+    env₃ = env₂.dropLifetime blockLifetime →
+    WellFormedEnv env₃ lifetime ∧ WellFormedTy env₃ ty lifetime := by
+  intro hchild hwellBody hwellTy hdrop
+  subst hdrop
+  refine ⟨⟨ContainedBorrowsWellFormed.dropLifetime_child hchild
+      hwellBody.1 hwellBody.2, ?_⟩,
+    WellFormedTy.dropLifetime_child hchild hwellBody.1 hwellTy⟩
+  intro x slot hslot
+  rcases Env.dropLifetime_slotAt_eq_some.mp hslot with ⟨hold, hne⟩
+  exact LifetimeChild.parent_of_outlives_child_ne hchild
+    (hwellBody.2 x slot hold) hne
+
+/-- Strict forward move transport: a typing whose route cannot conflict with
+the moved place survives the strike. -/
+theorem LValTyping.move_of_no_conflicts {env moved : Env} {movedLv : LVal} :
+    ContainedBorrowsWellFormed env →
+    EnvMove env movedLv moved →
+    ¬ WriteProhibited env movedLv →
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      ¬ lv ⋈ movedLv →
+      LValTyping env lv pt lf →
+      LValTyping moved lv pt lf := by
+  intro hcbwf hmove hnotWrite lv pt lf hnoConflict htyping
+  induction htyping with
+  | var hslot =>
+      rename_i y s
+      have hne : y ≠ LVal.base movedLv := hnoConflict
+      rcases hmove with ⟨movedSlot, struck, hmovedSlot, _hstrike, hmoved⟩
+      subst hmoved
+      exact .var (by simpa [Env.update, hne] using hslot)
+  | box _ ih =>
+      exact .box (ih hnoConflict)
+  | boxFull _ ih =>
+      exact .boxFull (ih hnoConflict)
+  | borrow hw hu ihBorrow ihTarget =>
+      rename_i w u m blf tlf tty
+      have hcontains :=
+        LValTyping.contains_borrow hw PartialTyContains.here
+      rcases hcontains with ⟨z, hcont⟩
+      have hnoConflictU : ¬ u ⋈ movedLv := by
+        intro hconflict
+        exact hnotWrite
+          (WriteProhibited.of_contains_conflict hcont hconflict)
+      exact .borrow (ihBorrow hnoConflict) (ihTarget hnoConflictU)
+
+theorem ContainedBorrowsWellFormed.move {env moved : Env} {lv : LVal} :
+    ContainedBorrowsWellFormed env →
+    EnvMove env lv moved →
+    ¬ WriteProhibited env lv →
+    ContainedBorrowsWellFormed moved := by
+  intro hcbwf hmove hnotWrite x slot mutable target hslot hcontainsMoved
+  have hcontainsSource : env ⊢ x ↝ (.borrow mutable target) :=
+    EnvMove.contains_borrow_source hmove hslot hcontainsMoved
+  rcases hcontainsSource with ⟨sourceSlot, hsourceSlot, hsourceContainsTy⟩
+  have htargetOld :=
+    hcbwf x sourceSlot mutable target hsourceSlot
+      ⟨sourceSlot, hsourceSlot, hsourceContainsTy⟩
+  have hlife : sourceSlot.lifetime = slot.lifetime := by
+    rcases hmove with ⟨movedSlot, struck, hmovedSlot, _hstrike, hmoved⟩
+    subst hmoved
+    by_cases hx : x = LVal.base lv
+    · subst hx
+      have h₁ : sourceSlot = movedSlot :=
+        Option.some.inj (hsourceSlot.symm.trans hmovedSlot)
+      have h₂ : slot = { movedSlot with ty := struck } :=
+        (Option.some.inj (by simpa [Env.update] using hslot)).symm
+      rw [h₁, h₂]
+    · have h : env.slotAt x = some slot := by
+        simpa [Env.update, hx] using hslot
+      rw [Option.some.inj (hsourceSlot.symm.trans h)]
+  rcases htargetOld with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+  have hnoConflictTarget : ¬ target ⋈ lv := by
+    intro hconflict
+    exact hnotWrite
+      (WriteProhibited.of_contains_conflict
+        ⟨sourceSlot, hsourceSlot, hsourceContainsTy⟩ hconflict)
+  exact ⟨ty₀, lf₀,
+    LValTyping.move_of_no_conflicts hcbwf hmove hnotWrite
+      hnoConflictTarget hty₀, hlife ▸ hle₀,
+    LValBaseOutlives.move hmove (hlife ▸ hbase₀)⟩
+
+theorem WellFormedEnv.move {env moved : Env} {lv : LVal}
+    {current : Lifetime} :
+    WellFormedEnv env current →
+    EnvMove env lv moved →
+    ¬ WriteProhibited env lv →
+    WellFormedEnv moved current := by
+  intro hwell hmove hnotWrite
+  refine ⟨ContainedBorrowsWellFormed.move hwell.1 hmove hnotWrite, ?_⟩
+  intro x slot hslot
+  rcases hmove with ⟨movedSlot, struck, hmovedSlot, _hstrike, hmoved⟩
+  subst hmoved
+  by_cases hx : x = LVal.base lv
+  · subst hx
+    have h : slot = { movedSlot with ty := struck } :=
+      (Option.some.inj (by simpa [Env.update] using hslot)).symm
+    subst h
+    exact hwell.2 _ movedSlot hmovedSlot
+  · exact hwell.2 x slot (by simpa [Env.update, hx] using hslot)
+
+/-- The moved-out type stays strictly well formed after the move. -/
+theorem WellFormedTy.move {env moved : Env} {lv : LVal}
+    {ty : Ty} {lifetime : Lifetime} :
+    ContainedBorrowsWellFormed env →
+    EnvMove env lv moved →
+    ¬ WriteProhibited env lv →
+    (∀ {mutable : Bool} {target : LVal},
+      PartialTyContains (.ty ty) (.borrow mutable target) →
+      ∃ x, env ⊢ x ↝ (.borrow mutable target)) →
+    WellFormedTy env ty lifetime →
+    WellFormedTy moved ty lifetime := by
+  intro hcbwf hmove hnotWrite hcontained hwellTy
+  induction hwellTy with
+  | unit => exact .unit
+  | int => exact .int
+  | borrow htargets =>
+      rename_i mutable' target' lifetime'
+      rcases htargets with ⟨ty₀, lf₀, hty₀, hle₀, hbase₀⟩
+      rcases hcontained PartialTyContains.here with ⟨x, hcont⟩
+      have hnoConflictTarget : ¬ target' ⋈ lv := by
+        intro hconflict
+        exact hnotWrite
+          (WriteProhibited.of_contains_conflict hcont hconflict)
+      exact .borrow ⟨ty₀, lf₀,
+        LValTyping.move_of_no_conflicts hcbwf hmove hnotWrite
+          hnoConflictTarget hty₀, hle₀,
+        LValBaseOutlives.move hmove hbase₀⟩
+  | box _ ih =>
+      refine .box (ih ?_)
+      intro mutable target hcontains
+      exact hcontained (PartialTyContains.tyBox hcontains)
+
 end Paper
 end LwRust
 
