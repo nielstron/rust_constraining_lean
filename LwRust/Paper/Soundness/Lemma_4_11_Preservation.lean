@@ -6468,6 +6468,110 @@ theorem validPartialValueWhenInitialized_strike_write
           | undef shape =>
               cases struck <;> simp [Strike] at hstrike
 
+/-- Chains from unowned roots to a common target agree on root and length:
+backward owner steps are deterministic. -/
+theorem ownsChain_unique {store : ProgramStore} {root₁ root₂ : Location}
+    (hvalidStore : ValidStore store)
+    (hroot₁ : ¬ ProgramStore.Owns store root₁)
+    (hroot₂ : ¬ ProgramStore.Owns store root₂) :
+    ∀ {n₁ n₂ : Nat} {target : Location},
+      OwnsChain store root₁ n₁ target →
+      OwnsChain store root₂ n₂ target →
+      root₁ = root₂ ∧ n₁ = n₂ := by
+  intro n₁
+  induction n₁ with
+  | zero =>
+      intro n₂ target h₁ h₂
+      cases h₁
+      cases h₂ with
+      | zero => exact ⟨rfl, rfl⟩
+      | succ _ howns => exact absurd ⟨_, howns⟩ hroot₁
+  | succ n ih =>
+      intro n₂ target h₁ h₂
+      cases h₁ with
+      | succ hchain₁ howns₁ =>
+          cases h₂ with
+          | zero => exact absurd ⟨_, howns₁⟩ hroot₂
+          | succ hchain₂ howns₂ =>
+              have hmid := hvalidStore _ _ _ howns₁ howns₂
+              subst hmid
+              rcases ih hchain₁ hchain₂ with ⟨hroot, hlen⟩
+              exact ⟨hroot, by rw [hlen]⟩
+
+/-- Owner chains compose. -/
+theorem ownsChain_append {store : ProgramStore} {root mid : Location}
+    {n : Nat} (hfirst : OwnsChain store root n mid) :
+    ∀ {m : Nat} {target : Location},
+      OwnsChain store mid m target →
+      OwnsChain store root (n + m) target := by
+  intro m
+  induction m with
+  | zero =>
+      intro target hsecond
+      cases hsecond
+      exact hfirst
+  | succ m ih =>
+      intro target hsecond
+      cases hsecond with
+      | succ hchain howns =>
+          exact OwnsChain.succ (ih hchain) howns
+
+/-- An owner reach from a stored value is an owner chain from its storage. -/
+theorem ownerReaches_ownsChain_stored {store : ProgramStore} :
+    ∀ {value : PartialValue} {partialTy : PartialTy} {ℓ : Location}
+      {storage : Location} {lifetime : Lifetime},
+      store.slotAt storage = some ⟨value, lifetime⟩ →
+      RuntimeFrame.OwnerReaches store value partialTy ℓ →
+      ∃ n, OwnsChain store storage (n + 1) ℓ := by
+  intro value partialTy ℓ storage lifetime hstored hreach
+  induction hreach generalizing storage lifetime with
+  | undefOf _hskel _hstrength _howner ih =>
+      exact ih hstored
+  | boxHere hslot =>
+      exact ⟨0, OwnsChain.succ OwnsChain.zero
+        ⟨lifetime, by simpa [owningRef] using hstored⟩⟩
+  | boxInner hslot _hinner ih =>
+      rename_i location slot inner ℓ'
+      rcases ih (storage := location) (lifetime := slot.lifetime)
+          (by simpa using hslot) with ⟨n, hchain⟩
+      refine ⟨n + 1, ?_⟩
+      have hfirst : OwnsChain store storage 1 location :=
+        OwnsChain.succ OwnsChain.zero
+          ⟨lifetime, by simpa [owningRef] using hstored⟩
+      have := ownsChain_append hfirst hchain
+      simpa [Nat.add_comm, Nat.add_assoc, Nat.add_left_comm] using this
+  | boxFullHere hslot =>
+      exact ⟨0, OwnsChain.succ OwnsChain.zero
+        ⟨lifetime, by simpa [owningRef] using hstored⟩⟩
+  | boxFullInner hslot _hinner ih =>
+      rename_i location slot ty ℓ'
+      rcases ih (storage := location) (lifetime := slot.lifetime)
+          (by simpa using hslot) with ⟨n, hchain⟩
+      refine ⟨n + 1, ?_⟩
+      have hfirst : OwnsChain store storage 1 location :=
+        OwnsChain.succ OwnsChain.zero
+          ⟨lifetime, by simpa [owningRef] using hstored⟩
+      have := ownsChain_append hfirst hchain
+      simpa [Nat.add_comm, Nat.add_assoc, Nat.add_left_comm] using this
+
+/-- Sibling exclusion: a value stored at a different unowned root never
+owner-reaches the leaf of the moved chain. -/
+theorem ownerReaches_stored_ne_chain_leaf {store : ProgramStore}
+    {rootLoc storage : Location} {k : Nat} {leafLoc : Location}
+    (hvalidStore : ValidStore store)
+    (hrootUnowned : ¬ ProgramStore.Owns store rootLoc)
+    (hstorageUnowned : ¬ ProgramStore.Owns store storage)
+    (hne : storage ≠ rootLoc)
+    (hleafChain : OwnsChain store rootLoc k leafLoc) :
+    ∀ {value : PartialValue} {partialTy : PartialTy} {lifetime : Lifetime},
+      store.slotAt storage = some ⟨value, lifetime⟩ →
+      ¬ RuntimeFrame.OwnerReaches store value partialTy leafLoc := by
+  intro value partialTy lifetime hstored hreach
+  rcases ownerReaches_ownsChain_stored hstored hreach with ⟨n, hchain⟩
+  rcases ownsChain_unique hvalidStore hstorageUnowned hrootUnowned
+      hchain hleafChain with ⟨hroots, _⟩
+  exact hne hroots
+
 end Paper
 end LwRust
 
