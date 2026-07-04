@@ -5146,6 +5146,295 @@ theorem WellFormedEnv.envWrite {env : Env} {current : Lifetime}
       hshape hwellTy hnotWrite,
     EnvSlotsOutlive.write hwrite hwell.2⟩
 
+/-- The struck remainder of a move never contains a borrow: the spine above
+the removed subtree is pure boxes, and the subtree itself became `undef`. -/
+theorem Strike.struck_borrow_free :
+    ∀ {path : Path} {source struck : PartialTy} {mutable : Bool}
+      {target : LVal},
+      Strike path source struck →
+      ¬ PartialTyContains struck (.borrow mutable target) := by
+  intro path
+  induction path with
+  | nil =>
+      intro source struck mutable target hstrike hcontains
+      cases source <;> cases struck <;> simp [Strike] at hstrike
+      cases hcontains
+  | cons head tail ih =>
+      intro source struck mutable target hstrike hcontains
+      cases source with
+      | ty tySource =>
+          cases tySource <;> cases struck <;> simp [Strike] at hstrike
+          cases hcontains with
+          | box hinner => exact ih hstrike hinner
+      | box inner =>
+          cases struck <;> simp [Strike] at hstrike
+          cases hcontains with
+          | box hinner => exact ih hstrike hinner
+      | undef shape =>
+          cases struck <;> simp [Strike] at hstrike
+
+/-- A movable lval's type is contained in its base slot: the strike premise
+forces a hop-free descent. -/
+theorem strike_typing_contains {env : Env} :
+    ∀ {path : Path} {source struck : PartialTy},
+      Strike path source struck →
+      ∀ {wcur : LVal} {lfc : Lifetime} {ty : Ty} {vlf : Lifetime}
+        {mutable : Bool} {target : LVal},
+        LValTyping env wcur source lfc →
+        LValTyping env (prependPath path wcur) (.ty ty) vlf →
+        PartialTyContains (.ty ty) (.borrow mutable target) →
+        PartialTyContains source (.borrow mutable target) := by
+  intro path
+  induction path with
+  | nil =>
+      intro source struck hstrike wcur lfc ty vlf mutable target hwcur hlhs
+        hcontains
+      have hdet := LValTyping.deterministic hwcur
+        (by simpa [prependPath] using hlhs)
+      rw [hdet.1]
+      exact hcontains
+  | cons head tail ih =>
+      intro source struck hstrike wcur lfc ty vlf mutable target hwcur hlhs
+        hcontains
+      cases source with
+      | ty tySource =>
+          cases tySource <;> cases struck <;> simp [Strike] at hstrike
+          exact PartialTyContains.tyBox
+            (ih hstrike (LValTyping.boxFull hwcur)
+              (by rw [prependPath_deref_comm]; exact hlhs) hcontains)
+      | box inner =>
+          cases struck <;> simp [Strike] at hstrike
+          exact PartialTyContains.box
+            (ih hstrike (LValTyping.box hwcur)
+              (by rw [prependPath_deref_comm]; exact hlhs) hcontains)
+      | undef shape =>
+          cases struck <;> simp [Strike] at hstrike
+
+/-- The moved-out type is borrow-safe against the post-move environment: its
+unique annotation lived in the struck slot, so it no longer conflicts with
+any surviving loan. -/
+theorem tyBorrowSafeAgainstEnv_move {env moved : Env} {lv : LVal} {ty : Ty}
+    {valueLifetime : Lifetime}
+    (hsafe : BorrowSafeEnv env)
+    (hLv : LValTyping env lv (.ty ty) valueLifetime)
+    (hmove : EnvMove env lv moved) :
+    TyBorrowSafeAgainstEnv moved ty := by
+  rcases hmove with ⟨slot, struck, hslot, hstrike, hmoved⟩
+  have hbaseContains : ∀ {mutable : Bool} {target : LVal},
+      PartialTyContains (.ty ty) (.borrow mutable target) →
+      env ⊢ (LVal.base lv) ↝ (.borrow mutable target) := by
+    intro mutable target hcontains
+    exact ⟨slot, hslot,
+      strike_typing_contains hstrike (LValTyping.var hslot)
+        (by rw [prependPath_path_base]; exact hLv) hcontains⟩
+  have hmovedBaseFree : ∀ {mutable : Bool} {target : LVal},
+      ¬ moved ⊢ (LVal.base lv) ↝ (.borrow mutable target) := by
+    intro mutable target hcontains
+    rcases hcontains with ⟨s, hs, hcontainsTy⟩
+    rw [hmoved] at hs
+    have hsEq : s = { slot with ty := struck } :=
+      (Option.some.inj (by simpa [Env.update] using hs)).symm
+    subst hsEq
+    exact Strike.struck_borrow_free hstrike hcontainsTy
+  have hmovedToEnv : ∀ {z : Name} {mutable : Bool} {target : LVal},
+      moved ⊢ z ↝ (.borrow mutable target) →
+      env ⊢ z ↝ (.borrow mutable target) := by
+    intro z mutable target hcontains
+    rcases hcontains with ⟨s, hs, hcontainsTy⟩
+    exact EnvMove.contains_borrow_source ⟨slot, struck, hslot, hstrike, hmoved⟩
+      hs ⟨s, hs, hcontainsTy⟩
+  constructor
+  · intro targetMutable mutable targetOther x hcontains hother hconflict
+    have hzx := hsafe (LVal.base lv) x mutable targetMutable targetOther
+      (hbaseContains hcontains) (hmovedToEnv hother) hconflict
+    exact hmovedBaseFree (hzx ▸ hother)
+  · intro x targetMutable mutable targetOther hcontainsMutable hcontains
+      hconflict
+    have hzx := hsafe x (LVal.base lv) mutable targetMutable targetOther
+      (hmovedToEnv hcontainsMutable) (hbaseContains hcontains)
+      (by exact hconflict)
+    exact hmovedBaseFree (hzx ▸ hcontainsMutable)
+
+/-- A copied type is borrow-safe against the environment: copyable types
+contain at most an immutable borrow, whose unique environment occurrence
+cannot conflict with a mutable loan by borrow safety and unarity. -/
+theorem tyBorrowSafeAgainstEnv_copy {env : Env} {lv : LVal} {ty : Ty}
+    {valueLifetime : Lifetime}
+    (hsafe : BorrowSafeEnv env)
+    (hLv : LValTyping env lv (.ty ty) valueLifetime)
+    (hcopy : CopyTy ty) :
+    TyBorrowSafeAgainstEnv env ty := by
+  cases hcopy with
+  | unit => exact tyBorrowSafeAgainstEnv_borrowFree (by
+      intro mutable target hcontains
+      cases hcontains)
+  | int => exact tyBorrowSafeAgainstEnv_borrowFree (by
+      intro mutable target hcontains
+      cases hcontains)
+  | immBorrow =>
+      rename_i target
+      constructor
+      · intro targetMutable mutable targetOther x hcontains _hother _hconflict
+        cases hcontains
+      · intro x targetMutable mutable targetOther hcontainsMutable hcontains
+          hconflict
+        cases hcontains with
+        | here =>
+            rcases LValTyping.contains_borrow hLv PartialTyContains.here with
+              ⟨z, hz⟩
+            have hxz := hsafe x z false targetMutable target
+              hcontainsMutable hz hconflict
+            subst hxz
+            rcases hcontainsMutable with ⟨sx, hsx, hcontainsX⟩
+            rcases hz with ⟨sz, hsz, hcontainsZ⟩
+            have hsEq : sx = sz := Option.some.inj (hsx.symm.trans hsz)
+            subst hsEq
+            rcases PartialTyContains.borrow_unique hcontainsX hcontainsZ with
+              ⟨hm, _⟩
+            cases hm
+
+/-- **The strict invariant walk.**  Source-term typing preserves the paper's
+Definition 4.8 and Definition 4.13 invariants and yields a result type that
+is well formed and borrow-safe against the result environment — with no rule
+obligations beyond the paper premises. -/
+theorem typingPreservesWellFormed_of_sourceTerm
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    SourceTerm term →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ ∧
+      WellFormedTy env₂ ty lifetime ∧ TyBorrowSafeAgainstEnv env₂ ty := by
+  intro hsource hwellFormed hsafe htyping
+  exact TermTyping.rec
+    (motive_1 := fun env _typing lifetime term ty env₂ _ =>
+      SourceTerm term →
+      WellFormedEnv env lifetime →
+      BorrowSafeEnv env →
+      WellFormedEnv env₂ lifetime ∧ BorrowSafeEnv env₂ ∧
+        WellFormedTy env₂ ty lifetime ∧ TyBorrowSafeAgainstEnv env₂ ty)
+    (motive_2 := fun env _typing blockLifetime terms ty env₂ _ =>
+      SourceTerm (.block blockLifetime terms) →
+      WellFormedEnv env blockLifetime →
+      BorrowSafeEnv env →
+      WellFormedEnv env₂ blockLifetime ∧ BorrowSafeEnv env₂ ∧
+        WellFormedTy env₂ ty blockLifetime ∧
+        TyBorrowSafeAgainstEnv env₂ ty)
+    (by
+      -- T-Const: source values are unit or int.
+      intro _env _typing _lifetime value ty hvalue hsource hwell hsafe
+      have hsourceValue : SourceValue value :=
+        hsource value (by simp [termValues])
+      cases hvalue with
+      | unit =>
+          exact ⟨hwell, hsafe, .unit,
+            tyBorrowSafeAgainstEnv_borrowFree
+              (fun mutable target hcontains => by cases hcontains)⟩
+      | int =>
+          exact ⟨hwell, hsafe, .int,
+            tyBorrowSafeAgainstEnv_borrowFree
+              (fun mutable target hcontains => by cases hcontains)⟩
+      | ref hlookup =>
+          exact absurd hsourceValue (by simp [SourceValue]))
+    (by
+      -- T-Copy.
+      intro _env _typing _lifetime _valueLifetime lv ty hLv hcopy _hnotRead
+        _hsource hwell hsafe
+      exact ⟨hwell, hsafe, LValTyping.wellFormedTy hwell hLv,
+        tyBorrowSafeAgainstEnv_copy hsafe hLv hcopy⟩)
+    (by
+      -- T-Move.
+      intro _env₁ _env₂ _typing _lifetime _valueLifetime lv ty hLv hnotWrite
+        hmove _hsource hwell hsafe
+      refine ⟨WellFormedEnv.move hwell hmove hnotWrite,
+        BorrowSafeEnv.move hsafe hmove, ?_,
+        tyBorrowSafeAgainstEnv_move hsafe hLv hmove⟩
+      refine WellFormedTy.move hwell.1 hmove hnotWrite ?_
+        (LValTyping.wellFormedTy hwell hLv)
+      intro mutable target hcontains
+      exact LValTyping.contains_borrow hLv hcontains)
+    (by
+      -- T-MutBorrow.
+      intro _env _typing _lifetime _valueLifetime lv ty hLv _hmutable
+        hnotWrite _hsource hwell hsafe
+      rcases LValTyping.base_slot_exists hLv with ⟨slot, hslot⟩
+      exact ⟨hwell, hsafe,
+        .borrow ⟨ty, _, hLv, LValTyping.lifetime_outlives_one hwell.2 hLv,
+          slot, hslot, hwell.2 _ slot hslot⟩,
+        tyBorrowSafeAgainstEnv_mutBorrow hnotWrite⟩)
+    (by
+      -- T-ImmBorrow.
+      intro _env _typing _lifetime _valueLifetime lv ty hLv hnotRead
+        _hsource hwell hsafe
+      rcases LValTyping.base_slot_exists hLv with ⟨slot, hslot⟩
+      exact ⟨hwell, hsafe,
+        .borrow ⟨ty, _, hLv, LValTyping.lifetime_outlives_one hwell.2 hLv,
+          slot, hslot, hwell.2 _ slot hslot⟩,
+        tyBorrowSafeAgainstEnv_immBorrow hnotRead⟩)
+    (by
+      -- T-Box.
+      intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih hsource hwell
+        hsafe
+      rcases ih (SourceTerm.box_inner hsource) hwell hsafe with
+        ⟨hwell₂, hsafe₂, hwellTy, htySafe⟩
+      exact ⟨hwell₂, hsafe₂, .box hwellTy, TyBorrowSafeAgainstEnv.box htySafe⟩)
+    (by
+      -- T-Block.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _blockLifetime _terms _ty
+        hchild _hterms hwellTy hdrop ih hsource hwell hsafe
+      rcases ih hsource
+          (WellFormedEnv.weaken hwell (LifetimeChild.outlives hchild))
+          hsafe with
+        ⟨hwellBody, hsafeBody, _hwellTyBody, htySafeBody⟩
+      rcases block_preserves_wellFormed hchild hwellBody hwellTy hdrop with
+        ⟨hwellOut, hwellTyOut⟩
+      refine ⟨hwellOut, ?_, hwellTyOut, ?_⟩
+      · rw [hdrop]
+        exact borrowSafeEnv_dropLifetime hsafeBody
+      · rw [hdrop]
+        exact TyBorrowSafeAgainstEnv.dropLifetime htySafeBody)
+    (by
+      -- T-Declare.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hfresh _hterm
+        hfreshOut henv₃ ih hsource hwell hsafe
+      rcases ih (SourceTerm.declare_inner hsource) hwell hsafe with
+        ⟨hwell₂, hsafe₂, hwellTy₂, htySafe₂⟩
+      refine ⟨?_, ?_, .unit,
+        tyBorrowSafeAgainstEnv_borrowFree
+          (fun mutable target hcontains => by cases hcontains)⟩
+      · rw [henv₃]
+        exact WellFormedEnv.update_fresh_ty hwell₂ hwellTy₂ hfreshOut
+      · rw [henv₃]
+        exact borrowSafeEnv_update_of_tyBorrowSafeAgainstEnv hsafe₂ htySafe₂)
+    (by
+      -- T-Assign: the write kernel.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
+        _rhs _rhsTy hRhs hLhsPost hshape hwellTy hwrite hnotWrite ih
+        hsource hwell hsafe
+      rcases ih (SourceTerm.assign_inner hsource) hwell hsafe with
+        ⟨hwell₂, hsafe₂, _hwellTyRhs, htySafe₂⟩
+      exact ⟨WellFormedEnv.envWrite hwell₂ hsafe₂ htySafe₂ hwrite hLhsPost
+          hshape hwellTy hnotWrite,
+        BorrowSafeEnv.envWrite hwell₂.1 hsafe₂ htySafe₂ hwrite hLhsPost
+          hshape,
+        .unit,
+        tyBorrowSafeAgainstEnv_borrowFree
+          (fun mutable target hcontains => by cases hcontains)⟩)
+    (by
+      -- T-Seq singleton.
+      intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih hsource hwell
+        hsafe
+      exact ih (SourceTerm.block_head hsource) hwell hsafe)
+    (by
+      -- T-Seq cons.
+      intro _env₁ _env₂ _env₃ _typing _lifetime _term _rest _termTy _finalTy
+        _hterm _hrest ihHead ihRest hsource hwell hsafe
+      rcases ihHead (SourceTerm.block_head hsource) hwell hsafe with
+        ⟨hwell₂, hsafe₂, _, _⟩
+      exact ihRest (SourceTerm.block_tail hsource) hwell₂ hsafe₂)
+    htyping hsource hwellFormed hsafe
+
 end Paper
 end LwRust
 
