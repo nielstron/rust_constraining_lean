@@ -2434,6 +2434,286 @@ theorem block_preserves_wellFormedWhenInitialized {env₂ env₃ : Env}
   exact LifetimeChild.parent_of_outlives_child_ne hchild
     (hwellBody.2 x slot hold) hne
 
+/-! ### Strong-update write: slot lifetime characterization
+
+`EnvWrite.slots_characterize` (P2): every slot of the write result exists in the
+source with the same lifetime, and any slot whose type changed has a lifetime
+that the written lval's typing lifetime outlives.  The proof threads the
+original lval typing down the write recursion: box steps extend the current
+spine prefix, and mutable-borrow hops rebase the residual typing onto the hop
+target (`LValTyping.rebase_hop`).
+-/
+
+@[simp] theorem prependPath_deref_comm :
+    ∀ (path : List Unit) (lv : LVal),
+      prependPath path (.deref lv) = .deref (prependPath path lv)
+  | [], _ => rfl
+  | () :: path, lv => by
+      simp [prependPath, prependPath_deref_comm path lv]
+
+theorem prependPath_path_base :
+    ∀ (lv : LVal), prependPath (LVal.path lv) (.var (LVal.base lv)) = lv
+  | .var _ => rfl
+  | .deref lv => by
+      have hcomm := List.Unit_append_singleton_typing (LVal.path lv)
+      simp [LVal.path, LVal.base, hcomm, prependPath,
+        prependPath_path_base lv]
+
+/-- Hop rebasing: if `wcur` is typed at a mutable borrow of `target`, then any
+typing of a deref tower over `.deref wcur` is also a typing of the same tower
+over `target` (the tower descends the hop target's type either way). -/
+theorem LValTyping.rebase_hop {env : Env} {wcur target : LVal}
+    {mutable : Bool} {borrowLifetime : Lifetime} :
+    LValTyping env wcur (.ty (.borrow mutable target)) borrowLifetime →
+    ∀ (path : List Unit) {pt : PartialTy} {lf : Lifetime},
+      LValTyping env (prependPath path (.deref wcur)) pt lf →
+      LValTyping env (prependPath path target) pt lf := by
+  intro hwcur path
+  induction path with
+  | nil =>
+      intro pt lf htyping
+      cases htyping with
+      | box hinner =>
+          have hdet := LValTyping.deterministic hwcur hinner
+          cases hdet.1
+      | boxFull hinner =>
+          have hdet := LValTyping.deterministic hwcur hinner
+          cases hdet.1
+      | borrow hw hu =>
+          have hdet := LValTyping.deterministic hwcur hw
+          cases hdet.1
+          exact hu
+  | cons head tail ih =>
+      intro pt lf htyping
+      rw [show prependPath (head :: tail) (.deref wcur) =
+          .deref (prependPath tail (.deref wcur)) from rfl] at htyping
+      rw [show prependPath (head :: tail) target =
+          .deref (prependPath tail target) from rfl]
+      cases htyping with
+      | box hinner =>
+          exact .box (ih hinner)
+      | boxFull hinner =>
+          exact .boxFull (ih hinner)
+      | borrow hw hu =>
+          exact .borrow (ih hw) hu
+
+/-- P2: every slot of a strong-update write result exists in the source with
+the same lifetime, and any slot whose type changed is outlived by the written
+lval's typing lifetime.  The typing is threaded down the write recursion: box
+steps extend the current spine prefix (`LValTyping.box`/`.boxFull`), and
+mutable-borrow hops rebase the residual typing onto the hop target
+(`LValTyping.rebase_hop`); at each `EnvWrite.intro` the written base slot is
+bounded through `LValTyping.lifetime_le_of_base_outlives_whenInitialized`. -/
+theorem EnvWrite.slots_characterize {env : Env}
+    (hcbwf : ContainedBorrowsWellFormedWhenInitialized env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime} :
+    EnvWrite env lhs rhsTy env₃ →
+    LValTyping env lhs oldTy targetLifetime →
+    ∀ y s₃, env₃.slotAt y = some s₃ →
+      ∃ s₂, env.slotAt y = some s₂ ∧ s₂.lifetime = s₃.lifetime ∧
+        (s₂.ty = s₃.ty ∨ targetLifetime ≤ s₃.lifetime) := by
+  intro hwrite
+  exact EnvWrite.rec
+    (motive_1 := fun path old _ty result _updated _ =>
+      ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
+        LValTyping env wcur old lfc →
+        LValTyping env (prependPath path wcur) pt lf →
+        ∀ y s₃, result.slotAt y = some s₃ →
+          ∃ s₂, env.slotAt y = some s₂ ∧ s₂.lifetime = s₃.lifetime ∧
+            (s₂.ty = s₃.ty ∨ lf ≤ s₃.lifetime))
+    (motive_2 := fun lv _ty result _ =>
+      ∀ {pt : PartialTy} {lf : Lifetime},
+        LValTyping env lv pt lf →
+        ∀ y s₃, result.slotAt y = some s₃ →
+          ∃ s₂, env.slotAt y = some s₂ ∧ s₂.lifetime = s₃.lifetime ∧
+            (s₂.ty = s₃.ty ∨ lf ≤ s₃.lifetime))
+    (by
+      -- strong: the environment is unchanged.
+      intro _old _ty wcur pt lf lfc _hwcur _hlhs y s₃ hs₃
+      exact ⟨s₃, hs₃, rfl, Or.inl rfl⟩)
+    (by
+      -- box: extend the spine prefix into the partial box.
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+        wcur pt lf lfc hwcur hlhs y s₃ hs₃
+      exact ih (LValTyping.box hwcur)
+        (by rw [prependPath_deref_comm]; exact hlhs) y s₃ hs₃)
+    (by
+      -- boxFull: extend the spine prefix into the full box.
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+        wcur pt lf lfc hwcur hlhs y s₃ hs₃
+      exact ih (LValTyping.boxFull hwcur)
+        (by rw [prependPath_deref_comm]; exact hlhs) y s₃ hs₃)
+    (by
+      -- mutBorrow: rebase the residual typing onto the hop target.
+      intro _env₂ path writeTarget _ty _hwrite ih
+        wcur pt lf lfc hwcur hlhs y s₃ hs₃
+      exact ih
+        (LValTyping.rebase_hop hwcur path
+          (by rw [prependPath_deref_comm]; exact hlhs)) y s₃ hs₃)
+    (by
+      -- intro: the written base slot keeps its lifetime and is bounded by
+      -- the typing lifetime; other slots come from the recursion.
+      intro _env₂ lv slot _ty updatedTy hslot hupdate ih pt lf hlv y s₃ hs₃
+      have hbound : lf ≤ slot.lifetime :=
+        LValTyping.lifetime_le_of_base_outlives_whenInitialized hcbwf hlv
+          ⟨slot, hslot, LifetimeOutlives.refl _⟩
+      by_cases hy : y = LVal.base lv
+      · subst hy
+        have hs₃Eq : s₃ = { slot with ty := updatedTy } :=
+          (Option.some.inj (by simpa [Env.update] using hs₃)).symm
+        subst hs₃Eq
+        exact ⟨slot, hslot, rfl, Or.inr hbound⟩
+      · have hs₃Mid : _env₂.slotAt y = some s₃ := by
+          simpa [Env.update, hy] using hs₃
+        exact ih (LValTyping.var hslot)
+          (by rw [prependPath_path_base]; exact hlv) y s₃ hs₃Mid)
+    hwrite
+
+/-- Strict analogue of the batch-1 extraction: a borrow contained in a
+strictly well-formed type has well-formed targets. -/
+theorem borrowTargetsWellFormed_of_wellFormedTy_contains
+    {env : Env} {ty : Ty} {lifetime : Lifetime} {mutable : Bool}
+    {target : LVal} :
+    WellFormedTy env ty lifetime →
+    PartialTyContains (.ty ty) (.borrow mutable target) →
+    BorrowTargetsWellFormed env target lifetime := by
+  intro hwellTy hcontains
+  induction hwellTy with
+  | unit => cases hcontains
+  | int => cases hcontains
+  | borrow htargets =>
+      cases hcontains with
+      | here => exact htargets
+  | box _ ih =>
+      cases hcontains with
+      | tyBox hcontains' => exact ih hcontains'
+
+/-- Any borrow contained in a slot of the write result has a base slot that
+outlives the containing slot: old-origin borrows through the source invariant,
+RHS-origin borrows through the strict well-formedness of the written type and
+the P2 lifetime bound. -/
+theorem envWrite_contains_baseOutlives {env : Env}
+    (hcbwf : ContainedBorrowsWellFormedWhenInitialized env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlhsTy : LValTyping env lhs oldTy targetLifetime)
+    (hwellTy : WellFormedTy env rhsTy targetLifetime) :
+    ∀ {y : Name} {s₃ : EnvSlot} {mutable : Bool} {u : LVal},
+      env₃.slotAt y = some s₃ →
+      PartialTyContains s₃.ty (.borrow mutable u) →
+      LValBaseOutlives env₃ u s₃.lifetime := by
+  intro y s₃ mutable u hs₃ hcontains₃
+  rcases EnvWrite.slots_characterize hcbwf hwrite hlhsTy y s₃ hs₃ with
+    ⟨s₂, hs₂, hlifeEq, hdisj⟩
+  rcases hdisj with htyEq | hbound
+  · -- Unchanged slot: the borrow was already contained in the source.
+    have hcontains₂ : env ⊢ y ↝ (.borrow mutable u) :=
+      ⟨s₂, hs₂, htyEq ▸ hcontains₃⟩
+    have hslotWF := hcbwf y s₂ mutable u hs₂ hcontains₂
+    have hbase := hslotWF.1
+    rw [hlifeEq] at hbase
+    exact LValBaseOutlives.write hwrite hbase
+  · -- Changed slot: decompose the borrow's origin.
+    rcases EnvWrite.contains_borrow_source hwrite ⟨s₃, hs₃, hcontains₃⟩ with
+      hrhs | hcontains₂
+    · rcases borrowTargetsWellFormed_of_wellFormedTy_contains hwellTy hrhs with
+        ⟨targetTy, targetLifetime', _htyping, _houtlives, hbase⟩
+      exact LValBaseOutlives.weaken (LValBaseOutlives.write hwrite hbase) hbound
+    · rcases hcontains₂ with ⟨s₂', hs₂', hcontainsTy₂⟩
+      have hs₂Eq : s₂' = s₂ := Option.some.inj (hs₂'.symm.trans hs₂)
+      subst hs₂Eq
+      have hslotWF := hcbwf y s₂' mutable u hs₂' ⟨s₂', hs₂', hcontainsTy₂⟩
+      have hbase := hslotWF.1
+      rw [hlifeEq] at hbase
+      exact LValBaseOutlives.write hwrite hbase
+
+/-- Master bound: after a strong-update write, every typing lifetime in the
+result environment is bounded by any lifetime its base outlives, and every
+borrow contained in a typing's result type has a base slot outliving the
+typing's lifetime. -/
+theorem envWrite_typing_bound {env : Env}
+    (hcbwf : ContainedBorrowsWellFormedWhenInitialized env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlhsTy : LValTyping env lhs oldTy targetLifetime)
+    (hwellTy : WellFormedTy env rhsTy targetLifetime) :
+    ∀ {t : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping env₃ t pt lf →
+      (∀ parent, LValBaseOutlives env₃ t parent → lf ≤ parent) ∧
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains pt (.borrow mutable u) →
+          LValBaseOutlives env₃ u lf) := by
+  intro t pt lf htyping
+  induction htyping with
+  | var hslot =>
+      rename_i y s₃
+      constructor
+      · intro parent hbase
+        rcases hbase with ⟨s', hs', hle⟩
+        have hEq : _ = s' := Option.some.inj (hslot.symm.trans hs')
+        exact hEq ▸ hle
+      · intro mutable u hcontains
+        exact envWrite_contains_baseOutlives hcbwf hwrite hlhsTy hwellTy
+          hslot hcontains
+  | box _ ih =>
+      refine ⟨ih.1, ?_⟩
+      intro mutable u hcontains
+      exact ih.2 (PartialTyContains.box hcontains)
+  | boxFull _ ih =>
+      refine ⟨ih.1, ?_⟩
+      intro mutable u hcontains
+      exact ih.2 (PartialTyContains.tyBox hcontains)
+  | borrow hw hu ihBorrow ihTarget =>
+      constructor
+      · intro parent hbase
+        have hblf := ihBorrow.1 parent hbase
+        have hbaseU := ihBorrow.2 PartialTyContains.here
+        exact LifetimeOutlives.trans (ihTarget.1 _ hbaseU) hblf
+      · intro mutable u hcontains
+        exact ihTarget.2 hcontains
+
+/-- The initialized borrow invariant is preserved by the strong-update write:
+paper Definition 4.8(i) across T-Assign, with no rule-carried obligations
+beyond the paper premises. -/
+theorem ContainedBorrowsWellFormedWhenInitialized.envWrite {env : Env}
+    (hcbwf : ContainedBorrowsWellFormedWhenInitialized env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlhsTy : LValTyping env lhs oldTy targetLifetime)
+    (hwellTy : WellFormedTy env rhsTy targetLifetime) :
+    ContainedBorrowsWellFormedWhenInitialized env₃ := by
+  intro x slot₃ mutable t hslot₃ hcontains₃
+  rcases hcontains₃ with ⟨containedSlot, hcontainedSlot, hcontainsTy⟩
+  have hslotEq : slot₃ = containedSlot :=
+    Option.some.inj (hslot₃.symm.trans hcontainedSlot)
+  subst hslotEq
+  have hbase : LValBaseOutlives env₃ t slot₃.lifetime :=
+    envWrite_contains_baseOutlives hcbwf hwrite hlhsTy hwellTy hslot₃
+      hcontainsTy
+  refine ⟨hbase, ?_⟩
+  rintro ⟨ty', lf', hty'⟩
+  have hbound :=
+    (envWrite_typing_bound hcbwf hwrite hlhsTy hwellTy hty').1
+      slot₃.lifetime hbase
+  exact ⟨ty', lf', hty', hbound, hbase⟩
+
+/-- Definition 4.8 across T-Assign's write. -/
+theorem WellFormedEnvWhenInitialized.envWrite {env : Env} {current : Lifetime}
+    (hwell : WellFormedEnvWhenInitialized env current)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (hwrite : EnvWrite env lhs rhsTy env₃)
+    (hlhsTy : LValTyping env lhs oldTy targetLifetime)
+    (hwellTy : WellFormedTy env rhsTy targetLifetime) :
+    WellFormedEnvWhenInitialized env₃ current :=
+  ⟨ContainedBorrowsWellFormedWhenInitialized.envWrite hwell.1 hwrite hlhsTy
+      hwellTy,
+    EnvSlotsOutlive.write hwrite hwell.2⟩
+
 end Paper
 end LwRust
 
