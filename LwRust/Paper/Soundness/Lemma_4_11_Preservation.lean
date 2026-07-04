@@ -5655,6 +5655,54 @@ theorem Strike.struck_borrow_free :
       | undef shape =>
           cases struck <;> simp [Strike] at hstrike
 
+/-- A strike through a typed lvalue factors into the prefix selecting the
+lvalue and the remaining suffix over the lvalue's own type. -/
+theorem LValTyping.strike_suffix {env : Env} :
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime}
+      {slot : EnvSlot} {suffix : Path} {struck : PartialTy},
+      LValTyping env lv pt lf →
+      env.slotAt (LVal.base lv) = some slot →
+      Strike (LVal.path lv ++ suffix) slot.ty struck →
+      ∃ localStruck, Strike suffix pt localStruck := by
+  intro lv pt lf slot suffix struck htyping
+  induction htyping generalizing slot suffix struck with
+  | var hslot =>
+      intro hbase hstrike
+      have hslotEq : slot = _ := Option.some.inj (hbase.symm.trans hslot)
+      subst hslotEq
+      exact ⟨struck, by simpa [LVal.path] using hstrike⟩
+  | box _ ih =>
+      intro hbase hstrike
+      rcases ih (by simpa only [LVal.base] using hbase)
+          (by
+            simpa only [LVal.path, List.append_assoc] using hstrike) with
+        ⟨sourceStruck, hsourceStruck⟩
+      cases sourceStruck with
+      | ty tyStruck => simp [Strike] at hsourceStruck
+      | box localStruck =>
+          simp [Strike] at hsourceStruck
+          exact ⟨localStruck, hsourceStruck⟩
+      | undef tyStruck => simp [Strike] at hsourceStruck
+  | boxFull _ ih =>
+      intro hbase hstrike
+      rcases ih (by simpa only [LVal.base] using hbase)
+          (by
+            simpa only [LVal.path, List.append_assoc] using hstrike) with
+        ⟨sourceStruck, hsourceStruck⟩
+      cases sourceStruck with
+      | ty tyStruck => simp [Strike] at hsourceStruck
+      | box localStruck =>
+          simp [Strike] at hsourceStruck
+          exact ⟨localStruck, hsourceStruck⟩
+      | undef tyStruck => simp [Strike] at hsourceStruck
+  | borrow _ _ ihBorrow _ihTarget =>
+      intro hbase hstrike
+      rcases ihBorrow (by simpa only [LVal.base] using hbase)
+          (by
+            simpa only [LVal.path, List.append_assoc] using hstrike) with
+        ⟨sourceStruck, hsourceStruck⟩
+      cases sourceStruck <;> simp [Strike] at hsourceStruck
+
 /-- A movable lval's type is contained in its base slot: the strike premise
 forces a hop-free descent. -/
 theorem strike_typing_contains {env : Env} :
@@ -5983,6 +6031,330 @@ inductive OwnerChainAt (store : ProgramStore) :
       OwnerChainAt store
         (.value (.ref { location := location, owner := true }))
         (() :: () :: rest) leaf
+
+theorem OwnerChainAt.extend {store : ProgramStore}
+    {value : PartialValue} {path : Path} {location next : Location}
+    {slot : StoreSlot} :
+    OwnerChainAt store value path location →
+    store.slotAt location = some slot →
+    slot.value = .value (.ref { location := next, owner := true }) →
+    OwnerChainAt store value (path ++ [()]) next := by
+  intro hchain hslot hvalue
+  induction hchain with
+  | here =>
+      have htail : OwnerChainAt store slot.value [()] next := by
+        rw [hvalue]
+        exact OwnerChainAt.here
+      simpa using OwnerChainAt.there hslot htail
+  | there hslotHead _htail ih =>
+      simpa [List.cons_append] using
+        OwnerChainAt.there hslotHead (ih hslot)
+
+theorem ownsChain_extend {store : ProgramStore} {root location next : Location}
+    {n : Nat} {slot : StoreSlot} :
+    OwnsChain store root n location →
+    store.slotAt location = some slot →
+    slot.value = .value (.ref { location := next, owner := true }) →
+    OwnsChain store root (n + 1) next := by
+  intro hchain hslot hvalue
+  exact OwnsChain.succ hchain
+    ⟨slot.lifetime, by
+      cases slot with
+      | mk slotValue slotLifetime =>
+          simp at hvalue
+          subst hvalue
+          simpa [owningRef] using hslot⟩
+
+def OwnerChainPrefix (store : ProgramStore) (root : Location)
+    (rootValue : PartialValue) (path : Path) (leaf : Location) : Prop :=
+  (path = [] ∧ leaf = root) ∨
+    ∃ k,
+      OwnerChainAt store rootValue path leaf ∧
+      OwnsChain store root k leaf ∧
+      k = path.length
+
+theorem OwnerChainPrefix.extend {store : ProgramStore}
+    {rootLoc location next : Location} {rootValue : PartialValue}
+    {path : Path} {slot : StoreSlot} :
+    OwnerChainPrefix store rootLoc rootValue path location →
+    (path = [] → rootValue = slot.value) →
+    store.slotAt location = some slot →
+    slot.value = .value (.ref { location := next, owner := true }) →
+    ∃ k,
+      OwnerChainAt store rootValue (path ++ [()]) next ∧
+      OwnsChain store rootLoc k next ∧
+      k = (path ++ [()]).length := by
+  intro hprefix hrootValue hslot hvalue
+  rcases hprefix with ⟨hpath, hlocation⟩ | ⟨k, hchain, howns, hlen⟩
+  · subst hpath
+    have howner : OwnerChainAt store rootValue [()] next := by
+      rw [hrootValue rfl, hvalue]
+      exact OwnerChainAt.here
+    refine ⟨1, by simpa using howner, ?_, by simp⟩
+    have howns1 : OwnsChain store location 1 next := by
+      simpa using ownsChain_extend
+        (OwnsChain.zero (store := store) (location := location))
+        hslot hvalue
+    subst hlocation
+    simpa using howns1
+  · refine ⟨k + 1, ?_, ?_, ?_⟩
+    · exact OwnerChainAt.extend hchain hslot hvalue
+    · exact ownsChain_extend howns hslot hvalue
+    · simp [List.length_append, hlen]
+
+theorem ProgramStore.loc_eq_var_of_path_nil {store : ProgramStore}
+    {lv : LVal} :
+    LVal.path lv = [] →
+    store.loc lv = some (VariableProjection (LVal.base lv)) := by
+  intro hpath
+  cases lv with
+  | var x =>
+      simp [ProgramStore.loc, VariableProjection, LVal.base]
+  | deref source =>
+      simp [LVal.path] at hpath
+
+theorem lvalTyping_box_ownerChainPrefix_whenInitialized
+    {store : ProgramStore} {env : Env}
+    (hsafe : SafeAbstraction store env) :
+    ∀ {lv : LVal} {inner : PartialTy} {lifetime : Lifetime},
+      LValTyping env lv (.box inner) lifetime →
+      ∃ envSlot rootSlot leaf leafSlot,
+        env.slotAt (LVal.base lv) = some envSlot ∧
+        store.slotAt (VariableProjection (LVal.base lv)) = some rootSlot ∧
+        rootSlot.lifetime = envSlot.lifetime ∧
+        store.loc lv = some leaf ∧
+        store.slotAt leaf = some leafSlot ∧
+        ValidPartialValueWhenInitialized env store rootSlot.value envSlot.ty ∧
+        ValidPartialValueWhenInitialized env store leafSlot.value (.box inner) ∧
+        OwnerChainPrefix store (VariableProjection (LVal.base lv))
+          rootSlot.value (LVal.path lv) leaf := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro inner lifetime htyping
+      rcases LValTyping.var_inv htyping with
+        ⟨envSlot, hslot, htyEq, _hlifetimeEq⟩
+      rcases hsafe.2 x envSlot hslot with ⟨rootValue, hrootSlot, hrootValid⟩
+      have hrootValidBox :
+          ValidPartialValueWhenInitialized env store rootValue (.box inner) := by
+        simpa [← htyEq] using hrootValid
+      refine ⟨envSlot, { value := rootValue, lifetime := envSlot.lifetime },
+        VariableProjection x, { value := rootValue, lifetime := envSlot.lifetime },
+        hslot, hrootSlot, rfl, ?_, hrootSlot, ?_, ?_, ?_⟩
+      · simp [ProgramStore.loc, VariableProjection]
+      · simpa using hrootValid
+      · simpa using hrootValidBox
+      · exact Or.inl ⟨by simp [LVal.path], rfl⟩
+  | deref source ih =>
+      intro inner lifetime htyping
+      cases htyping with
+      | box hsource =>
+      rcases ih hsource with
+        ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
+          hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot,
+          hrootValid, hsourceValid, hprefix⟩
+      rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+      cases hsourceValid with
+      | box hownerSlot hinnerValid =>
+          rename_i ownerLocation ownerSlot
+          have hderefLoc :
+              store.loc (.deref source) = some ownerLocation := by
+            simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+          have hsourceOwner :
+              (StoreSlot.mk
+                (.value (.ref { location := ownerLocation, owner := true }))
+                sourceSlotLifetime).value =
+              .value (.ref { location := ownerLocation, owner := true }) := rfl
+          have hprefixExtended :
+              ∃ k,
+                OwnerChainAt store rootSlot.value (LVal.path source ++ [()])
+                  ownerLocation ∧
+                OwnsChain store (VariableProjection (LVal.base source)) k
+                  ownerLocation ∧
+                k = (LVal.path source ++ [()]).length :=
+            OwnerChainPrefix.extend hprefix
+              (by
+                intro hpathNil
+                have hlocRoot :=
+                  ProgramStore.loc_eq_var_of_path_nil
+                    (store := store) (lv := source) hpathNil
+                have hlocEq :
+                    sourceLocation = VariableProjection (LVal.base source) :=
+                  Option.some.inj (hsourceLoc.symm.trans hlocRoot)
+                subst hlocEq
+                have hslotEq :
+                    StoreSlot.mk
+                        (.value (.ref { location := ownerLocation, owner := true }))
+                        sourceSlotLifetime = rootSlot :=
+                  Option.some.inj (hsourceSlot.symm.trans hrootSlot)
+                exact congrArg StoreSlot.value hslotEq.symm)
+              hsourceSlot hsourceOwner
+          refine ⟨envSlot, rootSlot, ownerLocation, ownerSlot,
+            by simpa [LVal.base] using henvBase,
+            by simpa [LVal.base] using hrootSlot,
+            hrootLifetime, hderefLoc, hownerSlot,
+            hrootValid, hinnerValid, ?_⟩
+          rcases hprefixExtended with ⟨k, hchain, howns, hlen⟩
+          exact Or.inr ⟨k, by simpa [LVal.path] using hchain,
+            by simpa [LVal.base] using howns,
+            by simpa [LVal.path] using hlen⟩
+
+theorem lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike
+    {store : ProgramStore} {env : Env}
+    (hsafe : SafeAbstraction store env) :
+    ∀ {lv : LVal} {inner : Ty} {lifetime : Lifetime}
+      {slot : EnvSlot} {struck : PartialTy} {suffix : Path},
+      LValTyping env lv (.ty (.box inner)) lifetime →
+      env.slotAt (LVal.base lv) = some slot →
+      Strike (LVal.path lv ++ (() :: suffix)) slot.ty struck →
+      ∃ envSlot rootSlot leaf leafSlot,
+        env.slotAt (LVal.base lv) = some envSlot ∧
+        store.slotAt (VariableProjection (LVal.base lv)) = some rootSlot ∧
+        rootSlot.lifetime = envSlot.lifetime ∧
+        store.loc lv = some leaf ∧
+        store.slotAt leaf = some leafSlot ∧
+        ValidPartialValueWhenInitialized env store rootSlot.value envSlot.ty ∧
+        ValidPartialValueWhenInitialized env store leafSlot.value
+          (.ty (.box inner)) ∧
+        OwnerChainPrefix store (VariableProjection (LVal.base lv))
+          rootSlot.value (LVal.path lv) leaf := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro inner lifetime slot struck suffix htyping hbase _hstrike
+      rcases LValTyping.var_inv htyping with
+        ⟨envSlot, hslot, htyEq, _hlifetimeEq⟩
+      rcases hsafe.2 x envSlot hslot with ⟨rootValue, hrootSlot, hrootValid⟩
+      have hrootValidBox :
+          ValidPartialValueWhenInitialized env store rootValue (.ty (.box inner)) := by
+        simpa [← htyEq] using hrootValid
+      refine ⟨envSlot, { value := rootValue, lifetime := envSlot.lifetime },
+        VariableProjection x, { value := rootValue, lifetime := envSlot.lifetime },
+        hslot, hrootSlot, rfl, ?_, hrootSlot, ?_, ?_, ?_⟩
+      · simp [ProgramStore.loc, VariableProjection]
+      · simpa using hrootValid
+      · simpa using hrootValidBox
+      · exact Or.inl ⟨by simp [LVal.path], rfl⟩
+  | deref source ih =>
+      intro inner lifetime slot struck suffix htyping hbase hstrike
+      cases htyping with
+      | box hsourceBox =>
+          rcases lvalTyping_box_ownerChainPrefix_whenInitialized hsafe
+              hsourceBox with
+            ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
+              hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot,
+              hrootValid, hsourceValid, hprefix⟩
+          rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+          cases hsourceValid with
+          | box hownerSlot hinnerValid =>
+              rename_i ownerLocation ownerSlot
+              have hderefLoc :
+                  store.loc (.deref source) = some ownerLocation := by
+                simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+              have hsourceOwner :
+                  (StoreSlot.mk
+                    (.value (.ref { location := ownerLocation, owner := true }))
+                    sourceSlotLifetime).value =
+                  .value (.ref { location := ownerLocation, owner := true }) := rfl
+              have hprefixExtended :
+                  ∃ k,
+                    OwnerChainAt store rootSlot.value (LVal.path source ++ [()])
+                      ownerLocation ∧
+                    OwnsChain store (VariableProjection (LVal.base source)) k
+                      ownerLocation ∧
+                    k = (LVal.path source ++ [()]).length :=
+                OwnerChainPrefix.extend hprefix
+                  (by
+                    intro hpathNil
+                    have hlocRoot :=
+                      ProgramStore.loc_eq_var_of_path_nil
+                        (store := store) (lv := source) hpathNil
+                    have hlocEq :
+                        sourceLocation = VariableProjection (LVal.base source) :=
+                      Option.some.inj (hsourceLoc.symm.trans hlocRoot)
+                    subst hlocEq
+                    have hslotEq :
+                        StoreSlot.mk
+                            (.value (.ref { location := ownerLocation, owner := true }))
+                            sourceSlotLifetime = rootSlot :=
+                      Option.some.inj (hsourceSlot.symm.trans hrootSlot)
+                    exact congrArg StoreSlot.value hslotEq.symm)
+                  hsourceSlot hsourceOwner
+              refine ⟨envSlot, rootSlot, ownerLocation, ownerSlot,
+                by simpa [LVal.base] using henvBase,
+                by simpa [LVal.base] using hrootSlot,
+                hrootLifetime, hderefLoc, hownerSlot,
+                hrootValid, hinnerValid, ?_⟩
+              rcases hprefixExtended with ⟨k, hchain, howns, hlen⟩
+              exact Or.inr ⟨k, by simpa [LVal.path] using hchain,
+                by simpa [LVal.base] using howns,
+                by simpa [LVal.path] using hlen⟩
+      | boxFull hsourceFull =>
+          have hstrikeSource :
+              Strike (LVal.path source ++ (() :: (() :: suffix))) slot.ty struck := by
+            change Strike ((LVal.path source ++ [()]) ++ (() :: suffix))
+              slot.ty struck at hstrike
+            simpa [List.append_assoc] using hstrike
+          rcases ih hsourceFull (by simpa [LVal.base] using hbase)
+              hstrikeSource with
+            ⟨envSlot, rootSlot, sourceLocation, sourceSlot, henvBase,
+              hrootSlot, hrootLifetime, hsourceLoc, hsourceSlot,
+              hrootValid, hsourceValid, hprefix⟩
+          rcases sourceSlot with ⟨sourceValue, sourceSlotLifetime⟩
+          cases hsourceValid with
+          | boxFull hownerSlot hinnerValid =>
+              rename_i ownerLocation ownerSlot
+              have hderefLoc :
+                  store.loc (.deref source) = some ownerLocation := by
+                simp [ProgramStore.loc, hsourceLoc, hsourceSlot]
+              have hsourceOwner :
+                  (StoreSlot.mk
+                    (.value (.ref { location := ownerLocation, owner := true }))
+                    sourceSlotLifetime).value =
+                  .value (.ref { location := ownerLocation, owner := true }) := rfl
+              have hprefixExtended :
+                  ∃ k,
+                    OwnerChainAt store rootSlot.value (LVal.path source ++ [()])
+                      ownerLocation ∧
+                    OwnsChain store (VariableProjection (LVal.base source)) k
+                      ownerLocation ∧
+                    k = (LVal.path source ++ [()]).length :=
+                OwnerChainPrefix.extend hprefix
+                  (by
+                    intro hpathNil
+                    have hlocRoot :=
+                      ProgramStore.loc_eq_var_of_path_nil
+                        (store := store) (lv := source) hpathNil
+                    have hlocEq :
+                        sourceLocation = VariableProjection (LVal.base source) :=
+                      Option.some.inj (hsourceLoc.symm.trans hlocRoot)
+                    subst hlocEq
+                    have hslotEq :
+                        StoreSlot.mk
+                            (.value (.ref { location := ownerLocation, owner := true }))
+                            sourceSlotLifetime = rootSlot :=
+                      Option.some.inj (hsourceSlot.symm.trans hrootSlot)
+                    exact congrArg StoreSlot.value hslotEq.symm)
+                  hsourceSlot hsourceOwner
+              refine ⟨envSlot, rootSlot, ownerLocation, ownerSlot,
+                by simpa [LVal.base] using henvBase,
+                by simpa [LVal.base] using hrootSlot,
+                hrootLifetime, hderefLoc, hownerSlot,
+                hrootValid, hinnerValid, ?_⟩
+              rcases hprefixExtended with ⟨k, hchain, howns, hlen⟩
+              exact Or.inr ⟨k, by simpa [LVal.path] using hchain,
+                by simpa [LVal.base] using howns,
+                by simpa [LVal.path] using hlen⟩
+      | borrow hsourceBorrow htarget =>
+          have hstrikeSource :
+              Strike (LVal.path source ++ (() :: (() :: suffix))) slot.ty struck := by
+            change Strike ((LVal.path source ++ [()]) ++ (() :: suffix))
+              slot.ty struck at hstrike
+            simpa [List.append_assoc] using hstrike
+          rcases LValTyping.strike_suffix hsourceBorrow
+              (by simpa [LVal.base] using hbase) hstrikeSource with
+            ⟨badStruck, hbad⟩
+          cases badStruck <;> simp [Strike] at hbad
 
 /-- **Strike/write alignment.**  Updating the owner-chain leaf to `undef`
 realizes the struck type: the box spine survives slot-for-slot (the chain

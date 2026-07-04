@@ -1,46 +1,51 @@
 # Phase D Hard Sites
 
-Status: the static preservation walks in
-`LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remain green.  The
-runtime induction is still blocked by proof obligations that are absent from the
-single-target helper stack.
+Status: `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remains green
+after adding the new strike/path and owner-chain extraction support:
+
+- `LValTyping.strike_suffix` factors a strike at a typed lvalue into the
+  remaining suffix over that lvalue's type.
+- `OwnerChainAt.extend`, `ownsChain_extend`, `OwnerChainPrefix.extend`, and
+  `ProgramStore.loc_eq_var_of_path_nil` package the zero-or-owner-chain runtime
+  facts needed by dereference moves.
+- `lvalTyping_box_ownerChainPrefix_whenInitialized` and
+  `lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike` derive the
+  runtime chain prefix, root/leaf slots, and root/leaf validity directly from
+  `SafeAbstraction`, `LValTyping`, and `Strike`.
+
+The final `lake build` is not green yet because `preservation` is still not
+exported.  The next blocker is no longer owner-chain acyclicity itself, but the
+initialized reachability frame needed after writing the selected heap leaf.
 
 ## 1. Deref move: struck owner spine after runtime write
 
-Blocked helper:
+Former hard blocker:
 
-`validPartialValueWhenInitialized_strike_write`
+`validPartialValueWhenInitialized_strike_write` is now present and green.
 
-Needed use site:
+Current needed use site:
 
 `preservation_move_deref_boxFull_multistep_runtime_whenInitialized_of_wellFormed`
 
 The old proof used `StoreOwnerSpineWhenInitialized.valid_after_strike_nonempty`.
-That entire spine layer is gone in the single-target file.  The fresh proof must
-replace it with a direct induction over `Strike`, aligned with the concrete
-`ProgramStore.loc` chain from `Step.move`.
+The fresh file now has the direct `Strike`/`OwnerChainAt` replacement and the
+runtime lvalue-chain extractors listed above.
 
-Concrete subgoals:
+Remaining concrete subgoals:
 
-- At the strike leaf, the runtime write has updated the selected leaf slot to
-  `.undef`, so the result must be rebuilt with
-  `ValidPartialValueWhenInitialized.undef`.
-- At each box or full-box step, the owner slot at the current owner location must
-  be shown unchanged by the deeper leaf update.  This requires a distinctness
-  proof between the current owner location and the selected leaf.  The available
-  ingredients are `ValidPartialValueSkeleton.no_owned_path_to_storage`,
-  `ValidStore` owner uniqueness, and the concrete ownership edge exposed by the
-  valid box/full-box constructor.
-- Borrow values inside sibling subtrees must be transported across the update:
-  live targets need `store.loc` preservation, and stale targets remain stale.
-  The variable case has this via
-  `reachesWhenInitialized_var_ne_of_stored_not_writeProhibited`; the deref case
-  needs the same frame generalized from a variable location to the selected
-  heap leaf.
-- After the store proof, the environment must be transported through `EnvMove`.
-  The available current lemma
-  `ValidPartialValueWhenInitialized.move_env` is sufficient only after the
-  post-write validity in the source environment is established.
+- Use `lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike` on the
+  source lvalue, extend the returned prefix by the final `.boxFull` edge, then
+  feed the resulting `OwnerChainAt`/`OwnsChain` into
+  `validPartialValueWhenInitialized_strike_write`.
+- Generalize the solved variable reachability frame
+  `reachesWhenInitialized_var_ne_of_stored_not_writeProhibited` from
+  `VariableProjection x` to the selected heap leaf of an owner chain.  Owner
+  reaches should be discharged by `ValidPartialValueWhenInitialized.
+  no_storage_ownership_cycle`/`ValidStore`; live borrow reaches need the
+  corresponding `¬ WriteProhibited env source.deref` conflict exclusion.
+- Use that generalized frame for the moved value and for all other safe
+  abstraction slots via `validPartialValueWhenInitialized_update_of_not_live_reaches`,
+  then transport through `ValidPartialValueWhenInitialized.move_env`.
 
 ## 2. Deref assign: runtime leaf and static graft alignment
 
@@ -130,4 +135,3 @@ after the helpers above exist.  It should add a `BorrowSafeEnv env₁` hypothesi
 `WellFormedEnv env₁ lifetime` alone is insufficient for the strict assignment
 walk.  Empty initial call sites can discharge the extra premise with
 `borrowSafeEnv_empty`.
-
