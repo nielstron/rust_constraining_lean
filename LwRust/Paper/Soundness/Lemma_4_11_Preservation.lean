@@ -4656,6 +4656,172 @@ theorem LValTyping.transport_of_outside_chain {env env₃ : Env} {lhs : LVal}
       exact ⟨.borrow (ihBorrow houtside).1 (ihTarget hguardU).1,
         (ihTarget hguardU).2⟩
 
+/-- Characterization of the strong-update write: either nothing changed
+(cyclic chains clobber their own graft), or exactly one slot `b` changed, its
+new type's borrows all come from the written type, the written lval's typing
+lifetime bounds `b`'s slot lifetime, and `b` is chain-guarded from the
+written base. -/
+theorem EnvWrite.chain_guarded {env : Env}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    {env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {oldTy : PartialTy} {targetLifetime : Lifetime} :
+    EnvWrite env lhs rhsTy env₃ →
+    LValTyping env lhs oldTy targetLifetime →
+    (∀ y, env₃.slotAt y = env.slotAt y) ∨
+      ∃ b bslot graftTy,
+        env.slotAt b = some bslot ∧
+        (∀ y, y ≠ b → env₃.slotAt y = env.slotAt y) ∧
+        env₃.slotAt b = some { bslot with ty := graftTy } ∧
+        targetLifetime ≤ bslot.lifetime ∧
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains graftTy (.borrow mutable u) →
+          PartialTyContains (.ty rhsTy) (.borrow mutable u)) ∧
+        ChainGuard env (LVal.base lhs) b := by
+  intro hwrite hlv
+  exact EnvWrite.rec
+    (motive_1 := fun path old ty result updated _ =>
+      ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
+        LValTyping env wcur old lfc →
+        LValTyping env (prependPath path wcur) pt lf →
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains old (.borrow mutable u) →
+          env ⊢ (LVal.base wcur) ↝ (.borrow mutable u)) →
+        ChainGuard env (LVal.base lhs) (LVal.base wcur) →
+        (updated = old ∧
+          ((∀ y, result.slotAt y = env.slotAt y) ∨
+            ∃ b bslot graftTy,
+              env.slotAt b = some bslot ∧
+              (∀ y, y ≠ b → result.slotAt y = env.slotAt y) ∧
+              result.slotAt b = some { bslot with ty := graftTy } ∧
+              lf ≤ bslot.lifetime ∧
+              (∀ {mutable : Bool} {u : LVal},
+                PartialTyContains graftTy (.borrow mutable u) →
+                PartialTyContains (.ty ty) (.borrow mutable u)) ∧
+              ChainGuard env (LVal.base lhs) b)) ∨
+        (result = env ∧
+          (∀ {mutable : Bool} {u : LVal},
+            PartialTyContains updated (.borrow mutable u) →
+            PartialTyContains (.ty ty) (.borrow mutable u))))
+    (motive_2 := fun lv ty result _ =>
+      ∀ {pt : PartialTy} {lf : Lifetime},
+        LValTyping env lv pt lf →
+        ChainGuard env (LVal.base lhs) (LVal.base lv) →
+        (∀ y, result.slotAt y = env.slotAt y) ∨
+          ∃ b bslot graftTy,
+            env.slotAt b = some bslot ∧
+            (∀ y, y ≠ b → result.slotAt y = env.slotAt y) ∧
+            result.slotAt b = some { bslot with ty := graftTy } ∧
+            lf ≤ bslot.lifetime ∧
+            (∀ {mutable : Bool} {u : LVal},
+              PartialTyContains graftTy (.borrow mutable u) →
+              PartialTyContains (.ty ty) (.borrow mutable u)) ∧
+            ChainGuard env (LVal.base lhs) b)
+    (by
+      -- strong: the graft happens here; the environment part is untouched.
+      intro _old _ty wcur pt lf lfc _hwcur _hlhs _hcontainsW _hguard
+      refine Or.inr ⟨rfl, ?_⟩
+      intro mutable u hcontains
+      exact hcontains)
+    (by
+      -- box: the update stays inside the partial box.
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+        wcur pt lf lfc hwcur hlhs hcontainsW hguard
+      rcases ih (LValTyping.box hwcur)
+          (by rw [prependPath_deref_comm]; exact hlhs)
+          (by
+            intro mutable u hcontains
+            exact hcontainsW (PartialTyContains.box hcontains))
+          hguard with
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft⟩
+      · exact Or.inl ⟨by rw [hupdEq], hprops⟩
+      · refine Or.inr ⟨henvEq, ?_⟩
+        intro mutable u hcontains
+        cases hcontains with
+        | box hinner' => exact hgraft hinner'
+    )
+    (by
+      -- boxFull: as box, through the rebox wrapper.
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+        wcur pt lf lfc hwcur hlhs hcontainsW hguard
+      rcases ih (LValTyping.boxFull hwcur)
+          (by rw [prependPath_deref_comm]; exact hlhs)
+          (by
+            intro mutable u hcontains
+            exact hcontainsW (PartialTyContains.tyBox hcontains))
+          hguard with
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft⟩
+      · exact Or.inl ⟨by rw [hupdEq, partialTyRebox], hprops⟩
+      · exact Or.inr ⟨henvEq, fun hcontains =>
+          hgraft (PartialTyContains.partialTyRebox_borrow_inv hcontains)⟩)
+    (by
+      -- mutBorrow: the local type is unchanged; the nested write carries the
+      -- change, one guard step deeper.
+      intro _env₂ path target _ty _hwrite ih
+        wcur pt lf lfc hwcur hlhs hcontainsW hguard
+      refine Or.inl ⟨rfl, ?_⟩
+      have hguardTarget : ChainGuard env (LVal.base lhs) (LVal.base target) :=
+        ChainGuard.step hguard (hcontainsW PartialTyContains.here) rfl
+      have hlhsRebased :
+          LValTyping env (prependPath path target) pt lf :=
+        LValTyping.rebase_hop hwcur path
+          (by rw [prependPath_deref_comm]; exact hlhs)
+      exact ih hlhsRebased (by simpa using hguardTarget))
+    (by
+      -- intro: assemble the per-slot characterization.
+      intro _env₂ lv slot _ty updatedTy hslot hupdate ih pt lf hlv hguard
+      have hcontainsW :
+          ∀ {mutable : Bool} {u : LVal},
+            PartialTyContains slot.ty (.borrow mutable u) →
+            env ⊢ (LVal.base lv) ↝ (.borrow mutable u) := by
+        intro mutable u hcontains
+        exact ⟨slot, hslot, hcontains⟩
+      rcases ih (wcur := .var (LVal.base lv)) (LValTyping.var hslot)
+          (by rw [prependPath_path_base]; exact hlv) hcontainsW hguard with
+        ⟨hupdEq, hprops⟩ | ⟨henvEq, hgraft⟩
+      · -- Chain slot: the update rewrites the slot to its own value.
+        have hslotEta : { slot with ty := updatedTy } = slot := by
+          rw [hupdEq]
+        rcases hprops with hpointwise | ⟨b, bslot, graftTy, hb, hne, hbLook,
+            hbound, hgraftContains, hguardB⟩
+        · refine Or.inl ?_
+          intro y
+          by_cases hy : y = LVal.base lv
+          · subst hy
+            rw [hslotEta]
+            simpa [Env.update] using hslot.symm
+          · simpa [Env.update, hy] using hpointwise y
+        · by_cases hbEq : b = LVal.base lv
+          · -- The chain clobbers its own graft: nothing changes.
+            refine Or.inl ?_
+            intro y
+            by_cases hy : y = LVal.base lv
+            · subst hy
+              rw [hslotEta]
+              simpa [Env.update] using hslot.symm
+            · have hyB : y ≠ b := fun h => hy (h.trans hbEq)
+              simpa [Env.update, hy] using hne y hyB
+          · refine Or.inr ⟨b, bslot, graftTy, hb, ?_, ?_, hbound,
+              hgraftContains, hguardB⟩
+            · intro y hy
+              by_cases hyLv : y = LVal.base lv
+              · subst hyLv
+                rw [hslotEta]
+                simpa [Env.update] using hslot.symm
+              · simpa [Env.update, hyLv] using hne y hy
+            · simpa [Env.update, hbEq] using hbLook
+      · -- Graft slot: the written base receives the grafted type.
+        refine Or.inr ⟨LVal.base lv, slot, updatedTy, hslot, ?_, ?_, ?_,
+          hgraft, hguard⟩
+        · intro y hy
+          rw [show (_env₂.update (LVal.base lv)
+              { slot with ty := updatedTy }).slotAt y = _env₂.slotAt y by
+            simp [Env.update, hy]]
+          rw [henvEq]
+        · simp [Env.update]
+        · exact LValTyping.lifetime_le_of_base_outlives hcbwf hlv
+            ⟨slot, hslot, LifetimeOutlives.refl _⟩)
+    hwrite hlv ChainGuard.base
+
 end Paper
 end LwRust
 
