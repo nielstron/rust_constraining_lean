@@ -1047,7 +1047,7 @@ mutual
     /-- T-Assign.
 
     The old fan-out premises (`EnvWriteNoStaleBorrowTargets`, rank witness,
-    `CoherentWhenInitialized env₃`, `EnvWriteRhsTargetsWellFormed`) are gone:
+    `EnvWriteRhsTargetsWellFormed`) are gone:
     their counterexamples require multi-target fan-out.  In the single-target
     branch-free core, linearizability is preserved as a derived invariant by
     the follow-up's Lemmas 1-4. -/

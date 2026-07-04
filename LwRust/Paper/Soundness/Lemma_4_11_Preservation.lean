@@ -13,12 +13,6 @@ namespace Paper
 
 open Core
 
-/-- Compatibility predicate kept for consumers from the stale-aware development.
-
-Single-target borrow validity already records the selected target in the type,
-so the old global coherence side-condition carries no additional data. -/
-def CoherentWhenInitialized (_env : Env) : Prop := True
-
 /-- Source terms carry no runtime-owned values, so any valid runtime context
 gives a valid runtime package for the source subterm itself. -/
 theorem validRuntimeState_of_sourceTerm {store : ProgramStore} {context term : Term} :
@@ -33,19 +27,6 @@ theorem validRuntimeState_of_sourceTerm {store : ProgramStore} {context term : T
       cases hmem⟩,
     hvalid.2.1, hvalid.2.2.1, hvalid.2.2.2.1,
     sourceTerm_ownerTargetsHeap hsource⟩
-
-/-- Compatibility wrapper: the old coherence invariant is trivial in the
-single-target system. -/
-theorem typingPreservesCoherentWhenInitialized_of_sourceTerm
-    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
-    {term : Term} {ty : Ty} :
-    SourceTerm term →
-    WellFormedEnvWhenInitialized env₁ lifetime →
-    CoherentWhenInitialized env₁ →
-    TermTyping env₁ typing lifetime term ty env₂ →
-    CoherentWhenInitialized env₂ := by
-  intro _ _ _ _
-  trivial
 
 theorem UpdateAtPath.lifetimesPreserved {env₁ env₂ : Env}
     {path : List Unit} {old : PartialTy} {ty : Ty} {updated : PartialTy} :

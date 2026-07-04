@@ -59,15 +59,10 @@ are open metatheory (neither paper develops it):
 - `env₂.fresh x` (declare): the literal rule admits the shadow chain
   `let mut x = (let mut x = t)`; the paper's Section 5.2 explicitly treats
   redeclaration as not permitted, so this mechanizes paper intent.
-- `FreshUpdateCoherenceObligations` (declare) and `CoherentWhenInitialized
-  env₃` (assign, weakened from the earlier strict `Coherent env₃`):
-  target-list coherence of declared/written types.  No counterexample to
-  derivability is known, but a premise-free proof needs a hereditary
-  coherence invariant closed under the union types that deref-through-borrow
-  typing nodes produce; the naive slot-level invariant provably does not
-  lift (a slot-coherent environment can expose a merged `&[x, y]` with
-  `x : int`, `y : unit`, which has no joint typing — unreachable-looking, but
-  proving unreachability is exactly the missing metatheory).
+- Historical target-list coherence premises from the stale-aware/multi-target
+  development are no longer live in the current single-target branch-free core.
+  The compatibility coherence side condition has been deleted rather than
+  threaded as a trivial invariant.
 
 `T-Block`'s `LifetimeChild` premise formalizes the paper's ambient lexical
 nesting assumption and is not a restriction.
@@ -84,14 +79,12 @@ over the same invariant, so the non-stuckness story is unaffected.
 
 ### 3. Non-initial preservation wrappers carry derived-invariant hypotheses
 
-Beyond `WellFormedEnvWhenInitialized` (paper Definition 4.8), the general
-(arbitrary starting state) preservation wrappers take `CoherentWhenInitialized
-env₁` and `BorrowSafeEnv env₁` hypotheses; the headline initial-state
-theorems discharge them for the empty environment, so the end-to-end results
-match the paper's statements.  `BorrowSafeEnv Γ₁` on Lemma 4.11 remains a
-likely paper bug fix (see README): the printed lemma appears false without
-it (`p ↦ &mut [*x]`, `q ↦ &mut [**x]` is well-formed but not borrow safe,
-and `*p = box 5` then dangles `q`).
+Beyond `WellFormedEnvWhenInitialized` (paper Definition 4.8), the current
+preservation rebuild no longer carries the deleted compatibility coherence
+hypothesis.  `BorrowSafeEnv Γ₁` remains a likely paper bug fix (see README):
+the printed lemma appears false without it (`p ↦ &mut [*x]`,
+`q ↦ &mut [**x]` is well-formed but not borrow safe, and `*p = box 5` then
+dangles `q`).
 
 ### 4. Assignment operational semantics order
 

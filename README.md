@@ -46,20 +46,11 @@ stated; the deviation then documents the corrected claim).
     followed by a fan-out write of a moved-out duplicate installs a borrow
     into its own target's slot — a rank self edge.  The witness premise
     rules such writes out; without it preservation is false as stated.
-  - *Coherence obligations* (`CoherentWhenInitialized env₃` on `T-Assign` —
-    weakened from the earlier strict `Coherent env₃` — and
-    `FreshUpdateCoherenceObligations` on `T-Declare`) —
-    **believed derivable for source programs, but the derivation is open**:
-    no counterexample is known (the write only unions shape-compatible
-    lists), yet a premise-free preservation proof requires a *hereditary*
-    coherence invariant closed under the union types produced at
-    deref-through-borrow typing nodes.  The naive slot-level formulation
-    provably does not lift: a slot-coherent environment can expose a merged
-    borrow `&[x, y]` with `x : int`, `y : unit` under a dereference, which
-    has no joint typing — such environments appear unreachable (recursive
-    shape compatibility blocks their creation), but neither paper develops
-    the metatheory to prove it.  The obligations are therefore retained as
-    proof-carried premises in the weakest known form.
+  - *Former coherence obligations* — the compatibility coherence side
+    condition from the stale-aware/multi-target development has been removed
+    in the current single-target branch-free core.  Remaining preservation
+    work is about the strict/initialized well-formedness walk and runtime
+    frame arguments, not a global coherence predicate.
 
     `T-Assign`'s result CBWF **is derived** (no longer a carried premise),
     but it is *not* derivable from the paper's premises alone: a write through a multi-target mutable borrow `&mut[x,z]`
@@ -149,15 +140,10 @@ These deviations from the paper should be kept.
 
 - **Assignment is strengthened.**  `T-Assign` rechecks that the lhs is typeable
   after typing the rhs, requires shape compatibility and rhs well-formedness at
-  the target lifetime, and carries explicit rank/coherence obligations:
-  `EnvWriteRhsBorrowTargetsBelow`, a stale-aware `CoherentWhenInitialized env₃`
-  (weakened from the earlier strict `Coherent env₃`), and the
-  minimal `EnvWriteRhsTargetsWellFormed` for the result (the RHS-origin borrow
-  edges must outlive the slot they are injected into — strictly weaker than the
-  broad result `ContainedBorrowsWellFormed`, which is *derived* from it via
-  `containedBorrowsWellFormed_assign`).  These avoid borrow cycles and
-  supply the facts needed by preservation.  The result-side obligations are
-  rule-carried invariants, not extra premises on the final safety statements.
+  the target lifetime.  The old rank/coherence/fan-out obligations from the
+  multi-target development are gone in the current single-target branch-free
+  core; the remaining proof work is to rebuild the strict write/frame
+  preservation facts.
 
 - **Borrow well-formedness is preserved per target.**  Runtime borrow
   well-formedness uses `BorrowTargetsWellFormed`, which requires each target to
@@ -170,12 +156,8 @@ These deviations from the paper should be kept.
 - **Well-formed environments are exactly the paper's Definition 4.8.**
   `WellFormedEnv` / `WellFormedEnvWhenInitialized` contain only the paper's two
   ingredients (contained borrows well-formed, slots outlive the current
-  lifetime).  The coherence and linearizability facts formerly carried as
-  invariant conjuncts are instead threaded through preservation: coherence via
-  the static walk `typingPreservesCoherentWhenInitialized_of_sourceTerm`
-  (rooted in the rule-carried obligations and discharged at the empty
-  environment), and rank facts via the assignment rank witness.  Facts the old
-  conjuncts supplied elsewhere are re-derived; notably the
+  lifetime).  The former compatibility coherence predicate has been deleted;
+  facts the old conjuncts supplied elsewhere are re-derived, notably the
   Linearizable-dependent update-self lemma (false for two-part-well-formed
   environments, which admit self-borrows) is replaced by witness-carrying
   `WriteProhibitedVia` chain lemmas that transport across writes.

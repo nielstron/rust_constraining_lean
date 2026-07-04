@@ -28,15 +28,14 @@ theorem lemma_9_9_valuePreservation
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
       WellFormedEnv env₁ lifetime →
-      CoherentWhenInitialized env₁ →
       store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
       (.ty ty) := by
-    intro hsource hvalid hstoreTyping hwellFormed hcoh hsafe htyping hmulti
+    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
     exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hcoh hsafe htyping hmulti).2.2
+      hwellFormed hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

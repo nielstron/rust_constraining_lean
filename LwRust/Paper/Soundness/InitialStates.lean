@@ -276,8 +276,7 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact preservation hsource hvalidRuntime hvalidStoreTyping
-    (wellFormedEnv_empty lifetime) coherentWhenInitialized_empty
-    hsafe htyping hmulti
+    (wellFormedEnv_empty lifetime) hsafe htyping hmulti
 
 /--
 **Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.
@@ -311,7 +310,7 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact typeAndBorrowSafety hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed _) coherentWhenInitialized_empty hsafe hstoreProgress
+    (hwellFormed _) hsafe hstoreProgress
     htyping hterminates
 
 /--
@@ -497,7 +496,6 @@ theorem sourceInitial_typeAndBorrowSafety_of_preservation
     (sourceInitialRuntimeState_valid hsource)
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
     (wellFormedEnv_empty _)
-    coherentWhenInitialized_empty
     safeAbstraction_empty
     operationalStoreProgress_empty
     htyping
@@ -685,7 +683,7 @@ theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hvalidRuntime hvalidStoreTyping
-    (hwellFormed lifetime) coherentWhenInitialized_empty hsafe
+    (hwellFormed lifetime) hsafe
     ProgramStore.finiteSupport_empty htyping).2
 
 end Paper
