@@ -11152,6 +11152,65 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                 hownerNoReachOld hreach
             simpa [hderefLoc] using hne)
 
+/-- **Chain-entry forcing in the result environment.**  Any borrow annotation
+of the post-write environment that targets into the write chain is a source
+annotation held on the chain itself: the graft's borrows never target the
+chain (`graft_target_outside`), and outside holders never target into it
+(`chainGuard_contains_exclusion`).  With unarity this pins the annotation to
+the chain's own hop at that slot. -/
+theorem chain_entry_env3 {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (hsafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {x : Name} {mutable : Bool} {u : LVal},
+      env₃ ⊢ x ↝ (.borrow mutable u) →
+      ChainGuard env (LVal.base lhs) (LVal.base u) →
+      env ⊢ x ↝ (.borrow mutable u) ∧ ChainGuard env (LVal.base lhs) x := by
+  have hunchanged : ∀ x, ¬ ChainGuard env (LVal.base lhs) x →
+      env₃.slotAt x = env.slotAt x := by
+    intro x hxOut
+    exact hne x (fun h => hxOut (h ▸ hguardB))
+  intro x mutable u hx hguardU
+  by_cases hxb : x = b
+  · -- The graft slot: its borrows never target the chain.
+    subst hxb
+    rcases hx with ⟨s, hs, hcontains⟩
+    have hsEq : s = { bslot with ty := graftTy } :=
+      Option.some.inj (hs.symm.trans hbLook)
+    subst hsEq
+    exact absurd hguardU
+      (graft_target_outside htySafe hnotWrite hbLook hgraftContains
+        hcontains)
+  · -- Unchanged slot: a source annotation; outside holders are excluded.
+    have hxEnv : env ⊢ x ↝ (.borrow mutable u) := by
+      rcases hx with ⟨s, hs, hcontains⟩
+      exact ⟨s, (hne x hxb) ▸ hs, hcontains⟩
+    refine ⟨hxEnv, ?_⟩
+    by_contra hxOutside
+    exact chainGuard_contains_exclusion hsafe hunchanged hnotWrite hguardU
+      hxOutside hxEnv rfl
+
+/-- On-chain holders carry exactly the chain's hop annotation: combining the
+entry forcing with unarity.  The entering borrow at a chain slot is the
+unique annotation of that slot. -/
+theorem chain_entry_unique {env : Env} {lhs : LVal}
+    {x : Name} {mutable mutable' : Bool} {u u' : LVal}
+    (hx : env ⊢ x ↝ (.borrow mutable u))
+    (hx' : env ⊢ x ↝ (.borrow mutable' u')) :
+    mutable = mutable' ∧ u = u' := by
+  rcases hx with ⟨s, hs, hcontains⟩
+  rcases hx' with ⟨s', hs', hcontains'⟩
+  have hsEq : s' = s := Option.some.inj (hs'.symm.trans hs)
+  subst hsEq
+  exact PartialTyContains.borrow_unique hcontains hcontains'
+
 end Paper
 end LwRust
 
