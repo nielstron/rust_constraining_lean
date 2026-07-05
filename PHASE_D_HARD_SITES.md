@@ -243,6 +243,20 @@ the singleton block lifetime-drop runtime preservation helper:
   induction that uses the unique-entry step to walk a non-self nested re-entry
   back toward the top root, then discharges the graft-slot/root case with the
   graft-target exclusion.
+- Added and compiled the Round 20 mechanical frame extraction:
+  `PathSelect.update_borrows`,
+  `WriteProhibited.transport_of_pointwise`,
+  `not_writeProhibited_of_pointwise`, and
+  `WellFormedEnvWhenInitialized.transport_of_pointwise`.  Refactored
+  `preservation_assign_deref_box_step_runtime_whenInitialized_of_frames` and
+  `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_frames`
+  so they consume already-transported RHS and sibling validities instead of a
+  local `¬ WriteProhibited` premise; their well-formed callers now construct
+  those validities from `validPartialValueWhenInitialized_envWrite_of_result_contains`.
+  Added `preservation_assign_var_step_runtime_whenInitialized_of_frames` and
+  rewrote `preservation_assign_var_step_runtime_whenInitialized_of_wellFormed`
+  as the wrapper that derives its four frame/validity premises from the
+  existing variable no-write facts.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;
