@@ -129,8 +129,8 @@ the singleton block lifetime-drop runtime preservation helper:
   chain-collapse proof is still the remaining hard assignment step.
 
 The final `lake build` is not green yet because `preservation` is still not
-exported.  Rechecked after the compiled helper additions above; current
-full-build failures are:
+exported.  Rechecked on 2026-07-05 after the compiled helper additions above;
+current full-build failures are:
 
 - `Appendix9/Lemma_9_9_ValuePreservation.lean:37`: unknown identifier
   `preservation`.
@@ -146,7 +146,10 @@ is the `UpdateAtPath.mutBorrow` re-rooting case needed by full-box paths that
 pass through a mutable borrow and by the direct borrow-hop assignment helper.
 That case must restart the runtime owner-chain extraction at the borrowed
 target's base variable and use `EnvWrite.chain_guarded` to relate the final
-guarded static slot to the re-rooted runtime leaf.
+guarded static slot to the re-rooted runtime leaf.  A re-audit confirmed that
+this is not final-theorem plumbing: `Theorem_4_12_TypeAndBorrowSafety` is
+parameterized by preservation rather than proving it, and the old reference
+borrow-hop proof depends on removed rank/selected-target machinery.
 
 ## 1. Deref move: struck owner spine after runtime write
 
