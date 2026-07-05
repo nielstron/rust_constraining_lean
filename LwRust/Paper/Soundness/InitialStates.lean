@@ -196,6 +196,12 @@ theorem sourceInitialRuntimeSoundnessHypotheses {term : Term} {lifetime : Lifeti
 /--
 Any program typed from the empty environment and empty store typing satisfies the
 runtime assumptions required by progress and preservation.
+
+The remaining proof-side invariants used by the preservation and Theorem 4.12
+wrappers are the canonical empty instances: `borrowSafeEnv_empty`,
+`Env.finiteSupport_empty`, and `Linearizable.empty`.  Thus the empty initial
+state establishes the whole invariant package, and the source-typing
+preservation lemmas thread it through well-typed programs.
 -/
 theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
     {lifetime : Lifetime} {term : Term} {ty : Ty} :
@@ -215,6 +221,32 @@ theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
       by
         intro env lifetime
         exact storeTypingRefsWellFormed_empty env lifetime⟩
+
+/-- A typed empty-initial program starts with the full invariant package, and
+source typing preserves the static package to the output environment. -/
+theorem emptyInitialInvariantPackage_of_typing {env₂ : Env}
+    {lifetime : Lifetime} {term : Term} {ty : Ty} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    SourceTerm term ∧
+      ValidRuntimeState ProgramStore.empty term ∧
+      ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
+      ProgramStore.empty ≈ₛ Env.empty ∧
+      ProgramStore.empty.FiniteSupport ∧
+      StaticInvariantPackage Env.empty lifetime ∧
+      StaticInvariantPackage env₂ lifetime ∧
+      WellFormedTy env₂ ty lifetime ∧
+      TyBorrowSafeAgainstEnv env₂ ty := by
+  intro htyping
+  rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
+    ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hprogress,
+      _hrefs⟩
+  have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
+  have hbase : StaticInvariantPackage Env.empty lifetime :=
+    StaticInvariantPackage.empty lifetime
+  rcases StaticInvariantPackage.preserve_of_sourceTerm hsource hbase htyping with
+    ⟨hresult, hwellTy, htySafe⟩
+  exact ⟨hsource, hvalidRuntime, hvalidStoreTyping, hsafe,
+    ProgramStore.finiteSupport_empty, hbase, hresult, hwellTy, htySafe⟩
 
 /-- **Lemma 4.10.** Empty-store/source-term instance of Progress. -/
 theorem sourceInitial_progress {term : Term} {lifetime : Lifetime}
@@ -279,6 +311,22 @@ theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     (wellFormedEnv_empty lifetime) borrowSafeEnv_empty
     Env.finiteSupport_empty Linearizable.empty fullSafeAbstraction_empty
     htyping hmulti
+
+/-- Empty-initial terminal preservation, bundled with the static invariant
+package before and after typing. -/
+theorem emptyInitial_preservation_with_invariantPackage
+    {term : Term} {lifetime : Lifetime}
+    {ty : Ty} {env₂ : Env} {finalStore : ProgramStore} {finalValue : Value} :
+      TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+      MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
+      StaticInvariantPackage Env.empty lifetime ∧
+        StaticInvariantPackage env₂ lifetime ∧
+        FullTerminalStateSafe finalStore finalValue env₂ ty := by
+  intro htyping hmulti
+  rcases emptyInitialInvariantPackage_of_typing htyping with
+    ⟨_hsource, _hvalidRuntime, _hvalidStoreTyping, _hsafe, _hfiniteStore,
+      hbase, hresult, _hwellTy, _htySafe⟩
+  exact ⟨hbase, hresult, emptyInitial_preservation htyping hmulti⟩
 
 /--
 **Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.

@@ -7609,6 +7609,40 @@ theorem typingPreservesLinearizable_of_sourceTerm
         hwellHead.1 hwellHead.2.1 hfinite₂ hlinear₂)
     htyping hsource hwellFormed hsafe hfinite hlinear
 
+/-- The static invariant package threaded by source typing and used by
+preservation: Definition 4.8 well-formedness, Definition 4.13 borrow safety,
+finite context support, and the follow-up paper's linearization/rank
+invariant. -/
+def StaticInvariantPackage (env : Env) (lifetime : Lifetime) : Prop :=
+  WellFormedEnv env lifetime ∧ BorrowSafeEnv env ∧
+    Env.FiniteSupport env ∧ Linearizable env
+
+theorem StaticInvariantPackage.empty (lifetime : Lifetime) :
+    StaticInvariantPackage Env.empty lifetime := by
+  exact ⟨wellFormedEnv_empty lifetime, borrowSafeEnv_empty,
+    Env.finiteSupport_empty, Linearizable.empty⟩
+
+/-- Source typing preserves the whole static invariant package. -/
+theorem StaticInvariantPackage.preserve_of_sourceTerm
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} :
+    SourceTerm term →
+    StaticInvariantPackage env₁ lifetime →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    StaticInvariantPackage env₂ lifetime ∧
+      WellFormedTy env₂ ty lifetime ∧
+      TyBorrowSafeAgainstEnv env₂ ty := by
+  intro hsource hinv htyping
+  rcases hinv with ⟨hwell, hsafe, hfinite, hlinear⟩
+  rcases typingPreservesWellFormed_of_sourceTerm hsource hwell hsafe htyping with
+    ⟨hwell₂, hsafe₂, hwellTy₂, htySafe₂⟩
+  have hfinite₂ : Env.FiniteSupport env₂ :=
+    TermTyping.finiteSupport htyping hfinite
+  have hlinear₂ : Linearizable env₂ :=
+    typingPreservesLinearizable_of_sourceTerm hsource hwell hsafe hfinite
+      hlinear htyping
+  exact ⟨⟨hwell₂, hsafe₂, hfinite₂, hlinear₂⟩, hwellTy₂, htySafe₂⟩
+
 theorem safeAbstractionWhenInitialized_dropLifetime_of_preserved
     {store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
     (∀ x,
