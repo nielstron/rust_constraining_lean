@@ -8143,11 +8143,15 @@ theorem UpdateAtPath.pathSelect_or_hop_typed
       ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
         LValTyping env wcur old lfc →
         LValTyping env (prependPath path wcur) pt lf →
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains old (.borrow mutable u) →
+          env ⊢ (LVal.base wcur) ↝ (.borrow mutable u)) →
         (∃ leaf, PathSelect path old leaf) ∨
           ∃ (path' : Path) (target : LVal) (nested : Env),
             EnvWrite env (prependPath path' target) rhsTy nested ∧
             result = nested ∧
             updated = old ∧
+            env ⊢ (LVal.base wcur) ↝ (.borrow true target) ∧
             LValTyping env (prependPath path' target) pt lf ∧
               store.loc (prependPath path wcur) =
                 store.loc (prependPath path' target) := by
@@ -8157,65 +8161,77 @@ theorem UpdateAtPath.pathSelect_or_hop_typed
       ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
         LValTyping env wcur old lfc →
         LValTyping env (prependPath path wcur) pt lf →
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains old (.borrow mutable u) →
+          env ⊢ (LVal.base wcur) ↝ (.borrow mutable u)) →
         (∃ leaf, PathSelect path old leaf) ∨
           ∃ (path' : Path) (target : LVal) (nested : Env),
             EnvWrite env (prependPath path' target) rhsTy nested ∧
             result = nested ∧
             updated = old ∧
+            env ⊢ (LVal.base wcur) ↝ (.borrow true target) ∧
             LValTyping env (prependPath path' target) pt lf ∧
             store.loc (prependPath path wcur) =
               store.loc (prependPath path' target))
     (motive_2 := fun _lv _rhsTy _result _ => True)
     (by
-      intro _old _ty wcur pt lf lfc _hwcur _hlhs
+      intro _old _ty wcur pt lf lfc _hwcur _hlhs _hcontainsW
       left
       exact ⟨_, PathSelect.here⟩)
     (by
       intro _env₂ _path _inner _updatedInner _ty _hinner ih
-      intro wcur pt lf lfc hwcur hlhs
+      intro wcur pt lf lfc hwcur hlhs hcontainsW
       have hpathEq :
           prependPath _path wcur.deref = prependPath (() :: _path) wcur := by
         simp [prependPath_deref_comm, prependPath]
       have hlhs' :
           LValTyping env (prependPath _path wcur.deref) pt lf := by
         simpa [hpathEq] using hlhs
-      rcases ih (LValTyping.box hwcur) hlhs' with
+      rcases ih (LValTyping.box hwcur) hlhs'
+          (by
+            intro mutable u hcontains
+            exact hcontainsW (PartialTyContains.box hcontains)) with
         hselect | hhop
       · rcases hselect with ⟨leaf, hselect⟩
         left
         exact ⟨leaf, PathSelect.box hselect⟩
       · rcases hhop with
-          ⟨path', target, nested, hwrite, hresult, hupdated, htyping,
+          ⟨path', target, nested, hwrite, hresult, hupdated, hann, htyping,
             hloc⟩
         right
-        refine ⟨path', target, nested, hwrite, hresult, ?_, htyping, ?_⟩
+        refine ⟨path', target, nested, hwrite, hresult, ?_, hann, htyping,
+          ?_⟩
         · rw [hupdated]
         · simpa [hpathEq] using hloc)
     (by
       intro _env₂ _path _inner _updatedInner _ty _hinner ih
-      intro wcur pt lf lfc hwcur hlhs
+      intro wcur pt lf lfc hwcur hlhs hcontainsW
       have hpathEq :
           prependPath _path wcur.deref = prependPath (() :: _path) wcur := by
         simp [prependPath_deref_comm, prependPath]
       have hlhs' :
           LValTyping env (prependPath _path wcur.deref) pt lf := by
         simpa [hpathEq] using hlhs
-      rcases ih (LValTyping.boxFull hwcur) hlhs' with
+      rcases ih (LValTyping.boxFull hwcur) hlhs'
+          (by
+            intro mutable u hcontains
+            exact hcontainsW (PartialTyContains.tyBox hcontains)) with
         hselect | hhop
       · rcases hselect with ⟨leaf, hselect⟩
         left
         exact ⟨leaf, PathSelect.boxFull hselect⟩
       · rcases hhop with
-          ⟨path', target, nested, hwrite, hresult, hupdated, htyping,
+          ⟨path', target, nested, hwrite, hresult, hupdated, hann, htyping,
             hloc⟩
         right
-        refine ⟨path', target, nested, hwrite, hresult, ?_, htyping, ?_⟩
+        refine ⟨path', target, nested, hwrite, hresult, ?_, hann, htyping,
+          ?_⟩
         · rw [hupdated]
           simp [partialTyRebox]
         · simpa [hpathEq] using hloc)
     (by
       intro env₂ path target rhsTy hwrite _ih
-      intro wcur pt lf lfc hwcur hlhs
+      intro wcur pt lf lfc hwcur hlhs hcontainsW
       have hpathEq :
           prependPath path wcur.deref = prependPath (() :: path) wcur := by
         simp [prependPath_deref_comm, prependPath]
@@ -8237,7 +8253,8 @@ theorem UpdateAtPath.pathSelect_or_hop_typed
             store.loc (prependPath path target) :=
         ProgramStore.loc_prependPath_eq_of_loc_eq hlocBase path
       right
-      exact ⟨path, target, env₂, hwrite, rfl, rfl, hrebased,
+      exact ⟨path, target, env₂, hwrite, rfl, rfl,
+        hcontainsW PartialTyContains.here, hrebased,
         by simpa [hpathEq] using hloc⟩)
     (by
       intro _env₂ _lv _slot _ty _updatedTy _hslot _hupdate _ih
@@ -8262,6 +8279,7 @@ theorem EnvWrite.select_or_hop_typed
         env.slotAt (LVal.base lhs) = some slot ∧
         EnvWrite env (prependPath path' target) rhsTy nested ∧
         env' = nested.update (LVal.base lhs) slot ∧
+        env ⊢ (LVal.base lhs) ↝ (.borrow true target) ∧
         LValTyping env (prependPath path' target) oldTy targetLifetime ∧
         store.loc lhs = store.loc (prependPath path' target) := by
   intro hwrite hlhs
@@ -8274,17 +8292,20 @@ theorem EnvWrite.select_or_hop_typed
             (LValTyping.var (by simpa [LVal.base] using hslot))
             (by
               rw [prependPath_path_base]
-              exact hlhs) with
+              exact hlhs)
+            (by
+              intro mutable u hcontains
+              exact ⟨slot, by simpa [LVal.base] using hslot, hcontains⟩) with
         hselect | hhop
       · rcases hselect with ⟨leaf, hselect⟩
         left
         exact ⟨slot, leaf, by simpa [LVal.base] using hslot, hselect⟩
       · rcases hhop with
-          ⟨path', target, nested, hnested, hresult, hupdated, htyping,
+          ⟨path', target, nested, hnested, hresult, hupdated, hann, htyping,
             hloc⟩
         right
         refine ⟨slot, path', target, nested, by simpa [LVal.base] using hslot,
-          hnested, ?_, htyping, ?_⟩
+          hnested, ?_, by simpa [LVal.base] using hann, htyping, ?_⟩
         · subst hresult
           subst hupdated
           simp [LVal.base]
@@ -11890,6 +11911,105 @@ theorem chainGuard_self_edge_eq_changed_slot {env env₃ : Env} {lhs : LVal}
     chainGuard_self_edge_eq_root hsafe hguardZ hcontains hbaseSelf
   exact chainGuard_step_root_prohibited hsafe htySafe hnotWrite hne
     hbLook hgraftContains hguardB hcontains (by simpa [hzRoot] using hbaseSelf)
+
+/-- Cycle prohibition.  Suppose no source annotation may target the top root
+`r₀` (in the intended use, because the whole result environment is pointwise
+value-equal to the source, so any such annotation survives the write and
+write-prohibits the top lvalue), and suppose a mutable edge held at `w₀`
+closes a cycle back to `ρ` with `ChainGuard env ρ w₀`.  Then no slot is
+reachable both from `r₀` and from `ρ`.  The induction walks the top chain
+backwards: at each meeting node, borrow safety matches the top chain's
+arriving edge with the cycle chain's arriving edge (they target the same
+base), so the meeting point slides one step toward `r₀`, where the arriving
+edge is killed outright. -/
+theorem chainGuard_cycle_prohibited {env : Env} {r₀ ρ w₀ : Name} {t : LVal}
+    (hsafe : BorrowSafeEnv env)
+    (hkill : ∀ {z : Name} {g : LVal},
+      env ⊢ z ↝ (.borrow true g) → LVal.base g = r₀ → False)
+    (hedge : env ⊢ w₀ ↝ (.borrow true t))
+    (hedgeBase : LVal.base t = ρ)
+    (hC₀ : ChainGuard env ρ w₀) :
+    ∀ {w : Name}, ChainGuard env r₀ w → ChainGuard env ρ w → False := by
+  intro w hT
+  induction hT with
+  | base =>
+      intro hC
+      cases hC with
+      | base => exact hkill hedge hedgeBase
+      | step _ hz hbase => exact hkill hz hbase
+  | @step zT wT gT hT' hzT hbaseT ih =>
+      intro hC
+      cases hC with
+      | base =>
+          rcases borrowSafe_same_target_unique_edge hsafe hedge hedgeBase
+              hzT hbaseT with ⟨hzEq, _, _⟩
+          exact ih (by rw [hzEq]; exact hC₀)
+      | @step zC _ gC hC' hzC hbaseC =>
+          rcases borrowSafe_same_target_unique_edge hsafe hzC hbaseC
+              hzT hbaseT with ⟨hzEq, _, _⟩
+          exact ih (by rw [hzEq]; exact hC')
+
+/-- The nested hop write preserves the outer holder slot.  Applying the write
+characterization to the reduced write, the only dangerous case is the one
+where the nested chain re-enters the outer holder base.  There the outer
+identity-update restores the holder slot, so the whole result environment is
+pointwise value-equal to the source; every source annotation survives, the
+re-entry chain plus the hop annotation closes a mutable-borrow cycle through
+the current holder, and `chainGuard_cycle_prohibited` converts it into
+`WriteProhibited env₃ lhsTop`, contradicting the rule premise. -/
+theorem EnvWrite.hop_nested_slot_preserved
+    {env env₃ nested : Env} {lhsTop : LVal} {lhsCur : Name} {rhsTy : Ty}
+    {slot : EnvSlot} {path' : Path} {target : LVal}
+    {oldTy : PartialTy} {targetLifetime : Lifetime}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hsafe : BorrowSafeEnv env)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (hguardTop : ChainGuard env (LVal.base lhsTop) lhsCur)
+    (hpoint : ∀ y, env₃.slotAt y = (nested.update lhsCur slot).slotAt y)
+    (hslot : env.slotAt lhsCur = some slot)
+    (hhopAnn : env ⊢ lhsCur ↝ (.borrow true target))
+    (hnested : EnvWrite env (prependPath path' target) rhsTy nested)
+    (hreduced :
+      LValTyping env (prependPath path' target) oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy)) :
+    nested.slotAt lhsCur = some slot := by
+  rcases EnvWrite.chain_guarded hcbwf hnested hreduced hshape with
+    hpointwise | ⟨b, bslot, graftTy, _hbEnv, hne, _hbNested, _hlife,
+      _hgraftContains, _hmirror, hguard⟩
+  · rw [hpointwise lhsCur]
+    exact hslot
+  · by_cases hbb : b = lhsCur
+    · -- Re-entry corner: derive a contradiction from the top premise.
+      exfalso
+      subst hbb
+      have henvEq : ∀ y, env₃.slotAt y = env.slotAt y := by
+        intro y
+        rw [hpoint y]
+        by_cases hy : y = b
+        · subst hy
+          simpa [Env.update] using hslot.symm
+        · have hupd :
+              (nested.update b slot).slotAt y = nested.slotAt y := by
+            simp [Env.update, hy]
+          rw [hupd]
+          exact hne y hy
+      have hkill : ∀ {z : Name} {g : LVal},
+          env ⊢ z ↝ (.borrow true g) → LVal.base g = LVal.base lhsTop →
+          False := by
+        intro z g hzg hbase
+        rcases hzg with ⟨s, hs, hcont⟩
+        refine hnotWriteTop
+          (WriteProhibited.of_contains_conflict
+            (⟨s, (henvEq z).trans hs, hcont⟩ :
+              env₃ ⊢ z ↝ (Ty.borrow true g)) ?_)
+        show LVal.base g = LVal.base lhsTop
+        exact hbase
+      have hC : ChainGuard env (LVal.base target) b := by
+        simpa using hguard
+      exact chainGuard_cycle_prohibited hsafe hkill hhopAnn rfl hC
+        hguardTop hC
+    · rw [hne lhsCur (fun h => hbb h.symm)]
+      exact hslot
 
 /-- Reverse outside-chain transport for the result of a guarded write.  If a
 post-write lvalue is rooted outside the source write chain, then its typing
