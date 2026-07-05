@@ -7991,6 +7991,85 @@ theorem assign_step_prependPath_deref_borrow_whenInitialized
       path
   exact assign_step_of_loc_eq hloc hstep
 
+theorem Env.update_same_pointwise {env : Env} {x : Name} {slot : EnvSlot} :
+    env.slotAt x = some slot →
+    ∀ y, (env.update x slot).slotAt y = env.slotAt y := by
+  intro hslot y
+  by_cases hy : y = x
+  · subst hy
+    simp [Env.update, hslot]
+  · simp [Env.update, hy]
+
+theorem EnvWrite.deref_borrow_var_inv
+    {env env' : Env} {x : Name} {slot : EnvSlot} {target : LVal}
+    {rhsTy : Ty} :
+    env.slotAt x = some slot →
+    slot.ty = .ty (.borrow true target) →
+    EnvWrite env (.deref (.var x)) rhsTy env' →
+    ∃ nested,
+      EnvWrite env target rhsTy nested ∧
+      env' = nested.update x { slot with ty := .ty (.borrow true target) } := by
+  intro hslot hslotTy hwrite
+  cases hwrite with
+  | @intro writeEnv _writeLv writeSlot _writeTy updatedTy hwriteSlot hupdate =>
+      have hwriteSlotEq : writeSlot = slot := by
+        have hslot' : env.slotAt x = some writeSlot := by
+          simpa [LVal.base] using hwriteSlot
+        exact Option.some.inj (hslot'.symm.trans hslot)
+      subst writeSlot
+      rw [hslotTy] at hupdate
+      cases hupdate with
+      | mutBorrow hinner =>
+          refine ⟨writeEnv, ?_, ?_⟩
+          · simpa [prependPath] using hinner
+          · simp [LVal.base]
+
+theorem TargetInitialized.transport_of_pointwise {env result : Env}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    ∀ {target : LVal},
+      TargetInitialized result target →
+      TargetInitialized env target := by
+  intro target htarget
+  rcases htarget with ⟨targetTy, targetLifetime, htyping⟩
+  exact ⟨targetTy, targetLifetime,
+    LValTyping.transport_of_pointwise (fun y => (heq y).symm) htyping⟩
+
+theorem safeAbstractionWhenInitialized_transport_pointwise
+    {store : ProgramStore} {env result : Env}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    SafeAbstraction store env →
+    SafeAbstraction store result := by
+  intro hsafe
+  refine ⟨?domain, ?slots⟩
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases (hsafe.1 x).mp hstoreDomain with ⟨slot, hslot⟩
+      exact ⟨slot, by simpa [heq x] using hslot⟩
+    · intro hresultDomain
+      rcases hresultDomain with ⟨slot, hslot⟩
+      exact (hsafe.1 x).mpr ⟨slot, by simpa [heq x] using hslot⟩
+  · intro x slot hslot
+    have hslotEnv : env.slotAt x = some slot := by
+      simpa [heq x] using hslot
+    rcases hsafe.2 x slot hslotEnv with
+      ⟨oldValue, hstoreSlot, hvalidOld⟩
+    exact ⟨oldValue, hstoreSlot,
+      validPartialValueWhenInitialized_transport_env
+        (TargetInitialized.transport_of_pointwise heq) hvalidOld⟩
+
+theorem TerminalStateSafe.transport_env_pointwise
+    {store : ProgramStore} {value : Value} {env result : Env} {ty : Ty}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    TerminalStateSafe store value env ty →
+    TerminalStateSafe store value result ty := by
+  intro hterminal
+  rcases hterminal with ⟨hvalidRuntime, hsafe, hvalidValue⟩
+  exact ⟨hvalidRuntime,
+    safeAbstractionWhenInitialized_transport_pointwise heq hsafe,
+    validPartialValueWhenInitialized_transport_env
+      (TargetInitialized.transport_of_pointwise heq) hvalidValue⟩
+
 theorem lvalTyping_box_ownerChainPrefix_whenInitialized
     {store : ProgramStore} {env : Env}
     (hsafe : SafeAbstraction store env) :
