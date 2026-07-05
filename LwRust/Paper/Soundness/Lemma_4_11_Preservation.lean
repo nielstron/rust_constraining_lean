@@ -7857,6 +7857,43 @@ theorem PathSelect.append_inv :
           rcases ih hinner with ⟨mid, hprefix, hsuffix⟩
           exact ⟨mid, PathSelect.boxFull hprefix, hsuffix⟩
 
+/-- Pure selections are deterministic. -/
+theorem PathSelect.deterministic :
+    ∀ {path : Path} {root a b : PartialTy},
+      PathSelect path root a → PathSelect path root b → a = b := by
+  intro path root a b ha
+  induction ha with
+  | here =>
+      intro hb
+      cases hb
+      rfl
+  | box hinner ih =>
+      intro hb
+      cases hb with
+      | box hinner' => exact ih hinner'
+  | boxFull hinner ih =>
+      intro hb
+      cases hb with
+      | boxFull hinner' => exact ih hinner'
+
+/-- Unit paths are determined by their length. -/
+theorem Path.eq_of_length_eq :
+    ∀ {p₁ p₂ : Path}, p₁.length = p₂.length → p₁ = p₂ := by
+  intro p₁
+  induction p₁ with
+  | nil =>
+      intro p₂ hlen
+      cases p₂ with
+      | nil => rfl
+      | cons _ _ => simp at hlen
+  | cons _ p ih =>
+      intro p₂ hlen
+      cases p₂ with
+      | nil => simp at hlen
+      | cons _ p' =>
+          simp only [List.length_cons, Nat.succ.injEq] at hlen
+          rw [ih hlen]
+
 theorem PathSelect.snoc_box :
     ∀ {path : Path} {root inner : PartialTy},
     PathSelect path root (.box inner) →
@@ -12574,6 +12611,8 @@ theorem HopsTo.locReads_ne_of_links_clean
         env.slotAt (LVal.base s₀) = some slotH →
         PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
         LValTyping env s₀ (.ty (.borrow true target)) lf →
+        env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
+        env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
         (∀ mid, RuntimeFrame.LocReads store s₀ mid → mid ≠ leaf) ∧
           store.loc s₀ ≠ some leaf) →
       (∀ mid, RuntimeFrame.LocReads store final mid → mid ≠ leaf) →
@@ -12583,7 +12622,7 @@ theorem HopsTo.locReads_ne_of_links_clean
   | refl =>
       intro _hlinks hfinal mid hread
       exact hfinal mid hread
-  | hop henvH hsel htyping _hcont _henv₃ tail ih =>
+  | hop henvH hsel htyping hcont henv₃ tail ih =>
       intro hlinks hfinal mid hread
       rcases LValTyping.partialTyBorrowsWellFormedInSlot hcbwf htyping
           PartialTyContains.here with
@@ -12594,11 +12633,137 @@ theorem HopsTo.locReads_ne_of_links_clean
           htargetTyping
       rcases locReads_prependPath_hop hloc _ hread with
         hsourceReads | hsourceLoc | htargetReads
-      · exact (hlinks henvH hsel htyping).1 mid hsourceReads
+      · exact (hlinks henvH hsel htyping hcont henv₃).1 mid hsourceReads
       · intro hmidEq
-        exact (hlinks henvH hsel htyping).2
+        exact (hlinks henvH hsel htyping hcont henv₃).2
           (by simpa [hmidEq] using hsourceLoc)
       · exact ih hlinks hfinal mid htargetReads
+
+/-- Hop links of the guarded write never read or point at the guarded leaf.
+Each hop's descent prefix is an owner path from its own base variable; if it
+read or reached the leaf, backward owner-chain uniqueness would root the
+prefix at the final write's base with the hop annotation contained at or
+below the graft position.  The graft is then value-equal to the old slot (the
+holder-slot preservation field), so the annotation survives into the result
+environment as a graft borrow — whose targets the write keeps off the guarded
+chain — contradicting that hop targets are chain nodes. -/
+theorem clean_hop_link_of_guarded_leaf
+    {env env₃ nested : Env} {store : ProgramStore} {lhs finalLhs : LVal}
+    {rhsTy : Ty} {bslotG : EnvSlot} {graftTy leafTy : PartialTy}
+    {leaf : Location} {k : Nat} {rootSlotF : EnvSlot}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited nested lhs)
+    (hpoint : ∀ y, env₃.slotAt y = nested.slotAt y)
+    (hbLook : nested.slotAt (LVal.base finalLhs) =
+      some { bslotG with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) (LVal.base finalLhs))
+    (henvRootF : env.slotAt (LVal.base finalLhs) = some rootSlotF)
+    (hselF : PathSelect (LVal.path finalLhs) rootSlotF.ty leafTy)
+    (hleafChain : OwnsChain store (VariableProjection (LVal.base finalLhs))
+      k leaf)
+    (hlenF : k = (LVal.path finalLhs).length) :
+    ∀ {s₀ target : LVal} {slotH : EnvSlot} {lf : Lifetime},
+      env.slotAt (LVal.base s₀) = some slotH →
+      PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
+      LValTyping env s₀ (.ty (.borrow true target)) lf →
+      env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
+      env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
+      (∀ mid, RuntimeFrame.LocReads store s₀ mid → mid ≠ leaf) ∧
+        store.loc s₀ ≠ some leaf := by
+  intro s₀ target slotH lf henvH hsel htyping hcont henv₃H
+  have hrefute : LVal.base s₀ = LVal.base finalLhs →
+      (LVal.path finalLhs).length ≤ (LVal.path s₀).length → False := by
+    intro hbase hlen
+    have hslotEq : slotH = rootSlotF := by
+      rw [hbase] at henvH
+      exact Option.some.inj (henvH.symm.trans henvRootF)
+    subst hslotEq
+    have hsplit : LVal.path s₀ =
+        (LVal.path s₀).take (LVal.path finalLhs).length ++
+          (LVal.path s₀).drop (LVal.path finalLhs).length :=
+      (List.take_append_drop _ _).symm
+    rw [hsplit] at hsel
+    rcases PathSelect.append_inv hsel with ⟨mid₁, hsel₁, hsel₂⟩
+    have htake : (LVal.path s₀).take (LVal.path finalLhs).length =
+        LVal.path finalLhs :=
+      Path.eq_of_length_eq (by
+        simp only [List.length_take]
+        omega)
+    rw [htake] at hsel₁
+    have hmidEq : mid₁ = leafTy := PathSelect.deterministic hsel₁ hselF
+    have hcontLeaf : PartialTyContains leafTy (.borrow true target) := by
+      rw [← hmidEq]
+      exact PathSelect.contains_of_leaf hsel₂ PartialTyContains.here
+    have hcontRoot : PartialTyContains slotH.ty (.borrow true target) :=
+      PathSelect.contains_of_leaf hselF hcontLeaf
+    have henv₃F : env₃.slotAt (LVal.base finalLhs) = some slotH := by
+      rw [← hbase, henv₃H, hbase]
+      exact henvRootF
+    have hnestedB : nested.slotAt (LVal.base finalLhs) = some slotH :=
+      (hpoint (LVal.base finalLhs)).symm.trans henv₃F
+    have hslotGEq : { bslotG with ty := graftTy } = slotH :=
+      Option.some.inj (hbLook.symm.trans hnestedB)
+    have hgraftEq : graftTy = slotH.ty := congrArg EnvSlot.ty hslotGEq
+    have hcontGraft : PartialTyContains graftTy (.borrow true target) := by
+      rw [hgraftEq]
+      exact hcontRoot
+    have hcontF : env ⊢ (LVal.base finalLhs) ↝ (.borrow true target) := by
+      rw [← hbase]
+      exact hcont
+    exact graft_target_outside htySafe hnotWrite hbLook hgraftContains
+      hcontGraft (ChainGuard.step hguardB hcontF rfl)
+  rcases hsafe.2 (LVal.base s₀) slotH henvH with
+    ⟨rootValue₀, hstore₀, hvalid₀⟩
+  rcases PathSelect.ownerChainPrefix_whenInitialized hstore₀
+      (by simpa using hvalid₀) hsel with
+    ⟨sLeaf, sLeafSlot, _hsLeafSlot, _hsLeafValid, hprefix₀⟩
+  constructor
+  · intro mid hmid hmidEq
+    subst hmidEq
+    rcases OwnerChainPrefix.locReads_ownsChain hprefix₀ hmid with
+      ⟨j, hjChain, hjLt⟩
+    rcases ownsChain_unique hvalidStore (var_not_owned hheap)
+        (var_not_owned hheap) hjChain hleafChain with ⟨hrootEq, hjk⟩
+    have hbase : LVal.base s₀ = LVal.base finalLhs := by
+      simpa [VariableProjection] using hrootEq
+    exact hrefute hbase (by omega)
+  · intro hlocEq
+    rcases hprefix₀ with ⟨hpathNil, _hleafRoot⟩ | ⟨k₀, _hchainAt, hchain₀, hlen₀⟩
+    · cases s₀ with
+      | var x =>
+          have hleafVar : leaf = VariableProjection x := by
+            simpa [ProgramStore.loc, VariableProjection] using hlocEq.symm
+          cases hleafChain with
+          | zero =>
+              have hbaseEq : LVal.base finalLhs = x := by
+                simpa [VariableProjection] using hleafVar
+              refine hrefute (by simpa [LVal.base] using hbaseEq.symm) ?_
+              simp only [LVal.path]
+              omega
+          | succ hchain' howns =>
+              have hOwns : ProgramStore.Owns store leaf := ⟨_, howns⟩
+              rw [hleafVar] at hOwns
+              exact var_not_owned hheap
+                (by simpa [VariableProjection] using hOwns)
+      | deref s' =>
+          exact absurd hpathNil (by simp [LVal.path])
+    · have hleafEq : leaf = sLeaf :=
+        ownsChain_loc_eq_of_length hchain₀ hlen₀ hlocEq
+      have hchainLeaf₀ :
+          OwnsChain store (VariableProjection (LVal.base s₀)) k₀ leaf := by
+        rw [hleafEq]
+        exact hchain₀
+      rcases ownsChain_unique hvalidStore (var_not_owned hheap)
+          (var_not_owned hheap) hchainLeaf₀ hleafChain with ⟨hrootEq, hkk⟩
+      have hbase : LVal.base s₀ = LVal.base finalLhs := by
+        simpa [VariableProjection] using hrootEq
+      exact hrefute hbase (by omega)
 
 /-- The final pure write selected by iterating borrow-hop reduction.  Any
 environment write under the top-level rule premises reduces to a pure
