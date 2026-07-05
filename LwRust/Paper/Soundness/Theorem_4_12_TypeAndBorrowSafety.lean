@@ -205,7 +205,7 @@ theorem terminatesAsValue_bounded
         (MultiStep.trans (Step.declare rfl) MultiStep.refl)⟩
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime lhs _oldTy rhs
-      rhsTy hRhs hLhsPost hshape hwellTy _hchain hwrite hnotWrite ih
+      rhsTy hRhs hLhsPost hshape hwellTy hwrite hnotWrite ih
       hsize hsource store hvalidRuntime hvalidStoreTyping hwellFormed
       hborrowSafe hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)

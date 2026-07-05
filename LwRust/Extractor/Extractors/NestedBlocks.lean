@@ -249,7 +249,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           exact extractTermStmts_typed hinit hinit'
   case ctermAssign_assignRhs hrhs =>
       cases htyped with
-      | assign hrhs' _ _ _ _ _ _ =>
+      | assign hrhs' _ _ _ _ _ =>
           simp only [extractTermStmts]
           exact extractTermStmts_typed hrhs hrhs'
   case ctermBox_boxOperand hoperand =>

@@ -5025,8 +5025,7 @@ theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
     (by
       -- T-Assign: Definition 4.8 across the strong-update write.
       intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-        _rhs _rhsTy hRhs hLhsPost _hshape hwellTy _hchain hwrite
-        _hnotWrite ih
+        _rhs _rhsTy hRhs hLhsPost _hshape hwellTy hwrite _hnotWrite ih
         hsource hwell
       have hmid := ih (SourceTerm.assign_inner hsource) hwell
       exact ⟨WellFormedEnvWhenInitialized.envWrite hmid.1 hwrite hLhsPost
@@ -5886,28 +5885,12 @@ private theorem source_assign_move_z :
   intro value hmem
   simp [termValues] at hmem
 
-private theorem movedZ_not_writeChainWritable :
-    ¬ WriteChainWritable movedZ (.deref p) := by
-  intro hchain
-  have hp : movedZ ⊢ "p" ↝ (.borrow true q) :=
-    ⟨pSlot, movedZ_slot_p, by
-      unfold pSlot
-      exact PartialTyContains.here⟩
-  have hguardQ : ChainGuard movedZ (LVal.base (.deref p)) "q" := by
-    exact ChainGuard.step ChainGuard.base hp rfl
-  have hnotWriteQ : ¬ WriteProhibited movedZ (.var "q") :=
-    hchain hguardQ
-  have hwriteQ : WriteProhibited movedZ (.var "q") :=
-    WriteProhibited.of_contains_conflict hp
-      (by simp [PathConflicts, q, LVal.base])
-  exact hnotWriteQ hwriteQ
-
-/-- `WellFormedEnv` plus the old post-write check is too weak for strict
-assignment preservation.  The old premises allow this assignment from a
-strictly well-formed but not borrow-safe environment: move `z : &mut *q` into
-`*p`, where `p : &mut q` and `q : &mut r`.  The strengthened `T-Assign` rule
-rejects the witness via `WriteChainWritable`, because the source write chain
-reaches `q`, and `q` is already write-prohibited by `p`'s mutable borrow. -/
+/-- `WellFormedEnv` plus the post-write check is too weak for strict assignment
+preservation when the source environment is not borrow-safe.  These premises
+allow the environment write from `move z : &mut *q` into `*p`, where
+`p : &mut q` and `q : &mut r`, and the resulting environment is not strictly
+contained-borrow well formed.  This is a borrow-safety counterexample, not a
+reason to reject ordinary borrow-authorized writes such as `*p = 1`. -/
 theorem strict_assign_rule_result_counterexample :
     ∃ env₁ env₂ env₃ typing lifetime lhs rhs oldTy targetLifetime rhsTy,
       WellFormedEnv env₁ lifetime ∧
@@ -5918,14 +5901,12 @@ theorem strict_assign_rule_result_counterexample :
         WellFormedTy env₂ rhsTy targetLifetime ∧
         EnvWrite env₂ lhs rhsTy env₃ ∧
         ¬ WriteProhibited env₃ lhs ∧
-        ¬ WriteChainWritable env₂ lhs ∧
         ¬ ContainedBorrowsWellFormed env₃ := by
   exact ⟨envWithZ, movedZ, resultMoved, StoreTyping.empty, l, .deref p,
     .move z, .ty (.borrow true r), l, rhsTy,
     envWithZ_wellFormed, source_assign_move_z, rhs_move_typing,
     moved_lhs_typing, moved_shape, moved_rhs_wellFormed, write_moved,
-    resultMoved_not_writeProhibited, movedZ_not_writeChainWritable,
-    resultMoved_not_containedBorrowsWellFormed⟩
+    resultMoved_not_writeProhibited, resultMoved_not_containedBorrowsWellFormed⟩
 
 end EnvWriteStrictCounterexample
 
@@ -7189,8 +7170,7 @@ theorem typingPreservesWellFormed_of_sourceTerm
     (by
       -- T-Assign: the write kernel.
       intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-        _rhs _rhsTy hRhs hLhsPost hshape hwellTy _hchain hwrite
-        hnotWrite ih
+        _rhs _rhsTy hRhs hLhsPost hshape hwellTy hwrite hnotWrite ih
         hsource hwell hsafe
       rcases ih (SourceTerm.assign_inner hsource) hwell hsafe with
         ⟨hwell₂, hsafe₂, _hwellTyRhs, htySafe₂⟩
@@ -15163,8 +15143,10 @@ theorem source_entry_select_final_live_not_tail_locReads_ne
 `EnvWrite.select_final` reduces the original assignment to this situation.  The
 helper discharges the source-entry read exclusions for entries outside the
 final tail, entries targeting the final base, and entries in the final tail.
-The tail case is covered by `WriteChainWritable`, which gives writability at
-the selected final node, not just at the syntactic lhs. -/
+This legacy helper keeps the tail case as an explicit local side condition:
+the selected final node itself must not be write-prohibited in the source
+environment.  The main assignment typing rule does not require this condition;
+borrow-authorized writes through mutable references are accepted. -/
 theorem preservation_assign_selected_final_step_runtime
     {store store' : ProgramStore} {env env₃ nested : Env}
     {lifetime targetLifetime : Lifetime}
@@ -15180,7 +15162,7 @@ theorem preservation_assign_selected_final_step_runtime
     LValTyping env lhsTop oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
     WellFormedTy env rhsTy targetLifetime →
-    WriteChainWritable env lhsTop →
+    ¬ WriteProhibited env finalLhs →
     ¬ WriteProhibited env₃ lhsTop →
     env.slotAt (LVal.base finalLhs) = some rootSlot →
     PathSelect (LVal.path finalLhs) rootSlot.ty leafTy →
@@ -15201,19 +15183,13 @@ theorem preservation_assign_selected_final_step_runtime
     Step store lifetime (.assign lv (.val value)) store' (.val finalValue) →
     FullTerminalStateSafe store' finalValue nested .unit := by
   intro hwell hborrowSafe htySafe hsafe hvalidRuntime hwriteTop hlvTop
-    hshape hwellTy hchainWritable hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint
+    hshape hwellTy hnotWriteFinal hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint
     htypingFinal hlocFinal hguardFinal hleafChain hlen hleafLoc
     hlast hhops hvalidValue hstep
   have hvalidStore : ValidStore store :=
     ValidRuntimeState.validStore hvalidRuntime
   have hheap : StoreOwnerTargetsHeap store :=
     ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime
-  have hnotWriteFinal : ¬ WriteProhibited env finalLhs := by
-    intro hwriteFinalSource
-    exact (hchainWritable hguardFinal)
-      (by
-        simpa [WriteProhibited, ReadProhibited, PathConflicts, LVal.base]
-          using hwriteFinalSource)
   have hwellEnv₃ : WellFormedEnv env₃ lifetime :=
     WellFormedEnv.envWrite hwell hborrowSafe htySafe hwriteTop hlvTop
       hshape hwellTy hnotWriteTop

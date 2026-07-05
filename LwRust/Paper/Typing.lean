@@ -732,14 +732,6 @@ inductive ChainGuard (env : Env) (root : Name) : Name → Prop where
       LVal.base g = y →
       ChainGuard env root y
 
-/-- Every node on the mutable-borrow write chain is writable in the source
-environment.  The final selected write node may be reached only after resolving
-borrow hops, so checking the syntactic left-hand side alone is too weak. -/
-def WriteChainWritable (env : Env) (lhs : LVal) : Prop :=
-  ∀ {y : Name},
-    ChainGuard env (LVal.base lhs) y →
-    ¬ WriteProhibited env (.var y)
-
 /-- A result type is borrow-safe against an environment when installing it as a
 new root would introduce no borrow-target conflict with any existing root. -/
 def TyBorrowSafeAgainstEnv (env : Env) (ty : Ty) : Prop :=
@@ -1043,11 +1035,10 @@ mutual
         TermTyping env₁ typing lifetime (.letMut x term) .unit env₃
     /-- T-Assign.
 
-    The rule checks both the final post-write environment at the syntactic
-    left-hand side and every source-environment node reachable along the
-    mutable-borrow write chain.  The latter is needed because the operational
-    write may be selected after borrow-hop resolution, at a different base
-    variable from the syntactic lhs. -/
+    The rule checks the final post-write environment at the syntactic
+    left-hand side.  Writes through mutable-borrow chains such as `*p = v`
+    are intentionally accepted when the post-write environment is not
+    write-prohibited at the original left-hand side. -/
     | assign {env₁ env₂ env₃ : Env} {typing : StoreTyping}
         {lifetime targetLifetime : Lifetime} {lhs : LVal}
         {oldTy : PartialTy} {rhs : Term} {rhsTy : Ty} :
@@ -1055,7 +1046,6 @@ mutual
         LValTyping env₂ lhs oldTy targetLifetime →
         ShapeCompatible env₂ oldTy (.ty rhsTy) →
         WellFormedTy env₂ rhsTy targetLifetime →
-        WriteChainWritable env₂ lhs →
         EnvWrite env₂ lhs rhsTy env₃ →
         ¬ WriteProhibited env₃ lhs →
         TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃
@@ -1097,7 +1087,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hfresh _hterm _hfreshOut henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
-    (fun _hrhs _hlhs _hshape _hwellTy _hchain hwrite _hnotWrite ih hfinite =>
+    (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnotWrite ih hfinite =>
       EnvWrite.finiteSupport hwrite (ih hfinite))
     (fun _hterm ih hfinite => ih hfinite)
     (fun _hterm _hrest ihTerm ihRest hfinite =>
