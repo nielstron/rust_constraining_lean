@@ -23,13 +23,18 @@ strictly decreases term size (`step_size_lt`), and Theorem 4.12's total form
 `emptyInitial_typeAndBorrowSafety_total`) states terminal execution plus
 safety for well-typed source programs with no divergence caveats.  While the
 single-target runtime preservation proof is being reassembled (see the
-README's proof status), the total form is parameterized by the
-terminal-safety hypothesis that the `preservation` export will discharge.
+README's proof status and `OBLIGATIONS.md`), every final safety theorem —
+Theorem 4.12 in all forms, the empty-initial wrappers, and Appendix
+Lemmas 9.9/9.10 — is parameterized by the terminal-safety hypothesis that
+the `preservation` export will discharge.
 
-`WellFormedEnv` and its stale-aware variant are now **exactly the paper's
-two-part Definition 4.8** (contained borrows well-formed, slots outlive the
-current lifetime).  The `Coherent` and `Linearizable` conjuncts that earlier
-versions added to the invariant are gone.
+`WellFormedEnv` and its stale-aware variant are the paper's two-part
+Definition 4.8 (contained borrows well-formed, slots outlive the current
+lifetime).  The `Coherent` and `Linearizable` conjuncts that earlier versions
+added to the invariant are gone.  One strengthening remains in part (i) —
+and likewise in `WellFormedTy`'s L-Borrow case: the borrow target's *base
+variable's* slot must also outlive the reference (`LValBaseOutlives`), a
+conjunct not present in the printed definitions (see §1a below).
 
 ## Remaining differences
 
@@ -53,18 +58,42 @@ previously-necessary extra premise became removable:
   mechanizes paper intent (the follow-up's T-Block states the same
   assumption).
 
-`T-Block`'s `LifetimeChild` premise formalizes the paper's ambient lexical
-nesting assumption and is not a restriction.
+Smaller deviations in and around the rules:
 
-### 2. Preservation concludes the stale-aware safety predicate
+- `T-Block`'s `LifetimeChild` premise formalizes the paper's ambient lexical
+  nesting assumption in a slightly stronger form: the block lifetime must be
+  an *immediate* child of the enclosing one, where the paper only assumes
+  nesting.
+- `T-Assign` evaluates the lhs typing, shape compatibility, and rhs
+  well-formedness in the post-rhs environment `env₂`; the printed core rule
+  types `w : ⟨T̃₁⟩^m` in the pre-rhs `Γ₁` (the follow-up's rule also uses the
+  post-rhs environment).
+- `CopyTy` additionally counts `unit` as copyable; printed Definition 3.6
+  lists only `int` and immutable borrows (the follow-up's complement
+  characterization agrees with the Lean definition).
 
-Lemma 4.11's mechanised form concludes `TerminalStateSafe` built on
-`SafeAbstraction` and `ValidPartialValueWhenInitialized` — stale borrow
-annotations are treated as protection tokens rather than fully
-dereferenceable borrows.  With conditionals removed, stale annotations
-plausibly cannot arise at all and the strict predicate may be provable; that
-collapse has not been carried out.  Progress and step theorems are stated
-over the same invariant, so the non-stuckness story is unaffected.
+### 1a. `LValBaseOutlives` strengthening of Definition 4.8(i) / L-Borrow
+
+`BorrowTargetsWellFormedInSlot` (Definition 4.8(i)) and
+`BorrowTargetsWellFormed` (L-Borrow, reached through `WellFormedTy` premises
+of `T-Block` and `T-Assign`) each carry a third conjunct: the slot of the
+borrow target's base variable must outlive the reference.  The printed
+definitions only require `Γ ⊢ w : ⟨T⟩^m ∧ m ≥ n`; since lvalue typing
+returns the target's lifetime without constraining intervening base slots,
+this is a genuine extra requirement of the mechanisation.
+
+### 2. Final statements are strict; the stale-aware family is internal
+
+The headline theorem statements conclude the strict paper predicates
+(`FullTerminalStateSafe`: strict abstraction `≈ₛ` plus `ValidValue`),
+matching the paper's `S₂ ∼ Γ₂` and value validity.  The per-redex
+preservation helpers in the development still run over the stale-aware
+`WhenInitialized` family — stale borrow annotations treated as protection
+tokens rather than fully dereferenceable borrows — and upgrade to the strict
+form at the end (`TerminalStateSafe.full_of_wellFormed`).  With conditionals
+removed, stale annotations plausibly cannot arise at all; collapsing the
+interior to the strict predicates is optional cleanup
+(`OBLIGATIONS.md` §2).
 
 ### 3. Non-initial preservation wrappers carry derived-invariant hypotheses
 
@@ -108,10 +137,12 @@ preservation died with multi-target borrows.)
 ## Bottom line
 
 The mechanised language is now exactly the paper's core calculus with the
-follow-up's single-target borrow grammar and strong-update write, the
-environment invariant is exactly Definition 4.8, and coherence and
-linearizability are gone from the development entirely.  The typing rules
-carry a single extra premise relative to the printed figures
-(`env₂.fresh x` on `T-Declare`, mechanizing the papers' stated
-no-redeclaration assumption).  The strict collapse of the stale-aware
-runtime predicates is in progress (see §2).
+follow-up's single-target borrow grammar and strong-update write, and
+coherence and linearizability are gone from the development entirely.  The
+environment invariant is Definition 4.8 up to the `LValBaseOutlives`
+strengthening (§1a), and the typing rules carry a single extra premise
+relative to the printed figures (`env₂.fresh x` on `T-Declare`, mechanizing
+the papers' stated no-redeclaration assumption).  The headline safety
+theorems are stated in the paper's strict form but remain conditional on
+the pending `preservation` export — the remaining work is itemised in
+`OBLIGATIONS.md`.

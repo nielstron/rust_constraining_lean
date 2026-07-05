@@ -13,15 +13,17 @@ The mechanised language is **exactly the paper's core calculus**
 - Borrows are single-target (the follow-up's grammar) and the environment
   write is the follow-up's strong update — no weak-update unions, no
   multi-target fan-out.
-- The environment invariant `WellFormedEnv` is **exactly the paper's
-  two-part Definition 4.8** (contained borrows well-formed, slots outlive
-  the current lifetime). 
+- The environment invariant `WellFormedEnv` is the paper's two-part
+  Definition 4.8 (contained borrows well-formed, slots outlive the current
+  lifetime), with one strengthening kept in part (i): a borrow target's
+  *base variable's* slot must also outlive the reference
+  (`LValBaseOutlives`; see `DIFFERENCES.md`).
 - The typing rules match the printed figures with **one** extra premise:
   `T-Declare` requires `env₂.fresh x`, mechanising the paper's Section 5.2
   statement that redeclaration is not permitted (the follow-up's `T-Block`
   makes the same assumption).  `T-Block`'s `LifetimeChild` premise
-  formalises the paper's ambient lexical-nesting assumption and is not a
-  restriction.
+  formalises the paper's ambient lexical-nesting assumption in a slightly
+  stronger form (immediate child rather than mere nesting).
 
 See `DIFFERENCES.md` for the precise, itemised comparison with the paper.
 
@@ -36,14 +38,15 @@ There is no `sorry`, `admit`, or `axiom` anywhere in `LwRust/`.
   strong-update kernel and preservation of borrow safety
   (Definition 4.13 / Corollary 4.14 content, previously unprovable in the
   multi-target system).
-- **Runtime half of Lemma 4.11: being rebuilt for the single-target core**
-  (this branch).  The per-redex runtime preservation helpers (moves,
-  assignments, block exit) and the borrow-hop reduction kernel are proven;
-  the final induction that exports `preservation` is not yet reassembled,
-  so `theorem_4_12_typeAndBorrowSafety_total` is currently parameterized by
-  the terminal-safety hypothesis it will discharge, and the
-  `InitialStates`/`Appendix9` call sites of `preservation` do not yet
-  build.  `PHASE_D_HARD_SITES.md` tracks the remaining work.
+- **Runtime half of Lemma 4.11: per-redex kernels proved; the whole-term
+  induction is pending** (this branch).  The build is fully green: the
+  per-redex runtime preservation helpers (moves, assignments including the
+  mutable-borrow-hop write kernel, block exit) are proven, but the final
+  induction that exports `preservation` is not yet reassembled.  Until it
+  is, every final safety theorem — Theorem 4.12 in all forms, the
+  empty-initial wrappers, and Appendix Lemmas 9.9/9.10 — takes the
+  Lemma 4.11 conclusion as an explicit `terminalSafety` hypothesis.
+  `OBLIGATIONS.md` lists the remaining work.
 
 ## Corrections kept relative to the printed paper
 
@@ -76,9 +79,10 @@ to stay:
   reduction relation is broader than the typed states covered by
   soundness; the declaration freshness intended by the paper is recovered
   from `T-Declare` and preservation.
-- **Preservation currently concludes the stale-aware safety predicate**
-  (`TerminalStateSafe` over the `WhenInitialized` value validity family),
-  which treats stale borrow annotations as protection tokens.  With
-  conditionals removed, stale annotations plausibly cannot arise and the
-  strict predicate should be recoverable; that collapse is planned once
-  the runtime rebuild is green (see `DIFFERENCES.md` §2).
+- **Final statements are strict; internal helpers are stale-aware.**  The
+  headline theorems conclude the strict paper predicates
+  (`FullTerminalStateSafe`, strict abstraction `≈ₛ`); the per-redex helper
+  lemmas still run over the stale-aware `WhenInitialized` family (stale
+  borrow annotations as protection tokens) and upgrade at the end.  With
+  conditionals removed, stale annotations plausibly cannot arise; the
+  interior collapse is optional cleanup (see `DIFFERENCES.md` §2).
