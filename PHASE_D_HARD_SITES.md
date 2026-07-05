@@ -127,6 +127,16 @@ the singleton block lifetime-drop runtime preservation helper:
   `ProgramStore.write_eq_of_loc_eq`.  These only package the runtime equality
   side of mutable-borrow hop re-rooting; the static/result-environment
   chain-collapse proof is still the remaining hard assignment step.
+- Added and compiled the next runtime re-rooting wrappers:
+  `assign_step_of_loc_eq`, `validRuntimeState_assign_lhs_of_value`,
+  `lvalTyping_deref_borrow_loc_eq_whenInitialized`, and
+  `assign_step_prependPath_deref_borrow_whenInitialized`.  These replay an
+  assignment redex at an equal concrete location, show assignment runtime
+  validity is independent of the syntactic lhs when the RHS is already a
+  value, and package the live-borrow fact
+  `store.loc source.deref = store.loc target` (plus any remaining deref
+  suffix).  They are operational/runtimestore support only; they do not yet
+  prove `EnvWrite.runtime_leaf_align` or rebuild the on-chain static slots.
 - Re-audited on 2026-07-05 after `chain_entry_env3`/`chain_entry_unique`:
   the keystone chain-entry facts are present and compile, but the runtime
   mut-borrow re-rooting bridge is still not present.  In particular,

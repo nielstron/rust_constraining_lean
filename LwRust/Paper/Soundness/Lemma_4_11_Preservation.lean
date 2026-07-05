@@ -7919,6 +7919,78 @@ theorem ProgramStore.write_eq_of_loc_eq
   intro hloc
   simp [ProgramStore.write, hloc]
 
+/-- Assignment redexes with the same concrete write location take the same
+runtime step.  This packages the operational side of mutable-borrow
+re-rooting: after the source borrow is known live, the step can be replayed at
+the borrow target. -/
+theorem assign_step_of_loc_eq
+    {store store' : ProgramStore} {lifetime : Lifetime}
+    {left right : LVal} {value finalValue : Value} :
+    store.loc left = store.loc right →
+    Step store lifetime (.assign left (.val value)) store' (.val finalValue) →
+    Step store lifetime (.assign right (.val value)) store' (.val finalValue) := by
+  intro hloc hstep
+  cases hstep with
+  | assign hread hwrite hdrops =>
+      exact Step.assign
+        (by simpa [ProgramStore.read, hloc] using hread)
+        (by simpa [ProgramStore.write, hloc] using hwrite)
+        hdrops
+
+/-- Assignment runtime validity depends on the RHS value, not on the syntactic
+left-hand side.  This is the validity companion to `assign_step_of_loc_eq`. -/
+theorem validRuntimeState_assign_lhs_of_value
+    {store : ProgramStore} {left right : LVal} {value : Value} :
+    ValidRuntimeState store (.assign left (.val value)) →
+    ValidRuntimeState store (.assign right (.val value)) := by
+  intro hvalid
+  exact validRuntimeState_assign_value_of_value
+    (validRuntimeState_assign_inner hvalid)
+
+/-- If a typed borrow source is dereferenced while its target is initialized,
+the runtime lvalue computation re-roots at the target location. -/
+theorem lvalTyping_deref_borrow_loc_eq_whenInitialized
+    {store : ProgramStore} {env : Env}
+    {source target : LVal} {mutable : Bool}
+    {borrowLifetime targetLifetime : Lifetime} {targetTy : Ty} :
+    SafeAbstraction store env →
+    LValTyping env source (.ty (.borrow mutable target)) borrowLifetime →
+    LValTyping env target (.ty targetTy) targetLifetime →
+    store.loc source.deref = store.loc target := by
+  intro hsafe hsource htarget
+  rcases lvalTyping_defined_location_whenInitialized hsafe hsource with
+    ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot, hsourceValid⟩
+  rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+  cases hsourceValid with
+  | borrowLive _hinitialized htargetLoc =>
+      simp [ProgramStore.loc, hsourceLoc, hsourceSlot, htargetLoc]
+  | borrowStale hstale =>
+      exact False.elim (hstale ⟨targetTy, targetLifetime, htarget⟩)
+
+/-- Re-root an assignment step below a live borrow hop, preserving any
+remaining dereference suffix. -/
+theorem assign_step_prependPath_deref_borrow_whenInitialized
+    {store store' : ProgramStore} {env : Env} {lifetime : Lifetime}
+    {source target : LVal} {mutable : Bool}
+    {borrowLifetime targetLifetime : Lifetime} {targetTy : Ty}
+    {path : Path} {value finalValue : Value} :
+    SafeAbstraction store env →
+    LValTyping env source (.ty (.borrow mutable target)) borrowLifetime →
+    LValTyping env target (.ty targetTy) targetLifetime →
+    Step store lifetime (.assign (prependPath path source.deref) (.val value))
+      store' (.val finalValue) →
+    Step store lifetime (.assign (prependPath path target) (.val value))
+      store' (.val finalValue) := by
+  intro hsafe hsource htarget hstep
+  have hloc :
+      store.loc (prependPath path source.deref) =
+        store.loc (prependPath path target) :=
+    ProgramStore.loc_prependPath_eq_of_loc_eq
+      (lvalTyping_deref_borrow_loc_eq_whenInitialized
+        hsafe hsource htarget)
+      path
+  exact assign_step_of_loc_eq hloc hstep
+
 theorem lvalTyping_box_ownerChainPrefix_whenInitialized
     {store : ProgramStore} {env : Env}
     (hsafe : SafeAbstraction store env) :
