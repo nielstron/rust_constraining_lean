@@ -18,8 +18,11 @@ Consequently there are no environment joins from control flow, and the
 termination of the core calculus is unconditional: every reduction step
 strictly decreases term size (`step_size_lt`), and Theorem 4.12's total form
 (`theorem_4_12_typeAndBorrowSafety_total`,
-`emptyInitial_typeAndBorrowSafety_total`) proves terminal execution plus
-safety for well-typed source programs with no divergence caveats.
+`emptyInitial_typeAndBorrowSafety_total`) states terminal execution plus
+safety for well-typed source programs with no divergence caveats.  While the
+single-target runtime preservation proof is being reassembled (see the
+README's proof status), the total form is parameterized by the
+terminal-safety hypothesis that the `preservation` export will discharge.
 
 `WellFormedEnv` and its stale-aware variant are now **exactly the paper's
 two-part Definition 4.8** (contained borrows well-formed, slots outlive the
