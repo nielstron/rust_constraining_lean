@@ -183,6 +183,20 @@ the singleton block lifetime-drop runtime preservation helper:
   which packages the already-proved full-box assignment helper for the
   owner-only branch and leaves exactly that explicit hop witness as the
   remaining re-rooting case.
+- Added and compiled the corrected Round 16 pure write split:
+  `UpdateAtPath.pathSelect_or_hop` and
+  `EnvWrite.select_or_hop_update_same`, plus
+  `EnvWrite.select_or_hop_of_nested_slot`.  The hop branch now records the
+  fact that the local rebuilt type is unchanged and that the outer write result
+  is `nested.update (LVal.base lhs) slot`; the pointwise form is available
+  once supplied with the exact missing typed premise that the nested write
+  preserves that outer holder slot.  This is intentionally weaker than the
+  originally sketched pure pointwise branch: without typed no-write /
+  borrow-safety data, the pointwise claim is false when the nested hop target
+  writes back into the same outer holder base.  The remaining proof obligation
+  is therefore the typed nested-slot preservation step under the actual
+  assignment hypotheses, or equivalently the framed structural assignment
+  theorem that avoids requiring `¬ WriteProhibited` for the reduced hop target.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;

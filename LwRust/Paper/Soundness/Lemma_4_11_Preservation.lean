@@ -8024,6 +8024,113 @@ theorem EnvWrite.deref_borrow_var_inv
           · simpa [prependPath] using hinner
           · simp [LVal.base]
 
+/-- A pure `UpdateAtPath` walk either stays on an owner-only selected path, or
+hits a mutable-borrow hop.  In the hop branch the local rebuilt type is exactly
+the original type; the environment change is the nested write below the hop. -/
+theorem UpdateAtPath.pathSelect_or_hop {env result : Env} :
+    ∀ {path : Path} {old updated : PartialTy} {rhsTy : Ty},
+      UpdateAtPath env path old rhsTy result updated →
+      (∃ leaf, PathSelect path old leaf) ∨
+        ∃ (path' : Path) (target : LVal) (nested : Env),
+          EnvWrite env (prependPath path' target) rhsTy nested ∧
+          result = nested ∧ updated = old := by
+  intro path old updated rhsTy hupdate
+  exact UpdateAtPath.rec
+    (motive_1 := fun path old rhsTy result updated _ =>
+      (∃ leaf, PathSelect path old leaf) ∨
+        ∃ (path' : Path) (target : LVal) (nested : Env),
+          EnvWrite env (prependPath path' target) rhsTy nested ∧
+          result = nested ∧ updated = old)
+    (motive_2 := fun _lv _rhsTy _result _ => True)
+    (by
+      intro old ty
+      left
+      exact ⟨_, PathSelect.here⟩)
+    (by
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+      rcases ih with ⟨leaf, hselect⟩ |
+        ⟨path', target, nestedEnv, hwrite, hresult, hupdated⟩
+      · left
+        exact ⟨leaf, PathSelect.box hselect⟩
+      · right
+        exact ⟨path', target, nestedEnv, hwrite, hresult, by
+          rw [hupdated]⟩)
+    (by
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+      rcases ih with ⟨leaf, hselect⟩ |
+        ⟨path', target, nestedEnv, hwrite, hresult, hupdated⟩
+      · left
+        exact ⟨leaf, PathSelect.boxFull hselect⟩
+      · right
+        exact ⟨path', target, nestedEnv, hwrite, hresult, by
+          rw [hupdated]
+          simp [partialTyRebox]⟩)
+    (by
+      intro _env₂ path target _ty hwrite _ih
+      right
+      exact ⟨path, target, _env₂, hwrite, rfl, rfl⟩)
+    (by
+      intro _env₂ _lv _slot _ty _updatedTy _hslot _hupdate _ih
+      trivial)
+    hupdate
+
+/-- The corresponding pure split for a complete environment write.  The hop
+branch intentionally records the final outer update as `nested.update ... slot`;
+turning that into pointwise equality requires proving that the nested write did
+not change the outer holder slot. -/
+theorem EnvWrite.select_or_hop_update_same
+    {env env' : Env} {lhs : LVal} {rhsTy : Ty} :
+    EnvWrite env lhs rhsTy env' →
+    (∃ slot leaf,
+      env.slotAt (LVal.base lhs) = some slot ∧
+      PathSelect (LVal.path lhs) slot.ty leaf) ∨
+      ∃ slot path' target nested,
+        env.slotAt (LVal.base lhs) = some slot ∧
+        EnvWrite env (prependPath path' target) rhsTy nested ∧
+        env' = nested.update (LVal.base lhs) slot := by
+  intro hwrite
+  cases hwrite with
+  | @intro result _lv slot _ty updatedTy hslot hupdate =>
+      rcases UpdateAtPath.pathSelect_or_hop hupdate with
+        ⟨leaf, hselect⟩ |
+        ⟨path', target, nestedEnv, hnested, hresult, hupdated⟩
+      · left
+        exact ⟨slot, leaf, hslot, hselect⟩
+      · right
+        exact ⟨slot, path', target, nestedEnv, hslot, hnested, by
+          simpa [hresult, hupdated]⟩
+
+/-- The pointwise form of `EnvWrite.select_or_hop_update_same`, parameterized
+by the missing typed fact that the nested hop write preserves the outer holder
+slot.  This is the exact extra ingredient needed to recover the Round 16
+pointwise branch under preservation hypotheses. -/
+theorem EnvWrite.select_or_hop_of_nested_slot
+    {env env' : Env} {lhs : LVal} {rhsTy : Ty}
+    (hpreserve :
+      ∀ {slot : EnvSlot} {path' : Path} {target : LVal} {nested : Env},
+        env.slotAt (LVal.base lhs) = some slot →
+        EnvWrite env (prependPath path' target) rhsTy nested →
+        nested.slotAt (LVal.base lhs) = some slot) :
+    EnvWrite env lhs rhsTy env' →
+    (∃ slot leaf,
+      env.slotAt (LVal.base lhs) = some slot ∧
+      PathSelect (LVal.path lhs) slot.ty leaf) ∨
+      ∃ path' target nested,
+        EnvWrite env (prependPath path' target) rhsTy nested ∧
+        (∀ y, env'.slotAt y = nested.slotAt y) := by
+  intro hwrite
+  rcases EnvWrite.select_or_hop_update_same hwrite with
+    hselect | ⟨slot, path', target, nested, hslot, hnested, henv'⟩
+  · exact Or.inl hselect
+  · right
+    refine ⟨path', target, nested, hnested, ?_⟩
+    intro y
+    rw [henv']
+    by_cases hy : y = LVal.base lhs
+    · subst hy
+      simpa [Env.update, hpreserve hslot hnested]
+    · simpa [Env.update, hy]
+
 theorem TargetInitialized.transport_of_pointwise {env result : Env}
     (heq : ∀ y, result.slotAt y = env.slotAt y) :
     ∀ {target : LVal},
