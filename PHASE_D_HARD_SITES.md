@@ -224,6 +224,25 @@ the singleton block lifetime-drop runtime preservation helper:
   edge back into the top chain must be classified in the final env and converted
   to `WriteProhibited env₃ lhs` using `BorrowSafeEnv` and the compiled
   chain-entry kernels.
+- Added and compiled the first Round 19 no-reentry kernels:
+  `chainGuard_self_edge_eq_root`,
+  `borrowSafe_same_target_unique_edge`,
+  `chainGuard_step_root_prohibited`, and
+  `chainGuard_self_edge_eq_changed_slot`.  The first collapses a guarded
+  mutable self-edge to the guard root by repeatedly comparing it with the
+  preceding chain edge via `BorrowSafeEnv`.  The second packages the
+  non-self-edge uniqueness step: when two annotations target the same guarded
+  base, `BorrowSafeEnv` gives the same holder and unary slot containment pins
+  the annotation to the chain edge.  The third packages the root-entry
+  exclusion: a source mutable annotation targeting the top write root must be
+  held at the single changed/graft slot, otherwise it survives through `hne`
+  into `env₃` and contradicts `¬ WriteProhibited env₃ lhs`.  The fourth combines
+  the root and self-edge facts for the degenerate re-entry/self-edge branch,
+  forcing such an edge to be at the changed slot.  This does not yet finish
+  `top_prefix_in_nested`/`nested_slot_preserved`; the remaining hard case is the
+  induction that uses the unique-entry step to walk a non-self nested re-entry
+  back toward the top root, then discharges the graft-slot/root case with the
+  graft-target exclusion.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;

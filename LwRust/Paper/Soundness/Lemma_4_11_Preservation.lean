@@ -11732,7 +11732,7 @@ theorem chain_entry_env3 {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
 /-- On-chain holders carry exactly the chain's hop annotation: combining the
 entry forcing with unarity.  The entering borrow at a chain slot is the
 unique annotation of that slot. -/
-theorem chain_entry_unique {env : Env} {lhs : LVal}
+theorem chain_entry_unique {env : Env}
     {x : Name} {mutable mutable' : Bool} {u u' : LVal}
     (hx : env ⊢ x ↝ (.borrow mutable u))
     (hx' : env ⊢ x ↝ (.borrow mutable' u')) :
@@ -11742,6 +11742,27 @@ theorem chain_entry_unique {env : Env} {lhs : LVal}
   have hsEq : s' = s := Option.some.inj (hs'.symm.trans hs)
   subst hsEq
   exact PartialTyContains.borrow_unique hcontains hcontains'
+
+/-- Borrow-safety plus slot unarity pins a competing entry edge.  If a chain
+edge `z ↝ &mut g` targets base `y`, then any borrow annotation whose target also
+has base `y` is held at `z`; if it is held at `z`, unary containment forces it
+to be the same mutable annotation. -/
+theorem borrowSafe_same_target_unique_edge {env : Env}
+    {z x y : Name} {g u : LVal} {mutable : Bool}
+    (hsafe : BorrowSafeEnv env)
+    (hchainEdge : env ⊢ z ↝ (.borrow true g))
+    (hchainBase : LVal.base g = y)
+    (hentry : env ⊢ x ↝ (.borrow mutable u))
+    (hentryBase : LVal.base u = y) :
+    x = z ∧ mutable = true ∧ u = g := by
+  have hconflict : g ⋈ u := by
+    show LVal.base g = LVal.base u
+    rw [hchainBase, hentryBase]
+  have hzx : z = x := hsafe z x mutable g u hchainEdge hentry hconflict
+  have hxz : x = z := hzx.symm
+  subst x
+  rcases chain_entry_unique hchainEdge hentry with ⟨hmutable, htarget⟩
+  exact ⟨rfl, hmutable.symm, htarget.symm⟩
 
 /-- Head decomposition for a guarded borrow chain.  A guarded slot is either
 the root itself, or it is reached by first following the root's own mutable
@@ -11763,6 +11784,32 @@ theorem chainGuard_head_inv {env : Env} {root y : Name} :
           exact ChainGuard.base⟩
       · exact Or.inr ⟨first, hrootContains,
           ChainGuard.step htail hcontains hbaseG⟩
+
+/-- In a borrow-safe environment, a guarded slot can carry a mutable self-edge
+only at the guard root.  If a later chain slot `z` pointed a mutable borrow
+back to a `z`-rooted target, that self-edge would conflict with the preceding
+chain edge into `z`; `BorrowSafeEnv` forces the predecessor holder to be `z`,
+and the shorter guard proof repeats the argument. -/
+theorem chainGuard_self_edge_eq_root {env : Env} {root z : Name} {g : LVal}
+    (hsafe : BorrowSafeEnv env) :
+    ChainGuard env root z →
+    env ⊢ z ↝ (.borrow true g) →
+    LVal.base g = z →
+    z = root := by
+  intro hguard
+  induction hguard with
+  | base =>
+      intro _hcontains _hbase
+      rfl
+  | @step zPrev z gPrev hguardPrev hcontainsPrev hbasePrev ih =>
+      intro hcontainsSelf hbaseSelf
+      have hconflict : gPrev ⋈ g := by
+        show LVal.base gPrev = LVal.base g
+        rw [hbasePrev, hbaseSelf]
+      have hprevEq : zPrev = z :=
+        hsafe zPrev z true gPrev g hcontainsPrev hcontainsSelf hconflict
+      subst hprevEq
+      exact ih hcontainsSelf hbaseSelf
 
 /-- Source-environment version of `chain_entry_env3`: if a source annotation
 targets into the guarded write chain, then its holder is on that chain. -/
@@ -11789,6 +11836,60 @@ theorem chain_entry_source {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
   by_contra hxOutside
   exact chainGuard_contains_exclusion hsafe hunchanged hnotWrite hguardU
     hxOutside hcontains rfl
+
+/-- Root-entry exclusion for source annotations.  If a source mutable
+annotation targets the top-level write root, then either its holder is the
+single changed/graft slot or the annotation survives into the result
+environment and immediately contradicts the rule's `¬ WriteProhibited`
+premise. -/
+theorem chainGuard_step_root_prohibited {env env₃ : Env} {lhs : LVal}
+    {rhsTy : Ty} {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (_hsafe : BorrowSafeEnv env)
+    (_htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (_hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (_hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (_hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {x : Name} {g : LVal},
+      env ⊢ x ↝ (.borrow true g) →
+      LVal.base g = LVal.base lhs →
+      x = b := by
+  intro x g hcontains hbase
+  by_contra hxb
+  have hcontains₃ : env₃ ⊢ x ↝ (.borrow true g) := by
+    rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+    exact ⟨slot, (hne x hxb) ▸ hslot, hcontainsTy⟩
+  exact hnotWrite (WriteProhibited.of_contains_conflict hcontains₃ hbase)
+
+/-- Degenerate no-reentry package: a mutable self-edge on the guarded top
+write chain can only live at the final changed/graft slot.  Borrow safety first
+collapses any guarded self-edge to the chain root; the root-entry exclusion
+then says the holder must be the changed slot, since any other holder survives
+into the result environment and write-prohibits the top lhs. -/
+theorem chainGuard_self_edge_eq_changed_slot {env env₃ : Env} {lhs : LVal}
+    {rhsTy : Ty} {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (hsafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {z : Name} {g : LVal},
+      ChainGuard env (LVal.base lhs) z →
+      env ⊢ z ↝ (.borrow true g) →
+      LVal.base g = z →
+      z = b := by
+  intro z g hguardZ hcontains hbaseSelf
+  have hzRoot : z = LVal.base lhs :=
+    chainGuard_self_edge_eq_root hsafe hguardZ hcontains hbaseSelf
+  exact chainGuard_step_root_prohibited hsafe htySafe hnotWrite hne
+    hbLook hgraftContains hguardB hcontains (by simpa [hzRoot] using hbaseSelf)
 
 /-- Reverse outside-chain transport for the result of a guarded write.  If a
 post-write lvalue is rooted outside the source write chain, then its typing
