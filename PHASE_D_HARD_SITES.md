@@ -4,7 +4,8 @@ Status: `LwRust/Paper/Soundness/Lemma_4_11_Preservation.lean` remains green
 after adding the new strike/path and owner-chain extraction support, the
 owner-route collapse helpers, the dereference-move runtime preservation
 helpers, the direct-variable assignment owner-drop frame, and the pure
-partial-box dereference-assignment runtime preservation wrapper:
+partial/full-box dereference-assignment runtime preservation wrappers, plus
+the singleton block lifetime-drop runtime preservation helper:
 
 - `LValTyping.strike_suffix` factors a strike at a typed lvalue into the
   remaining suffix over that lvalue's type.
@@ -112,6 +113,20 @@ partial-box dereference-assignment runtime preservation wrapper:
   owner path.  The unqualified full-box helper is still pending because it
   must split off the `UpdateAtPath.mutBorrow` route and dispatch that route to
   the borrow-hop/re-rooting proof.
+- Added and compiled the singleton block lifetime-drop preservation path:
+  `dropsAvoids_of_protectedByBase_lifetime_whenInitialized`,
+  `lval_loc_dropsAvoids_lifetime_whenInitialized`,
+  `locReads_dropsAvoids_lifetime_whenInitialized`,
+  `borrowDependencyWhenInitialized_dropsAvoids_lifetime`,
+  `RuntimeFrame.dropsAvoids_of_reaches_stored_validPartialValueWhenInitialized_of_frames`,
+  `dropsAvoids_of_ownerReaches_value_lifetime_whenInitialized`, and
+  `preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`.
+- Added and compiled small runtime re-rooting conveniences:
+  `ProgramStore.loc_prependPath_eq_of_loc_eq`,
+  `ProgramStore.read_eq_of_loc_eq`, and
+  `ProgramStore.write_eq_of_loc_eq`.  These only package the runtime equality
+  side of mutable-borrow hop re-rooting; the static/result-environment
+  chain-collapse proof is still the remaining hard assignment step.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked after the compiled helper additions above; current
@@ -205,31 +220,16 @@ reach exclusion, proves overwritten owners orphaned with
 
 ## 4. Singleton block final value lifetime drop
 
-Blocked helper:
+Completed helper:
 
 `preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`
 
-Most of the old proof can be reused, but these WhenInitialized lifetime-drop
-helpers are not present in the fresh file:
-
-- `dropPreservation_lifetime_whenInitialized`
-- `dropLifetime_domain_equiv_of_ownerTargetsHeap_whenInitialized`
-- a value-level `dropsAvoids_of_reaches_validPartialValueWhenInitialized`
-- `borrowDependencyWhenInitialized_dropsAvoids_lifetime`
-
-The file already has stored-slot variants:
-
-- `dropsAvoids_of_reaches_stored_validPartialValueWhenInitialized`
-- `dropsAvoids_of_borrowDependencyWhenInitialized_unprotected_values`
-
-The missing bridge is still the value-level lifetime-drop-specific proof that
-values being dropped at the block lifetime cannot be protected by a dependency
-of the terminal value.  The stored-slot preservation path has the needed
-variants, but the terminal value branch still needs a
-`dropsAvoids_of_reaches_validPartialValueWhenInitialized`-style lemma for
-`DropsLifetime`.  The proof should use `LifetimeChild`, `EnvSlotsOutlive`, heap
-slots at root lifetime, `ValidRuntimeState.storeTermDisjoint`, and
-`lifetimeDropOwnersDisjoint_of_heapRootLifetime`.
+The value-level and stored-slot lifetime-drop frames are now present and the
+singleton `R-BlockB` proof compiles.  The terminal value is framed with
+`dropsAvoids_of_ownerReaches_value_lifetime_whenInitialized`; surviving
+environment slots use the stored-slot frame plus
+`borrowDependencyWhenInitialized_dropsAvoids_lifetime`, and the final safe
+abstraction is rebuilt with `dropPreservation_lifetime_whenInitialized`.
 
 ## 5. Final induction and downstream callers
 
