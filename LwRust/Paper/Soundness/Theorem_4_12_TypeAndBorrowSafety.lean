@@ -201,7 +201,7 @@ theorem terminatesAsValue_bounded
       (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hchild))
       hborrowSafe hlinear hsafe hfinite
   case declare =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty _hfresh hinner
+    intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty hinner
       _hfreshOut _henv ih hsize hsource store hvalidRuntime
       hvalidStoreTyping hwellFormed hborrowSafe hlinear hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)

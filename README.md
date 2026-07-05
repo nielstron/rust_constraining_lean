@@ -18,10 +18,14 @@ The mechanised language is **exactly the paper's core calculus**
   lifetime), with one strengthening kept in part (i): a borrow target's
   *base variable's* slot must also outlive the reference
   (`LValBaseOutlives`; see `DIFFERENCES.md`).
-- The typing rules match the printed figures with **one** extra premise:
-  `T-Declare` requires `env₂.fresh x`, mechanising the paper's Section 5.2
-  statement that redeclaration is not permitted (the follow-up's `T-Block`
-  makes the same assumption).  `T-Block`'s `LifetimeChild` premise
+- The typing rules match the printed figures with **one** amended premise:
+  `T-Declare`'s freshness check is stated on the post-initializer `Γ₂`
+  rather than the printed `Γ₁` — we read the printed `x ∉ dom(Γ₁)` as a
+  typo, since only the `Γ₂` form rejects the shadow chain
+  `let mut x = (let mut x = t)` that Section 5.2 says is not permitted
+  (the follow-up's `T-Block` makes the same assumption), and on well-formed
+  environments `Γ₂`-freshness implies `Γ₁`-freshness.
+  `T-Block`'s `LifetimeChild` premise
   formalises the paper's ambient lexical-nesting assumption in a slightly
   stronger form (immediate child rather than mere nesting).
 

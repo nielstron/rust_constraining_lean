@@ -1419,7 +1419,7 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
       ValidValue store' .unit .unit := by
   intro hvalidStoreTyping hsafe hvalidRuntime htyping hstep
   cases htyping with
-  | declare hfresh hinit _hfreshOut henv₃ =>
+  | declare hinit hfreshOut henv₃ =>
       cases hinit with
       | const hvalueTyping =>
           rcases hvalidStoreTyping value (by simp [termValues]) with
@@ -1428,7 +1428,7 @@ theorem preservation_declare_step_runtime {store store' : ProgramStore}
             valueTyping_deterministic hstoredTyping hvalueTyping
           subst hty
           have hpreserved :=
-            preservation_declare_redex_runtime_of_validValue hsafe hfresh
+            preservation_declare_redex_runtime_of_validValue hsafe hfreshOut
               hvalidRuntime hvalidValue hstep
           rw [henv₃]
           exact hpreserved

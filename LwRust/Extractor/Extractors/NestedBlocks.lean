@@ -244,7 +244,7 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           · exact hwf
   case ctermLetMut_letMutRhs hinit =>
       cases htyped with
-      | declare _ hinit' _ _ =>
+      | declare hinit' _ _ =>
           simp only [extractTermStmts]
           exact extractTermStmts_typed hinit hinit'
   case ctermAssign_assignRhs hrhs =>
