@@ -5171,7 +5171,7 @@ theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
         (WellFormedTy.whenInitialized hwellTy) hdrop)
     (by
       -- T-Declare.
-      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hfresh _hterm
+      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hterm
         hfreshOut henv₃ ih hsource hwell
       have hinner := ih (SourceTerm.declare_inner hsource) hwell
       refine ⟨?_, .unit⟩
@@ -7442,7 +7442,7 @@ theorem typingPreservesWellFormed_of_sourceTerm
         exact TyBorrowSafeAgainstEnv.dropLifetime htySafeBody)
     (by
       -- T-Declare.
-      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hfresh _hterm
+      intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty _hterm
         hfreshOut henv₃ ih hsource hwell hsafe
       rcases ih (SourceTerm.declare_inner hsource) hwell hsafe with
         ⟨hwell₂, hsafe₂, hwellTy₂, htySafe₂⟩
@@ -7549,7 +7549,7 @@ theorem typingPreservesLinearizable_of_sourceTerm
       rw [hdrop]
       exact ⟨φ, LinearizedBy.dropLifetime hφ⟩)
     (by
-      intro _env₁ _env₂ _env₃ _typing _lifetime x _term _ty _hfresh hterm
+      intro _env₁ _env₂ _env₃ _typing _lifetime x _term _ty hterm
         hfreshOut henv₃ ih hsource hwell hsafe hfinite hlinear
       have hlinear₂ : Linearizable _env₂ :=
         ih (SourceTerm.declare_inner hsource) hwell hsafe hfinite hlinear
@@ -16839,13 +16839,13 @@ theorem preservation_bounded
       (WellFormedEnv.weaken hwell (LifetimeChild.outlives hchild))
       hborrowSafe hfinite hlinear hsafe hwellTy hmulti
   case declare =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty hfresh hinner
+    intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty hinner
       hfreshOut henv₃ ih hsize hsource store finalStore finalValue
       hvalidRuntime hvalidStoreTyping hwell hborrowSafe hfinite hlinear hsafe
       hmulti
     have htermTyping :
         TermTyping _env₁ _typing _lifetime (.letMut x inner) .unit _env₃ :=
-      TermTyping.declare hfresh hinner hfreshOut henv₃
+      TermTyping.declare hinner hfreshOut henv₃
     have hstatic :=
       typingPreservesWellFormed_of_sourceTerm hsource hwell hborrowSafe
         htermTyping

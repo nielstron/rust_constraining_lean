@@ -104,7 +104,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     exact ih htypingEq
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty
-      _hfresh _hterm _hfreshOut _henv₃ ih htypingEq candidate hmem
+      _hterm _hfreshOut _henv₃ ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy

@@ -53,11 +53,16 @@ previously-necessary extra premise became removable:
   historical coherence, rank, stale-target, and rhs-target lifetime premises
   are not rule premises.  `LinearizedBy`/`Linearizable` exist only as
   follow-up-paper proof infrastructure for preservation's cycle exclusion.
-- `T-Declare` carries one extra premise: `env₂.fresh x`.  The literal rule
-  admits the shadow chain `let mut x = (let mut x = t)`; the paper's
-  Section 5.2 explicitly treats redeclaration as not permitted, so this
-  mechanizes paper intent (the follow-up's T-Block states the same
-  assumption).
+- `T-Declare`'s freshness premise is stated on the post-initializer
+  environment: `env₂.fresh x` where the printed rule says `x ∉ dom(Γ₁)`.
+  We read the printed premise as a typo for `Γ₂`: the `Γ₁` form fails to
+  reject the shadow chain `let mut x = (let mut x = t)` (where `x` re-enters
+  the environment through the initializer), which the paper's Section 5.2
+  explicitly treats as not permitted and the follow-up's T-Block assumes
+  away.  The two forms are logically independent on raw environments, but on
+  well-formed environments `Γ₂`-freshness implies `Γ₁`-freshness (typing
+  only ever drops block-local slots, so domains grow monotonically), so no
+  paper-intended program is rejected.
 
 Smaller deviations in and around the rules:
 

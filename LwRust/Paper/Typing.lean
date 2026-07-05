@@ -1066,18 +1066,16 @@ mutual
         TermTyping env₁ typing lifetime (.block blockLifetime terms) ty env₃
     /-- T-Declare.
 
-    The paper rule requires `x ∉ dom(Γ₁)`.  The extra `env₂.fresh x` premise
-    mechanizes the paper's no-redeclaration intent (Section 5.2 explicitly
-    treats redeclaration as not permitted): the literal rule would allow the
-    shadow chain `let mut x = (let mut x = t)`, where `x` re-enters the
-    environment through the initializer itself.
-
-    The follow-up's T-Block explicitly assumes no redeclaration; `env₂.fresh x`
-    is the mechanized form of that premise for initializers that may themselves
-    evaluate declarations. -/
+    The freshness premise is stated on the post-initializer environment
+    `Γ₂` where the printed rule says `x ∉ dom(Γ₁)`.  We read the printed
+    premise as a typo for `Γ₂`: `Γ₁`-freshness fails to reject the shadow
+    chain `let mut x = (let mut x = t)`, where `x` re-enters the environment
+    through the initializer itself, and Section 5.2 explicitly treats
+    redeclaration as not permitted (the follow-up's T-Block states the same
+    assumption).  On well-formed environments `Γ₂`-freshness implies
+    `Γ₁`-freshness, since typing only ever drops block-local slots. -/
     | declare {env₁ env₂ env₃ : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {x : Name} {term : Term} {ty : Ty} :
-        env₁.fresh x →
         TermTyping env₁ typing lifetime term ty env₂ →
         env₂.fresh x →
         env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
@@ -1133,7 +1131,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (fun _hchild _hterms _hwellTy henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).dropLifetime)
-    (fun _hfresh _hterm _hfreshOut henvEq ih hfinite => by
+    (fun _hterm _hfreshOut henvEq ih hfinite => by
       rw [henvEq]
       exact (ih hfinite).update)
     (fun _hrhs _hlhs _hshape _hwellTy hwrite _hnotWrite ih hfinite =>

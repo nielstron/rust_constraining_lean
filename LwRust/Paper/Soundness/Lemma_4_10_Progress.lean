@@ -879,7 +879,7 @@ theorem progress_declare_value_typing {store : ProgramStore} {env env₂ : Env}
     ProgressResult store lifetime (.letMut x (.val value)) := by
   intro htyping
   cases htyping with
-  | declare _hfresh _hinit _henv =>
+  | declare _hinit _hfreshOut _henv =>
       exact Or.inr ⟨store.declare x lifetime value, .val .unit, Step.declare rfl⟩
 
 /-- Lemma 4.10, composed `T-Box` progress case. -/
@@ -1039,10 +1039,10 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
     exact ih hsize hvst lifetime
       (EnvSlotsOutlive.weaken houtlives (LifetimeChild.outlives hchild)) hsafe hstore
   case declare =>
-    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hfresh hterm hfreshOut
+    intro _env₁ _env₂ _env₃ _typing _lifetime _x _term _ty hterm hfreshOut
       henv ih hsize hvst hwf hsafe hstore
     exact progress_declare_typing
-      (TermTyping.declare hfresh hterm hfreshOut henv)
+      (TermTyping.declare hterm hfreshOut henv)
       (ih (by simp [Term.size] at hsize ⊢; omega)
         (validStoreTyping_declare_inner hvst) hwf hsafe hstore)
   case assign =>

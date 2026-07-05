@@ -92,11 +92,11 @@ theorem invalidBorrowExample_rejected :
               cases htail2 with
               | singleton hassign =>
                   cases hdeclareX with
-                  | declare _freshX hinitX _hfreshOutX hxEnv =>
+                  | declare hinitX _hfreshOutX hxEnv =>
                       cases hinitX with
                       | const _ =>
                           cases hdeclareY with
-                          | declare _freshY hinitY _hfreshOutY hyEnv =>
+                          | declare hinitY _hfreshOutY hyEnv =>
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   rename_i _valueLifetimeY borrowedTy
@@ -195,7 +195,6 @@ private theorem declare_x_typing :
       (.letMut "x" (.val (.int 0))) .unit envX := by
   unfold envX xSlot l
   exact TermTyping.declare
-    (by simp [Env.fresh, Env.empty])
     (TermTyping.const ValueTyping.int)
     (by simp [Env.fresh, Env.empty])
     rfl
@@ -207,7 +206,7 @@ private theorem declare_p_typing :
     TermTyping envX StoreTyping.empty l
       (.letMut "p" (.borrow true x)) .unit envP := by
   unfold envP pSlot
-  exact TermTyping.declare envX_fresh_p borrow_x_typing envX_fresh_p rfl
+  exact TermTyping.declare borrow_x_typing envX_fresh_p rfl
 
 private theorem prefix_typing :
     TermListTyping Env.empty StoreTyping.empty l prefixTerms .unit envP := by
