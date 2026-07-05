@@ -8131,6 +8131,165 @@ theorem EnvWrite.select_or_hop_of_nested_slot
       simpa [Env.update, hpreserve hslot hnested]
     · simpa [Env.update, hy]
 
+/-- Typed form of `UpdateAtPath.pathSelect_or_hop`.  The hop branch carries the
+rebased lvalue typing and the concrete runtime-location equality needed to
+replay the assignment step at the hop target. -/
+theorem UpdateAtPath.pathSelect_or_hop_typed
+    {store : ProgramStore} {env result : Env}
+    (hsafe : SafeAbstraction store env)
+    (hcbwf : ContainedBorrowsWellFormed env) :
+    ∀ {path : Path} {old updated : PartialTy} {rhsTy : Ty},
+      UpdateAtPath env path old rhsTy result updated →
+      ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
+        LValTyping env wcur old lfc →
+        LValTyping env (prependPath path wcur) pt lf →
+        (∃ leaf, PathSelect path old leaf) ∨
+          ∃ (path' : Path) (target : LVal) (nested : Env),
+            EnvWrite env (prependPath path' target) rhsTy nested ∧
+            result = nested ∧
+            updated = old ∧
+            LValTyping env (prependPath path' target) pt lf ∧
+              store.loc (prependPath path wcur) =
+                store.loc (prependPath path' target) := by
+  intro path old updated rhsTy hupdate
+  exact UpdateAtPath.rec
+    (motive_1 := fun path old rhsTy result updated _ =>
+      ∀ {wcur : LVal} {pt : PartialTy} {lf lfc : Lifetime},
+        LValTyping env wcur old lfc →
+        LValTyping env (prependPath path wcur) pt lf →
+        (∃ leaf, PathSelect path old leaf) ∨
+          ∃ (path' : Path) (target : LVal) (nested : Env),
+            EnvWrite env (prependPath path' target) rhsTy nested ∧
+            result = nested ∧
+            updated = old ∧
+            LValTyping env (prependPath path' target) pt lf ∧
+            store.loc (prependPath path wcur) =
+              store.loc (prependPath path' target))
+    (motive_2 := fun _lv _rhsTy _result _ => True)
+    (by
+      intro _old _ty wcur pt lf lfc _hwcur _hlhs
+      left
+      exact ⟨_, PathSelect.here⟩)
+    (by
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+      intro wcur pt lf lfc hwcur hlhs
+      have hpathEq :
+          prependPath _path wcur.deref = prependPath (() :: _path) wcur := by
+        simp [prependPath_deref_comm, prependPath]
+      have hlhs' :
+          LValTyping env (prependPath _path wcur.deref) pt lf := by
+        simpa [hpathEq] using hlhs
+      rcases ih (LValTyping.box hwcur) hlhs' with
+        hselect | hhop
+      · rcases hselect with ⟨leaf, hselect⟩
+        left
+        exact ⟨leaf, PathSelect.box hselect⟩
+      · rcases hhop with
+          ⟨path', target, nested, hwrite, hresult, hupdated, htyping,
+            hloc⟩
+        right
+        refine ⟨path', target, nested, hwrite, hresult, ?_, htyping, ?_⟩
+        · rw [hupdated]
+        · simpa [hpathEq] using hloc)
+    (by
+      intro _env₂ _path _inner _updatedInner _ty _hinner ih
+      intro wcur pt lf lfc hwcur hlhs
+      have hpathEq :
+          prependPath _path wcur.deref = prependPath (() :: _path) wcur := by
+        simp [prependPath_deref_comm, prependPath]
+      have hlhs' :
+          LValTyping env (prependPath _path wcur.deref) pt lf := by
+        simpa [hpathEq] using hlhs
+      rcases ih (LValTyping.boxFull hwcur) hlhs' with
+        hselect | hhop
+      · rcases hselect with ⟨leaf, hselect⟩
+        left
+        exact ⟨leaf, PathSelect.boxFull hselect⟩
+      · rcases hhop with
+          ⟨path', target, nested, hwrite, hresult, hupdated, htyping,
+            hloc⟩
+        right
+        refine ⟨path', target, nested, hwrite, hresult, ?_, htyping, ?_⟩
+        · rw [hupdated]
+          simp [partialTyRebox]
+        · simpa [hpathEq] using hloc)
+    (by
+      intro env₂ path target rhsTy hwrite _ih
+      intro wcur pt lf lfc hwcur hlhs
+      have hpathEq :
+          prependPath path wcur.deref = prependPath (() :: path) wcur := by
+        simp [prependPath_deref_comm, prependPath]
+      have hlhs' :
+          LValTyping env (prependPath path wcur.deref) pt lf := by
+        simpa [hpathEq] using hlhs
+      have hrebased :
+          LValTyping env (prependPath path target) pt lf :=
+        LValTyping.rebase_hop hwcur path hlhs'
+      rcases LValTyping.partialTyBorrowsWellFormedInSlot hcbwf hwcur
+          PartialTyContains.here with
+        ⟨targetTy, targetLifetime, htargetTyping, _houtlives, _hbase⟩
+      have hlocBase :
+          store.loc wcur.deref = store.loc target :=
+        lvalTyping_deref_borrow_loc_eq_whenInitialized hsafe hwcur
+          htargetTyping
+      have hloc :
+          store.loc (prependPath path wcur.deref) =
+            store.loc (prependPath path target) :=
+        ProgramStore.loc_prependPath_eq_of_loc_eq hlocBase path
+      right
+      exact ⟨path, target, env₂, hwrite, rfl, rfl, hrebased,
+        by simpa [hpathEq] using hloc⟩)
+    (by
+      intro _env₂ _lv _slot _ty _updatedTy _hslot _hupdate _ih
+      trivial)
+    hupdate
+
+/-- Typed form of the write split.  In the hop branch, the nested write is over
+the same runtime location as the original lhs, and the reduced lhs has the same
+static type as the original write target. -/
+theorem EnvWrite.select_or_hop_typed
+    {store : ProgramStore} {env env' : Env}
+    (hsafe : SafeAbstraction store env)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    {lhs : LVal} {oldTy : PartialTy} {targetLifetime : Lifetime}
+    {rhsTy : Ty} :
+    EnvWrite env lhs rhsTy env' →
+    LValTyping env lhs oldTy targetLifetime →
+    (∃ slot leaf,
+      env.slotAt (LVal.base lhs) = some slot ∧
+      PathSelect (LVal.path lhs) slot.ty leaf) ∨
+      ∃ slot path' target nested,
+        env.slotAt (LVal.base lhs) = some slot ∧
+        EnvWrite env (prependPath path' target) rhsTy nested ∧
+        env' = nested.update (LVal.base lhs) slot ∧
+        LValTyping env (prependPath path' target) oldTy targetLifetime ∧
+        store.loc lhs = store.loc (prependPath path' target) := by
+  intro hwrite hlhs
+  cases hwrite with
+  | @intro result _lv slot _ty updatedTy hslot hupdate =>
+      rcases
+          UpdateAtPath.pathSelect_or_hop_typed hsafe hcbwf hupdate
+            (wcur := .var (LVal.base lhs))
+            (pt := oldTy) (lf := targetLifetime)
+            (LValTyping.var (by simpa [LVal.base] using hslot))
+            (by
+              rw [prependPath_path_base]
+              exact hlhs) with
+        hselect | hhop
+      · rcases hselect with ⟨leaf, hselect⟩
+        left
+        exact ⟨slot, leaf, by simpa [LVal.base] using hslot, hselect⟩
+      · rcases hhop with
+          ⟨path', target, nested, hnested, hresult, hupdated, htyping,
+            hloc⟩
+        right
+        refine ⟨slot, path', target, nested, by simpa [LVal.base] using hslot,
+          hnested, ?_, htyping, ?_⟩
+        · subst hresult
+          subst hupdated
+          simp [LVal.base]
+        · simpa [prependPath_path_base] using hloc
+
 theorem TargetInitialized.transport_of_pointwise {env result : Env}
     (heq : ∀ y, result.slotAt y = env.slotAt y) :
     ∀ {target : LVal},

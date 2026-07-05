@@ -197,6 +197,20 @@ the singleton block lifetime-drop runtime preservation helper:
   is therefore the typed nested-slot preservation step under the actual
   assignment hypotheses, or equivalently the framed structural assignment
   theorem that avoids requiring `¬ WriteProhibited` for the reduced hop target.
+- Added and compiled the typed Round 16 runtime split:
+  `UpdateAtPath.pathSelect_or_hop_typed` and
+  `EnvWrite.select_or_hop_typed`.  The hop branch now carries the reduced
+  `EnvWrite`, the rebased reduced-lhs `LValTyping`, and the concrete runtime
+  equality `store.loc lhs = store.loc reduced`.  The location/rebase part of
+  the borrow-hop assignment bridge is therefore no longer missing.  The
+  remaining blocker is the recursive environment frame: the reduced lhs can be
+  `WriteProhibited` by the hop annotation itself, so the existing pure
+  `_of_wellFormed` / `_of_frames` helpers cannot be invoked recursively with a
+  per-level `¬ WriteProhibited`.  The next proof must either discharge the
+  Round-17 `nested_slot_preserved_of_notWrite`/pointwise transport obligation
+  using the top-level `¬ WriteProhibited`, or introduce the framed structural
+  assignment theorem whose base cases consume the Round-12 guarded-leaf frames
+  keyed to the original top-level write.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;
