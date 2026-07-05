@@ -12465,13 +12465,14 @@ lvalue reduces to the final pure lvalue through a sequence of mutable-borrow
 hops.  Each hop records the hop-free descent prefix `s₀` (typed at the hop
 annotation), the annotation's containment at the base slot, and the remaining
 path that re-roots at the hop target. -/
-inductive HopsTo (env : Env) : LVal → LVal → Prop where
-  | refl {lv : LVal} : HopsTo env lv lv
+inductive HopsTo (env env₃ : Env) : LVal → LVal → Prop where
+  | refl {lv : LVal} : HopsTo env env₃ lv lv
   | hop {s₀ target final : LVal} {lf : Lifetime} {p : Path} :
       LValTyping env s₀ (.ty (.borrow true target)) lf →
       env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
-      HopsTo env (prependPath p target) final →
-      HopsTo env (prependPath p s₀.deref) final
+      env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
+      HopsTo env env₃ (prependPath p target) final →
+      HopsTo env env₃ (prependPath p s₀.deref) final
 
 /-- The final pure write selected by iterating borrow-hop reduction.  Any
 environment write under the top-level rule premises reduces to a pure
@@ -12492,7 +12493,7 @@ def SelectFinalPackage (store : ProgramStore) (env env₃ : Env)
       ∃ (holder : Name) (path' : Path) (target' : LVal),
         env ⊢ holder ↝ (.borrow true target') ∧
         finalLhs = prependPath path' target') ∧
-      HopsTo env lv finalLhs)
+      HopsTo env env₃ lv finalLhs)
 
 theorem EnvWrite.select_final
     {store : ProgramStore} {env env₃ : Env} {lhsTop : LVal}
@@ -12639,7 +12640,9 @@ theorem EnvWrite.select_final
       · exact Or.inr ⟨LVal.base wcur, path, target, hannBase, hEq⟩
       · exact Or.inr hHop
     · rw [← hpathEq]
-      exact HopsTo.hop hwcur hannBase hhops
+      exact HopsTo.hop hwcur hannBase
+        ((henv₃nested (LVal.base wcur)).trans
+          (hpreserved.trans henvRoot.symm)) hhops
   case intro =>
     intro _env₂ lv slot ty updatedTy hslot hupdate ih hlv hguard hshapePt
       hpoint
