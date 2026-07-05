@@ -137,17 +137,3 @@ The paper's global borrow-safe-environment corollary is not established as a
 separate theorem; borrow safety is instead threaded as a preservation
 hypothesis/conclusion pair.  (The old fan-out counterexample to its
 preservation died with multi-target borrows.)
-
-## Bottom line
-
-The mechanised language is now exactly the paper's core calculus with the
-follow-up's single-target borrow grammar and strong-update write.  Coherence is
-gone, while linearization is back in the follow-up paper's role: a proof-side
-rank invariant for ruling out assignment cycles, not an extra typing-rule
-premise.  The environment invariant is Definition 4.8 up to the
-`LValBaseOutlives` strengthening (§1a), and the typing rules carry a single
-extra premise relative to the printed figures (`env₂.fresh x` on `T-Declare`,
-mechanizing the papers' stated no-redeclaration assumption).  The headline
-safety theorems are stated in the paper's strict form and are backed by the
-compiled preservation export; remaining items are optional paper-sync or
-simplification work itemised in `OBLIGATIONS.md`.
