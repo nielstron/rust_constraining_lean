@@ -12467,7 +12467,9 @@ annotation), the annotation's containment at the base slot, and the remaining
 path that re-roots at the hop target. -/
 inductive HopsTo (env env₃ : Env) : LVal → LVal → Prop where
   | refl {lv : LVal} : HopsTo env env₃ lv lv
-  | hop {s₀ target final : LVal} {lf : Lifetime} {p : Path} :
+  | hop {s₀ target final : LVal} {slotH : EnvSlot} {lf : Lifetime} {p : Path} :
+      env.slotAt (LVal.base s₀) = some slotH →
+      PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
       LValTyping env s₀ (.ty (.borrow true target)) lf →
       env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
       env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
@@ -12518,6 +12520,7 @@ theorem EnvWrite.select_final
           env ⊢ (LVal.base wcur) ↝ (.borrow mutable u)) →
         ChainGuard env (LVal.base lhsTop) (LVal.base wcur) →
         env.slotAt (LVal.base wcur) = some rootSlot →
+        PathSelect (LVal.path wcur) rootSlot.ty old →
         ShapeCompatible env oldTy (.ty ty) →
         (∃ leaf, PathSelect path old leaf) ∨
           (updated = old ∧
@@ -12535,12 +12538,12 @@ theorem EnvWrite.select_final
     hshape (fun _ => rfl)
   case strong =>
     intro _old _ty wcur rootSlot lfc _hwcur _hlhs _hcontainsW _hguard
-      _henvRoot _hshapePt
+      _henvRoot _hselw _hshapePt
     left
     exact ⟨_, PathSelect.here⟩
   case box =>
     intro _env₂ _path _inner _updatedInner _ty _hinner ih
-      wcur rootSlot lfc hwcur hlhs hcontainsW hguard henvRoot hshapePt
+      wcur rootSlot lfc hwcur hlhs hcontainsW hguard henvRoot hselw hshapePt
     have hpathEq :
         prependPath _path wcur.deref = prependPath (() :: _path) wcur := by
       simp [prependPath_deref_comm, prependPath]
@@ -12552,7 +12555,9 @@ theorem EnvWrite.select_final
         (by
           intro mutable u hcontains
           exact hcontainsW (PartialTyContains.box hcontains))
-        hguard henvRoot hshapePt with
+        hguard henvRoot
+        (by simpa [LVal.path] using PathSelect.snoc_box hselw)
+        hshapePt with
       hselect | ⟨hupdEq, himpl⟩
     · rcases hselect with ⟨leaf, hselect⟩
       left
@@ -12564,7 +12569,7 @@ theorem EnvWrite.select_final
       exact hfinal
   case boxFull =>
     intro _env₂ _path _inner _updatedInner _ty _hinner ih
-      wcur rootSlot lfc hwcur hlhs hcontainsW hguard henvRoot hshapePt
+      wcur rootSlot lfc hwcur hlhs hcontainsW hguard henvRoot hselw hshapePt
     have hpathEq :
         prependPath _path wcur.deref = prependPath (() :: _path) wcur := by
       simp [prependPath_deref_comm, prependPath]
@@ -12576,7 +12581,9 @@ theorem EnvWrite.select_final
         (by
           intro mutable u hcontains
           exact hcontainsW (PartialTyContains.tyBox hcontains))
-        hguard henvRoot hshapePt with
+        hguard henvRoot
+        (by simpa [LVal.path] using PathSelect.snoc_boxFull hselw)
+        hshapePt with
       hselect | ⟨hupdEq, himpl⟩
     · rcases hselect with ⟨leaf, hselect⟩
       left
@@ -12588,7 +12595,7 @@ theorem EnvWrite.select_final
       exact hfinal
   case mutBorrow =>
     intro _env₂ path target ty hwriteNested ihNested
-      wcur rootSlot lfc hwcur hlhs hcontainsW hguard henvRoot hshapePt
+      wcur rootSlot lfc hwcur hlhs hcontainsW hguard henvRoot hselw hshapePt
     refine Or.inr ⟨rfl, ?_⟩
     intro hp
     have hpathEq :
@@ -12640,7 +12647,7 @@ theorem EnvWrite.select_final
       · exact Or.inr ⟨LVal.base wcur, path, target, hannBase, hEq⟩
       · exact Or.inr hHop
     · rw [← hpathEq]
-      exact HopsTo.hop hwcur hannBase
+      exact HopsTo.hop henvRoot hselw hwcur hannBase
         ((henv₃nested (LVal.base wcur)).trans
           (hpreserved.trans henvRoot.symm)) hhops
   case intro =>
@@ -12656,6 +12663,7 @@ theorem EnvWrite.select_final
           exact ⟨slot, by simpa [LVal.base] using hslot, hcontains⟩)
         (by simpa [LVal.base] using hguard)
         (by simpa [LVal.base] using hslot)
+        (by simpa [LVal.path] using PathSelect.here)
         hshapePt with
       hselect | ⟨hupdEq, himpl⟩
     · rcases hselect with ⟨leaf, hselect⟩
