@@ -5025,7 +5025,8 @@ theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
     (by
       -- T-Assign: Definition 4.8 across the strong-update write.
       intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-        _rhs _rhsTy hRhs hLhsPost _hshape hwellTy hwrite _hnotWrite ih
+        _rhs _rhsTy hRhs hLhsPost _hshape hwellTy _hchain hwrite
+        _hnotWrite ih
         hsource hwell
       have hmid := ih (SourceTerm.assign_inner hsource) hwell
       exact ⟨WellFormedEnvWhenInitialized.envWrite hmid.1 hwrite hLhsPost
@@ -5885,27 +5886,45 @@ private theorem source_assign_move_z :
   intro value hmem
   simp [termValues] at hmem
 
-private theorem assign_move_z_typing :
-    TermTyping envWithZ StoreTyping.empty l
-      (.assign (.deref p) (.move z)) .unit resultMoved := by
-  exact TermTyping.assign rhs_move_typing moved_lhs_typing moved_shape
-    moved_rhs_wellFormed write_moved resultMoved_not_writeProhibited
+private theorem movedZ_not_writeChainWritable :
+    ¬ WriteChainWritable movedZ (.deref p) := by
+  intro hchain
+  have hp : movedZ ⊢ "p" ↝ (.borrow true q) :=
+    ⟨pSlot, movedZ_slot_p, by
+      unfold pSlot
+      exact PartialTyContains.here⟩
+  have hguardQ : ChainGuard movedZ (LVal.base (.deref p)) "q" := by
+    exact ChainGuard.step ChainGuard.base hp rfl
+  have hnotWriteQ : ¬ WriteProhibited movedZ (.var "q") :=
+    hchain hguardQ
+  have hwriteQ : WriteProhibited movedZ (.var "q") :=
+    WriteProhibited.of_contains_conflict hp
+      (by simp [PathConflicts, q, LVal.base])
+  exact hnotWriteQ hwriteQ
 
-/-- `WellFormedEnv` alone is too weak for strict assignment preservation.  The
-formalized `T-Assign` rule admits this assignment from a strictly well-formed
-but not borrow-safe environment: move `z : &mut *q` into `*p`, where
-`p : &mut q` and `q : &mut r`.  The witness is therefore not a reachable
-source-environment witness under the paper's borrow-safety discipline; it
-isolates that the strict proof needs a borrow-safety/reachability premise, not
-just Definition 4.8 well-formedness. -/
+/-- `WellFormedEnv` plus the old post-write check is too weak for strict
+assignment preservation.  The old premises allow this assignment from a
+strictly well-formed but not borrow-safe environment: move `z : &mut *q` into
+`*p`, where `p : &mut q` and `q : &mut r`.  The strengthened `T-Assign` rule
+rejects the witness via `WriteChainWritable`, because the source write chain
+reaches `q`, and `q` is already write-prohibited by `p`'s mutable borrow. -/
 theorem strict_assign_rule_result_counterexample :
-    ∃ env₁ env₃ typing lifetime lhs rhs,
+    ∃ env₁ env₂ env₃ typing lifetime lhs rhs oldTy targetLifetime rhsTy,
       WellFormedEnv env₁ lifetime ∧
         SourceTerm (.assign lhs rhs) ∧
-        TermTyping env₁ typing lifetime (.assign lhs rhs) .unit env₃ ∧
+        TermTyping env₁ typing lifetime rhs rhsTy env₂ ∧
+        LValTyping env₂ lhs oldTy targetLifetime ∧
+        ShapeCompatible env₂ oldTy (.ty rhsTy) ∧
+        WellFormedTy env₂ rhsTy targetLifetime ∧
+        EnvWrite env₂ lhs rhsTy env₃ ∧
+        ¬ WriteProhibited env₃ lhs ∧
+        ¬ WriteChainWritable env₂ lhs ∧
         ¬ ContainedBorrowsWellFormed env₃ := by
-  exact ⟨envWithZ, resultMoved, StoreTyping.empty, l, .deref p, .move z,
-    envWithZ_wellFormed, source_assign_move_z, assign_move_z_typing,
+  exact ⟨envWithZ, movedZ, resultMoved, StoreTyping.empty, l, .deref p,
+    .move z, .ty (.borrow true r), l, rhsTy,
+    envWithZ_wellFormed, source_assign_move_z, rhs_move_typing,
+    moved_lhs_typing, moved_shape, moved_rhs_wellFormed, write_moved,
+    resultMoved_not_writeProhibited, movedZ_not_writeChainWritable,
     resultMoved_not_containedBorrowsWellFormed⟩
 
 end EnvWriteStrictCounterexample
@@ -6167,16 +6186,6 @@ theorem PartialTyContains.borrow_unique {pt : PartialTy} {mutable mutable' : Boo
       intro hright
       cases hright with
       | box hinner => exact ih hβ hinner
-
-/-- Slots reachable from `root` through environment-contained mutable borrow
-annotations. -/
-inductive ChainGuard (env : Env) (root : Name) : Name → Prop where
-  | base : ChainGuard env root root
-  | step {z y : Name} {g : LVal} :
-      ChainGuard env root z →
-      env ⊢ z ↝ (.borrow true g) →
-      LVal.base g = y →
-      ChainGuard env root y
 
 /-- No annotation held outside the chain targets into the chain. -/
 theorem chainGuard_contains_exclusion {env env₃ : Env} {lhs : LVal}
@@ -7180,7 +7189,8 @@ theorem typingPreservesWellFormed_of_sourceTerm
     (by
       -- T-Assign: the write kernel.
       intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-        _rhs _rhsTy hRhs hLhsPost hshape hwellTy hwrite hnotWrite ih
+        _rhs _rhsTy hRhs hLhsPost hshape hwellTy _hchain hwrite
+        hnotWrite ih
         hsource hwell hsafe
       rcases ih (SourceTerm.assign_inner hsource) hwell hsafe with
         ⟨hwell₂, hsafe₂, _hwellTyRhs, htySafe₂⟩
@@ -7753,6 +7763,17 @@ def OwnerChainPrefix (store : ProgramStore) (root : Location)
       OwnsChain store root k leaf ∧
       k = path.length
 
+theorem OwnerChainPrefix.ownsChain_length {store : ProgramStore}
+    {root leaf : Location} {rootValue : PartialValue} {path : Path} :
+    OwnerChainPrefix store root rootValue path leaf →
+    ∃ k, OwnsChain store root k leaf ∧ k = path.length := by
+  intro hprefix
+  rcases hprefix with ⟨hpath, hleaf⟩ | ⟨k, _hchainAt, hchain, hlen⟩
+  · subst hpath
+    subst hleaf
+    exact ⟨0, OwnsChain.zero, rfl⟩
+  · exact ⟨k, hchain, hlen⟩
+
 theorem OwnerChainPrefix.prepend_owner {store : ProgramStore}
     {root next leaf : Location} {rootSlot nextSlot : StoreSlot}
     {path : Path} :
@@ -7816,6 +7837,21 @@ theorem PathSelect.contains_of_leaf :
   | boxFull _hinner ih =>
       intro hcontains
       exact PartialTyContains.tyBox (ih hcontains)
+
+theorem PartialTyContains.pathSelect :
+    ∀ {root : PartialTy} {needle : Ty},
+      PartialTyContains root needle →
+      ∃ path, PathSelect path root (.ty needle) := by
+  intro root needle hcontains
+  induction hcontains with
+  | here =>
+      exact ⟨[], PathSelect.here⟩
+  | tyBox _hinner ih =>
+      rcases ih with ⟨path, hselect⟩
+      exact ⟨() :: path, PathSelect.boxFull hselect⟩
+  | box _hinner ih =>
+      rcases ih with ⟨path, hselect⟩
+      exact ⟨() :: path, PathSelect.box hselect⟩
 
 theorem PathSelect.borrow_contains_to_leaf :
     ∀ {path : Path} {root leafTy : PartialTy} {mutable : Bool} {u : LVal},
@@ -8024,6 +8060,49 @@ theorem PathSelect.update_borrows {env env₂ : Env}
           exact ih hupdateInner
             (PartialTyContains.partialTyRebox_borrow_inv hcontains)
 
+theorem EnvWrite.pathSelect_update_eq {env env' : Env} {lhs : LVal}
+    {rhsTy : Ty} {leaf : PartialTy} {envSlot : EnvSlot} :
+    env.slotAt (LVal.base lhs) = some envSlot →
+    PathSelect (LVal.path lhs) envSlot.ty leaf →
+    EnvWrite env lhs rhsTy env' →
+    ∃ updatedTy,
+      UpdateAtPath env (LVal.path lhs) envSlot.ty rhsTy env updatedTy ∧
+        env' = env.update (LVal.base lhs) { envSlot with ty := updatedTy } := by
+  intro hslot hselect hwrite
+  cases hwrite with
+  | @intro writeEnv _writeLv writeSlot _writeTy updatedTy hwriteSlot hupdate =>
+      have hwriteSlotEq : writeSlot = envSlot := by
+        have hslot' : env.slotAt (LVal.base lhs) = some writeSlot := by
+          simpa using hwriteSlot
+        exact Option.some.inj (hslot'.symm.trans hslot)
+      subst hwriteSlotEq
+      have henvEq : writeEnv = env :=
+        PathSelect.update_env_eq hselect hupdate
+      subst henvEq
+      exact ⟨updatedTy, hupdate, rfl⟩
+
+theorem EnvWrite.pathSelect_result_contains {env env' : Env} {lhs : LVal}
+    {rhsTy : Ty} {leaf : PartialTy} {envSlot : EnvSlot} :
+    env.slotAt (LVal.base lhs) = some envSlot →
+    PathSelect (LVal.path lhs) envSlot.ty leaf →
+    EnvWrite env lhs rhsTy env' →
+    (∀ {mutable : Bool} {target : LVal},
+      PartialTyContains (.ty rhsTy) (.borrow mutable target) →
+      env' ⊢ (LVal.base lhs) ↝ (.borrow mutable target)) ∧
+    (∀ y, y ≠ LVal.base lhs → env'.slotAt y = env.slotAt y) := by
+  intro hslot hselect hwrite
+  rcases EnvWrite.pathSelect_update_eq hslot hselect hwrite with
+    ⟨updatedTy, hupdate, henv'⟩
+  constructor
+  · intro mutable target hcontains
+    refine ⟨{ envSlot with ty := updatedTy }, ?_, ?_⟩
+    · rw [henv']
+      simp [Env.update]
+    · exact PathSelect.update_contains_rhs hselect hupdate hcontains
+  · intro y hy
+    rw [henv']
+    simp [Env.update, hy]
+
 /-- Snoc decomposition of a pure selection: the last step descends either a
 partial box or a full box from the second-to-last node. -/
 theorem PathSelect.snoc_inv :
@@ -8051,6 +8130,49 @@ theorem PathSelect.snoc_inv :
       | boxFull hinner =>
           rcases ih hinner with ⟨mid, hmid, hshape⟩
           exact ⟨mid, PathSelect.boxFull hmid, hshape⟩
+
+theorem PathSelect.lvalTyping_prepend_var
+    {env : Env} {x : Name} {slot : EnvSlot} :
+    ∀ {path : Path} {root leaf : PartialTy},
+      env.slotAt x = some slot →
+      slot.ty = root →
+      PathSelect path root leaf →
+      LValTyping env (prependPath path (.var x)) leaf slot.lifetime := by
+  intro path
+  induction path with
+  | nil =>
+      intro root leaf hslot hroot hselect
+      cases hselect
+      simpa [prependPath, hroot] using LValTyping.var hslot
+  | cons _ path ih =>
+      intro root leaf hslot hroot hselect
+      have hselectSnoc : PathSelect (path ++ [()]) root leaf := by
+        simpa [List.Unit_append_singleton_typing] using hselect
+      rcases PathSelect.snoc_inv hselectSnoc with
+        ⟨mid, hmid, hshape⟩
+      have hprefix :
+          LValTyping env (prependPath path (.var x)) mid slot.lifetime :=
+        ih hslot hroot hmid
+      rcases hshape with hpartial | ⟨T, hfull, hleaf⟩
+      · subst hpartial
+        simpa [prependPath] using LValTyping.box hprefix
+      · subst hfull
+        subst hleaf
+        simpa [prependPath] using LValTyping.boxFull hprefix
+
+theorem EnvContains.borrow_pathSelect_lvalTyping
+    {env : Env} {y : Name} {mutable : Bool} {target : LVal} :
+    env ⊢ y ↝ (.borrow mutable target) →
+    ∃ (slot : EnvSlot) (path : Path),
+      env.slotAt y = some slot ∧
+        PathSelect path slot.ty (.ty (.borrow mutable target)) ∧
+        LValTyping env (prependPath path (.var y))
+          (.ty (.borrow mutable target)) slot.lifetime := by
+  intro hentry
+  rcases hentry with ⟨slot, hslot, hcontains⟩
+  rcases PartialTyContains.pathSelect hcontains with ⟨path, hselect⟩
+  refine ⟨slot, path, hslot, hselect, ?_⟩
+  exact PathSelect.lvalTyping_prepend_var hslot rfl hselect
 
 /-- A typing derivation and a pure selection over the same lvalue path from
 the same base slot compute the same partial type.  In particular a selectable
@@ -8137,6 +8259,38 @@ theorem not_writeProhibited_of_pointwise {env result : Env} {lv : LVal}
     (WriteProhibited.transport_of_pointwise
       (env := result) (result := env) (fun y => (heq y).symm)
       hwriteResult)
+
+theorem LValBaseOutlives.transport_of_pointwise {env result : Env}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    ∀ {target : LVal} {lifetime : Lifetime},
+      LValBaseOutlives env target lifetime →
+      LValBaseOutlives result target lifetime := by
+  intro target lifetime hbase
+  rcases hbase with ⟨baseSlot, hbaseSlot, hle⟩
+  exact ⟨baseSlot, (heq (LVal.base target)).trans hbaseSlot, hle⟩
+
+theorem WellFormedEnv.transport_of_pointwise
+    {env result : Env} {lifetime : Lifetime}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    WellFormedEnv env lifetime →
+    WellFormedEnv result lifetime := by
+  intro hwell
+  refine ⟨?contained, ?outlive⟩
+  · intro x slot mutable target hslotResult hcontainsResult
+    have hslotEnv : env.slotAt x = some slot :=
+      (heq x).symm.trans hslotResult
+    rcases hcontainsResult with
+      ⟨containedSlot, hcontainedSlotResult, hcontainsTy⟩
+    have hcontainedSlotEnv : env.slotAt x = some containedSlot :=
+      (heq x).symm.trans hcontainedSlotResult
+    rcases hwell.1 x slot mutable target hslotEnv
+        ⟨containedSlot, hcontainedSlotEnv, hcontainsTy⟩ with
+      ⟨targetTy, targetLifetime, htyping, hle, hbase⟩
+    exact ⟨targetTy, targetLifetime,
+      LValTyping.transport_of_pointwise heq htyping, hle,
+      LValBaseOutlives.transport_of_pointwise heq hbase⟩
+  · intro x slot hslotResult
+    exact hwell.2 x slot ((heq x).symm.trans hslotResult)
 
 theorem WellFormedEnvWhenInitialized.transport_of_pointwise
     {env result : Env} {lifetime : Lifetime}
@@ -8295,6 +8449,45 @@ theorem ownsChain_loc_eq_of_length {store : ProgramStore} :
               simpa [ProgramStore.loc, hsourceLoc, hslotOwn, owningRef]
                 using hloc.symm
 
+theorem PathSelect.runtime_leaf_whenInitialized {store : ProgramStore}
+    {env : Env} {lv : LVal} {rootSlot : EnvSlot} {leafTy : PartialTy} :
+    SafeAbstraction store env →
+    env.slotAt (LVal.base lv) = some rootSlot →
+    PathSelect (LVal.path lv) rootSlot.ty leafTy →
+    ∃ rootStore leaf leafSlot k,
+      store.slotAt (VariableProjection (LVal.base lv)) = some rootStore ∧
+      rootStore.lifetime = rootSlot.lifetime ∧
+      ValidPartialValueWhenInitialized env store rootStore.value
+        rootSlot.ty ∧
+      store.slotAt leaf = some leafSlot ∧
+      ValidPartialValueWhenInitialized env store leafSlot.value leafTy ∧
+      OwnerChainPrefix store (VariableProjection (LVal.base lv))
+        rootStore.value (LVal.path lv) leaf ∧
+      OwnsChain store (VariableProjection (LVal.base lv)) k leaf ∧
+      k = (LVal.path lv).length ∧
+      ∀ {location : Location}, store.loc lv = some location →
+        location = leaf := by
+  intro hsafe henv hselect
+  rcases hsafe.2 (LVal.base lv) rootSlot henv with
+    ⟨rootValue, hrootStore, hrootValid⟩
+  let rootStore : StoreSlot :=
+    { value := rootValue, lifetime := rootSlot.lifetime }
+  have hrootStore' :
+      store.slotAt (VariableProjection (LVal.base lv)) =
+        some rootStore := by
+    simpa [rootStore] using hrootStore
+  rcases
+      PathSelect.ownerChainPrefix_whenInitialized hrootStore'
+        (by simpa [rootStore] using hrootValid) hselect with
+    ⟨leaf, leafSlot, hleafStore, hleafValid, hprefix⟩
+  rcases OwnerChainPrefix.ownsChain_length hprefix with
+    ⟨k, hchain, hlen⟩
+  refine ⟨rootStore, leaf, leafSlot, k, hrootStore', rfl,
+    by simpa [rootStore] using hrootValid, hleafStore, hleafValid,
+    hprefix, hchain, hlen, ?_⟩
+  intro location hloc
+  exact ownsChain_loc_eq_of_length hchain hlen hloc
+
 theorem locReads_ownsChain_of_ownsChain_length {store : ProgramStore} :
     ∀ {lv : LVal} {leaf : Location} {k : Nat},
       OwnsChain store (VariableProjection (LVal.base lv)) k leaf →
@@ -8381,6 +8574,24 @@ theorem locReads_ne_ownsChain_leaf {store : ProgramStore} :
     ownsChain_unique_length hvalidStore (var_not_owned hheap)
       hmidChain hleafChain
   rw [← hlen, hjk] at hlt
+  omega
+
+theorem locReads_ne_of_ownsChain_length {store : ProgramStore}
+    {lv : LVal} {leaf : Location} {k : Nat} :
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    OwnsChain store (VariableProjection (LVal.base lv)) k leaf →
+    k = (LVal.path lv).length →
+    ∀ {mid : Location},
+      RuntimeFrame.LocReads store lv mid → mid ≠ leaf := by
+  intro hvalidStore hheap hleafChain hlen mid hreads hmid
+  rcases locReads_ownsChain_of_ownsChain_length hleafChain hlen hreads with
+    ⟨j, hmidChain, hjLt⟩
+  subst hmid
+  have hjk : j = k :=
+    ownsChain_unique_length hvalidStore (var_not_owned hheap)
+      hmidChain hleafChain
+  rw [hjk, hlen] at hjLt
   omega
 
 theorem ProgramStore.loc_prependPath_eq_of_loc_eq
@@ -12279,6 +12490,160 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
               hretypedTarget))
       hvalidValue hstep
 
+/-- Dispatch assignment preservation for a pure selected lvalue.  The caller
+supplies the frame obligations against the selected runtime leaf; the theorem
+then selects the appropriate existing var/box/full-box assignment frame helper.
+The borrow-hop typing case is impossible because a pure `PathSelect` descent
+cannot type through a borrow. -/
+theorem preservation_assign_pathSelect_step_runtime_whenInitialized_of_frames
+    {store store' : ProgramStore} {env env' : Env}
+    {lifetime targetLifetime : Lifetime} {lhs : LVal}
+    {oldTy leafTy : PartialTy} {rootSlot : EnvSlot}
+    {leafLoc : Location} {value finalValue : Value} {rhsTy : Ty} :
+    WellFormedEnv env lifetime →
+    BorrowSafeEnv env →
+    TyBorrowSafeAgainstEnv env rhsTy →
+    SafeAbstraction store env →
+    ValidRuntimeState store (.assign lhs (.val value)) →
+    LValTyping env lhs oldTy targetLifetime →
+    ShapeCompatible env oldTy (.ty rhsTy) →
+    WellFormedTy env rhsTy targetLifetime →
+    EnvWrite env lhs rhsTy env' →
+    WellFormedEnv env' lifetime →
+    env.slotAt (LVal.base lhs) = some rootSlot →
+    PathSelect (LVal.path lhs) rootSlot.ty leafTy →
+    store.loc lhs = some leafLoc →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
+    Step store lifetime (.assign lhs (.val value)) store' (.val finalValue) →
+    ValidPartialValueWhenInitialized env' store (.value value) (.ty rhsTy) →
+    (∀ y otherEnvSlot oldValue,
+      y ≠ LVal.base lhs →
+      env.slotAt y = some otherEnvSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
+      ValidPartialValueWhenInitialized env' store oldValue otherEnvSlot.ty) →
+    (∀ location,
+      RuntimeFrame.ReachesWhenInitialized env' store (.value value) (.ty rhsTy)
+        location →
+      location ≠ leafLoc) →
+    (∀ y otherEnvSlot oldValue,
+      y ≠ LVal.base lhs →
+      env.slotAt y = some otherEnvSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
+      ∀ location,
+        RuntimeFrame.ReachesWhenInitialized env' store oldValue
+          otherEnvSlot.ty location →
+        location ≠ leafLoc) →
+    TerminalStateSafe store' finalValue env' .unit := by
+  intro hwell hborrowSafe htySafe hsafe hvalidRuntime hlhs hshape hwellTy
+    hwriteEnv hwellOut henvRoot hselect hleafLoc hvalidValue hstep
+    hvalidValueEnv' hotherValidEnv' hvalueFrame hotherFrame
+  cases lhs with
+  | var x =>
+      have hleafEq : leafLoc = VariableProjection x := by
+        exact (Option.some.inj
+          ((by simpa [ProgramStore.loc, VariableProjection] using hleafLoc :
+              some (VariableProjection x) = some leafLoc))).symm
+      exact
+        preservation_assign_var_step_runtime_whenInitialized_of_frames
+          (WellFormedEnv.whenInitialized hwell) hsafe hvalidRuntime hlhs
+          hshape hwellTy.whenInitialized hwriteEnv
+          (WellFormedEnv.whenInitialized hwellOut) hvalidValue hstep
+          hvalidValueEnv'
+          (by
+            intro y otherEnvSlot oldValue hyBase henvY hstoreY
+            exact hotherValidEnv' y otherEnvSlot oldValue
+              (by simpa [LVal.base] using hyBase) henvY hstoreY)
+          (by
+            intro location hreach hlocation
+            exact hvalueFrame location hreach (by simpa [hleafEq] using hlocation))
+          (by
+            intro y otherEnvSlot oldValue hyBase henvY hstoreY location
+              hreach hlocation
+            exact hotherFrame y otherEnvSlot oldValue
+              (by simpa [LVal.base] using hyBase) henvY hstoreY
+              location hreach (by simpa [hleafEq] using hlocation))
+  | deref source =>
+      cases hlhs with
+      | box hsourceBox =>
+          exact
+            preservation_assign_deref_box_step_runtime_whenInitialized_of_frames
+              hwell.1 hborrowSafe htySafe hsafe hvalidRuntime hsourceBox
+              hshape hwellTy hwriteEnv (WellFormedEnv.whenInitialized hwellOut)
+              hvalidValue hstep hvalidValueEnv'
+              (by
+                intro y otherEnvSlot oldValue hyBase henvY hstoreY
+                exact hotherValidEnv' y otherEnvSlot oldValue
+                  (by simpa [LVal.base] using hyBase) henvY hstoreY)
+              (by
+                intro location hreach
+                simpa [hleafLoc] using hvalueFrame location hreach)
+              (by
+                intro y otherEnvSlot oldValue hyBase henvY hstoreY location
+                  hreach
+                simpa [hleafLoc] using
+                  hotherFrame y otherEnvSlot oldValue
+                    (by simpa [LVal.base] using hyBase) henvY hstoreY
+                    location hreach)
+      | boxFull hsourceFull =>
+          rename_i inner
+          have hselectDeref :
+              PathSelect (LVal.path source ++ [()]) rootSlot.ty leafTy := by
+            simpa [LVal.path] using hselect
+          rcases PathSelect.snoc_inv hselectDeref with
+            ⟨mid, hselectSourceMid, hmidShape⟩
+          have hmidEq :
+              PartialTy.ty (.box inner) = mid :=
+            LValTyping.pathSelect_deterministic hsourceFull
+              (by simpa [LVal.base] using henvRoot) hselectSourceMid
+          have hselectSource :
+              ∀ {slot : EnvSlot},
+                env.slotAt (LVal.base source) = some slot →
+                PathSelect (LVal.path source) slot.ty
+                  (PartialTy.ty (.box inner)) := by
+            intro slot hslot
+            have hslotEq : slot = rootSlot :=
+              Option.some.inj (hslot.symm.trans
+                (by simpa [LVal.base] using henvRoot))
+            subst hslotEq
+            simpa [hmidEq] using hselectSourceMid
+          exact
+            preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_frames
+              hwell.1 hborrowSafe htySafe hsafe hvalidRuntime hsourceFull
+              hshape hwellTy hwriteEnv (WellFormedEnv.whenInitialized hwellOut)
+              hselectSource hvalidValue hstep hvalidValueEnv'
+              (by
+                intro y otherEnvSlot oldValue hyBase henvY hstoreY
+                exact hotherValidEnv' y otherEnvSlot oldValue
+                  (by simpa [LVal.base] using hyBase) henvY hstoreY)
+              (by
+                intro location hreach
+                simpa [hleafLoc] using hvalueFrame location hreach)
+              (by
+                intro y otherEnvSlot oldValue hyBase henvY hstoreY location
+                  hreach
+                simpa [hleafLoc] using
+                  hotherFrame y otherEnvSlot oldValue
+                    (by simpa [LVal.base] using hyBase) henvY hstoreY
+                    location hreach)
+      | borrow hsourceBorrow _htarget =>
+          have hselectDeref :
+              PathSelect (LVal.path source ++ [()]) rootSlot.ty leafTy := by
+            simpa [LVal.path] using hselect
+          rcases PathSelect.snoc_inv hselectDeref with
+            ⟨mid, hselectSourceMid, hmidShape⟩
+          have hsourceEq :
+              PartialTy.ty (.borrow _ _) = mid :=
+            LValTyping.pathSelect_deterministic hsourceBorrow
+              (by simpa [LVal.base] using henvRoot) hselectSourceMid
+          rcases hmidShape with hbox | htyBox
+          · rw [hbox] at hsourceEq
+            cases hsourceEq
+          · rcases htyBox with ⟨T, htyBox, _hleaf⟩
+            rw [htyBox] at hsourceEq
+            cases hsourceEq
+
 /-- **Chain-entry forcing in the result environment.**  Any borrow annotation
 of the post-write environment that targets into the write chain is a source
 annotation held on the chain itself: the graft's borrows never target the
@@ -12338,6 +12703,83 @@ theorem chain_entry_unique {env : Env}
   subst hsEq
   exact PartialTyContains.borrow_unique hcontains hcontains'
 
+theorem chainGuard_tail_of_step {env : Env} {z a w : Name} {g : LVal}
+    (hedge : env ⊢ z ↝ (.borrow true g))
+    (hbase : LVal.base g = a) :
+    ChainGuard env z w →
+    w = z ∨ ChainGuard env a w := by
+  intro hguard
+  induction hguard with
+  | base =>
+      exact Or.inl rfl
+  | @step zPrev y gPrev hprev hcont hbasePrev ih =>
+      rcases ih with hprevEq | htail
+      · subst hprevEq
+        rcases chain_entry_unique hedge hcont with ⟨_hmut, htarget⟩
+        subst htarget
+        right
+        have hyEq : y = a := hbasePrev.symm.trans hbase
+        subst hyEq
+        exact ChainGuard.base
+      · exact Or.inr (ChainGuard.step htail hcont hbasePrev)
+
+theorem chainGuard_incoming_edge {env : Env} {root y : Name} :
+    ChainGuard env root y →
+    y ≠ root →
+    ∃ z g,
+      ChainGuard env root z ∧
+        env ⊢ z ↝ (.borrow true g) ∧
+        LVal.base g = y := by
+  intro hguard hyRoot
+  cases hguard with
+  | base =>
+      exact False.elim (hyRoot rfl)
+  | step hprev hcont hbase =>
+      exact ⟨_, _, hprev, hcont, hbase⟩
+
+theorem chainGuard_linear {env : Env} {root a b : Name} :
+    ChainGuard env root a →
+    ChainGuard env root b →
+    a = b ∨ ChainGuard env a b ∨ ChainGuard env b a := by
+  intro ha
+  induction ha generalizing b with
+  | base =>
+      intro hb
+      exact Or.inr (Or.inl hb)
+  | @step z a g hrootZ hedge hbase ih =>
+      intro hb
+      rcases ih hb with hzb | hcomp
+      · subst hzb
+        exact Or.inr (Or.inr
+          (ChainGuard.step ChainGuard.base hedge hbase))
+      · rcases hcomp with hzToB | hbToZ
+        · rcases chainGuard_tail_of_step hedge hbase hzToB with hbEqZ | haToB
+          · subst hbEqZ
+            exact Or.inr (Or.inr
+              (ChainGuard.step ChainGuard.base hedge hbase))
+          · exact Or.inr (Or.inl haToB)
+        · exact Or.inr (Or.inr (ChainGuard.step hbToZ hedge hbase))
+
+theorem chainGuard_trans {env : Env} {root mid target : Name} :
+    ChainGuard env root mid →
+    ChainGuard env mid target →
+    ChainGuard env root target := by
+  intro hroot htail
+  induction htail with
+  | base => exact hroot
+  | step hprev hcont hbase ih =>
+      exact ChainGuard.step ih hcont hbase
+
+theorem chainGuard_linear_ne {env : Env} {root final y : Name} :
+    ChainGuard env root final →
+    ChainGuard env root y →
+    y ≠ final →
+    ChainGuard env final y ∨ ChainGuard env y final := by
+  intro hfinal hy hyFinal
+  rcases chainGuard_linear hfinal hy with hEq | hcomp
+  · exact False.elim (hyFinal hEq.symm)
+  · exact hcomp
+
 /-- Borrow-safety plus slot unarity pins a competing entry edge.  If a chain
 edge `z ↝ &mut g` targets base `y`, then any borrow annotation whose target also
 has base `y` is held at `z`; if it is held at `z`, unary containment forces it
@@ -12358,6 +12800,25 @@ theorem borrowSafe_same_target_unique_edge {env : Env}
   subst x
   rcases chain_entry_unique hchainEdge hentry with ⟨hmutable, htarget⟩
   exact ⟨rfl, hmutable.symm, htarget.symm⟩
+
+theorem chainGuard_entry_to_nonroot_unique_edge {env : Env}
+    {root y targetBase : Name} {target : LVal} {mutable : Bool}
+    (hsafe : BorrowSafeEnv env)
+    (hguardTarget : ChainGuard env root targetBase)
+    (htargetNeRoot : targetBase ≠ root)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (hentryBase : LVal.base target = targetBase) :
+    ∃ pred g,
+      ChainGuard env root pred ∧
+        env ⊢ pred ↝ (.borrow true g) ∧
+        LVal.base g = targetBase ∧
+        y = pred ∧ mutable = true ∧ target = g := by
+  rcases chainGuard_incoming_edge hguardTarget htargetNeRoot with
+    ⟨pred, g, hguardPred, hedge, hedgeBase⟩
+  rcases borrowSafe_same_target_unique_edge hsafe hedge hedgeBase
+      hentry hentryBase with
+    ⟨hyPred, hmutable, htarget⟩
+  exact ⟨pred, g, hguardPred, hedge, hedgeBase, hyPred, hmutable, htarget⟩
 
 /-- Head decomposition for a guarded borrow chain.  A guarded slot is either
 the root itself, or it is reached by first following the root's own mutable
@@ -12523,6 +12984,68 @@ theorem chainGuard_cycle_prohibited {env : Env} {r₀ ρ w₀ : Name} {t : LVal}
               hzT hbaseT with ⟨hzEq, _, _⟩
           exact ih (by rw [hzEq]; exact hC')
 
+/-- Cycle prohibition with an arbitrary back edge.  The top chain still consists
+of mutable edges; the closing edge can be mutable or immutable because it is
+used as the second argument to `BorrowSafeEnv` when matching an arriving top
+edge. -/
+theorem chainGuard_cycle_prohibited_any_back {env : Env}
+    {r₀ ρ w₀ : Name} {t : LVal} {mutable : Bool}
+    (hsafe : BorrowSafeEnv env)
+    (hkill : ∀ {z : Name} {mutable : Bool} {g : LVal},
+      env ⊢ z ↝ (.borrow mutable g) → LVal.base g = r₀ → False)
+    (hedge : env ⊢ w₀ ↝ (.borrow mutable t))
+    (hedgeBase : LVal.base t = ρ)
+    (hC₀ : ChainGuard env ρ w₀) :
+    ∀ {w : Name}, ChainGuard env r₀ w → ChainGuard env ρ w → False := by
+  intro w hT
+  induction hT with
+  | base =>
+      intro hC
+      cases hC with
+      | base => exact hkill hedge hedgeBase
+      | step _ hz hbase => exact hkill hz hbase
+  | @step zT wT gT hT' hzT hbaseT ih =>
+      intro hC
+      cases hC with
+      | base =>
+          have hconflict : gT ⋈ t := by
+            show LVal.base gT = LVal.base t
+            rw [hbaseT, hedgeBase]
+          have hzEq : zT = w₀ :=
+            hsafe zT w₀ mutable gT t hzT hedge hconflict
+          exact ih (by rw [hzEq]; exact hC₀)
+      | @step zC _ gC hC' hzC hbaseC =>
+          rcases borrowSafe_same_target_unique_edge hsafe hzC hbaseC
+              hzT hbaseT with ⟨hzEq, _, _⟩
+          exact ih (by rw [hzEq]; exact hC')
+
+theorem chainGuard_back_edge_to_guarded_root_prohibited {env : Env}
+    {top root z : Name} {target : LVal} {mutable : Bool}
+    (hsafe : BorrowSafeEnv env)
+    (hkillTop : ∀ {w : Name} {mutable : Bool} {g : LVal},
+      env ⊢ w ↝ (.borrow mutable g) → LVal.base g = top → False)
+    (hguardRoot : ChainGuard env top root)
+    (hback : env ⊢ z ↝ (.borrow mutable target))
+    (hbackBase : LVal.base target = root)
+    (hrootToZ : ChainGuard env root z) :
+    False :=
+  chainGuard_cycle_prohibited_any_back hsafe hkillTop hback hbackBase
+    hrootToZ hguardRoot ChainGuard.base
+
+theorem chainGuard_tail_back_edge_to_guarded_ancestor_prohibited {env : Env}
+    {top ancestor tail z : Name} {target : LVal} {mutable : Bool}
+    (hsafe : BorrowSafeEnv env)
+    (hkillTop : ∀ {w : Name} {mutable : Bool} {g : LVal},
+      env ⊢ w ↝ (.borrow mutable g) → LVal.base g = top → False)
+    (hguardAncestor : ChainGuard env top ancestor)
+    (hancestorToTail : ChainGuard env ancestor tail)
+    (htailToZ : ChainGuard env tail z)
+    (hback : env ⊢ z ↝ (.borrow mutable target))
+    (hbackBase : LVal.base target = ancestor) :
+    False :=
+  chainGuard_back_edge_to_guarded_root_prohibited hsafe hkillTop hguardAncestor
+    hback hbackBase (chainGuard_trans hancestorToTail htailToZ)
+
 /-- The nested hop write preserves the outer holder slot.  Applying the write
 characterization to the reduced write, the only dangerous case is the one
 where the nested chain re-enters the outer holder base.  There the outer
@@ -12638,6 +13161,182 @@ theorem HopsTo.locReads_ne_of_links_clean
         exact (hlinks henvH hsel htyping hcont henv₃).2
           (by simpa [hmidEq] using hsourceLoc)
       · exact ih hlinks hfinal mid htargetReads
+
+theorem final_edge_target_locReads_ne
+    {env : Env} {store : ProgramStore} {finalLhs target target' : LVal}
+    {holder y : Name} {path' : Path} {mutable : Bool} {leaf : Location}
+    (hborrowSafe : BorrowSafeEnv env)
+    (hfinalEdge : env ⊢ holder ↝ (.borrow true target'))
+    (hfinalEq : finalLhs = prependPath path' target')
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (hentryBase : LVal.base target = LVal.base finalLhs)
+    (hfinalReads : ∀ mid, RuntimeFrame.LocReads store finalLhs mid →
+      mid ≠ leaf) :
+    ∀ mid, RuntimeFrame.LocReads store target mid → mid ≠ leaf := by
+  have htargetBase : LVal.base target' = LVal.base finalLhs := by
+    rw [hfinalEq]
+    simp [LVal.base_prependPath]
+  rcases borrowSafe_same_target_unique_edge hborrowSafe hfinalEdge
+      htargetBase hentry hentryBase with ⟨_holderEq, _mutableEq,
+        htargetEq⟩
+  subst htargetEq
+  intro mid hread
+  exact hfinalReads mid (by
+    rw [hfinalEq]
+    exact locReads_prependPath_of_locReads path' hread)
+
+theorem HopsTo.tail_target_locReads_ne
+    {env env₃ : Env} {store : ProgramStore} {leaf : Location}
+    (hsafe : SafeAbstraction store env)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    {target final : LVal} {path' : Path}
+    (hhops : HopsTo env env₃ (prependPath path' target) final)
+    (hlinks :
+      ∀ {s₀ target : LVal} {slotH : EnvSlot} {lf : Lifetime},
+        env.slotAt (LVal.base s₀) = some slotH →
+        PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
+        LValTyping env s₀ (.ty (.borrow true target)) lf →
+        env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
+        env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
+        (∀ mid, RuntimeFrame.LocReads store s₀ mid → mid ≠ leaf) ∧
+          store.loc s₀ ≠ some leaf)
+    (hfinalReads : ∀ mid, RuntimeFrame.LocReads store final mid →
+      mid ≠ leaf) :
+    ∀ mid, RuntimeFrame.LocReads store target mid → mid ≠ leaf := by
+  have htailReads :
+      ∀ mid, RuntimeFrame.LocReads store (prependPath path' target) mid →
+        mid ≠ leaf :=
+    HopsTo.locReads_ne_of_links_clean hsafe hcbwf hhops hlinks hfinalReads
+  intro mid hread
+  exact htailReads mid (locReads_prependPath_of_locReads path' hread)
+
+/-- A source annotation targeting the root of a hop-spine tail is the incoming
+hop annotation itself, so the tail read-exclusion applies to its target. -/
+theorem HopsTo.source_entry_tail_root_locReads_ne
+    {env env₃ : Env} {store : ProgramStore} {leaf : Location}
+    (hsafe : SafeAbstraction store env)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    {tailRoot target final : LVal} {path' : Path}
+    {holder y : Name} {mutable : Bool}
+    (hincoming : env ⊢ holder ↝ (.borrow true tailRoot))
+    (hhops : HopsTo env env₃ (prependPath path' tailRoot) final)
+    (hlinks :
+      ∀ {s₀ target : LVal} {slotH : EnvSlot} {lf : Lifetime},
+        env.slotAt (LVal.base s₀) = some slotH →
+        PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
+        LValTyping env s₀ (.ty (.borrow true target)) lf →
+        env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
+        env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
+        (∀ mid, RuntimeFrame.LocReads store s₀ mid → mid ≠ leaf) ∧
+          store.loc s₀ ≠ some leaf)
+    (hfinalReads : ∀ mid, RuntimeFrame.LocReads store final mid →
+      mid ≠ leaf)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (hentryBase : LVal.base target = LVal.base tailRoot) :
+    ∀ mid, RuntimeFrame.LocReads store target mid → mid ≠ leaf := by
+  have htailRootReads :
+      ∀ mid, RuntimeFrame.LocReads store tailRoot mid → mid ≠ leaf :=
+    HopsTo.tail_target_locReads_ne hsafe hcbwf hhops hlinks hfinalReads
+  have htailRootBase : LVal.base tailRoot = LVal.base tailRoot := rfl
+  rcases borrowSafe_same_target_unique_edge hborrowSafe hincoming
+      htailRootBase hentry hentryBase with
+    ⟨_holderEq, _mutableEq, htargetEq⟩
+  subst htargetEq
+  exact htailRootReads
+
+theorem HopsTo.suffix_of_guard_prefix
+    {env env₃ : Env} :
+    ∀ {lv final target : LVal} {y : Name} {mutable : Bool},
+      HopsTo env env₃ lv final →
+      ChainGuard env (LVal.base lv) y →
+      ChainGuard env y (LVal.base final) →
+      y ≠ LVal.base final →
+      env ⊢ y ↝ (.borrow mutable target) →
+      (ChainGuard env (LVal.base final) y →
+        ChainGuard env y (LVal.base final) → False) →
+      ∃ path', HopsTo env env₃ (prependPath path' target) final := by
+  intro lv final target y mutable hhops
+  induction hhops generalizing y target mutable with
+  | refl =>
+      intro hprefix hyFinal hyNeFinal hentry hnoCycle
+      exact False.elim
+        (hnoCycle (by simpa using hprefix) hyFinal)
+  | @hop s₀ hopTarget final slotH lf p henvH hsel htyping hcont henv₃H tail ih =>
+      intro hprefix hyFinal hyNeFinal hentry hnoCycle
+      have hprefixS₀ :
+          ChainGuard env (LVal.base s₀) y := by
+        simpa [LVal.base_prependPath, LVal.base] using hprefix
+      rcases chainGuard_tail_of_step hcont rfl hprefixS₀ with hyRoot | htail
+      · subst hyRoot
+        rcases chain_entry_unique hcont hentry with ⟨_hmutable, htargetEq⟩
+        subst htargetEq
+        exact ⟨p, tail⟩
+      · have htail' :
+            ChainGuard env (LVal.base (prependPath p hopTarget)) y := by
+          simpa [LVal.base_prependPath] using htail
+        exact ih htail' hyFinal hyNeFinal hentry hnoCycle
+
+theorem source_entry_final_base_locReads_ne
+    {env nested : Env} {store : ProgramStore} {lhsTop finalLhs lv target : LVal}
+    {rhsTy : Ty} {rootSlot : EnvSlot} {graftTy : PartialTy}
+    {y : Name} {mutable : Bool} {leaf : Location}
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWriteNested : ¬ WriteProhibited nested lhsTop)
+    (hne : ∀ z, z ≠ LVal.base finalLhs →
+      nested.slotAt z = env.slotAt z)
+    (hbLook : nested.slotAt (LVal.base finalLhs) =
+      some { rootSlot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hlast :
+      finalLhs = lv ∨
+        ∃ (holder : Name) (path' : Path) (target' : LVal),
+          env ⊢ holder ↝ (.borrow true target') ∧
+          finalLhs = prependPath path' target')
+    (hlvBase : LVal.base lv = LVal.base lhsTop)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (hentryBase : LVal.base target = LVal.base finalLhs)
+    (hfinalReads : ∀ mid, RuntimeFrame.LocReads store finalLhs mid →
+      mid ≠ leaf) :
+    ∀ mid, RuntimeFrame.LocReads store target mid → mid ≠ leaf := by
+  rcases hlast with hfinalEq | hhop
+  · exfalso
+    have htargetTop : LVal.base target = LVal.base lhsTop := by
+      rw [hentryBase, hfinalEq, hlvBase]
+    have hentryNested : nested ⊢ y ↝ (.borrow mutable target) := by
+      rcases hentry with ⟨slot, hslot, hcontains⟩
+      exact ⟨slot, (hne y hyFinal) ▸ hslot, hcontains⟩
+    exact hnotWriteNested
+      (WriteProhibited.of_contains_conflict hentryNested
+        (by simpa [PathConflicts] using htargetTop))
+  · rcases hhop with ⟨holder, path', target', hfinalEdge, hfinalEq⟩
+    exact final_edge_target_locReads_ne hborrowSafe hfinalEdge hfinalEq
+      hentry hentryBase hfinalReads
+
+theorem source_entry_to_top_root_eq_final_base
+    {env nested : Env} {lhsTop finalLhs target : LVal}
+    {z : Name} {mutable : Bool}
+    (hnotWriteNested : ¬ WriteProhibited nested lhsTop)
+    (hne : ∀ y, y ≠ LVal.base finalLhs →
+      nested.slotAt y = env.slotAt y)
+    (hentry : env ⊢ z ↝ (.borrow mutable target))
+    (hentryBase : LVal.base target = LVal.base lhsTop) :
+    z = LVal.base finalLhs := by
+  by_contra hzFinal
+  rcases hentry with ⟨slot, hslot, hcontains⟩
+  have hentryNested : nested ⊢ z ↝ (.borrow mutable target) :=
+    ⟨slot, (hne z hzFinal) ▸ hslot, hcontains⟩
+  exact hnotWriteNested
+    (by
+      cases mutable
+      · exact Or.inr ⟨z, target, hentryNested, hentryBase⟩
+      · exact Or.inl ⟨z, target, hentryNested, hentryBase⟩)
 
 /-- Hop links of the guarded write never read or point at the guarded leaf.
 Each hop's descent prefix is an owner path from its own base variable; if it
@@ -12970,6 +13669,101 @@ theorem EnvWrite.select_final
       have hfinal := himpl hp
       rw [prependPath_path_base] at hfinal
       exact hfinal
+
+theorem validPartialValueWhenInitialized_select_final_rhs
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs : LVal} {rhsTy : Ty} {oldTy leaf : PartialTy}
+    {targetLifetime : Lifetime} {rootSlot : EnvSlot} {value : Value}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leaf)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ y, env₃.slotAt y = nested.slotAt y) :
+    ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
+    ValidPartialValueWhenInitialized nested store (.value value)
+      (.ty rhsTy) := by
+  intro hvalidValue
+  have hcontainsNested :
+      ∀ {mutable : Bool} {target : LVal},
+        PartialTyContains (.ty rhsTy) (.borrow mutable target) →
+        nested ⊢ (LVal.base finalLhs) ↝ (.borrow mutable target) :=
+    (EnvWrite.pathSelect_result_contains henvFinal hselectFinal
+      hwriteFinal).1
+  have hcontainsTop :
+      ∀ {mutable : Bool} {target : LVal},
+        PartialTyContains (.ty rhsTy) (.borrow mutable target) →
+        ∃ holder, env₃ ⊢ holder ↝ (.borrow mutable target) := by
+    intro mutable target hcontains
+    rcases hcontainsNested hcontains with ⟨slot, hslot, hcontainsSlot⟩
+    exact ⟨LVal.base finalLhs, slot,
+      (hpoint (LVal.base finalLhs)).trans hslot, hcontainsSlot⟩
+  have hvalidEnv₃ :
+      ValidPartialValueWhenInitialized env₃ store (.value value)
+        (.ty rhsTy) :=
+    validPartialValueWhenInitialized_envWrite_of_result_contains
+      hcbwf hborrowSafe htySafe hwriteTop hlvTop hshape hwellTy
+      hnotWriteTop hcontainsTop hvalidValue
+  exact validPartialValueWhenInitialized_transport_env
+    (env := env₃) (result := nested)
+    (fun htarget =>
+      TargetInitialized.transport_of_pointwise
+        (env := env₃) (result := nested)
+        (fun y => (hpoint y).symm) htarget)
+    hvalidEnv₃
+
+theorem validPartialValueWhenInitialized_select_final_unchanged_slot
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs : LVal} {rhsTy : Ty} {oldTy leaf : PartialTy}
+    {targetLifetime : Lifetime} {rootSlot otherEnvSlot : EnvSlot}
+    {oldValue : PartialValue} {y : Name}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leaf)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (henvY : env.slotAt y = some otherEnvSlot) :
+    ValidPartialValueWhenInitialized env store oldValue otherEnvSlot.ty →
+    ValidPartialValueWhenInitialized nested store oldValue otherEnvSlot.ty := by
+  intro hvalidOld
+  have hunchangedNested :
+      nested.slotAt y = env.slotAt y :=
+    (EnvWrite.pathSelect_result_contains henvFinal hselectFinal
+      hwriteFinal).2 y hyFinal
+  have henv₃Y : env₃.slotAt y = some otherEnvSlot := by
+    rw [hpoint y, hunchangedNested, henvY]
+  have hcontainsTop :
+      ∀ {mutable : Bool} {target : LVal},
+        PartialTyContains otherEnvSlot.ty (.borrow mutable target) →
+        ∃ holder, env₃ ⊢ holder ↝ (.borrow mutable target) := by
+    intro mutable target hcontains
+    exact ⟨y, otherEnvSlot, henv₃Y, hcontains⟩
+  have hvalidEnv₃ :
+      ValidPartialValueWhenInitialized env₃ store oldValue otherEnvSlot.ty :=
+    validPartialValueWhenInitialized_envWrite_of_result_contains
+      hcbwf hborrowSafe htySafe hwriteTop hlvTop hshape hwellTy
+      hnotWriteTop hcontainsTop hvalidOld
+  exact validPartialValueWhenInitialized_transport_env
+    (env := env₃) (result := nested)
+    (fun htarget =>
+      TargetInitialized.transport_of_pointwise
+        (env := env₃) (result := nested)
+        (fun z => (hpoint z).symm) htarget)
+    hvalidEnv₃
 
 /-- Reverse outside-chain transport for the result of a guarded write.  If a
 post-write lvalue is rooted outside the source write chain, then its typing
@@ -13311,6 +14105,121 @@ theorem borrowDependencyWhenInitialized_chain_leaf_ne_of_target_outside
           exact hcontains (PartialTyContains.tyBox hcontainsInner))
         hdependencyEq
 
+/-- If every contained borrow target avoids the leaf and the owner spine avoids
+the leaf, then the initialized reach relation avoids that leaf. -/
+theorem reachesWhenInitialized_ne_of_borrow_targets_locReads_ne
+    {env : Env} {store : ProgramStore} {leafLoc : Location}
+    {value : PartialValue} {partialTy : PartialTy}
+    (hcontains : ∀ {mutable : Bool} {target : LVal},
+      PartialTyContains partialTy (.borrow mutable target) →
+      ∀ {location : Location},
+        RuntimeFrame.LocReads store target location →
+        location ≠ leafLoc)
+    (hownerNoReach :
+      ¬ RuntimeFrame.OwnerReaches store value partialTy leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized env store value partialTy location →
+      location ≠ leafLoc := by
+  intro location hreach
+  induction hreach with
+  | undefOf hskel hstrength howner =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using
+          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
+  | boxHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxHere hslot)
+  | boxInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.box hcontainsInner))
+        (by
+          intro howner
+          exact hownerNoReach (RuntimeFrame.OwnerReaches.boxInner hslot howner))
+        hlocation
+  | boxFullHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxFullHere hslot)
+  | boxFullInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.tyBox hcontainsInner))
+        (by
+          intro howner
+          exact hownerNoReach
+            (RuntimeFrame.OwnerReaches.boxFullInner hslot howner))
+        hlocation
+  | borrow _hinitialized _hloc hreads =>
+      intro hlocation
+      exact hcontains PartialTyContains.here hreads hlocation
+
+/-- Live initialized reach only needs read-exclusion for initialized borrow
+targets.  Stale annotations never contribute `ReachesWhenInitialized.borrow`,
+so the caller may use the supplied `TargetInitialized` evidence to prove the
+target is one of the live entries preserved by the write. -/
+theorem reachesWhenInitialized_ne_of_live_borrow_targets_locReads_ne
+    {env : Env} {store : ProgramStore} {leafLoc : Location}
+    {value : PartialValue} {partialTy : PartialTy}
+    (hcontains : ∀ {mutable : Bool} {target : LVal},
+      PartialTyContains partialTy (.borrow mutable target) →
+      TargetInitialized env target →
+      ∀ {location : Location},
+        RuntimeFrame.LocReads store target location →
+        location ≠ leafLoc)
+    (hownerNoReach :
+      ¬ RuntimeFrame.OwnerReaches store value partialTy leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized env store value partialTy location →
+      location ≠ leafLoc := by
+  intro location hreach
+  induction hreach with
+  | undefOf hskel hstrength howner =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using
+          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
+  | boxHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxHere hslot)
+  | boxInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner hinitialized
+          exact hcontains (PartialTyContains.box hcontainsInner)
+            hinitialized)
+        (by
+          intro howner
+          exact hownerNoReach (RuntimeFrame.OwnerReaches.boxInner hslot howner))
+        hlocation
+  | boxFullHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxFullHere hslot)
+  | boxFullInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner hinitialized
+          exact hcontains (PartialTyContains.tyBox hcontainsInner)
+            hinitialized)
+        (by
+          intro howner
+          exact hownerNoReach
+            (RuntimeFrame.OwnerReaches.boxFullInner hslot howner))
+        hlocation
+  | borrow hinitialized _hloc hreads =>
+      intro hlocation
+      exact hcontains PartialTyContains.here hinitialized hreads hlocation
+
 /-- Values whose contained borrow targets are off the guarded source chain cannot
 reach the guarded leaf, assuming their owner roots also do not reach that leaf. -/
 theorem reachesWhenInitialized_chain_leaf_ne_of_target_outside
@@ -13560,6 +14469,843 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain
     (ownerReaches_stored_ne_guarded_chain_leaf hvalidStore hheap hleafChain
       hguardB hyOutside hstoreY)
     hreach
+
+/-- RHS values installed by the final pure write cannot reach the selected
+runtime leaf in the pre-write store.  The pure write exposes the graft slot;
+all graft borrows are RHS borrows, and `TyBorrowSafeAgainstEnv` keeps those
+targets outside the guarded write chain. -/
+theorem reachesWhenInitialized_select_final_rhs_ne_leaf
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs : LVal} {rhsTy : Ty} {oldTy leafTy : PartialTy}
+    {targetLifetime : Lifetime} {rootSlot : EnvSlot}
+    {value : Value} {leafLoc : Location} {k : Nat}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ y, env₃.slotAt y = nested.slotAt y)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hvalueHeap : ValueOwnerTargetsHeap value)
+    (hvalueUnowned : ∀ owned, owned ∈ valueOwningLocations value →
+      ¬ ProgramStore.Owns store owned) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized nested store (.value value)
+        (.ty rhsTy) location →
+      location ≠ leafLoc := by
+  rcases EnvWrite.pathSelect_update_eq henvFinal hselectFinal hwriteFinal with
+    ⟨updatedTy, hupdate, hnested⟩
+  have hnotWriteNested :
+      ¬ WriteProhibited nested lhsTop :=
+    not_writeProhibited_of_pointwise
+      (env := env₃) (result := nested) (fun y => (hpoint y).symm)
+      hnotWriteTop
+  have hne : ∀ y, y ≠ LVal.base finalLhs →
+      nested.slotAt y = env.slotAt y := by
+    intro y hy
+    rw [hnested]
+    simp [Env.update, hy]
+  have hbLook :
+      nested.slotAt (LVal.base finalLhs) =
+        some { rootSlot with ty := updatedTy } := by
+    rw [hnested]
+    simp [Env.update]
+  have hgraftContains :
+      ∀ {mutable : Bool} {u : LVal},
+        PartialTyContains updatedTy (.borrow mutable u) →
+        PartialTyContains (.ty rhsTy) (.borrow mutable u) := by
+    intro mutable u hcontains
+    exact PathSelect.update_borrows hselectFinal hupdate hcontains
+  intro location hreach
+  exact reachesWhenInitialized_chain_leaf_ne_of_target_outside
+    hsafe hvalidStore hheap hborrowSafe htySafe hnotWriteNested hne
+    hbLook hgraftContains hguardFinal
+    (protectedByBase_of_ownsChain hleafChain)
+    (by
+      intro mutable target hcontains htargetGuard
+      exact graft_target_outside htySafe hnotWriteNested hbLook
+        hgraftContains
+        (PathSelect.update_contains_rhs hselectFinal hupdate hcontains)
+        htargetGuard)
+    (ownerReaches_value_ne_chain_leaf_of_unowned_root
+      hvalidStore hheap hvalueHeap hvalueUnowned hleafChain)
+    hreach
+
+/-- Off-chain surviving source slots cannot reach the final selected leaf after
+the pure final write. -/
+theorem reachesWhenInitialized_select_final_stored_outside_ne_leaf
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs : LVal} {rhsTy : Ty} {leafTy : PartialTy}
+    {rootSlot otherEnvSlot : EnvSlot} {oldValue : PartialValue}
+    {y : Name} {leafLoc : Location} {k : Nat}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hyOutside : ¬ ChainGuard env (LVal.base lhsTop) y)
+    (henvY : env.slotAt y = some otherEnvSlot)
+    (hstoreY : store.slotAt (VariableProjection y) =
+      some { value := oldValue, lifetime := otherEnvSlot.lifetime }) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized nested store oldValue
+        otherEnvSlot.ty location →
+      location ≠ leafLoc := by
+  rcases EnvWrite.pathSelect_update_eq henvFinal hselectFinal hwriteFinal with
+    ⟨updatedTy, hupdate, hnested⟩
+  have hnotWriteNested :
+      ¬ WriteProhibited nested lhsTop :=
+    not_writeProhibited_of_pointwise
+      (env := env₃) (result := nested) (fun z => (hpoint z).symm)
+      hnotWriteTop
+  have hne : ∀ z, z ≠ LVal.base finalLhs →
+      nested.slotAt z = env.slotAt z := by
+    intro z hz
+    rw [hnested]
+    simp [Env.update, hz]
+  have hbLook :
+      nested.slotAt (LVal.base finalLhs) =
+        some { rootSlot with ty := updatedTy } := by
+    rw [hnested]
+    simp [Env.update]
+  have hgraftContains :
+      ∀ {mutable : Bool} {u : LVal},
+        PartialTyContains updatedTy (.borrow mutable u) →
+        PartialTyContains (.ty rhsTy) (.borrow mutable u) := by
+    intro mutable u hcontains
+    exact PathSelect.update_borrows hselectFinal hupdate hcontains
+  intro location hreach
+  exact reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain
+    hsafe hvalidStore hheap hborrowSafe htySafe hnotWriteNested hne
+    hbLook hgraftContains hguardFinal hleafChain hyOutside henvY
+    hstoreY hreach
+
+/-- Stored source slots reduce to source-entry read exclusions.  Owner reaches
+are ruled out by store uniqueness; initialized borrow reaches are exactly the
+contained source annotations whose targets must not read the selected leaf. -/
+theorem reachesWhenInitialized_select_final_stored_ne_leaf_of_source_entries
+    {store : ProgramStore} {env nested : Env}
+    {finalLhs : LVal} {otherEnvSlot : EnvSlot} {oldValue : PartialValue}
+    {y : Name} {leafLoc : Location} {k : Nat}
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (henvY : env.slotAt y = some otherEnvSlot)
+    (hstoreY : store.slotAt (VariableProjection y) =
+      some { value := oldValue, lifetime := otherEnvSlot.lifetime })
+    (hentryReads :
+      ∀ {mutable : Bool} {target : LVal},
+        env ⊢ y ↝ (.borrow mutable target) →
+        ∀ {location : Location},
+          RuntimeFrame.LocReads store target location →
+          location ≠ leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized nested store oldValue
+        otherEnvSlot.ty location →
+      location ≠ leafLoc := by
+  have hstorageNeRoot :
+      VariableProjection y ≠ VariableProjection (LVal.base finalLhs) := by
+    intro hEq
+    exact hyFinal (by simpa [VariableProjection] using hEq)
+  have hownerNoReach :
+      ¬ RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty leafLoc :=
+    ownerReaches_stored_ne_chain_leaf hvalidStore
+      (var_not_owned hheap) (var_not_owned hheap) hstorageNeRoot
+      hleafChain hstoreY
+  intro location hreach
+  exact reachesWhenInitialized_ne_of_borrow_targets_locReads_ne
+    (env := nested) (store := store) (leafLoc := leafLoc)
+    (value := oldValue) (partialTy := otherEnvSlot.ty)
+    (by
+      intro mutable target hcontains location hreads
+      exact hentryReads ⟨otherEnvSlot, henvY, hcontains⟩ hreads)
+    hownerNoReach hreach
+
+/-- Stored source slots reduce to read exclusions for live source entries.
+This is the form needed by selected-final assignment: a borrow annotation only
+has to be excluded when the target remains initialized in the final
+environment and can therefore be reached at runtime. -/
+theorem reachesWhenInitialized_select_final_stored_ne_leaf_of_live_source_entries
+    {store : ProgramStore} {env nested : Env}
+    {finalLhs : LVal} {otherEnvSlot : EnvSlot} {oldValue : PartialValue}
+    {y : Name} {leafLoc : Location} {k : Nat}
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (henvY : env.slotAt y = some otherEnvSlot)
+    (hstoreY : store.slotAt (VariableProjection y) =
+      some { value := oldValue, lifetime := otherEnvSlot.lifetime })
+    (hentryReads :
+      ∀ {mutable : Bool} {target : LVal},
+        env ⊢ y ↝ (.borrow mutable target) →
+        TargetInitialized nested target →
+        ∀ {location : Location},
+          RuntimeFrame.LocReads store target location →
+          location ≠ leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized nested store oldValue
+        otherEnvSlot.ty location →
+      location ≠ leafLoc := by
+  have hstorageNeRoot :
+      VariableProjection y ≠ VariableProjection (LVal.base finalLhs) := by
+    intro hEq
+    exact hyFinal (by simpa [VariableProjection] using hEq)
+  have hownerNoReach :
+      ¬ RuntimeFrame.OwnerReaches store oldValue otherEnvSlot.ty leafLoc :=
+    ownerReaches_stored_ne_chain_leaf hvalidStore
+      (var_not_owned hheap) (var_not_owned hheap) hstorageNeRoot
+      hleafChain hstoreY
+  intro location hreach
+  exact reachesWhenInitialized_ne_of_live_borrow_targets_locReads_ne
+    (env := nested) (store := store) (leafLoc := leafLoc)
+    (value := oldValue) (partialTy := otherEnvSlot.ty)
+    (by
+      intro mutable target hcontains hinitialized location hreads
+      exact hentryReads ⟨otherEnvSlot, henvY, hcontains⟩
+        hinitialized hreads)
+    hownerNoReach hreach
+
+/-- A source borrow annotation's target remains initialized in the selected
+final environment.  The original write transports target initialization to
+`env₃`; the selected-final package supplies a pointwise-equal nested result. -/
+theorem targetInitialized_select_final_of_source_entry
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop target : LVal} {rhsTy : Ty} {oldTy : PartialTy}
+    {targetLifetime : Lifetime} {mutable : Bool} {y : Name}
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hentry : env ⊢ y ↝ (.borrow mutable target)) :
+    TargetInitialized nested target := by
+  rcases hentry with ⟨slotY, hslotY, hcontainsY⟩
+  rcases hcbwf y slotY mutable target hslotY
+      (⟨slotY, hslotY, hcontainsY⟩ :
+        env ⊢ y ↝ (.borrow mutable target)) with
+    ⟨targetTy, targetLifetime', htargetTyping, _hle, _hbase⟩
+  rcases TargetInitialized.envWrite hcbwf hborrowSafe htySafe hwriteTop
+      hlvTop hshape hwellTy hnotWriteTop
+      (⟨targetTy, targetLifetime', htargetTyping⟩ :
+        TargetInitialized env target) with
+    ⟨targetTy₃, targetLifetime₃, htargetTyping₃⟩
+  exact ⟨targetTy₃, targetLifetime₃,
+    LValTyping.transport_of_pointwise (fun z => (hpoint z).symm)
+      htargetTyping₃⟩
+
+/-- If a source borrow annotation survives to the selected-final environment and
+its target reads the selected leaf, then the target root is on the original
+write chain. -/
+theorem source_entry_target_guard_of_select_final_locReads
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs target : LVal} {rhsTy : Ty}
+    {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
+    {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
+    {mutable : Bool} {y : Name}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hentry : env ⊢ y ↝ (.borrow mutable target)) :
+    RuntimeFrame.LocReads store target leafLoc →
+      ChainGuard env (LVal.base lhsTop) (LVal.base target) := by
+  intro hreads
+  rcases EnvWrite.pathSelect_update_eq henvFinal hselectFinal hwriteFinal with
+    ⟨updatedTy, hupdate, hnested⟩
+  have hnotWriteNested :
+      ¬ WriteProhibited nested lhsTop :=
+    not_writeProhibited_of_pointwise
+      (env := env₃) (result := nested) (fun z => (hpoint z).symm)
+      hnotWriteTop
+  have hne : ∀ z, z ≠ LVal.base finalLhs →
+      nested.slotAt z = env.slotAt z := by
+    intro z hz
+    rw [hnested]
+    simp [Env.update, hz]
+  have hbLook :
+      nested.slotAt (LVal.base finalLhs) =
+        some { rootSlot with ty := updatedTy } := by
+    rw [hnested]
+    simp [Env.update]
+  have hgraftContains :
+      ∀ {mutable : Bool} {u : LVal},
+        PartialTyContains updatedTy (.borrow mutable u) →
+        PartialTyContains (.ty rhsTy) (.borrow mutable u) := by
+    intro mutable u hcontains
+    exact PathSelect.update_borrows hselectFinal hupdate hcontains
+  rcases targetInitialized_select_final_of_source_entry (store := store)
+      hcbwf hborrowSafe htySafe hwriteTop hlvTop hshape hwellTy
+      hnotWriteTop hpoint hentry with
+    ⟨targetTy, targetLifetime', htargetTyping⟩
+  exact locReads_chain_protected_base_on_chain
+    hsafe hvalidStore hheap hborrowSafe htySafe hnotWriteNested hne hbLook
+    hgraftContains hguardFinal (protectedByBase_of_ownsChain hleafChain)
+    htargetTyping hreads
+
+/-- Source entries whose target is rooted at the selected final base cannot
+read the selected leaf.  The root case would survive and write-prohibit the
+top write; the hop-selected case is pinned to the final incoming edge by
+borrow safety and reduces to the final lvalue's own read exclusion. -/
+theorem source_entry_select_final_base_locReads_ne
+    {env env₃ nested : Env} {store : ProgramStore}
+    {lhsTop finalLhs lv target : LVal} {rhsTy : Ty}
+    {rootSlot : EnvSlot} {leafTy : PartialTy}
+    {y : Name} {mutable : Bool} {leafLoc : Location}
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hlast :
+      finalLhs = lv ∨
+        ∃ (holder : Name) (path' : Path) (target' : LVal),
+          env ⊢ holder ↝ (.borrow true target') ∧
+          finalLhs = prependPath path' target')
+    (hlvBase : LVal.base lv = LVal.base lhsTop)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (hentryBase : LVal.base target = LVal.base finalLhs)
+    (hfinalReads : ∀ mid,
+      RuntimeFrame.LocReads store finalLhs mid → mid ≠ leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.LocReads store target location →
+      location ≠ leafLoc := by
+  rcases EnvWrite.pathSelect_update_eq henvFinal hselectFinal hwriteFinal with
+    ⟨updatedTy, hupdate, hnested⟩
+  have hnotWriteNested :
+      ¬ WriteProhibited nested lhsTop :=
+    not_writeProhibited_of_pointwise
+      (env := env₃) (result := nested) (fun z => (hpoint z).symm)
+      hnotWriteTop
+  have hne : ∀ z, z ≠ LVal.base finalLhs →
+      nested.slotAt z = env.slotAt z := by
+    intro z hz
+    rw [hnested]
+    simp [Env.update, hz]
+  have hbLook :
+      nested.slotAt (LVal.base finalLhs) =
+        some { rootSlot with ty := updatedTy } := by
+    rw [hnested]
+    simp [Env.update]
+  have hgraftContains :
+      ∀ {mutable : Bool} {u : LVal},
+        PartialTyContains updatedTy (.borrow mutable u) →
+        PartialTyContains (.ty rhsTy) (.borrow mutable u) := by
+    intro mutable u hcontains
+    exact PathSelect.update_borrows hselectFinal hupdate hcontains
+  exact source_entry_final_base_locReads_ne hborrowSafe htySafe
+    hnotWriteNested hne hbLook hgraftContains hguardFinal hlast hlvBase
+    hyFinal hentry hentryBase hfinalReads
+
+/-- If a source entry's target is outside the original write chain, it cannot
+read the selected final leaf. -/
+theorem source_entry_select_final_outside_locReads_ne
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs target : LVal} {rhsTy : Ty}
+    {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
+    {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
+    {mutable : Bool} {y : Name}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (htargetOutside :
+      ¬ ChainGuard env (LVal.base lhsTop) (LVal.base target)) :
+    ∀ {location : Location},
+      RuntimeFrame.LocReads store target location →
+      location ≠ leafLoc := by
+  intro location hreads hlocation
+  exact htargetOutside
+    (source_entry_target_guard_of_select_final_locReads
+      hsafe hvalidStore hheap hcbwf hborrowSafe htySafe hwriteTop hlvTop
+      hshape hwellTy hnotWriteTop henvFinal hselectFinal hwriteFinal
+      hpoint hguardFinal hleafChain hentry
+      (by simpa [hlocation] using hreads))
+
+/-- A source-entry target that is the root of a remaining selected-hop suffix
+cannot read the selected leaf. -/
+theorem source_entry_select_final_hops_suffix_locReads_ne
+    {env env₃ nested : Env} {store : ProgramStore}
+    {lhsTop finalLhs target : LVal} {rhsTy : Ty}
+    {rootSlot : EnvSlot} {leafTy : PartialTy}
+    {leafLoc : Location} {k : Nat}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hlen : k = (LVal.path finalLhs).length)
+    (hhopsTail : ∃ path',
+      HopsTo env env₃ (prependPath path' target) finalLhs) :
+    ∀ {location : Location},
+      RuntimeFrame.LocReads store target location →
+      location ≠ leafLoc := by
+  rcases EnvWrite.pathSelect_update_eq henvFinal hselectFinal hwriteFinal with
+    ⟨updatedTy, hupdate, hnested⟩
+  have hnotWriteNested :
+      ¬ WriteProhibited nested lhsTop :=
+    not_writeProhibited_of_pointwise
+      (env := env₃) (result := nested) (fun z => (hpoint z).symm)
+      hnotWriteTop
+  have hne : ∀ z, z ≠ LVal.base finalLhs →
+      nested.slotAt z = env.slotAt z := by
+    intro z hz
+    rw [hnested]
+    simp [Env.update, hz]
+  have hbLook :
+      nested.slotAt (LVal.base finalLhs) =
+        some { rootSlot with ty := updatedTy } := by
+    rw [hnested]
+    simp [Env.update]
+  have hgraftContains :
+      ∀ {mutable : Bool} {u : LVal},
+        PartialTyContains updatedTy (.borrow mutable u) →
+        PartialTyContains (.ty rhsTy) (.borrow mutable u) := by
+    intro mutable u hcontains
+    exact PathSelect.update_borrows hselectFinal hupdate hcontains
+  have hlinks :
+      ∀ {s₀ target : LVal} {slotH : EnvSlot} {lf : Lifetime},
+        env.slotAt (LVal.base s₀) = some slotH →
+        PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
+        LValTyping env s₀ (.ty (.borrow true target)) lf →
+        env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
+        env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
+        (∀ mid, RuntimeFrame.LocReads store s₀ mid → mid ≠ leafLoc) ∧
+          store.loc s₀ ≠ some leafLoc :=
+    clean_hop_link_of_guarded_leaf hsafe hvalidStore hheap htySafe
+      hnotWriteNested hpoint hbLook hgraftContains hguardFinal henvFinal
+      hselectFinal hleafChain hlen
+  have hfinalReads :
+      ∀ mid, RuntimeFrame.LocReads store finalLhs mid → mid ≠ leafLoc := by
+    intro mid hreads
+    exact locReads_ne_of_ownsChain_length hvalidStore hheap hleafChain
+      hlen hreads
+  rcases hhopsTail with ⟨path', hhops⟩
+  exact HopsTo.tail_target_locReads_ne hsafe hcbwf hhops hlinks
+    hfinalReads
+
+/-- Prefix-chain source entries are exactly selected-hop suffix roots, unless
+they are also in the final tail.  The `hnotTail` premise selects the genuine
+prefix case when a degenerate source cycle gives both orderings. -/
+theorem source_entry_select_final_prefix_locReads_ne
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop finalLhs target : LVal} {rhsTy : Ty}
+    {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
+    {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
+    {mutable : Bool} {y : Name}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hlen : k = (LVal.path finalLhs).length)
+    (hhops : HopsTo env env₃ lhsTop finalLhs)
+    (hguardY : ChainGuard env (LVal.base lhsTop) y)
+    (hyFinal : ChainGuard env y (LVal.base finalLhs))
+    (hyNeFinal : y ≠ LVal.base finalLhs)
+    (hnotTail : ¬ ChainGuard env (LVal.base finalLhs) y)
+    (hentry : env ⊢ y ↝ (.borrow mutable target)) :
+    ∀ {location : Location},
+      RuntimeFrame.LocReads store target location →
+      location ≠ leafLoc := by
+  have hsuffix :
+      ∃ path', HopsTo env env₃ (prependPath path' target) finalLhs :=
+    HopsTo.suffix_of_guard_prefix hhops hguardY hyFinal hyNeFinal hentry
+      (by
+        intro hfinalY _hyFinal
+        exact hnotTail hfinalY)
+  intro location hreads
+  exact source_entry_select_final_hops_suffix_locReads_ne
+    hsafe hvalidStore hheap hcbwf htySafe hnotWriteTop henvFinal
+    hselectFinal hwriteFinal hpoint hguardFinal hleafChain hlen hsuffix
+    hreads
+
+theorem source_entry_select_final_live_of_not_writeProhibited_final_locReads_ne
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop lv finalLhs target : LVal} {rhsTy : Ty}
+    {leafTy : PartialTy} {rootSlot : EnvSlot}
+    {leafLoc : Location} {k : Nat} {mutable : Bool} {y : Name}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (hnotWriteFinal : ¬ WriteProhibited env finalLhs)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hlen : k = (LVal.path finalLhs).length)
+    (hlast :
+      finalLhs = lv ∨
+        ∃ (holder : Name) (path' : Path) (target' : LVal),
+          env ⊢ holder ↝ (.borrow true target') ∧
+          finalLhs = prependPath path' target')
+    (hlvBase : LVal.base lv = LVal.base lhsTop)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (_hinitialized : TargetInitialized nested target) :
+    ∀ {location : Location},
+      RuntimeFrame.LocReads store target location →
+      location ≠ leafLoc := by
+  rcases hentry with ⟨entrySlot, hentrySlot, hentryContains⟩
+  have hentry' : env ⊢ y ↝ (.borrow mutable target) :=
+    ⟨entrySlot, hentrySlot, hentryContains⟩
+  rcases hcbwf y entrySlot mutable target hentrySlot hentry' with
+    ⟨targetTy, targetLifetime, htargetTyping, _hle, _hbase⟩
+  intro location hreads hlocation
+  rcases locReads_chain_leaf_conflict_or_writeProhibited_whenInitialized
+      hsafe hvalidStore hheap hleafChain htargetTyping
+      (by simpa [hlocation] using hreads) with
+    htargetFinal | hwriteFinal
+  · have hfinalReads :
+        ∀ mid, RuntimeFrame.LocReads store finalLhs mid → mid ≠ leafLoc := by
+      intro mid hread
+      exact locReads_ne_of_ownsChain_length hvalidStore hheap hleafChain
+        hlen hread
+    exact source_entry_select_final_base_locReads_ne hborrowSafe htySafe
+      hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint hguardFinal
+      hlast hlvBase hyFinal hentry' htargetFinal hfinalReads hreads
+      hlocation
+  · exact hnotWriteFinal hwriteFinal
+
+/-- Live source entries that are not in the final tail cannot read the selected
+runtime leaf.  This consolidates the target-at-final and selected-prefix cases
+used by the assignment wrapper; the remaining open case is exactly a holder in
+the final tail. -/
+theorem source_entry_select_final_live_not_tail_locReads_ne
+    {store : ProgramStore} {env env₃ nested : Env}
+    {lhsTop lv finalLhs target : LVal} {rhsTy : Ty}
+    {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
+    {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
+    {mutable : Bool} {y : Name}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hcbwf : ContainedBorrowsWellFormed env)
+    (hborrowSafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hwriteTop : EnvWrite env lhsTop rhsTy env₃)
+    (hlvTop : LValTyping env lhsTop oldTy targetLifetime)
+    (hshape : ShapeCompatible env oldTy (.ty rhsTy))
+    (hwellTy : WellFormedTy env rhsTy targetLifetime)
+    (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
+    (henvFinal : env.slotAt (LVal.base finalLhs) = some rootSlot)
+    (hselectFinal : PathSelect (LVal.path finalLhs) rootSlot.ty leafTy)
+    (hwriteFinal : EnvWrite env finalLhs rhsTy nested)
+    (hpoint : ∀ z, env₃.slotAt z = nested.slotAt z)
+    (hguardFinal : ChainGuard env (LVal.base lhsTop)
+      (LVal.base finalLhs))
+    (hleafChain : OwnsChain store
+      (VariableProjection (LVal.base finalLhs)) k leafLoc)
+    (hlen : k = (LVal.path finalLhs).length)
+    (hlast :
+      finalLhs = lv ∨
+        ∃ (holder : Name) (path' : Path) (target' : LVal),
+          env ⊢ holder ↝ (.borrow true target') ∧
+          finalLhs = prependPath path' target')
+    (hhops : HopsTo env env₃ lhsTop finalLhs)
+    (hlvBase : LVal.base lv = LVal.base lhsTop)
+    (hyFinal : y ≠ LVal.base finalLhs)
+    (hnotTailY : ¬ ChainGuard env (LVal.base finalLhs) y)
+    (hentry : env ⊢ y ↝ (.borrow mutable target))
+    (_hinitialized : TargetInitialized nested target) :
+    ∀ {location : Location},
+      RuntimeFrame.LocReads store target location →
+      location ≠ leafLoc := by
+  intro location hreads hlocation
+  have htargetGuard :
+      ChainGuard env (LVal.base lhsTop) (LVal.base target) :=
+    source_entry_target_guard_of_select_final_locReads
+      hsafe hvalidStore hheap hcbwf hborrowSafe htySafe hwriteTop hlvTop
+      hshape hwellTy hnotWriteTop henvFinal hselectFinal hwriteFinal
+      hpoint hguardFinal hleafChain hentry
+      (by simpa [hlocation] using hreads)
+  by_cases htargetFinal : LVal.base target = LVal.base finalLhs
+  · have hfinalReads :
+        ∀ mid, RuntimeFrame.LocReads store finalLhs mid → mid ≠ leafLoc := by
+      intro mid hread
+      exact locReads_ne_of_ownsChain_length hvalidStore hheap hleafChain
+        hlen hread
+    exact source_entry_select_final_base_locReads_ne hborrowSafe htySafe
+      hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint hguardFinal
+      hlast hlvBase hyFinal hentry htargetFinal hfinalReads hreads hlocation
+  have hguardY :
+      ChainGuard env (LVal.base lhsTop) y := by
+    rcases EnvWrite.pathSelect_update_eq henvFinal hselectFinal
+        hwriteFinal with
+      ⟨updatedTy, hupdate, hnested⟩
+    have hnotWriteNested :
+        ¬ WriteProhibited nested lhsTop :=
+      not_writeProhibited_of_pointwise
+        (env := env₃) (result := nested) (fun z => (hpoint z).symm)
+        hnotWriteTop
+    have hne : ∀ z, z ≠ LVal.base finalLhs →
+        nested.slotAt z = env.slotAt z := by
+      intro z hz
+      rw [hnested]
+      simp [Env.update, hz]
+    have hbLook :
+        nested.slotAt (LVal.base finalLhs) =
+          some { rootSlot with ty := updatedTy } := by
+      rw [hnested]
+      simp [Env.update]
+    have hgraftContains :
+        ∀ {mutable : Bool} {u : LVal},
+          PartialTyContains updatedTy (.borrow mutable u) →
+          PartialTyContains (.ty rhsTy) (.borrow mutable u) := by
+      intro mutable u hcontains
+      exact PathSelect.update_borrows hselectFinal hupdate hcontains
+    exact chain_entry_source hborrowSafe htySafe hnotWriteNested hne
+      hbLook hgraftContains hguardFinal hentry htargetGuard
+  rcases chainGuard_linear_ne hguardFinal hguardY hyFinal with htail | hprefix
+  · exact False.elim (hnotTailY htail)
+  · exact source_entry_select_final_prefix_locReads_ne
+      hsafe hvalidStore hheap hcbwf hborrowSafe htySafe hwriteTop
+      hlvTop hshape hwellTy hnotWriteTop henvFinal hselectFinal
+      hwriteFinal hpoint hguardFinal hleafChain hlen hhops hguardY
+      hprefix hyFinal hnotTailY hentry hreads hlocation
+
+/-- Selected-final assignment preservation.
+
+`EnvWrite.select_final` reduces the original assignment to this situation.  The
+helper discharges the source-entry read exclusions for entries outside the
+final tail, entries targeting the final base, and entries in the final tail.
+The tail case is covered by `WriteChainWritable`, which gives writability at
+the selected final node, not just at the syntactic lhs. -/
+theorem preservation_assign_selected_final_step_runtime
+    {store store' : ProgramStore} {env env₃ nested : Env}
+    {lifetime targetLifetime : Lifetime}
+    {lhsTop lv finalLhs : LVal} {oldTy leafTy : PartialTy}
+    {rootSlot : EnvSlot} {rhsTy : Ty}
+    {value finalValue : Value} {leafLoc : Location} {k : Nat} :
+    WellFormedEnv env lifetime →
+    BorrowSafeEnv env →
+    TyBorrowSafeAgainstEnv env rhsTy →
+    SafeAbstraction store env →
+    ValidRuntimeState store (.assign lv (.val value)) →
+    EnvWrite env lhsTop rhsTy env₃ →
+    LValTyping env lhsTop oldTy targetLifetime →
+    ShapeCompatible env oldTy (.ty rhsTy) →
+    WellFormedTy env rhsTy targetLifetime →
+    WriteChainWritable env lhsTop →
+    ¬ WriteProhibited env₃ lhsTop →
+    env.slotAt (LVal.base finalLhs) = some rootSlot →
+    PathSelect (LVal.path finalLhs) rootSlot.ty leafTy →
+    EnvWrite env finalLhs rhsTy nested →
+    (∀ y, env₃.slotAt y = nested.slotAt y) →
+    LValTyping env finalLhs oldTy targetLifetime →
+    store.loc lv = store.loc finalLhs →
+    ChainGuard env (LVal.base lhsTop) (LVal.base finalLhs) →
+    OwnsChain store (VariableProjection (LVal.base finalLhs)) k leafLoc →
+    k = (LVal.path finalLhs).length →
+    store.loc finalLhs = some leafLoc →
+    (finalLhs = lhsTop ∨
+      ∃ (holder : Name) (path' : Path) (target' : LVal),
+        env ⊢ holder ↝ (.borrow true target') ∧
+        finalLhs = prependPath path' target') →
+    HopsTo env env₃ lhsTop finalLhs →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
+    Step store lifetime (.assign lv (.val value)) store' (.val finalValue) →
+    FullTerminalStateSafe store' finalValue nested .unit := by
+  intro hwell hborrowSafe htySafe hsafe hvalidRuntime hwriteTop hlvTop
+    hshape hwellTy hchainWritable hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint
+    htypingFinal hlocFinal hguardFinal hleafChain hlen hleafLoc
+    hlast hhops hvalidValue hstep
+  have hvalidStore : ValidStore store :=
+    ValidRuntimeState.validStore hvalidRuntime
+  have hheap : StoreOwnerTargetsHeap store :=
+    ValidRuntimeState.storeOwnerTargetsHeap hvalidRuntime
+  have hnotWriteFinal : ¬ WriteProhibited env finalLhs := by
+    intro hwriteFinalSource
+    exact (hchainWritable hguardFinal)
+      (by
+        simpa [WriteProhibited, ReadProhibited, PathConflicts, LVal.base]
+          using hwriteFinalSource)
+  have hwellEnv₃ : WellFormedEnv env₃ lifetime :=
+    WellFormedEnv.envWrite hwell hborrowSafe htySafe hwriteTop hlvTop
+      hshape hwellTy hnotWriteTop
+  have hwellNested : WellFormedEnv nested lifetime :=
+    WellFormedEnv.transport_of_pointwise
+      (env := env₃) (result := nested) (fun y => (hpoint y).symm)
+      hwellEnv₃
+  have hstepFinal :
+      Step store lifetime (.assign finalLhs (.val value)) store'
+        (.val finalValue) :=
+    assign_step_of_loc_eq hlocFinal hstep
+  have hvalidRuntimeFinal :
+      ValidRuntimeState store (.assign finalLhs (.val value)) :=
+    validRuntimeState_assign_lhs_of_value hvalidRuntime
+  have hvalidValueNested :
+      ValidPartialValueWhenInitialized nested store (.value value)
+        (.ty rhsTy) :=
+    validPartialValueWhenInitialized_select_final_rhs
+      hwell.1 hborrowSafe htySafe hwriteTop hlvTop hshape hwellTy
+      hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint hvalidValue
+  have hotherValidNested :
+      ∀ y otherEnvSlot oldValue,
+        y ≠ LVal.base finalLhs →
+        env.slotAt y = some otherEnvSlot →
+        store.slotAt (VariableProjection y) =
+          some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
+        ValidPartialValueWhenInitialized nested store oldValue
+          otherEnvSlot.ty := by
+    intro y otherEnvSlot oldValue hyFinal henvY hstoreY
+    rcases hsafe.2 y otherEnvSlot henvY with
+      ⟨safeValue, hsafeStoreY, hvalidOld⟩
+    have hvalueEq : safeValue = oldValue := by
+      have hslotEq :=
+        Option.some.inj (hsafeStoreY.symm.trans hstoreY)
+      exact congrArg StoreSlot.value hslotEq
+    subst hvalueEq
+    exact validPartialValueWhenInitialized_select_final_unchanged_slot
+      hwell.1 hborrowSafe htySafe hwriteTop hlvTop hshape hwellTy
+      hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint hyFinal
+      henvY hvalidOld
+  have hvalueHeap : ValueOwnerTargetsHeap value :=
+    TermOwnerTargetsHeap.value
+      (termOwnerTargetsHeap_assign_inner
+        (ValidRuntimeState.termOwnerTargetsHeap hvalidRuntime))
+  have hvalueUnowned :
+      ∀ owned, owned ∈ valueOwningLocations value →
+        ¬ ProgramStore.Owns store owned := by
+    intro owned hmem
+    exact
+      (ValidRuntimeState.storeTermDisjoint hvalidRuntime owned
+        (by
+          simpa [termOwningLocations, termValues,
+            partialValueOwningLocations] using hmem))
+  have hvalueFrame :
+      ∀ location,
+        RuntimeFrame.ReachesWhenInitialized nested store (.value value)
+          (.ty rhsTy) location →
+        location ≠ leafLoc := by
+    intro location hreach
+    exact reachesWhenInitialized_select_final_rhs_ne_leaf
+      hsafe hvalidStore hheap hborrowSafe htySafe hwriteTop hlvTop hshape
+      hwellTy hnotWriteTop henvFinal hselectFinal hwriteFinal hpoint
+      hguardFinal hleafChain hvalueHeap hvalueUnowned hreach
+  have hotherFrame :
+      ∀ y otherEnvSlot oldValue,
+        y ≠ LVal.base finalLhs →
+        env.slotAt y = some otherEnvSlot →
+      store.slotAt (VariableProjection y) =
+        some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
+      ∀ location,
+        RuntimeFrame.ReachesWhenInitialized nested store oldValue
+          otherEnvSlot.ty location →
+      location ≠ leafLoc := by
+    intro y otherEnvSlot oldValue hyFinal henvY hstoreY location hreach
+    exact reachesWhenInitialized_select_final_stored_ne_leaf_of_live_source_entries
+      hvalidStore hheap hleafChain hyFinal henvY hstoreY
+      (by
+        intro mutable target hentry hinitialized location hreads
+        exact
+          source_entry_select_final_live_of_not_writeProhibited_final_locReads_ne
+            hsafe hvalidStore hheap hwell.1 hborrowSafe htySafe
+            hnotWriteTop hnotWriteFinal henvFinal hselectFinal hwriteFinal
+            hpoint hguardFinal hleafChain hlen hlast rfl hyFinal
+            hentry hinitialized hreads)
+      hreach
+  have hterminal : TerminalStateSafe store' finalValue nested .unit :=
+    preservation_assign_pathSelect_step_runtime_whenInitialized_of_frames
+      hwell hborrowSafe htySafe hsafe hvalidRuntimeFinal htypingFinal hshape
+      hwellTy hwriteFinal hwellNested henvFinal hselectFinal hleafLoc hvalidValue
+      hstepFinal hvalidValueNested hotherValidNested hvalueFrame hotherFrame
+  exact TerminalStateSafe.full_of_wellFormed hterminal hwellNested
+    WellFormedTy.unit
 
 end Paper
 end LwRust

@@ -6,9 +6,8 @@ import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then the final
 > value is abstracted by the result type: `S₂ ▷ v ∼ T`.
 
-Status: **proven** for the strengthened Section 4 typing system over source
-continuations.  This is the value-validity conjunct of
-`TerminalStateSafe`, established by Preservation (Lemma 4.11).
+Status: conditional on the Preservation (Lemma 4.11) terminal-safety
+conclusion.  This is the value-validity conjunct of `FullTerminalStateSafe`.
 The file also exposes representative redex-level frame lemmas for move/value
 cases.
 -/
@@ -18,24 +17,24 @@ namespace LwRust.Paper.Soundness
 open LwRust.Paper LwRust.Core
 
 /--
-Appendix 9.9, Value Preservation, as the value-abstraction projection of
-Lemma 4.11.
+Appendix 9.9, Value Preservation, as the value-abstraction projection of an
+already-established Lemma 4.11 terminal-safety conclusion.
 -/
 theorem lemma_9_9_valuePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
+    FullTerminalStateSafe finalStore finalValue env₂ ty →
     SourceTerm term →
-      ValidRuntimeState store term →
-      ValidStoreTyping store term typing →
-      WellFormedEnv env₁ lifetime →
-      store ∼ₛ env₁ →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    store ≈ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
-      (.ty ty) := by
-    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
-    exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hsafe htyping hmulti).2.2
+    ValidValue finalStore finalValue ty := by
+    intro hterminal _hsource _hvalid _hstoreTyping _hwellFormed _hsafe
+      _htyping _hmulti
+    exact hterminal.2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

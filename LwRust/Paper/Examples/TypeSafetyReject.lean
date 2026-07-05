@@ -102,7 +102,7 @@ theorem invalidBorrowExample_rejected :
                                   rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
                                     | assign _hRhs _hLhsPost _hshape _hwell
-                                        hwrite hnotWrite =>
+                                        _hchain hwrite hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue

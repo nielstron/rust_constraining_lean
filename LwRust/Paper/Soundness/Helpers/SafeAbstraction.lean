@@ -171,6 +171,53 @@ theorem ValidPartialValue.whenInitialized {env : Env} {store : ProgramStore}
   | boxFull hslot _hinner ih =>
       exact ValidPartialValueWhenInitialized.boxFull hslot ih
 
+theorem ValidPartialValueWhenInitialized.toFull_of_borrowsWellFormed
+    {env : Env} {store : ProgramStore} {value : PartialValue}
+    {partialTy : PartialTy} :
+    ValidPartialValueWhenInitialized env store value partialTy →
+    ∀ {slotLifetime : Lifetime},
+      PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
+      ValidPartialValue store value partialTy := by
+  intro hvalid
+  induction hvalid with
+  | unit =>
+      intro _slotLifetime _hwell
+      exact ValidPartialValue.unit
+  | int =>
+      intro _slotLifetime _hwell
+      exact ValidPartialValue.int
+  | undef =>
+      intro _slotLifetime _hwell
+      exact ValidPartialValue.undef
+  | undefOf hinner hstrength =>
+      intro _slotLifetime _hwell
+      exact ValidPartialValue.undefOf hinner hstrength
+  | @borrowLive location mutable target hinitialized hloc =>
+      intro _slotLifetime _hwell
+      exact ValidPartialValue.borrow hloc
+  | @borrowStale location mutable target hstale =>
+      intro slotLifetime hwell
+      have hinitialized : TargetInitialized env target := by
+        rcases hwell (mutable := mutable) (target := target)
+            PartialTyContains.here with
+          ⟨targetTy, targetLifetime, htyping, _hle, _hbase⟩
+        exact ⟨targetTy, targetLifetime, htyping⟩
+      exact False.elim (hstale hinitialized)
+  | @box location slot inner hslot _hinner ih =>
+      intro slotLifetime hwell
+      exact ValidPartialValue.box hslot
+        (ih (slotLifetime := slotLifetime)
+          (by
+            intro mutable target hcontains
+            exact hwell (PartialTyContains.box hcontains)))
+  | @boxFull location slot ty hslot _hinner ih =>
+      intro slotLifetime hwell
+      exact ValidPartialValue.boxFull hslot
+        (ih (slotLifetime := slotLifetime)
+          (by
+            intro mutable target hcontains
+            exact hwell (PartialTyContains.tyBox hcontains)))
+
 theorem ValidPartialValueWhenInitialized.skeleton {env : Env}
     {store : ProgramStore} {value : PartialValue} {ty : PartialTy} :
     ValidPartialValueWhenInitialized env store value ty →
@@ -1082,6 +1129,44 @@ theorem FullSafeAbstraction.whenInitialized {store : ProgramStore} {env : Env} :
   · intro x envSlot hslot
     rcases hsafe.2 x envSlot hslot with ⟨value, hstore, hvalid⟩
     exact ⟨value, hstore, hvalid.whenInitialized⟩
+
+theorem FullSafeAbstraction.transport_pointwise
+    {store : ProgramStore} {env result : Env}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    store ≈ₛ env →
+    store ≈ₛ result := by
+  intro hsafe
+  constructor
+  · intro x
+    constructor
+    · intro hstoreDomain
+      rcases (hsafe.1 x).mp hstoreDomain with ⟨slot, hslot⟩
+      exact ⟨slot, by simpa [heq x] using hslot⟩
+    · intro hresultDomain
+      rcases hresultDomain with ⟨slot, hslot⟩
+      exact (hsafe.1 x).mpr ⟨slot, by simpa [heq x] using hslot⟩
+  · intro x envSlot hslot
+    have hsourceSlot : env.slotAt x = some envSlot := by
+      simpa [heq x] using hslot
+    exact hsafe.2 x envSlot hsourceSlot
+
+theorem SafeAbstraction.full_of_containedBorrowsWellFormed
+    {store : ProgramStore} {env : Env} :
+    ContainedBorrowsWellFormed env →
+    store ∼ₛ env →
+    store ≈ₛ env := by
+  intro hcbwf hsafe
+  constructor
+  · exact hsafe.1
+  · intro x envSlot hslot
+    rcases hsafe.2 x envSlot hslot with ⟨value, hstore, hvalid⟩
+    refine ⟨value, hstore, ?_⟩
+    exact hvalid.toFull_of_borrowsWellFormed
+      (slotLifetime := envSlot.lifetime)
+      (by
+        intro mutable target hcontains
+        exact hcbwf x envSlot mutable target hslot
+          ⟨envSlot, hslot, hcontains⟩)
 
 theorem FullSafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {target : LVal}

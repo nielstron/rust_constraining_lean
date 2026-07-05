@@ -108,8 +108,8 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime _lhs _oldTy
-      _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hwrite _hnotWrite ih
-      htypingEq candidate hmem
+      _rhs _rhsTy _hRhs _hLhsPost _hshape _hwellTy _hchain _hwrite
+      _hnotWrite ih htypingEq candidate hmem
     exact ih htypingEq candidate (by simpa [termValues] using hmem)
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
@@ -165,13 +165,13 @@ theorem sourceInitialSoundnessHypotheses {term : Term} {lifetime : Lifetime} :
     SourceTerm term →
     ValidState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ₛ Env.empty ∧
+    ProgramStore.empty ≈ₛ Env.empty ∧
     WellFormedEnv Env.empty lifetime ∧
     OperationalStoreProgress ProgramStore.empty := by
   intro hsource
   exact ⟨sourceInitialState_valid hsource,
     sourceTerm_validStoreTyping_empty hsource,
-    safeAbstraction_empty,
+    fullSafeAbstraction_empty,
     wellFormedEnv_empty lifetime,
     operationalStoreProgress_empty⟩
 
@@ -183,13 +183,13 @@ theorem sourceInitialRuntimeSoundnessHypotheses {term : Term} {lifetime : Lifeti
     SourceTerm term →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ₛ Env.empty ∧
+    ProgramStore.empty ≈ₛ Env.empty ∧
     WellFormedEnv Env.empty lifetime ∧
     OperationalStoreProgress ProgramStore.empty := by
   intro hsource
   exact ⟨sourceInitialRuntimeState_valid hsource,
     sourceTerm_validStoreTyping_empty hsource,
-    safeAbstraction_empty,
+    fullSafeAbstraction_empty,
     wellFormedEnv_empty lifetime,
     operationalStoreProgress_empty⟩
 
@@ -202,14 +202,14 @@ theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-      ProgramStore.empty ∼ₛ Env.empty ∧
+      ProgramStore.empty ≈ₛ Env.empty ∧
       (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
       OperationalStoreProgress ProgramStore.empty ∧
       (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
   intro htyping
   exact ⟨emptyInitialRuntimeState_valid_of_typing htyping,
     emptyInitialValidStoreTyping_of_typing htyping,
-      safeAbstraction_empty,
+      fullSafeAbstraction_empty,
       wellFormedEnv_empty_all,
       operationalStoreProgress_empty,
       by
@@ -227,7 +227,7 @@ theorem sourceInitial_progress {term : Term} {lifetime : Lifetime}
     (sourceInitialState_valid hsource)
     (sourceTerm_validStoreTyping_empty hsource)
     (wellFormedEnv_empty _)
-    safeAbstraction_empty
+    fullSafeAbstraction_empty
     operationalStoreProgress_empty
     htyping
 
@@ -258,8 +258,8 @@ theorem emptyInitial_progress {term : Term} {lifetime : Lifetime}
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
       _hrefs⟩
-  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping (hwellFormed _).2
-    hsafe hstoreProgress htyping
+  exact typeAndBorrowProgress hvalidRuntime hvalidStoreTyping
+    (hwellFormed lifetime) fullSafeAbstraction_empty hstoreProgress htyping
 
 /--
 **Lemma 4.11.** Empty-initial Preservation for terminal multisteps, with all
@@ -267,16 +267,29 @@ initial runtime assumptions derived from typing.
 -/
 theorem emptyInitial_preservation {term : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} {finalStore : ProgramStore} {finalValue : Value} :
+      (∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
+        {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+        {ty : Ty} {finalValue : Value},
+        SourceTerm term →
+        ValidRuntimeState store term →
+        ValidStoreTyping store term typing →
+        WellFormedEnv env₁ lifetime →
+        BorrowSafeEnv env₁ →
+        store ≈ₛ env₁ →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        MultiStep store lifetime term finalStore (.val finalValue) →
+        FullTerminalStateSafe finalStore finalValue env₂ ty) →
       TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
-      TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hmulti
+      FullTerminalStateSafe finalStore finalValue env₂ ty := by
+  intro terminalSafety htyping hmulti
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, _hwellFormed, _hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact preservation hsource hvalidRuntime hvalidStoreTyping
-    (wellFormedEnv_empty lifetime) hsafe htyping hmulti
+  exact terminalSafety hsource hvalidRuntime hvalidStoreTyping
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty
+    fullSafeAbstraction_empty htyping hmulti
 
 /--
 **Lemma 4.11.** Empty-initial paper-facing Preservation wrapper.
@@ -287,9 +300,21 @@ premise: for empty source store typing, `SourceTerm` follows from typability by
 -/
 theorem lemma_4_11_preservation_emptyInitial {term : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} {finalStore : ProgramStore} {finalValue : Value} :
+      (∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
+        {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+        {ty : Ty} {finalValue : Value},
+        SourceTerm term →
+        ValidRuntimeState store term →
+        ValidStoreTyping store term typing →
+        WellFormedEnv env₁ lifetime →
+        BorrowSafeEnv env₁ →
+        store ≈ₛ env₁ →
+        TermTyping env₁ typing lifetime term ty env₂ →
+        MultiStep store lifetime term finalStore (.val finalValue) →
+        FullTerminalStateSafe finalStore finalValue env₂ ty) →
       TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
-      TerminalStateSafe finalStore finalValue env₂ ty :=
+      FullTerminalStateSafe finalStore finalValue env₂ ty :=
   emptyInitial_preservation
 
 /--
@@ -298,22 +323,34 @@ typed from the empty initial runtime state.
 -/
 theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
     {ty : Ty} {env₂ : Env} :
+    (∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
+      {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+      {ty : Ty} {finalValue : Value},
+      SourceTerm term →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      BorrowSafeEnv env₁ →
+      store ≈ₛ env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term finalStore (.val finalValue) →
+      FullTerminalStateSafe finalStore finalValue env₂ ty) →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     TerminatesAsValue ProgramStore.empty lifetime term →
     ProgressResult ProgramStore.empty lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hterminates
+          FullTerminalStateSafe finalStore finalValue env₂ ty := by
+  intro terminalSafety htyping hterminates
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
   rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
   exact ⟨typeAndBorrowProgress hvalidRuntime hvalidStoreTyping
-      (hwellFormed _).2 hsafe hstoreProgress htyping,
+      (hwellFormed lifetime) fullSafeAbstraction_empty hstoreProgress htyping,
     ⟨finalStore, finalValue, hmulti,
-      emptyInitial_preservation htyping hmulti⟩⟩
+      emptyInitial_preservation terminalSafety htyping hmulti⟩⟩
 
 /--
 **Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.
@@ -324,12 +361,24 @@ typability derives it.
 -/
 theorem theorem_4_12_typeAndBorrowSafety_emptyInitial {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
+    (∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
+      {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+      {ty : Ty} {finalValue : Value},
+      SourceTerm term →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      BorrowSafeEnv env₁ →
+      store ≈ₛ env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term finalStore (.val finalValue) →
+      FullTerminalStateSafe finalStore finalValue env₂ ty) →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     TerminatesAsValue ProgramStore.empty lifetime term →
     ProgressResult ProgramStore.empty lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₂ ty :=
+          FullTerminalStateSafe finalStore finalValue env₂ ty :=
   emptyInitial_typeAndBorrowSafety
 
 /-- **Lemma 4.10.** Empty-store/source-term non-terminal step corollary. -/
@@ -366,22 +415,28 @@ theorem sourceInitial_blockB_value_multistep_preservation
     TermTyping Env.empty StoreTyping.empty lifetime (.block blockLifetime [.val value]) ty env₂ →
     MultiStep ProgramStore.empty lifetime
       (.block blockLifetime [.val value]) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
-      ValidValue finalStore finalValue ty := by
+    FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource htyping hmulti
   have hsourceTerm : SourceTerm (.block blockLifetime [.val value]) := by
     intro candidate hmem
     simp [termValues] at hmem
     subst hmem
     exact hsource
-  exact preservation_blockB_value_multistep_runtime_no_slots
+  rcases preservation_blockB_value_multistep_runtime_no_slots
     (sourceInitialRuntimeState_valid hsourceTerm)
     safeAbstraction_empty
     htyping
     (empty_no_lifetime_slots blockLifetime)
     (sourceValue_validValue_of_empty_valueTyping hsource
       (blockValueTyping_valueTyping htyping))
-    hmulti
+    hmulti with
+    ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
+  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
+  exact ⟨hvalidFinal,
+    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
+      hsafeFinal,
+    hvalueFinal⟩
 
 /--
 **Lemma 4.11.** Source-initial multistep preservation for `box v` with a
@@ -393,21 +448,27 @@ theorem sourceInitial_box_value_multistep_preservation
     SourceValue value →
     TermTyping Env.empty StoreTyping.empty lifetime (.box (.val value)) (.box ty) env₂ →
     MultiStep ProgramStore.empty lifetime (.box (.val value)) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₂ ∧
-      ValidValue finalStore finalValue (.box ty) := by
+    FullTerminalStateSafe finalStore finalValue env₂ (.box ty) := by
   intro hsource htyping hmulti
   have hsourceTerm : SourceTerm (.box (.val value)) := by
     intro candidate hmem
     simp [termValues] at hmem
     subst hmem
     exact hsource
-  exact preservation_box_multistep_runtime
+  rcases preservation_box_multistep_runtime
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
       (term := .box (.val value)) hsourceTerm)
     safeAbstraction_empty
     (sourceInitialRuntimeState_valid hsourceTerm)
     htyping
-    hmulti
+    hmulti with
+    ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
+  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
+  exact ⟨hvalidFinal,
+    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
+      hsafeFinal,
+    hvalueFinal⟩
 
 /--
 **Lemma 4.11.** Source-initial multistep preservation for `let mut x = v` with a
@@ -420,21 +481,27 @@ theorem sourceInitial_declare_value_multistep_preservation
     TermTyping Env.empty StoreTyping.empty lifetime (.letMut x (.val value)) .unit env₃ →
     MultiStep ProgramStore.empty lifetime
       (.letMut x (.val value)) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ₛ env₃ ∧
-      ValidValue finalStore finalValue .unit := by
+    FullTerminalStateSafe finalStore finalValue env₃ .unit := by
   intro hsource htyping hmulti
   have hsourceTerm : SourceTerm (.letMut x (.val value)) := by
     intro candidate hmem
     simp [termValues] at hmem
     subst hmem
     exact hsource
-  exact preservation_declare_multistep_runtime
+  rcases preservation_declare_multistep_runtime
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
       (term := .letMut x (.val value)) hsourceTerm)
     fullSafeAbstraction_empty
     (sourceInitialRuntimeState_valid hsourceTerm)
     htyping
-    hmulti
+    hmulti with
+    ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
+  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
+  exact ⟨hvalidFinal,
+    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
+      hsafeFinal,
+    hvalueFinal⟩
 
 /--
 **Lemma 4.11.** Source-level terminal preservation base case, where the program
@@ -446,33 +513,47 @@ theorem sourceInitial_multistep_value_preservation
     SourceValue value →
     TermTyping Env.empty StoreTyping.empty lifetime (.val value) ty env₂ →
     MultiStep ProgramStore.empty lifetime (.val value) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧
-      finalStore ∼ₛ env₂ ∧
-      ValidValue finalStore finalValue ty := by
+    FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource htyping hmulti
   have hsourceTerm : SourceTerm (.val value) := by
     intro candidate hmem
     simp [termValues] at hmem
     subst hmem
     exact hsource
-  exact preservation_multistep_runtime_value
+  rcases preservation_multistep_runtime_value
     (sourceInitialRuntimeState_valid hsourceTerm)
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
       (term := .val value) hsourceTerm)
     safeAbstraction_empty
     htyping
-    hmulti
+    hmulti with
+    ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
+  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
+  exact ⟨hvalidFinal,
+    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
+      hsafeFinal,
+    hvalueFinal⟩
 
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried route. -/
+theorem sourceInitial_borrowInvariance_full {term : Term} {env₂ : Env}
+    {lifetime : Lifetime} {ty : Ty} :
+    SourceTerm term →
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    WellFormedEnv env₂ lifetime := by
+  intro hsource htyping
+  exact (typingPreservesWellFormed_of_sourceTerm hsource
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping).1
+
+/-- **Lemma 4.9.** Compatibility form of source-initial borrow invariance. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hsource htyping
-  exact (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
-    (WellFormedEnv.whenInitialized (wellFormedEnv_empty lifetime))
-    htyping).1
+  exact WellFormedEnv.whenInitialized
+    (sourceInitial_borrowInvariance_full hsource htyping)
 
 /--
 **Theorem 4.12.** Source-initial conditional type-and-borrow safety bridge from
@@ -484,19 +565,19 @@ theorem sourceInitial_typeAndBorrowSafety_of_preservation
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       (∀ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) →
-        TerminalStateSafe finalStore finalValue env₂ ty) →
+        FullTerminalStateSafe finalStore finalValue env₂ ty) →
       TerminatesAsValue ProgramStore.empty lifetime term →
       ProgressResult ProgramStore.empty lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime term finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₂ ty := by
+          FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource htyping hpreservation hterminates
   rcases hterminates with ⟨finalStore, finalValue, hmulti⟩
   exact ⟨typeAndBorrowProgress
       (sourceInitialRuntimeState_valid hsource)
       (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty) hsource)
-      (wellFormedEnv_empty _).2
-      safeAbstraction_empty
+      (wellFormedEnv_empty lifetime)
+      fullSafeAbstraction_empty
       operationalStoreProgress_empty
       htyping,
     ⟨finalStore, finalValue, hmulti,
@@ -513,7 +594,7 @@ theorem sourceInitial_value_typeAndBorrowSafety
     ProgressResult ProgramStore.empty lifetime (.val value) ∧
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime (.val value) finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₂ ty := by
+          FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource htyping
   have hsourceTerm : SourceTerm (.val value) := by
     intro candidate hmem
@@ -525,9 +606,7 @@ theorem sourceInitial_value_typeAndBorrowSafety
     htyping
     (by
       intro finalStore finalValue hmulti
-      rcases sourceInitial_multistep_value_preservation hsource htyping hmulti with
-        ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-      exact ⟨hvalidFinal, hsafeFinal, hvalueFinal.whenInitialized⟩)
+      exact sourceInitial_multistep_value_preservation hsource htyping hmulti)
     ⟨ProgramStore.empty, value, MultiStep.refl⟩
 
 /--
@@ -543,7 +622,7 @@ theorem sourceInitial_blockB_value_typeAndBorrowSafety
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime
             (.block blockLifetime [.val value]) finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₂ ty := by
+          FullTerminalStateSafe finalStore finalValue env₂ ty := by
   intro hsource htyping
   have hsourceTerm : SourceTerm (.block blockLifetime [.val value]) := by
     intro candidate hmem
@@ -556,9 +635,8 @@ theorem sourceInitial_blockB_value_typeAndBorrowSafety
     htyping
     (by
       intro finalStore finalValue hmulti
-      rcases sourceInitial_blockB_value_multistep_preservation hsource htyping hmulti with
-        ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-      exact ⟨hvalidFinal, hsafeFinal, hvalueFinal.whenInitialized⟩)
+      exact sourceInitial_blockB_value_multistep_preservation
+        hsource htyping hmulti)
     ⟨storeAfterDrop, value,
       MultiStep.trans (Step.blockB (lifetime := lifetime) hdrops) MultiStep.refl⟩
 
@@ -573,7 +651,7 @@ theorem sourceInitial_box_value_typeAndBorrowSafety
     ProgressResult ProgramStore.empty lifetime (.box (.val value)) ∧
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime (.box (.val value)) finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₂ (.box ty) := by
+          FullTerminalStateSafe finalStore finalValue env₂ (.box ty) := by
   intro hsource htyping
   have hsourceTerm : SourceTerm (.box (.val value)) := by
     intro candidate hmem
@@ -586,9 +664,7 @@ theorem sourceInitial_box_value_typeAndBorrowSafety
     htyping
     (by
       intro finalStore finalValue hmulti
-      rcases sourceInitial_box_value_multistep_preservation hsource htyping hmulti with
-        ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-      exact ⟨hvalidFinal, hsafeFinal, hvalueFinal.whenInitialized⟩)
+      exact sourceInitial_box_value_multistep_preservation hsource htyping hmulti)
     ⟨boxed.1, .ref boxed.2,
       MultiStep.trans
         (Step.box (address := 0) (ref := boxed.2)
@@ -607,7 +683,7 @@ theorem sourceInitial_declare_value_typeAndBorrowSafety
     ProgressResult ProgramStore.empty lifetime (.letMut x (.val value)) ∧
         ∃ finalStore finalValue,
           MultiStep ProgramStore.empty lifetime (.letMut x (.val value)) finalStore (.val finalValue) ∧
-          TerminalStateSafe finalStore finalValue env₃ .unit := by
+          FullTerminalStateSafe finalStore finalValue env₃ .unit := by
   intro hsource htyping
   have hsourceTerm : SourceTerm (.letMut x (.val value)) := by
     intro candidate hmem
@@ -619,9 +695,8 @@ theorem sourceInitial_declare_value_typeAndBorrowSafety
     htyping
     (by
       intro finalStore finalValue hmulti
-      rcases sourceInitial_declare_value_multistep_preservation hsource htyping hmulti with
-        ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-      exact ⟨hvalidFinal, hsafeFinal, hvalueFinal.whenInitialized⟩)
+      exact sourceInitial_declare_value_multistep_preservation
+        hsource htyping hmulti)
     ⟨ProgramStore.empty.declare x lifetime value, .unit,
       MultiStep.trans (Step.declare (lifetime := lifetime) rfl) MultiStep.refl⟩
 
@@ -639,9 +714,17 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
       TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hsource htyping
-  exact (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
-    (WellFormedEnv.whenInitialized (wellFormedEnv_empty lifetime))
-    htyping).1
+  exact WellFormedEnv.whenInitialized
+    (sourceInitial_borrowInvariance_full hsource htyping)
+
+theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence_full
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
+      :
+      SourceTerm term →
+      TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+      WellFormedEnv env₂ lifetime := by
+  intro hsource htyping
+  exact sourceInitial_borrowInvariance_full hsource htyping
 
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried obligation route. -/
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
@@ -650,9 +733,16 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
       TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
       WellFormedEnvWhenInitialized env₂ lifetime := by
   intro hsource htyping
-  exact (typingPreservesWellFormedWhenInitialized_of_sourceTerm hsource
-    (WellFormedEnv.whenInitialized (wellFormedEnv_empty lifetime))
-    htyping).1
+  exact WellFormedEnv.whenInitialized
+    (sourceInitial_borrowInvariance_full hsource htyping)
+
+theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations_full
+      {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
+      SourceTerm term →
+      TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+      WellFormedEnv env₂ lifetime := by
+  intro hsource htyping
+  exact sourceInitial_borrowInvariance_full hsource htyping
 
 /--
 **Theorem 4.12, empty-initial terminal-safety form.**  Any term typed from the
@@ -660,28 +750,37 @@ empty initial environment and store typing has a safe terminal state.
 -/
 theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
+    (∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
+      {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+      {ty : Ty} {finalValue : Value},
+      SourceTerm term →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      BorrowSafeEnv env₁ →
+      store ≈ₛ env₁ →
+      TermTyping env₁ typing lifetime term ty env₂ →
+      MultiStep store lifetime term finalStore (.val finalValue) →
+      FullTerminalStateSafe finalStore finalValue env₂ ty) →
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     ∃ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore
           (.val finalValue) ∧
-        TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping
+        FullTerminalStateSafe finalStore finalValue env₂ ty := by
+  intro terminalSafety htyping
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  rcases terminatesAsValue
-      (fun hsource' hvalidRuntime' hvalidStoreTyping' hwellFormed' hsafe'
-        htyping' hmulti' =>
-          (preservation hsource' hvalidRuntime' hvalidStoreTyping'
-            (wellFormedEnv_empty lifetime)
-            hsafe' htyping' hmulti'))
+  rcases terminatesAsValue terminalSafety
       hsource hvalidRuntime hvalidStoreTyping
-      (WellFormedEnv.whenInitialized (hwellFormed lifetime))
-      hsafe ProgramStore.finiteSupport_empty htyping with
+      (hwellFormed lifetime) borrowSafeEnv_empty fullSafeAbstraction_empty
+      ProgramStore.finiteSupport_empty htyping with
     ⟨finalStore, finalValue, hmulti⟩
   exact ⟨finalStore, finalValue, hmulti,
-    emptyInitial_preservation htyping hmulti⟩
+    terminalSafety hsource hvalidRuntime hvalidStoreTyping
+      (hwellFormed lifetime) borrowSafeEnv_empty fullSafeAbstraction_empty
+      htyping hmulti⟩
 
 end Paper
 end LwRust

@@ -32,6 +32,29 @@ theorem FullTerminalStateSafe.whenInitialized {store : ProgramStore}
   exact ⟨hterminal.1, hterminal.2.1.whenInitialized,
     hterminal.2.2.whenInitialized⟩
 
+theorem TerminalStateSafe.full_of_wellFormed {store : ProgramStore}
+    {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
+    TerminalStateSafe store value env ty →
+    WellFormedEnv env lifetime →
+    WellFormedTy env ty lifetime →
+    FullTerminalStateSafe store value env ty := by
+  intro hterminal hwell hwellTy
+  exact ⟨hterminal.1,
+    SafeAbstraction.full_of_containedBorrowsWellFormed hwell.1
+      hterminal.2.1,
+    hterminal.2.2.toFull_of_borrowsWellFormed
+      (PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellTy)⟩
+
+theorem FullTerminalStateSafe.transport_env_pointwise
+    {store : ProgramStore} {value : Value} {env result : Env} {ty : Ty}
+    (heq : ∀ y, result.slotAt y = env.slotAt y) :
+    FullTerminalStateSafe store value env ty →
+    FullTerminalStateSafe store value result ty := by
+  intro hterminal
+  exact ⟨hterminal.1,
+    FullSafeAbstraction.transport_pointwise heq hterminal.2.1,
+    hterminal.2.2⟩
+
 def EnvSameShapeStrengthening (source result : Env) : Prop :=
   (∀ x resultSlot,
     result.slotAt x = some resultSlot →
