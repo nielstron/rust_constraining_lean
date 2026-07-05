@@ -12460,6 +12460,19 @@ theorem EnvWrite.hop_nested_slot_preserved
     · rw [hne lhsCur (fun h => hbb h.symm)]
       exact hslot
 
+/-- The traversed borrow-hop spine of an environment write: the written
+lvalue reduces to the final pure lvalue through a sequence of mutable-borrow
+hops.  Each hop records the hop-free descent prefix `s₀` (typed at the hop
+annotation), the annotation's containment at the base slot, and the remaining
+path that re-roots at the hop target. -/
+inductive HopsTo (env : Env) : LVal → LVal → Prop where
+  | refl {lv : LVal} : HopsTo env lv lv
+  | hop {s₀ target final : LVal} {lf : Lifetime} {p : Path} :
+      LValTyping env s₀ (.ty (.borrow true target)) lf →
+      env ⊢ (LVal.base s₀) ↝ (.borrow true target) →
+      HopsTo env (prependPath p target) final →
+      HopsTo env (prependPath p s₀.deref) final
+
 /-- The final pure write selected by iterating borrow-hop reduction.  Any
 environment write under the top-level rule premises reduces to a pure
 (`PathSelect`) write over the same runtime location whose result is pointwise
@@ -12475,10 +12488,11 @@ def SelectFinalPackage (store : ProgramStore) (env env₃ : Env)
     LValTyping env finalLhs oldTy targetLifetime ∧
     store.loc lv = store.loc finalLhs ∧
     ChainGuard env (LVal.base lhsTop) (LVal.base finalLhs) ∧
-    (finalLhs = lv ∨
+    ((finalLhs = lv ∨
       ∃ (holder : Name) (path' : Path) (target' : LVal),
         env ⊢ holder ↝ (.borrow true target') ∧
-        finalLhs = prependPath path' target')
+        finalLhs = prependPath path' target') ∧
+      HopsTo env lv finalLhs)
 
 theorem EnvWrite.select_final
     {store : ProgramStore} {env env₃ : Env} {lhsTop : LVal}
@@ -12614,9 +12628,9 @@ theorem EnvWrite.select_final
     rcases hfinal with
       ⟨finalLhs, rootSlot', nestedEnv, leaf, henvFinal, hselectFinal,
         hwriteFinal, hpointFinal, htypingFinal, hlocFinal, hguardFinal,
-        hlast⟩
+        hlast, hhops⟩
     refine ⟨finalLhs, rootSlot', nestedEnv, leaf, henvFinal, hselectFinal,
-      hwriteFinal, hpointFinal, htypingFinal, ?_, hguardFinal, ?_⟩
+      hwriteFinal, hpointFinal, htypingFinal, ?_, hguardFinal, ?_, ?_⟩
     · calc store.loc (prependPath (() :: path) wcur)
           = store.loc (prependPath path wcur.deref) := by rw [hpathEq]
         _ = store.loc (prependPath path target) := hloc
@@ -12624,6 +12638,8 @@ theorem EnvWrite.select_final
     · rcases hlast with hEq | hHop
       · exact Or.inr ⟨LVal.base wcur, path, target, hannBase, hEq⟩
       · exact Or.inr hHop
+    · rw [← hpathEq]
+      exact HopsTo.hop hwcur hannBase hhops
   case intro =>
     intro _env₂ lv slot ty updatedTy hslot hupdate ih hlv hguard hshapePt
       hpoint
@@ -12642,7 +12658,7 @@ theorem EnvWrite.select_final
     · rcases hselect with ⟨leaf, hselect⟩
       exact ⟨lv, slot, _env₂.update (LVal.base lv) { slot with ty := updatedTy },
         leaf, hslot, hselect, EnvWrite.intro hslot hupdate, hpoint, hlv,
-        rfl, hguard, Or.inl rfl⟩
+        rfl, hguard, Or.inl rfl, HopsTo.refl⟩
     · have hslotEta : { slot with ty := updatedTy } = slot := by
         rw [hupdEq]
       have hp :
