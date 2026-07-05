@@ -13,7 +13,9 @@ There is no `sorry`, `admit`, Lean `axiom`, or other proof escape hatch in
 The formalization now covers **exactly the paper's core calculus** (Figure 1):
 the Section 6.1 extension (booleans, equality, conditionals) and the synthetic
 diverging `missing` placeholder that earlier versions carried have been
-removed, along with the extractor subsystem that depended on `missing`.
+removed.  The restored extractor subsystem is cut back to the current core
+syntax and uses the core `ϵ`/unit term for expression holes while omitting
+unavailable statement-position fragments, rather than reintroducing `missing`.
 Consequently there are no environment joins from control flow, and the
 termination of the core calculus is unconditional: every reduction step
 strictly decreases term size (`step_size_lt`), and Theorem 4.12's total form

@@ -459,31 +459,6 @@ def derive_states(
                     Rule(prod, sname, fields, None, prefix_len, field_map)
                 )
 
-    # A bare lvalue is itself a complete term via move, so the same `lval ...`
-    # frontier can also be completed as the left-hand side of equality.
-    lval_eq_prod = Production(
-        name="ctermEq",
-        target_cat="cterm",
-        elems=[
-            Elem("cat", "clval", "clval"),
-            Elem("token", "\"==\""),
-            Elem("cat", "cterm", "cterm"),
-        ],
-        ast="SyntaxCtor.ctermEq_ctor (SyntaxCtor.ctermMove_ctor {lval}) {rhs}",
-        field_names=["lval", "rhs"],
-        field_types=["LVal", "Term"],
-    )
-    lval_fields = [("lval", "PartialLVal")]
-    add_state(states["cterm"], "lvalStart", lval_fields)
-    rules["cterm"].append(
-        Rule(
-            lval_eq_prod,
-            "lvalStart",
-            lval_fields,
-            0,
-            field_map=(("lval", "lval"),),
-        )
-    )
     return states, rules
 
 
@@ -709,6 +684,12 @@ def validate_generated_metadata(
 
 def render_generated() -> str:
     productions = parse_syntax_rules()
+    used_list_cats = {
+        elem.cat
+        for prod in productions
+        for elem in prod.elems
+        if elem.kind == "list"
+    }
     states, rules = derive_states(productions)
     metadata = state_metadata(rules)
     validate_generated_metadata(productions, metadata, rules)
@@ -724,6 +705,8 @@ def render_generated() -> str:
         "",
     ]
     for cat in LIST_CATS:
+        if cat not in used_list_cats:
+            continue
         lines.extend(render_list_inductive(cat))
         lines.append("")
     for cat in CATS:
@@ -748,6 +731,8 @@ def render_generated() -> str:
         ]
     )
     for cat in LIST_CATS:
+        if cat not in used_list_cats:
+            continue
         lines.extend(render_list_relation(cat))
         lines.append("")
     for cat in CATS:
