@@ -7915,6 +7915,92 @@ theorem PathSelect.update_borrows {env env₂ : Env}
           exact ih hupdateInner
             (PartialTyContains.partialTyRebox_borrow_inv hcontains)
 
+/-- Snoc decomposition of a pure selection: the last step descends either a
+partial box or a full box from the second-to-last node. -/
+theorem PathSelect.snoc_inv :
+    ∀ {path : Path} {root leaf : PartialTy},
+      PathSelect (path ++ [()]) root leaf →
+      ∃ mid, PathSelect path root mid ∧
+        (mid = .box leaf ∨ ∃ T, mid = .ty (.box T) ∧ leaf = .ty T) := by
+  intro path
+  induction path with
+  | nil =>
+      intro root leaf hselect
+      cases hselect with
+      | box hinner =>
+          cases hinner
+          exact ⟨_, PathSelect.here, Or.inl rfl⟩
+      | boxFull hinner =>
+          cases hinner
+          exact ⟨_, PathSelect.here, Or.inr ⟨_, rfl, rfl⟩⟩
+  | cons _ p ih =>
+      intro root leaf hselect
+      cases hselect with
+      | box hinner =>
+          rcases ih hinner with ⟨mid, hmid, hshape⟩
+          exact ⟨mid, PathSelect.box hmid, hshape⟩
+      | boxFull hinner =>
+          rcases ih hinner with ⟨mid, hmid, hshape⟩
+          exact ⟨mid, PathSelect.boxFull hmid, hshape⟩
+
+/-- A typing derivation and a pure selection over the same lvalue path from
+the same base slot compute the same partial type.  In particular a selectable
+lvalue never types through a borrow hop. -/
+theorem LValTyping.pathSelect_deterministic {env : Env} :
+    ∀ {lv : LVal} {pt mid : PartialTy} {lf : Lifetime} {slot : EnvSlot},
+      LValTyping env lv pt lf →
+      env.slotAt (LVal.base lv) = some slot →
+      PathSelect (LVal.path lv) slot.ty mid →
+      pt = mid := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro pt mid lf slot htyping hslot hselect
+      rcases LValTyping.var_inv htyping with ⟨envSlot, henvSlot, htyEq, _⟩
+      have hslotEq : slot = envSlot :=
+        Option.some.inj
+          ((by simpa [LVal.base] using hslot :
+              env.slotAt x = some slot).symm.trans henvSlot)
+      subst hslotEq
+      have hmid : mid = slot.ty := by
+        cases hselect
+        rfl
+      rw [htyEq, hmid]
+  | deref source ih =>
+      intro pt mid lf slot htyping hslot hselect
+      have hselect' : PathSelect (LVal.path source ++ [()]) slot.ty mid := by
+        simpa [LVal.path] using hselect
+      rcases PathSelect.snoc_inv hselect' with ⟨midp, hmidp, hshape⟩
+      cases htyping with
+      | box hsource =>
+          have hsourceEq : PartialTy.box pt = midp :=
+            ih hsource (by simpa [LVal.base] using hslot) hmidp
+          rcases hshape with hbox | ⟨T, htyBox, _hleaf⟩
+          · rw [hbox] at hsourceEq
+            cases hsourceEq
+            rfl
+          · rw [htyBox] at hsourceEq
+            cases hsourceEq
+      | boxFull hsource =>
+          rename_i inner
+          have hsourceEq : PartialTy.ty (.box inner) = midp :=
+            ih hsource (by simpa [LVal.base] using hslot) hmidp
+          rcases hshape with hbox | ⟨T, htyBox, hleaf⟩
+          · rw [hbox] at hsourceEq
+            cases hsourceEq
+          · rw [htyBox] at hsourceEq
+            cases hsourceEq
+            rw [hleaf]
+      | borrow hsource _htarget =>
+          have hsourceEq :
+              PartialTy.ty (.borrow _ _) = midp :=
+            ih hsource (by simpa [LVal.base] using hslot) hmidp
+          rcases hshape with hbox | ⟨T, htyBox, _hleaf⟩
+          · rw [hbox] at hsourceEq
+            cases hsourceEq
+          · rw [htyBox] at hsourceEq
+            cases hsourceEq
+
 theorem WriteProhibited.transport_of_pointwise {env result : Env} {lv : LVal}
     (heq : ∀ y, result.slotAt y = env.slotAt y) :
     WriteProhibited env lv → WriteProhibited result lv := by
