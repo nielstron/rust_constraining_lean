@@ -265,6 +265,12 @@ the singleton block lifetime-drop runtime preservation helper:
   `locReads_ne_ownsChain_leaf`, and the target-outside guarded-leaf reach
   twins `borrowDependencyWhenInitialized_chain_leaf_ne_of_target_outside` and
   `reachesWhenInitialized_chain_leaf_ne_of_target_outside`.
+- Added and compiled the Round 22 reads telescope support:
+  `PathSelect.borrow_contains_to_leaf`, `PathSelect.append_inv`,
+  `locReads_prependPath_of_locReads`, `locReads_prependPath_hop`, and
+  `HopsTo.locReads_ne_of_links_clean`.  These transport read exclusion back
+  over a mutable-borrow hop spine once each clean hop link excludes source
+  reads/base locations and the final lvalue excludes the guarded leaf.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;

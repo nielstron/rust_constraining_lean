@@ -7817,6 +7817,46 @@ theorem PathSelect.contains_of_leaf :
       intro hcontains
       exact PartialTyContains.tyBox (ih hcontains)
 
+theorem PathSelect.borrow_contains_to_leaf :
+    ∀ {path : Path} {root leafTy : PartialTy} {mutable : Bool} {u : LVal},
+      PathSelect path root leafTy →
+      PartialTyContains root (.borrow mutable u) →
+      PartialTyContains leafTy (.borrow mutable u) := by
+  intro path root leafTy mutable u hselect
+  induction hselect with
+  | here =>
+      intro hcontains
+      exact hcontains
+  | box _hinner ih =>
+      intro hcontains
+      cases hcontains with
+      | box hinner =>
+          exact ih hinner
+  | boxFull _hinner ih =>
+      intro hcontains
+      cases hcontains with
+      | tyBox hinner =>
+          exact ih hinner
+
+theorem PathSelect.append_inv :
+    ∀ {p₁ p₂ : Path} {root leaf : PartialTy},
+      PathSelect (p₁ ++ p₂) root leaf →
+      ∃ mid, PathSelect p₁ root mid ∧ PathSelect p₂ mid leaf := by
+  intro p₁
+  induction p₁ with
+  | nil =>
+      intro p₂ root leaf hselect
+      exact ⟨root, PathSelect.here, by simpa using hselect⟩
+  | cons _ p ih =>
+      intro p₂ root leaf hselect
+      cases hselect with
+      | box hinner =>
+          rcases ih hinner with ⟨mid, hprefix, hsuffix⟩
+          exact ⟨mid, PathSelect.box hprefix, hsuffix⟩
+      | boxFull hinner =>
+          rcases ih hinner with ⟨mid, hprefix, hsuffix⟩
+          exact ⟨mid, PathSelect.boxFull hprefix, hsuffix⟩
+
 theorem PathSelect.snoc_box :
     ∀ {path : Path} {root inner : PartialTy},
     PathSelect path root (.box inner) →
@@ -8319,6 +8359,54 @@ theorem ProgramStore.loc_prependPath_eq_of_loc_eq
   | cons head tail ih =>
       cases head
       simp [prependPath, ProgramStore.loc, ih]
+
+theorem locReads_prependPath_of_locReads {store : ProgramStore} :
+    ∀ (p : Path) {lv : LVal} {mid : Location},
+      RuntimeFrame.LocReads store lv mid →
+      RuntimeFrame.LocReads store (prependPath p lv) mid := by
+  intro p
+  induction p with
+  | nil =>
+      intro lv mid hread
+      simpa [prependPath] using hread
+  | cons _ p ih =>
+      intro lv mid hread
+      exact RuntimeFrame.LocReads.there (ih hread)
+
+theorem locReads_prependPath_hop {store : ProgramStore} {s₀ target : LVal}
+    (hloc : store.loc s₀.deref = store.loc target) :
+    ∀ (p : Path) {mid : Location},
+      RuntimeFrame.LocReads store (prependPath p s₀.deref) mid →
+      RuntimeFrame.LocReads store s₀ mid ∨
+        store.loc s₀ = some mid ∨
+        RuntimeFrame.LocReads store (prependPath p target) mid := by
+  intro p
+  induction p with
+  | nil =>
+      intro mid hread
+      simp [prependPath] at hread
+      cases hread with
+      | here hsource =>
+          exact Or.inr (Or.inl hsource)
+      | there hsource =>
+          exact Or.inl hsource
+  | cons _ p ih =>
+      intro mid hread
+      cases hread with
+      | here hsource =>
+          have hlocPath :
+              store.loc (prependPath p s₀.deref) =
+                store.loc (prependPath p target) :=
+            ProgramStore.loc_prependPath_eq_of_loc_eq hloc p
+          have htarget :
+              store.loc (prependPath p target) = some mid := by
+            rwa [hlocPath] at hsource
+          exact Or.inr (Or.inr (RuntimeFrame.LocReads.here htarget))
+      | there hsource =>
+          rcases ih hsource with hbaseReads | hbaseLoc | htargetReads
+          · exact Or.inl hbaseReads
+          · exact Or.inr (Or.inl hbaseLoc)
+          · exact Or.inr (Or.inr (RuntimeFrame.LocReads.there htargetReads))
 
 theorem ProgramStore.read_eq_of_loc_eq
     {store : ProgramStore} {left right : LVal} :
@@ -12475,6 +12563,42 @@ inductive HopsTo (env env₃ : Env) : LVal → LVal → Prop where
       env₃.slotAt (LVal.base s₀) = env.slotAt (LVal.base s₀) →
       HopsTo env env₃ (prependPath p target) final →
       HopsTo env env₃ (prependPath p s₀.deref) final
+
+theorem HopsTo.locReads_ne_of_links_clean
+    {env env₃ : Env} {store : ProgramStore} {leaf : Location}
+    (hsafe : SafeAbstraction store env)
+    (hcbwf : ContainedBorrowsWellFormed env) :
+    ∀ {lv final : LVal},
+      HopsTo env env₃ lv final →
+      (∀ {s₀ target : LVal} {slotH : EnvSlot} {lf : Lifetime},
+        env.slotAt (LVal.base s₀) = some slotH →
+        PathSelect (LVal.path s₀) slotH.ty (.ty (.borrow true target)) →
+        LValTyping env s₀ (.ty (.borrow true target)) lf →
+        (∀ mid, RuntimeFrame.LocReads store s₀ mid → mid ≠ leaf) ∧
+          store.loc s₀ ≠ some leaf) →
+      (∀ mid, RuntimeFrame.LocReads store final mid → mid ≠ leaf) →
+      ∀ mid, RuntimeFrame.LocReads store lv mid → mid ≠ leaf := by
+  intro lv final hhops
+  induction hhops with
+  | refl =>
+      intro _hlinks hfinal mid hread
+      exact hfinal mid hread
+  | hop henvH hsel htyping _hcont _henv₃ tail ih =>
+      intro hlinks hfinal mid hread
+      rcases LValTyping.partialTyBorrowsWellFormedInSlot hcbwf htyping
+          PartialTyContains.here with
+        ⟨targetTy, targetLifetime', htargetTyping, _houtlives, _hbase⟩
+      have hloc :
+          store.loc _ = store.loc _ :=
+        lvalTyping_deref_borrow_loc_eq_whenInitialized hsafe htyping
+          htargetTyping
+      rcases locReads_prependPath_hop hloc _ hread with
+        hsourceReads | hsourceLoc | htargetReads
+      · exact (hlinks henvH hsel htyping).1 mid hsourceReads
+      · intro hmidEq
+        exact (hlinks henvH hsel htyping).2
+          (by simpa [hmidEq] using hsourceLoc)
+      · exact ih hlinks hfinal mid htargetReads
 
 /-- The final pure write selected by iterating borrow-hop reduction.  Any
 environment write under the top-level rule premises reduces to a pure
