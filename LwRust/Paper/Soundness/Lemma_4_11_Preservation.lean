@@ -8182,6 +8182,69 @@ theorem LValTyping.box_pathSelect {env : Env} :
             ih hsource (by simpa [LVal.base] using hslot)
           simpa [LVal.path] using PathSelect.snoc_box hsourceSelect
 
+/-- A full-box lvalue is either reached through an owner-only selected path
+from its base slot, or its first non-owner hop is an explicit mutable-borrow
+descent.  This is the structural split needed by dereference assignment: the
+left branch is handled by the pure `PathSelect` helper, while the right branch
+is the remaining re-rooting case. -/
+theorem LValTyping.tyBox_pathSelect_or_borrow {env : Env} :
+    ∀ {lv : LVal} {inner : Ty} {lifetime : Lifetime}
+      {slot : EnvSlot},
+      LValTyping env lv (.ty (.box inner)) lifetime →
+      env.slotAt (LVal.base lv) = some slot →
+      PathSelect (LVal.path lv) slot.ty (.ty (.box inner)) ∨
+        ∃ (pref : Path) (source target : LVal) (mutable : Bool)
+          (borrowLifetime targetLifetime : Lifetime) (targetTy : Ty),
+          lv = prependPath pref source.deref ∧
+          LValTyping env source (.ty (.borrow mutable target))
+            borrowLifetime ∧
+          LValTyping env target (.ty targetTy) targetLifetime ∧
+          LValTyping env (prependPath pref target) (.ty (.box inner))
+            lifetime := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro inner lifetime slot htyping hslot
+      rcases LValTyping.var_inv htyping with
+        ⟨envSlot, henvSlot, htyEq, _hlifetimeEq⟩
+      have hslotEq : slot = envSlot :=
+        Option.some.inj (hslot.symm.trans henvSlot)
+      subst hslotEq
+      left
+      rw [← htyEq]
+      exact PathSelect.here
+  | deref source ih =>
+      intro inner lifetime slot htyping hslot
+      cases htyping with
+      | box hsource =>
+          have hsourceSelect :
+              PathSelect (LVal.path source) slot.ty
+                (.box (.ty (.box inner))) :=
+            LValTyping.box_pathSelect hsource
+              (by simpa [LVal.base] using hslot)
+          left
+          simpa [LVal.path] using PathSelect.snoc_box hsourceSelect
+      | boxFull hsource =>
+          rcases ih hsource (by simpa [LVal.base] using hslot) with
+            hselect | hhop
+          · left
+            simpa [LVal.path] using PathSelect.snoc_boxFull hselect
+          · rcases hhop with
+              ⟨pref, hopSource, target, mutable, borrowLifetime,
+                targetLifetime, targetTy, hsourceEq, hhopTyping,
+                htargetTyping, hretypedTarget⟩
+            right
+            refine ⟨() :: pref, hopSource, target, mutable,
+              borrowLifetime, targetLifetime, targetTy, ?_, hhopTyping,
+              htargetTyping, ?_⟩
+            · rw [hsourceEq]
+              rfl
+            · simpa [prependPath] using LValTyping.boxFull hretypedTarget
+      | borrow hsource htarget =>
+          right
+          exact ⟨[], source, _, _, _, _, .box inner, rfl,
+            hsource, htarget, by simpa [prependPath] using htarget⟩
+
 theorem EnvWrite.deref_box_update_eq {env env' : Env} {source : LVal}
     {oldTy : PartialTy} {targetLifetime : Lifetime} {rhsTy : Ty} :
     LValTyping env source (.box oldTy) targetLifetime →
@@ -11302,6 +11365,58 @@ theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFo
                   exact ⟨y, otherEnvSlot, henvY', hcontains⟩)
                 hownerNoReachOld hreach
             simpa [hderefLoc] using hne)
+
+/-- Full-box dereference assignment on the owner-only branch of the lvalue
+descent.  The only excluded case is the explicit mutable-borrow hop produced by
+`LValTyping.tyBox_pathSelect_or_borrow`; that is the re-rooting branch still
+needed for the fully general helper. -/
+theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed_of_no_borrow_hop
+    {store store' : ProgramStore} {env env' : Env}
+    {lifetime sourceLifetime : Lifetime} {source : LVal}
+    {oldTy : Ty} {value finalValue : Value} {rhsTy : Ty} :
+    WellFormedEnv env lifetime →
+    BorrowSafeEnv env →
+    TyBorrowSafeAgainstEnv env rhsTy →
+    SafeAbstraction store env →
+    ValidRuntimeState store (.assign source.deref (.val value)) →
+    LValTyping env source (.ty (.box oldTy)) sourceLifetime →
+    ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
+    WellFormedTy env rhsTy sourceLifetime →
+    EnvWrite env source.deref rhsTy env' →
+    ¬ WriteProhibited env' source.deref →
+    WellFormedEnv env' lifetime →
+    (∀ {pref : Path} {hopSource target : LVal} {mutable : Bool}
+      {borrowLifetime hopTargetLifetime : Lifetime} {hopTargetTy : Ty},
+      source = prependPath pref hopSource.deref →
+      LValTyping env hopSource (.ty (.borrow mutable target))
+        borrowLifetime →
+      LValTyping env target (.ty hopTargetTy) hopTargetLifetime →
+      LValTyping env (prependPath pref target) (.ty (.box oldTy))
+        sourceLifetime →
+      False) →
+    ValidPartialValueWhenInitialized env store (.value value) (.ty rhsTy) →
+    Step store lifetime (.assign source.deref (.val value)) store'
+      (.val finalValue) →
+    TerminalStateSafe store' finalValue env' .unit := by
+  intro hwell hborrowSafe htySafe hsafe hvalidRuntime hsourceFull hshape
+    hwellTy hwriteEnv hnotWrite hwellOut hnoBorrowHop hvalidValue hstep
+  exact
+    preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed_of_select
+      hwell hborrowSafe htySafe hsafe hvalidRuntime hsourceFull hshape
+      hwellTy hwriteEnv hnotWrite hwellOut
+      (by
+        intro slot hslot
+        rcases LValTyping.tyBox_pathSelect_or_borrow hsourceFull hslot with
+          hselect | hhop
+        · exact hselect
+        · rcases hhop with
+            ⟨pref, hopSource, target, mutable, borrowLifetime,
+              hopTargetLifetime, hopTargetTy, hsourceEq, hhopTyping,
+              htargetTyping, hretypedTarget⟩
+          exact False.elim
+            (hnoBorrowHop hsourceEq hhopTyping htargetTyping
+              hretypedTarget))
+      hvalidValue hstep
 
 /-- **Chain-entry forcing in the result environment.**  Any borrow annotation
 of the post-write environment that targets into the write chain is a source

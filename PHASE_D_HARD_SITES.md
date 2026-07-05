@@ -173,6 +173,16 @@ the singleton block lifetime-drop runtime preservation helper:
   assignment proof: the structural hop-elimination proof still needs to lift
   `EnvWrite.deref_borrow_var_inv` through box/boxFull prefixes and directly
   rebuild on-chain borrow slots after the nested write.
+- Added and compiled the Round 15 lvalue split:
+  `LValTyping.tyBox_pathSelect_or_borrow`.  A full-box lvalue is now classified
+  as either an owner-only `PathSelect` descent or an explicit first
+  mutable-borrow hop
+  `source = prependPath pref hopSource.deref` whose target re-types at the
+  same full-box slot after the prefix.  Added
+  `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed_of_no_borrow_hop`,
+  which packages the already-proved full-box assignment helper for the
+  owner-only branch and leaves exactly that explicit hop witness as the
+  remaining re-rooting case.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;
@@ -238,7 +248,13 @@ Concrete subgoals:
   root-update version is complete.  The off-chain sibling portion of the
   guarded-chain frame is now compiled via
   `reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain`.  Remaining:
-  use the Round 14 hop-elimination route rather than `EnvWrite.runtime_leaf_align`:
+  the borrow-hop branch exposed by
+  `LValTyping.tyBox_pathSelect_or_borrow` must re-root the runtime step from
+  `source.deref` to `prependPath pref target`, invert the corresponding
+  `EnvWrite`/`UpdateAtPath.mutBorrow` subderivation through any owner prefix,
+  and transport the terminal/safe-abstraction conclusion across the
+  pointwise-equal outer updates.  Use the Round 14 hop-elimination route rather
+  than `EnvWrite.runtime_leaf_align`:
   replay the runtime step at the re-rooted lvalue, recurse on the nested
   `EnvWrite`, transport pointwise-equal terminal states, and rebuild the
   guarded on-chain borrow slots directly.
