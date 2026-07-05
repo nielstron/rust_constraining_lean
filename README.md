@@ -50,42 +50,11 @@ There is no `sorry`, `admit`, or `axiom` anywhere in `LwRust/`.
 
 ## Invariant package
 
-The static part is represented in Lean by `StaticInvariantPackage`, with
-`StaticInvariantPackage.empty` for the empty environment and
-`StaticInvariantPackage.preserve_of_sourceTerm` for source typing.
-
-The empty initial environment/store discharge every invariant needed by the
-paper-facing soundness theorems:
-
-- `SourceTerm term`, from typability under `StoreTyping.empty`
-  (`termTyping_empty_sourceTerm`).
-- Runtime validity and empty store typing
-  (`emptyInitialRuntimeSoundnessHypotheses_of_typing`).
-- Strict safe abstraction, `ProgramStore.empty ≈ₛ Env.empty`
-  (`fullSafeAbstraction_empty`).
-- Definition 4.8 well-formedness, `WellFormedEnv Env.empty lifetime`
-  (`wellFormedEnv_empty`).
-- Definition 4.13 borrow safety, `BorrowSafeEnv Env.empty`
-  (`borrowSafeEnv_empty`).
-- Finite context support, `Env.FiniteSupport Env.empty`
-  (`Env.finiteSupport_empty`).
-- The follow-up paper's rank invariant, `Linearizable Env.empty`
-  (`Linearizable.empty`).
-- Finite/runtime store progress assumptions
-  (`ProgramStore.finiteSupport_empty`, `operationalStoreProgress_empty`).
-
-For well-typed source programs, the static invariants are preserved by typing:
-`typingPreservesWellFormed_of_sourceTerm` threads `WellFormedEnv`,
-`BorrowSafeEnv`, `WellFormedTy`, and `TyBorrowSafeAgainstEnv`;
-`typingPreservesLinearizable_of_sourceTerm` threads `Linearizable`; and
-`TermTyping.finiteSupport` threads finite environment support.  At runtime,
-`preservation` combines those static invariants with `FullSafeAbstraction` and
-a terminal multistep to produce `FullTerminalStateSafe`.  Theorem 4.12 derives
-finite environment support for arbitrary finite stores via
-`Env.FiniteSupport.of_fullSafeAbstraction`, and the empty-initial wrappers use
-the empty instances above.  `emptyInitialInvariantPackage_of_typing` packages
-the empty base facts and the post-typing static invariants;
-`emptyInitial_preservation_with_invariantPackage` adds terminal preservation.
+See `emptyInitialInvariantPackage_of_typing`: from
+`Env.empty`/`StoreTyping.empty`, a well-typed program starts with
+`StaticInvariantPackage Env.empty lifetime` and preserves it to the output
+environment.  The underlying facts are `StaticInvariantPackage.empty` and
+`StaticInvariantPackage.preserve_of_sourceTerm`.
 
 ## Corrections kept relative to the printed paper
 
@@ -122,10 +91,3 @@ to stay:
   reduction relation is broader than the typed states covered by
   soundness; the declaration freshness intended by the paper is recovered
   from `T-Declare` and preservation.
-- **Final statements are strict; internal helpers are stale-aware.**  The
-  headline theorems conclude the strict paper predicates
-  (`FullTerminalStateSafe`, strict abstraction `≈ₛ`); the per-redex helper
-  lemmas still run over the stale-aware `WhenInitialized` family (stale
-  borrow annotations as protection tokens) and upgrade at the end.  With
-  conditionals removed, stale annotations plausibly cannot arise; the
-  interior collapse is optional cleanup (see `DIFFERENCES.md` §2).
