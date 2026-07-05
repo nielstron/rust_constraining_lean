@@ -11743,6 +11743,53 @@ theorem chain_entry_unique {env : Env} {lhs : LVal}
   subst hsEq
   exact PartialTyContains.borrow_unique hcontains hcontains'
 
+/-- Head decomposition for a guarded borrow chain.  A guarded slot is either
+the root itself, or it is reached by first following the root's own mutable
+borrow annotation and then continuing the guard from that target base. -/
+theorem chainGuard_head_inv {env : Env} {root y : Name} :
+    ChainGuard env root y →
+    y = root ∨
+      ∃ g, env ⊢ root ↝ (.borrow true g) ∧
+        ChainGuard env (LVal.base g) y := by
+  intro hguard
+  induction hguard with
+  | base =>
+      exact Or.inl rfl
+  | @step z y g hguardZ hcontains hbaseG ih =>
+      rcases ih with hroot | ⟨first, hrootContains, htail⟩
+      · subst hroot
+        exact Or.inr ⟨g, hcontains, by
+          rw [← hbaseG]
+          exact ChainGuard.base⟩
+      · exact Or.inr ⟨first, hrootContains,
+          ChainGuard.step htail hcontains hbaseG⟩
+
+/-- Source-environment version of `chain_entry_env3`: if a source annotation
+targets into the guarded write chain, then its holder is on that chain. -/
+theorem chain_entry_source {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (hsafe : BorrowSafeEnv env)
+    (_htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (_hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (_hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {x : Name} {mutable : Bool} {u : LVal},
+      env ⊢ x ↝ (.borrow mutable u) →
+      ChainGuard env (LVal.base lhs) (LVal.base u) →
+      ChainGuard env (LVal.base lhs) x := by
+  have hunchanged : ∀ x, ¬ ChainGuard env (LVal.base lhs) x →
+      env₃.slotAt x = env.slotAt x := by
+    intro x hxOut
+    exact hne x (fun h => hxOut (h ▸ hguardB))
+  intro x mutable u hcontains hguardU
+  by_contra hxOutside
+  exact chainGuard_contains_exclusion hsafe hunchanged hnotWrite hguardU
+    hxOutside hcontains rfl
+
 /-- Reverse outside-chain transport for the result of a guarded write.  If a
 post-write lvalue is rooted outside the source write chain, then its typing
 reads only unchanged source slots.  The auxiliary containment result records

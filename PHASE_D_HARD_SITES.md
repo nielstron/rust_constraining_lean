@@ -211,6 +211,19 @@ the singleton block lifetime-drop runtime preservation helper:
   using the top-level `¬ WriteProhibited`, or introduce the framed structural
   assignment theorem whose base cases consume the Round-12 guarded-leaf frames
   keyed to the original top-level write.
+- Added and compiled the first Round 18 no-reentry packaging:
+  `chainGuard_head_inv` and `chain_entry_source`.  The first decomposes a
+  `ChainGuard` path into the root case or the root's first mutable-borrow edge;
+  the second is the source-environment analogue of `chain_entry_env3`: any
+  source annotation targeting into the guarded top-level write chain has an
+  on-chain holder.  These are prerequisites for showing that a nested
+  borrow-hop write cannot re-enter an already visited holder slot under the
+  top-level `¬ WriteProhibited env₃ lhs` premise.  The remaining missing lemma
+  is still the full no-reentry/nested-slot preservation step: when the reduced
+  nested `EnvWrite`'s `chain_guarded` changed slot is an outer holder, the last
+  edge back into the top chain must be classified in the final env and converted
+  to `WriteProhibited env₃ lhs` using `BorrowSafeEnv` and the compiled
+  chain-entry kernels.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;
