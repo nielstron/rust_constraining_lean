@@ -257,6 +257,14 @@ the singleton block lifetime-drop runtime preservation helper:
   rewrote `preservation_assign_var_step_runtime_whenInitialized_of_wellFormed`
   as the wrapper that derives its four frame/validity premises from the
   existing variable no-write facts.
+- Added and compiled the Round 21 assign-theorem prerequisites:
+  `LValTyping.ty_borrow_contained`,
+  `PathSelect.contains_of_leaf`,
+  the last-hop export in `SelectFinalPackage`/`EnvWrite.select_final`,
+  `OwnerChainPrefix.locReads_ownsChain` with
+  `locReads_ne_ownsChain_leaf`, and the target-outside guarded-leaf reach
+  twins `borrowDependencyWhenInitialized_chain_leaf_ne_of_target_outside` and
+  `reachesWhenInitialized_chain_leaf_ne_of_target_outside`.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;

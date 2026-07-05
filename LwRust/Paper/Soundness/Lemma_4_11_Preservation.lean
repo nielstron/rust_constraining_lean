@@ -506,6 +506,21 @@ theorem LValTyping.contains_borrow {env : Env} :
       intro hcontains
       exact ihTarget hcontains
 
+theorem LValTyping.contained_of_partialTyContains {env : Env} :
+    ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
+      {mutable : Bool} {target : LVal},
+      LValTyping env lv partialTy lifetime →
+      PartialTyContains partialTy (.borrow mutable target) →
+      ∃ holder, env ⊢ holder ↝ (.borrow mutable target) := by
+  exact LValTyping.contains_borrow
+
+theorem LValTyping.ty_borrow_contained {env : Env} :
+    ∀ {lv : LVal} {mutable : Bool} {target : LVal} {lifetime : Lifetime},
+      LValTyping env lv (.ty (.borrow mutable target)) lifetime →
+      ∃ holder, env ⊢ holder ↝ (.borrow mutable target) := by
+  intro lv mutable target lifetime htyping
+  exact LValTyping.contained_of_partialTyContains htyping PartialTyContains.here
+
 theorem LValTyping.move_to_source_of_no_conflicts {env moved : Env}
     {movedLv : LVal} :
     EnvMove env movedLv moved →
@@ -7785,6 +7800,23 @@ inductive PathSelect : Path → PartialTy → PartialTy → Prop where
       PathSelect path (.ty inner) leaf →
       PathSelect (() :: path) (.ty (.box inner)) leaf
 
+theorem PathSelect.contains_of_leaf :
+    ∀ {path : Path} {root leafTy : PartialTy} {needle : Ty},
+      PathSelect path root leafTy →
+      PartialTyContains leafTy needle →
+      PartialTyContains root needle := by
+  intro path root leafTy needle hselect
+  induction hselect with
+  | here =>
+      intro hcontains
+      exact hcontains
+  | box _hinner ih =>
+      intro hcontains
+      exact PartialTyContains.box (ih hcontains)
+  | boxFull _hinner ih =>
+      intro hcontains
+      exact PartialTyContains.tyBox (ih hcontains)
+
 theorem PathSelect.snoc_box :
     ∀ {path : Path} {root inner : PartialTy},
     PathSelect path root (.box inner) →
@@ -8149,6 +8181,130 @@ theorem ProgramStore.loc_eq_var_of_path_nil {store : ProgramStore}
       simp [ProgramStore.loc, VariableProjection, LVal.base]
   | deref source =>
       simp [LVal.path] at hpath
+
+theorem ownsChain_loc_eq_of_length {store : ProgramStore} :
+    ∀ {lv : LVal} {leaf : Location} {k : Nat},
+      OwnsChain store (VariableProjection (LVal.base lv)) k leaf →
+      k = (LVal.path lv).length →
+      ∀ {location : Location},
+        store.loc lv = some location →
+        location = leaf := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro leaf k hchain hlen location hloc
+      simp [LVal.path] at hlen
+      subst k
+      cases hchain
+      simpa [ProgramStore.loc, VariableProjection, LVal.base] using hloc.symm
+  | deref source ih =>
+      intro leaf k hchain hlen location hloc
+      cases hsourceLoc : store.loc source with
+      | none =>
+          simp [ProgramStore.loc, hsourceLoc] at hloc
+      | some sourceLocation =>
+          cases hchain with
+          | zero =>
+              simp [LVal.path, List.length_append] at hlen
+          | succ hprefix howns =>
+              rename_i chainLocation n
+              have hn : n = (LVal.path source).length := by
+                simp [LVal.path, List.length_append] at hlen
+                omega
+              have hsourceEq : sourceLocation = chainLocation :=
+                ih hprefix hn hsourceLoc
+              subst hsourceEq
+              rcases howns with ⟨ownLifetime, hslotOwn⟩
+              simpa [ProgramStore.loc, hsourceLoc, hslotOwn, owningRef]
+                using hloc.symm
+
+theorem locReads_ownsChain_of_ownsChain_length {store : ProgramStore} :
+    ∀ {lv : LVal} {leaf : Location} {k : Nat},
+      OwnsChain store (VariableProjection (LVal.base lv)) k leaf →
+      k = (LVal.path lv).length →
+      ∀ {mid : Location},
+        RuntimeFrame.LocReads store lv mid →
+        ∃ j, OwnsChain store (VariableProjection (LVal.base lv)) j mid ∧
+          j < (LVal.path lv).length := by
+  intro lv
+  induction lv with
+  | var x =>
+      intro leaf k hchain hlen mid hreads
+      cases hreads
+  | deref source ih =>
+      intro leaf k hchain hlen mid hreads
+      cases hreads with
+      | here hloc =>
+          cases hchain with
+          | zero =>
+              simp [LVal.path, List.length_append] at hlen
+          | succ hprefix howns =>
+              rename_i chainLocation n
+              have hn : n = (LVal.path source).length := by
+                simp [LVal.path, List.length_append] at hlen
+                omega
+              have hmidEq : mid = chainLocation :=
+                ownsChain_loc_eq_of_length (lv := source) hprefix hn hloc
+              subst hmidEq
+              refine ⟨n, ?_, ?_⟩
+              · simpa [LVal.base] using hprefix
+              · simp [LVal.path, List.length_append]
+                omega
+      | there hsourceReads =>
+          cases hchain with
+          | zero =>
+              simp [LVal.path, List.length_append] at hlen
+          | succ hprefix howns =>
+              rename_i chainLocation n
+              have hn : n = (LVal.path source).length := by
+                simp [LVal.path, List.length_append] at hlen
+                omega
+              rcases ih hprefix hn hsourceReads with ⟨j, hchainMid, hlt⟩
+              refine ⟨j, ?_, ?_⟩
+              · simpa [LVal.base] using hchainMid
+              · simp [LVal.path, List.length_append]
+                omega
+
+theorem OwnerChainPrefix.locReads_ownsChain {store : ProgramStore} :
+    ∀ {lv : LVal} {rootValue : PartialValue} {leaf : Location},
+      OwnerChainPrefix store (VariableProjection (LVal.base lv)) rootValue
+        (LVal.path lv) leaf →
+      ∀ {mid : Location},
+        RuntimeFrame.LocReads store lv mid →
+        ∃ j, OwnsChain store (VariableProjection (LVal.base lv)) j mid ∧
+          j < (LVal.path lv).length := by
+  intro lv rootValue leaf hprefix mid hreads
+  rcases hprefix with ⟨hpath, _hleaf⟩ | ⟨k, _hchainAt, hchain, hlen⟩
+  · cases lv with
+    | var x =>
+        cases hreads
+    | deref source =>
+        have hfalse : False := by
+          simpa [LVal.path] using hpath
+        exact False.elim hfalse
+  · exact locReads_ownsChain_of_ownsChain_length hchain hlen hreads
+
+theorem locReads_ne_ownsChain_leaf {store : ProgramStore} :
+    ValidStore store →
+    StoreOwnerTargetsHeap store →
+    ∀ {lv : LVal} {rootValue : PartialValue} {leaf : Location} {k : Nat},
+      OwnerChainPrefix store (VariableProjection (LVal.base lv)) rootValue
+        (LVal.path lv) leaf →
+      OwnsChain store (VariableProjection (LVal.base lv)) k leaf →
+      k = (LVal.path lv).length →
+      ∀ {mid : Location},
+        RuntimeFrame.LocReads store lv mid →
+        mid ≠ leaf := by
+  intro hvalidStore hheap lv rootValue leaf k hprefix hleafChain hlen mid hreads
+    hmidEq
+  rcases OwnerChainPrefix.locReads_ownsChain hprefix hreads with
+    ⟨j, hmidChain, hlt⟩
+  subst hmidEq
+  have hjk : j = k :=
+    ownsChain_unique_length hvalidStore (var_not_owned hheap)
+      hmidChain hleafChain
+  rw [← hlen, hjk] at hlt
+  omega
 
 theorem ProgramStore.loc_prependPath_eq_of_loc_eq
     {store : ProgramStore} {left right : LVal} :
@@ -12318,7 +12474,11 @@ def SelectFinalPackage (store : ProgramStore) (env env₃ : Env)
     (∀ y, env₃.slotAt y = nested.slotAt y) ∧
     LValTyping env finalLhs oldTy targetLifetime ∧
     store.loc lv = store.loc finalLhs ∧
-    ChainGuard env (LVal.base lhsTop) (LVal.base finalLhs)
+    ChainGuard env (LVal.base lhsTop) (LVal.base finalLhs) ∧
+    (finalLhs = lv ∨
+      ∃ (holder : Name) (path' : Path) (target' : LVal),
+        env ⊢ holder ↝ (.borrow true target') ∧
+        finalLhs = prependPath path' target')
 
 theorem EnvWrite.select_final
     {store : ProgramStore} {env env₃ : Env} {lhsTop : LVal}
@@ -12453,13 +12613,17 @@ theorem EnvWrite.select_final
       ihNested hrebased (by simpa using hguardTarget) hshapePt henv₃nested
     rcases hfinal with
       ⟨finalLhs, rootSlot', nestedEnv, leaf, henvFinal, hselectFinal,
-        hwriteFinal, hpointFinal, htypingFinal, hlocFinal, hguardFinal⟩
+        hwriteFinal, hpointFinal, htypingFinal, hlocFinal, hguardFinal,
+        hlast⟩
     refine ⟨finalLhs, rootSlot', nestedEnv, leaf, henvFinal, hselectFinal,
-      hwriteFinal, hpointFinal, htypingFinal, ?_, hguardFinal⟩
-    calc store.loc (prependPath (() :: path) wcur)
-        = store.loc (prependPath path wcur.deref) := by rw [hpathEq]
-      _ = store.loc (prependPath path target) := hloc
-      _ = store.loc finalLhs := hlocFinal
+      hwriteFinal, hpointFinal, htypingFinal, ?_, hguardFinal, ?_⟩
+    · calc store.loc (prependPath (() :: path) wcur)
+          = store.loc (prependPath path wcur.deref) := by rw [hpathEq]
+        _ = store.loc (prependPath path target) := hloc
+        _ = store.loc finalLhs := hlocFinal
+    · rcases hlast with hEq | hHop
+      · exact Or.inr ⟨LVal.base wcur, path, target, hannBase, hEq⟩
+      · exact Or.inr hHop
   case intro =>
     intro _env₂ lv slot ty updatedTy hslot hupdate ih hlv hguard hshapePt
       hpoint
@@ -12478,7 +12642,7 @@ theorem EnvWrite.select_final
     · rcases hselect with ⟨leaf, hselect⟩
       exact ⟨lv, slot, _env₂.update (LVal.base lv) { slot with ty := updatedTy },
         leaf, hslot, hselect, EnvWrite.intro hslot hupdate, hpoint, hlv,
-        rfl, hguard⟩
+        rfl, hguard, Or.inl rfl⟩
     · have hslotEta : { slot with ty := updatedTy } = slot := by
         rw [hupdEq]
       have hp :
@@ -12775,6 +12939,134 @@ theorem locReads_chain_protected_base_on_chain
                 hbLook hgraftContains hguardB hsource hloc hleafProtected
       | there hsourceReads =>
           exact ihSource hsourceReads
+
+/-- Borrow-dependency routes whose borrow targets are off the guarded source
+chain cannot hit the guarded leaf. -/
+theorem borrowDependencyWhenInitialized_chain_leaf_ne_of_target_outside
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    {leafLoc : Location}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hleafProtected : RuntimeFrame.ProtectedByBase store b leafLoc) :
+    ∀ {value : PartialValue} {partialTy : PartialTy}
+      {dependency : Location},
+      (∀ {mutable : Bool} {target : LVal},
+        PartialTyContains partialTy (.borrow mutable target) →
+        ¬ ChainGuard env (LVal.base lhs) (LVal.base target)) →
+      RuntimeFrame.BorrowDependencyWhenInitialized env₃ store value
+        partialTy dependency →
+      dependency = leafLoc →
+      False := by
+  intro value partialTy dependency hcontains hdependency
+  induction hdependency with
+  | @borrow location dependency mutable target hinitialized _hloc hreads =>
+      intro hdependencyEq
+      rcases hinitialized with ⟨targetTy, targetLifetime, htargetTyping⟩
+      have htargetGuard :
+          ChainGuard env (LVal.base lhs) (LVal.base target) :=
+        locReads_chain_protected_base_on_chain
+          hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne hbLook
+          hgraftContains hguardB hleafProtected htargetTyping
+          (by simpa [hdependencyEq] using hreads)
+      exact (hcontains PartialTyContains.here) htargetGuard
+  | boxInner _hslot _hinner ih =>
+      intro hdependencyEq
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.box hcontainsInner))
+        hdependencyEq
+  | boxFullInner _hslot _hinner ih =>
+      intro hdependencyEq
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.tyBox hcontainsInner))
+        hdependencyEq
+
+/-- Values whose contained borrow targets are off the guarded source chain cannot
+reach the guarded leaf, assuming their owner roots also do not reach that leaf. -/
+theorem reachesWhenInitialized_chain_leaf_ne_of_target_outside
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    {leafLoc : Location} {value : PartialValue} {partialTy : PartialTy}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hleafProtected : RuntimeFrame.ProtectedByBase store b leafLoc)
+    (hcontains : ∀ {mutable : Bool} {target : LVal},
+      PartialTyContains partialTy (.borrow mutable target) →
+      ¬ ChainGuard env (LVal.base lhs) (LVal.base target))
+    (hownerNoReach :
+      ¬ RuntimeFrame.OwnerReaches store value partialTy leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized env₃ store value partialTy location →
+      location ≠ leafLoc := by
+  intro location hreach
+  induction hreach with
+  | undefOf hskel hstrength howner =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using
+          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
+  | boxHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxHere hslot)
+  | boxInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.box hcontainsInner))
+        (by
+          intro howner
+          exact hownerNoReach (RuntimeFrame.OwnerReaches.boxInner hslot howner))
+        hlocation
+  | boxFullHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxFullHere hslot)
+  | boxFullInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.tyBox hcontainsInner))
+        (by
+          intro howner
+          exact hownerNoReach
+            (RuntimeFrame.OwnerReaches.boxFullInner hslot howner))
+        hlocation
+  | borrow hinitialized hloc hreads =>
+      intro hlocation
+      exact
+        borrowDependencyWhenInitialized_chain_leaf_ne_of_target_outside
+          hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne hbLook
+          hgraftContains hguardB hleafProtected hcontains
+          (RuntimeFrame.BorrowDependencyWhenInitialized.borrow
+            hinitialized hloc hreads)
+          hlocation
 
 /-- Borrow-dependency routes from an off-chain value cannot hit the guarded
 leaf. -/
