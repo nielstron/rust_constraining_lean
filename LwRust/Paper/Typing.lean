@@ -524,6 +524,55 @@ def EnvContains (env : Env) (x : Name) (ty : Ty) : Prop :=
 
 notation:50 env:51 " ⊢ " x:51 " ↝ " ty:51 => EnvContains env x ty
 
+/--
+Follow-up Definition 11: a typing environment is linearized by a rank map when
+each live borrow target mentioned in a slot has strictly lower rank than the
+slot holder.
+-/
+def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
+  ∀ x slot v,
+    env.slotAt x = some slot →
+    v ∈ PartialTy.vars slot.ty →
+    φ v < φ x
+
+def Linearizable (env : Env) : Prop :=
+  ∃ φ, LinearizedBy φ env
+
+theorem PartialTyContains.borrow_target_mem_vars
+    {partialTy : PartialTy} {mutable : Bool} {target : LVal} :
+    PartialTyContains partialTy (.borrow mutable target) →
+    LVal.base target ∈ PartialTy.vars partialTy := by
+  intro hcontains
+  suffices hgeneral :
+      ∀ {partialTy : PartialTy} {needle : Ty},
+        PartialTyContains partialTy needle →
+        ∀ {mutable : Bool} {target : LVal},
+          needle = .borrow mutable target →
+          LVal.base target ∈ PartialTy.vars partialTy by
+    exact hgeneral hcontains rfl
+  intro partialTy needle hcontains
+  induction hcontains with
+  | here =>
+      intro mutable target hneedle
+      subst hneedle
+      simp [PartialTy.vars, Ty.vars]
+  | tyBox _ ih =>
+      intro mutable target hneedle
+      simpa [PartialTy.vars, Ty.vars] using ih hneedle
+  | box _ ih =>
+      intro mutable target hneedle
+      simpa [PartialTy.vars] using ih hneedle
+
+theorem LinearizedBy.contains_rank_lt {φ : Name → Nat} {env : Env}
+    {x : Name} {mutable : Bool} {target : LVal} :
+    LinearizedBy φ env →
+    env ⊢ x ↝ (.borrow mutable target) →
+    φ (LVal.base target) < φ x := by
+  intro hφ hcontains
+  rcases hcontains with ⟨slot, hslot, hborrow⟩
+  exact hφ x slot (LVal.base target) hslot
+    (PartialTyContains.borrow_target_mem_vars hborrow)
+
 /-- Definition 3.16, `readProhibited(Γ, w)`. -/
 def ReadProhibited (env : Env) (lv : LVal) : Prop :=
   ∃ x target,

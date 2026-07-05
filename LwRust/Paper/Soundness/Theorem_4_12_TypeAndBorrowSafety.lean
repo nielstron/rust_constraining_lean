@@ -36,6 +36,26 @@ def TerminatesAsValue (store : ProgramStore) (lifetime : Lifetime) (term : Term)
   ∃ finalStore finalValue,
     MultiStep store lifetime term finalStore (.val finalValue)
 
+theorem Env.FiniteSupport.of_fullSafeAbstraction {store : ProgramStore}
+    {env : Env} :
+    store.FiniteSupport →
+    store ≈ₛ env →
+    env.FiniteSupport := by
+  rintro ⟨support, hsupport⟩ hsafe
+  let envSupport : Finset Name :=
+    (support.toList.filterMap
+      (fun location =>
+        match location with
+        | .var x => some x
+        | .heap _ => none)).toFinset
+  refine ⟨envSupport, ?_⟩
+  intro x slot hslot
+  rcases (hsafe.1 x).mpr ⟨slot, hslot⟩ with ⟨storeSlot, hstoreSlot⟩
+  have hvarMem : VariableProjection x ∈ support :=
+    hsupport (VariableProjection x) storeSlot hstoreSlot
+  simp [envSupport]
+  exact ⟨.var x, hvarMem, rfl⟩
+
 /--
 Source continuations terminate.
 
@@ -45,19 +65,6 @@ continue after a subterm has evaluated.
 -/
 theorem terminatesAsValue_bounded
     (fuel : Nat)
-    (terminalSafety :
-      ∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
-        {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-        {ty : Ty} {finalValue : Value},
-        SourceTerm term →
-        ValidRuntimeState store term →
-        ValidStoreTyping store term typing →
-        WellFormedEnv env₁ lifetime →
-        BorrowSafeEnv env₁ →
-        store ≈ₛ env₁ →
-        TermTyping env₁ typing lifetime term ty env₂ →
-        MultiStep store lifetime term finalStore (.val finalValue) →
-        FullTerminalStateSafe finalStore finalValue env₂ ty)
     {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     term.size ≤ fuel →
@@ -66,6 +73,7 @@ theorem terminatesAsValue_bounded
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
     BorrowSafeEnv env₁ →
+    Linearizable env₁ →
     store ≈ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
@@ -73,11 +81,11 @@ theorem terminatesAsValue_bounded
   induction fuel generalizing store env₁ env₂ typing lifetime term ty with
   | zero =>
       intro hsize _hsource _hvalidRuntime _hvalidStoreTyping
-        _hwellFormed _hborrowSafe _hsafe _hfinite _htyping
+        _hwellFormed _hborrowSafe _hlinear _hsafe _hfinite _htyping
       cases term <;> simp [Term.size] at hsize
   | succ fuel ihFuel =>
   intro hsize hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe
-    hsafe hfinite htyping
+    hlinear hsafe hfinite htyping
   refine TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
       term.size ≤ fuel.succ →
@@ -87,6 +95,7 @@ theorem terminatesAsValue_bounded
         ValidStoreTyping store term currentTyping →
         WellFormedEnv env lifetime →
         BorrowSafeEnv env →
+        Linearizable env →
         store ≈ₛ env →
         store.FiniteSupport →
         TerminatesAsValue store lifetime term)
@@ -99,22 +108,23 @@ theorem terminatesAsValue_bounded
         ValidStoreTyping store (.block blockLifetime terms) currentTyping →
         WellFormedEnv env blockLifetime →
         BorrowSafeEnv env →
+        Linearizable env →
         store ≈ₛ env →
         store.FiniteSupport →
         TerminatesAsValue store outerLifetime (.block blockLifetime terms))
     ?const ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign
     ?singleton ?cons htyping hsize hsource store hvalidRuntime
-    hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
+    hvalidStoreTyping hwellFormed hborrowSafe hlinear hsafe hfinite
   case const =>
     intro _env _typing _lifetime value _ty _hvalueTyping _hsize _hsource
-      store _hvalidRuntime _hvalidStoreTyping _hwellFormed _hborrowSafe _hsafe
-      _hfinite
+      store _hvalidRuntime _hvalidStoreTyping _hwellFormed _hborrowSafe
+      _hlinear _hsafe _hfinite
     exact ⟨store, value, MultiStep.refl⟩
   case copy =>
     intro _env _typing _lifetime _valueLifetime lv _ty hLv hcopy hnotRead
       _hsize _hsource store _hvalidRuntime _hvalidStoreTyping
-      _hwellFormed _hborrowSafe hsafe _hfinite
+      _hwellFormed _hborrowSafe _hlinear hsafe _hfinite
     have htermTyping : TermTyping _env _typing _lifetime (.copy lv) _ty _env :=
       TermTyping.copy hLv hcopy hnotRead
     rcases progress_copy_typing hsafe htermTyping with hterminal |
@@ -126,7 +136,7 @@ theorem terminatesAsValue_bounded
   case move =>
     intro _env₁ _env₂ _typing _lifetime _valueLifetime lv _ty hLv hnotWrite
       hmove _hsize _hsource store _hvalidRuntime _hvalidStoreTyping
-      _hwellFormed _hborrowSafe hsafe _hfinite
+      _hwellFormed _hborrowSafe _hlinear hsafe _hfinite
     have htermTyping : TermTyping _env₁ _typing _lifetime (.move lv) _ty _env₂ :=
       TermTyping.move hLv hnotWrite hmove
     rcases progress_move_typing hsafe htermTyping with hterminal |
@@ -138,7 +148,7 @@ theorem terminatesAsValue_bounded
   case mutBorrow =>
     intro _env _typing _lifetime _valueLifetime lv _ty hLv hmutable hnotWrite
       _hsize _hsource store _hvalidRuntime _hvalidStoreTyping
-      _hwellFormed _hborrowSafe hsafe _hfinite
+      _hwellFormed _hborrowSafe _hlinear hsafe _hfinite
     have htermTyping :
         TermTyping _env _typing _lifetime (.borrow true lv) (.borrow true lv) _env :=
       TermTyping.mutBorrow hLv hmutable hnotWrite
@@ -151,7 +161,7 @@ theorem terminatesAsValue_bounded
   case immBorrow =>
     intro _env _typing _lifetime _valueLifetime lv _ty hLv hnotRead
       _hsize _hsource store _hvalidRuntime _hvalidStoreTyping
-      _hwellFormed _hborrowSafe hsafe _hfinite
+      _hwellFormed _hborrowSafe _hlinear hsafe _hfinite
     have htermTyping :
         TermTyping _env _typing _lifetime (.borrow false lv) (.borrow false lv) _env :=
       TermTyping.immBorrow hLv hnotRead
@@ -163,13 +173,14 @@ theorem terminatesAsValue_bounded
           exact ⟨_, _, MultiStep.trans (Step.borrow hloc) MultiStep.refl⟩
   case box =>
     intro _env₁ _env₂ _typing _lifetime inner _ty hinner ih hsize hsource
-      store hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
+      store hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hlinear
+      hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.box_inner hsource)
         store
         (validRuntimeState_of_sourceTerm (SourceTerm.box_inner hsource) hvalidRuntime)
         (validStoreTyping_box_inner hvalidStoreTyping)
-        hwellFormed hborrowSafe hsafe hfinite with
+        hwellFormed hborrowSafe hlinear hsafe hfinite with
       ⟨midStore, value, hmultiInner⟩
     have hfiniteMid : midStore.FiniteSupport :=
       hfinite.multiStep hmultiInner
@@ -184,21 +195,21 @@ theorem terminatesAsValue_bounded
   case block =>
     intro _env₁ _env₂ _env₃ _typing _lifetime blockLifetime terms _ty hchild
       _hterms _hwellTy _hdrop ih hsize hsource store hvalidRuntime
-      hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
+      hvalidStoreTyping hwellFormed hborrowSafe hlinear hsafe hfinite
     exact ih hsize hsource _lifetime store hchild hvalidRuntime
       hvalidStoreTyping
       (WellFormedEnv.weaken hwellFormed (LifetimeChild.outlives hchild))
-      hborrowSafe hsafe hfinite
+      hborrowSafe hlinear hsafe hfinite
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty _hfresh hinner
       _hfreshOut _henv ih hsize hsource store hvalidRuntime
-      hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
+      hvalidStoreTyping hwellFormed hborrowSafe hlinear hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.declare_inner hsource)
         store
         (validRuntimeState_declare_inner hvalidRuntime)
         (validStoreTyping_declare_inner hvalidStoreTyping)
-        hwellFormed hborrowSafe hsafe hfinite with
+        hwellFormed hborrowSafe hlinear hsafe hfinite with
       ⟨midStore, value, hmultiInner⟩
     exact ⟨midStore.declare x _lifetime value, .unit,
       multistep_append (MultiStep.subDeclare hmultiInner)
@@ -207,22 +218,24 @@ theorem terminatesAsValue_bounded
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime lhs _oldTy rhs
       rhsTy hRhs hLhsPost hshape hwellTy hwrite hnotWrite ih
       hsize hsource store hvalidRuntime hvalidStoreTyping hwellFormed
-      hborrowSafe hsafe hfinite
+      hborrowSafe hlinear hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.assign_inner hsource)
         store
         (validRuntimeState_of_sourceTerm (SourceTerm.assign_inner hsource)
           hvalidRuntime)
         (validStoreTyping_assign_inner hvalidStoreTyping)
-        hwellFormed hborrowSafe hsafe hfinite with
+        hwellFormed hborrowSafe hlinear hsafe hfinite with
       ⟨midStore, value, hmultiRhs⟩
+    have henvFinite : Env.FiniteSupport _env₁ :=
+      Env.FiniteSupport.of_fullSafeAbstraction hfinite hsafe
     have hterminalRhs :
         FullTerminalStateSafe midStore value _env₂ rhsTy :=
-      terminalSafety (SourceTerm.assign_inner hsource)
+      preservation (SourceTerm.assign_inner hsource)
         (validRuntimeState_of_sourceTerm (SourceTerm.assign_inner hsource)
           hvalidRuntime)
         (validStoreTyping_assign_inner hvalidStoreTyping)
-        hwellFormed hborrowSafe hsafe hRhs hmultiRhs
+        hwellFormed hborrowSafe henvFinite hlinear hsafe hRhs hmultiRhs
     have hfiniteMid : midStore.FiniteSupport :=
       hfinite.multiStep hmultiRhs
     rcases read_defined_of_allocated
@@ -237,13 +250,13 @@ theorem terminatesAsValue_bounded
   case singleton =>
     intro _env₁ _env₂ _typing blockLifetime inner _ty hinner ih hsize hsource
       outerLifetime store hchild hvalidRuntime hvalidStoreTyping hwellFormed
-      hborrowSafe hsafe hfinite
+      hborrowSafe hlinear hsafe hfinite
     rcases ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
         (SourceTerm.block_head hsource)
         store
         (validRuntimeState_block_singleton_inner hvalidRuntime)
         (validStoreTyping_block_singleton_inner hvalidStoreTyping)
-        hwellFormed hborrowSafe hsafe hfinite with
+        hwellFormed hborrowSafe hlinear hsafe hfinite with
       ⟨midStore, value, hmultiInner⟩
     have hfiniteMid : midStore.FiniteSupport :=
       hfinite.multiStep hmultiInner
@@ -258,7 +271,8 @@ theorem terminatesAsValue_bounded
   case cons =>
     intro _env₁ _env₂ _env₃ _typing blockLifetime head rest _termTy _finalTy
       hhead hrest ihHead ihRest hsize hsource outerLifetime store hchild
-      hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
+      hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hlinear hsafe
+      hfinite
     cases rest with
     | nil =>
         cases hrest
@@ -271,18 +285,23 @@ theorem terminatesAsValue_bounded
             hsourceHead store
             (validRuntimeState_block_head hvalidRuntime)
             (validStoreTyping_block_head hvalidStoreTyping)
-            hwellFormed hborrowSafe hsafe hfinite with
+            hwellFormed hborrowSafe hlinear hsafe hfinite with
           ⟨midStore, value, hmultiHead⟩
+        have henvFinite : Env.FiniteSupport _env₁ :=
+          Env.FiniteSupport.of_fullSafeAbstraction hfinite hsafe
         have hterminalHead :
             FullTerminalStateSafe midStore value _env₂ _termTy :=
-          terminalSafety hsourceHead
+          preservation hsourceHead
             (validRuntimeState_block_head hvalidRuntime)
             (validStoreTyping_block_head hvalidStoreTyping)
-            hwellFormed hborrowSafe hsafe hhead hmultiHead
+            hwellFormed hborrowSafe henvFinite hlinear hsafe hhead hmultiHead
         have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceHead
           hwellFormed hborrowSafe hhead
         have hwellInner : WellFormedEnv _env₂ blockLifetime := hwellOut.1
         have hborrowSafeInner : BorrowSafeEnv _env₂ := hwellOut.2.1
+        have hlinearInner : Linearizable _env₂ :=
+          typingPreservesLinearizable_of_sourceTerm hsourceHead hwellFormed
+            hborrowSafe henvFinite hlinear hhead
         have hfiniteMid : midStore.FiniteSupport :=
           hfinite.multiStep hmultiHead
         rcases (OperationalStoreProgress.of_finiteSupport hfiniteMid).dropValue
@@ -315,8 +334,8 @@ theorem terminatesAsValue_bounded
           hfiniteMid.step hseqStep
         rcases ihRest (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
             hsourceTail outerLifetime storeAfterDrop hchild
-            hvalidTailAfter htailStoreTyping hwellInner hborrowSafeInner hsafeTailAfter
-            hfiniteAfterDrop with
+            hvalidTailAfter htailStoreTyping hwellInner hborrowSafeInner
+            hlinearInner hsafeTailAfter hfiniteAfterDrop with
           ⟨finalStore, finalValue, hmultiTail⟩
         exact ⟨finalStore, finalValue,
           multistep_append
@@ -326,32 +345,21 @@ theorem terminatesAsValue_bounded
 
 theorem terminatesAsValue {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
-    (∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
-      {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-      {ty : Ty} {finalValue : Value},
-      SourceTerm term →
-      ValidRuntimeState store term →
-      ValidStoreTyping store term typing →
-      WellFormedEnv env₁ lifetime →
-      BorrowSafeEnv env₁ →
-      store ≈ₛ env₁ →
-      TermTyping env₁ typing lifetime term ty env₂ →
-      MultiStep store lifetime term finalStore (.val finalValue) →
-      FullTerminalStateSafe finalStore finalValue env₂ ty) →
     SourceTerm term →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
     BorrowSafeEnv env₁ →
+    Linearizable env₁ →
     store ≈ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term := by
-  intro terminalSafety hsource hvalidRuntime hvalidStoreTyping hwellFormed
-    hborrowSafe hsafe hfinite htyping
-  exact terminatesAsValue_bounded term.size terminalSafety (Nat.le_refl _)
-    hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hsafe hfinite
-    htyping
+  intro hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hlinear
+    hsafe hfinite htyping
+  exact terminatesAsValue_bounded term.size (Nat.le_refl _)
+    hsource hvalidRuntime hvalidStoreTyping hwellFormed hborrowSafe hlinear
+    hsafe hfinite htyping
 
 /--
 The nontermination-friendly progress component of Theorem 4.12.
@@ -393,13 +401,12 @@ theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
       hstoreProgress htyping
 
 /--
-Theorem 4.12 bridge, conditional terminal safety.
+Theorem 4.12 bridge for an explicitly supplied terminal run.
 
-The paper's core calculus is intended to terminate.  This mechanisation keeps
-that fact separate: the theorem is stated with an explicit terminal-run witness
-and the Lemma 4.11 preservation conclusion as a premise.  Progress rules out an
-initially stuck well-typed state; preservation turns the terminal multistep into
-a safe terminal state.
+Progress rules out an initially stuck well-typed state; the supplied
+preservation conclusion turns the terminal multistep into a safe terminal
+state.  The paper-facing wrappers below discharge both terminal existence and
+preservation.
 -/
 theorem typeAndBorrowSafety_of_preservation
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
@@ -426,10 +433,9 @@ theorem typeAndBorrowSafety_of_preservation
     ⟨finalStore, finalValue, hmulti, hpreservation finalStore finalValue hmulti⟩⟩
 
 /--
-Theorem 4.12, conditional Type and Borrow Safety for source continuations.
-
-The paper's theorem states terminal existence; this mechanized form is the
-conditional safety theorem for an explicitly supplied terminal multistep.
+Type and borrow safety for source continuations, factored over an explicit
+terminal run and preservation conclusion.  The paper-facing wrappers below
+derive both pieces.
 -/
 theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
@@ -508,34 +514,23 @@ theorem theorem_4_12_typeAndBorrowSafety
     (hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ≈ₛ env₁)
     (hfinite : store.FiniteSupport)
+    (hlinear : Linearizable env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
-    (terminalSafety :
-      ∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
-        {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-        {ty : Ty} {finalValue : Value},
-        SourceTerm term →
-        ValidRuntimeState store term →
-        ValidStoreTyping store term typing →
-        WellFormedEnv env₁ lifetime →
-        BorrowSafeEnv env₁ →
-        store ≈ₛ env₁ →
-        TermTyping env₁ typing lifetime term ty env₂ →
-        MultiStep store lifetime term finalStore (.val finalValue) →
-        FullTerminalStateSafe finalStore finalValue env₂ ty)
     :
       ProgressResult store lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
           FullTerminalStateSafe finalStore finalValue env₂ ty :=
+  let henvFinite : Env.FiniteSupport env₁ :=
+    Env.FiniteSupport.of_fullSafeAbstraction hfinite hsafe
   typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed hsafe
     (OperationalStoreProgress.of_finiteSupport hfinite) htyping
     (by
       intro finalStore finalValue hmulti
-      exact terminalSafety hsource hvalid hstoreTyping
-        hwellFormed hborrowSafe hsafe htyping hmulti)
-    (terminatesAsValue terminalSafety hsource hvalid hstoreTyping
-      hwellFormed hborrowSafe hsafe hfinite
-      htyping)
+      exact preservation hsource hvalid hstoreTyping hwellFormed hborrowSafe
+        henvFinite hlinear hsafe htyping hmulti)
+    (terminatesAsValue hsource hvalid hstoreTyping
+      hwellFormed hborrowSafe hlinear hsafe hfinite htyping)
 
 /-- Theorem 4.12, Type and Borrow Safety, total form. -/
 theorem theorem_4_12_typeAndBorrowSafety_total
@@ -548,25 +543,13 @@ theorem theorem_4_12_typeAndBorrowSafety_total
     (hborrowSafe : BorrowSafeEnv env₁)
     (hsafe : store ≈ₛ env₁)
     (hfinite : store.FiniteSupport)
-    (htyping : TermTyping env₁ typing lifetime term ty env₂)
-    (terminalSafety :
-      ∀ {store finalStore : ProgramStore} {env₁ env₂ : Env}
-        {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
-        {ty : Ty} {finalValue : Value},
-        SourceTerm term →
-        ValidRuntimeState store term →
-        ValidStoreTyping store term typing →
-        WellFormedEnv env₁ lifetime →
-        BorrowSafeEnv env₁ →
-        store ≈ₛ env₁ →
-        TermTyping env₁ typing lifetime term ty env₂ →
-        MultiStep store lifetime term finalStore (.val finalValue) →
-        FullTerminalStateSafe finalStore finalValue env₂ ty) :
+    (hlinear : Linearizable env₁)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂) :
       ProgressResult store lifetime term ∧
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
           FullTerminalStateSafe finalStore finalValue env₂ ty :=
   theorem_4_12_typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed
-    hborrowSafe hsafe hfinite htyping terminalSafety
+    hborrowSafe hsafe hfinite hlinear htyping
 
 end LwRust.Paper.Soundness

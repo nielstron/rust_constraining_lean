@@ -38,26 +38,26 @@ There is no `sorry`, `admit`, or `axiom` anywhere in `LwRust/`.
   strong-update kernel and preservation of borrow safety
   (Definition 4.13 / Corollary 4.14 content, previously unprovable in the
   multi-target system).
-- **Runtime half of Lemma 4.11: per-redex kernels proved; the whole-term
-  induction is pending** (this branch).  The build is fully green: the
-  per-redex runtime preservation helpers (moves, assignments including the
-  mutable-borrow-hop write kernel, block exit) are proven, but the final
-  induction that exports `preservation` is not yet reassembled.  Until it
-  is, every final safety theorem — Theorem 4.12 in all forms, the
-  empty-initial wrappers, and Appendix Lemmas 9.9/9.10 — takes the
-  Lemma 4.11 conclusion as an explicit `terminalSafety` hypothesis.
-  `OBLIGATIONS.md` lists the remaining work.
+- **Runtime half of Lemma 4.11: complete.**  The per-redex runtime
+  preservation helpers (moves, assignments including the mutable-borrow-hop
+  write kernel, block exit) are proven, and the whole-term induction now
+  exports `preservation` / `lemma_4_11_preservation`.  Theorem 4.12 and the
+  empty-initial wrappers call preservation directly.
 
 ## Corrections kept relative to the printed paper
 
 These deviations strengthen or repair the paper's claims and are intended
 to stay:
 
-- **General preservation carries `BorrowSafeEnv Γ₁` (Definition 4.13).**
+- **General preservation carries `BorrowSafeEnv Γ₁` (Definition 4.13),
+  finite context support, and `Linearizable Γ₁`.**
   The printed Lemma 4.11 appears false without it for arbitrary starting
   states: the development contains machine-checked counterexamples showing
   strict preservation fails from Definition-4.8-only environments.  The
-  premise discharges at empty initial states, so the headline theorems
+  linearization invariant is the follow-up paper's rank argument for
+  assignment cycles; finite environment support is derived in Theorem 4.12
+  from finite store support plus full safe abstraction.  These premises
+  discharge at empty initial states, so the empty-initial headline theorems
   match the paper's statements.
 - **Assignment follows the reference implementation, not the printed
   rule.**  The step reads the overwritten slot, writes the new value, then
