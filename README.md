@@ -10,32 +10,18 @@ grammar (`paper/lw_rust_followup.pdf`).
 The mechanised language is **exactly the paper's core calculus**
 (Figure 1):
 
-- The Section 6.1 extension (booleans, equality, conditionals) and the
-  synthetic diverging placeholder that earlier versions carried are removed.
-  Without conditionals there are no environment joins, and every reduction
-  step strictly decreases term size (`step_size_lt`), so the core calculus
-  terminates unconditionally and Theorem 4.12 is stated in the paper's total
-  form for source programs.
 - Borrows are single-target (the follow-up's grammar) and the environment
   write is the follow-up's strong update — no weak-update unions, no
   multi-target fan-out.
 - The environment invariant `WellFormedEnv` is **exactly the paper's
   two-part Definition 4.8** (contained borrows well-formed, slots outlive
-  the current lifetime).  The `Coherent` and `Linearizable` conjuncts and
-  premises that earlier versions added no longer exist anywhere in the
-  development.
+  the current lifetime). 
 - The typing rules match the printed figures with **one** extra premise:
   `T-Declare` requires `env₂.fresh x`, mechanising the paper's Section 5.2
   statement that redeclaration is not permitted (the follow-up's `T-Block`
   makes the same assumption).  `T-Block`'s `LifetimeChild` premise
   formalises the paper's ambient lexical-nesting assumption and is not a
   restriction.
-
-The old multi-target development — and with it the rank/linearization
-witness, the stale-retarget guard, the coherence obligations, and the
-fan-out premises that previous revisions of this file documented — has been
-deleted; those premises were only ever needed to control weak-update
-fan-out, which no longer exists.
 
 See `DIFFERENCES.md` for the precise, itemised comparison with the paper.
 
