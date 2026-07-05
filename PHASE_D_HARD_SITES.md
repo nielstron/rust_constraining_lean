@@ -127,6 +127,32 @@ the singleton block lifetime-drop runtime preservation helper:
   `ProgramStore.write_eq_of_loc_eq`.  These only package the runtime equality
   side of mutable-borrow hop re-rooting; the static/result-environment
   chain-collapse proof is still the remaining hard assignment step.
+- Re-audited on 2026-07-05 after `chain_entry_env3`/`chain_entry_unique`:
+  the keystone chain-entry facts are present and compile, but the runtime
+  mut-borrow re-rooting bridge is still not present.  In particular,
+  `EnvWrite.runtime_leaf_align`, the generalized post-`EnvWrite` chain-leaf
+  reach frame for `UpdateAtPath.mutBorrow`, the unqualified
+  `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed`,
+  and `preservation_assign_deref_borrow_step_runtime_whenInitialized_of_wellFormed`
+  are still absent.  The current pure full-box helper is only
+  `preservation_assign_deref_boxFull_step_runtime_whenInitialized_of_wellFormed_of_select`,
+  requiring a `PathSelect` owner-only path witness; it cannot dispatch
+  full-box paths whose source typing reaches `.ty (.box oldTy)` through
+  `LValTyping.borrow`.
+- Added and compiled the first Round 12 runtime-route increment:
+  `LValTyping.transport_into_source_of_outside_chain`,
+  `lval_loc_chain_protected_base_on_chain`,
+  `ownerReaches_stored_ne_guarded_chain_leaf`,
+  `locReads_chain_protected_base_on_chain`,
+  `borrowDependencyWhenInitialized_chain_leaf_ne_of_outside_chain`,
+  `reachesWhenInitialized_chain_leaf_ne_of_outside_chain`, and
+  `reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain`.
+  These prove that post-write typings rooted outside the guarded source chain
+  transport back to the source environment, and that off-chain sibling slots
+  cannot reach the guarded runtime leaf.  `Lemma_4_11_Preservation.lean`
+  remains green after this increment.  This is not yet the full mut-borrow
+  assignment proof: the runtime leaf alignment from `EnvWrite` and the direct
+  rebuild of on-chain borrow slots are still missing.
 
 The final `lake build` is not green yet because `preservation` is still not
 exported.  Rechecked on 2026-07-05 after the compiled helper additions above;
@@ -189,9 +215,12 @@ Concrete subgoals:
 
 - Generalize the initialized reachability/result-environment frame from the
   now-proved direct variable version to the selected heap leaf.  The pure
-  root-update version is complete; the remaining borrow-reach cases are the
-  `UpdateAtPath.mutBorrow` cases that re-root the runtime descent at the borrow
-  target's base variable while still concluding `WriteProhibited env₃ lhs`.
+  root-update version is complete.  The off-chain sibling portion of the
+  guarded-chain frame is now compiled via
+  `reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain`.  Remaining:
+  package `EnvWrite.runtime_leaf_align` so the concrete write leaf is known to
+  be protected by the final guarded changed slot, and rebuild the guarded
+  chain slots themselves rather than framing them.
 - Extract the concrete selected leaf from `Step.assign` and the lhs
   `LValTyping` derivation via `lvalTyping_defined_location_whenInitialized`.
 - For the partial-box owner-chain case, use the new `PathSelect`/`EnvWrite`
@@ -203,8 +232,9 @@ Concrete subgoals:
   assignment helper.
 - Preserve the RHS value and unaffected environment slots after the runtime
   write using `validPartialValueWhenInitialized_update_of_not_live_reaches`.
-  The existing variable frame is insufficient because the updated location is
-  a heap leaf rather than `VariableProjection x`.
+  Off-chain sibling slots now have the needed reach exclusion.  RHS/graft
+  values still need the corresponding graft-contained target exclusion once
+  `EnvWrite.runtime_leaf_align` exposes the concrete guarded leaf.
 - Complete the post-write/post-drop runtime invariants using the existing
   drop-orphan machinery once the leaf-alignment frame is available.
 

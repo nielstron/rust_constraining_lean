@@ -11211,6 +11211,468 @@ theorem chain_entry_unique {env : Env} {lhs : LVal}
   subst hsEq
   exact PartialTyContains.borrow_unique hcontains hcontains'
 
+/-- Reverse outside-chain transport for the result of a guarded write.  If a
+post-write lvalue is rooted outside the source write chain, then its typing
+reads only unchanged source slots.  The auxiliary containment result records
+that any borrow annotation in the transported type is still held outside the
+chain in the post-write environment; this is the fact needed for subsequent
+borrow-hop exclusions. -/
+theorem LValTyping.transport_into_source_of_outside_chain
+    {env env₃ : Env} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (hsafe : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {t : LVal} {pt : PartialTy} {lf : Lifetime},
+      ¬ ChainGuard env (LVal.base lhs) (LVal.base t) →
+      LValTyping env₃ t pt lf →
+      LValTyping env t pt lf ∧
+        (∀ {mutable : Bool} {u : LVal},
+          PartialTyContains pt (.borrow mutable u) →
+          ∃ z, ¬ ChainGuard env (LVal.base lhs) z ∧
+            env₃ ⊢ z ↝ (.borrow mutable u)) := by
+  intro t pt lf houtside htyping
+  induction htyping with
+  | var hslot =>
+      rename_i y s
+      have hyb : y ≠ b := by
+        intro hy
+        exact houtside (by simpa [hy, LVal.base] using hguardB)
+      refine ⟨.var ((hne y hyb) ▸ hslot), ?_⟩
+      intro mutable u hcontains
+      exact ⟨y, houtside, ⟨s, hslot, hcontains⟩⟩
+  | box _ ih =>
+      rcases ih houtside with ⟨hsource, hcontains⟩
+      exact ⟨.box hsource, fun h => hcontains (PartialTyContains.box h)⟩
+  | boxFull _ ih =>
+      rcases ih houtside with ⟨hsource, hcontains⟩
+      exact ⟨.boxFull hsource,
+        fun h => hcontains (PartialTyContains.tyBox h)⟩
+  | borrow hw hu ihBorrow ihTarget =>
+      rename_i w u m blf tlf targetTy
+      rcases ihBorrow houtside with ⟨hwSource, hborrowContains⟩
+      rcases hborrowContains PartialTyContains.here with
+        ⟨holder, hholderOutside, hholderContains⟩
+      have huOutside :
+          ¬ ChainGuard env (LVal.base lhs) (LVal.base u) := by
+        intro hguardU
+        exact hholderOutside
+          (chain_entry_env3 hsafe htySafe hnotWrite hne hbLook
+            hgraftContains hguardB hholderContains hguardU).2
+      rcases ihTarget huOutside with ⟨huSource, htargetContains⟩
+      exact ⟨.borrow hwSource huSource, htargetContains⟩
+
+/-- If a post-write lvalue's runtime location is protected by the guarded
+changed slot, then the lvalue's base is itself on the source write chain. -/
+theorem lval_loc_chain_protected_base_on_chain
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b) :
+    ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
+      {location : Location},
+      LValTyping env₃ lv partialTy lifetime →
+      store.loc lv = some location →
+      RuntimeFrame.ProtectedByBase store b location →
+      ChainGuard env (LVal.base lhs) (LVal.base lv) := by
+  intro lv partialTy lifetime location htyping
+  induction htyping generalizing location with
+  | var hslot =>
+      rename_i x slot
+      intro hloc hprotected
+      simp [ProgramStore.loc] at hloc
+      subst hloc
+      cases hprotected with
+      | inl hroot =>
+          have hxb : x = b := by
+            simpa [VariableProjection] using hroot
+          simpa [hxb, LVal.base] using hguardB
+      | inr hpath =>
+          rcases hheap _ (ProgramStore.OwnsTransitively.to_owns hpath) with
+            ⟨address, hheapLocation⟩
+          cases hheapLocation
+  | box hsource ih =>
+      rename_i source inner sourceLifetime
+      intro hloc hprotected
+      by_cases hchain :
+          ChainGuard env (LVal.base lhs) (LVal.base source)
+      · simpa [LVal.base] using hchain
+      · rcases
+          LValTyping.transport_into_source_of_outside_chain
+            hsafeEnv htySafe hnotWrite hne hbLook hgraftContains hguardB
+            hchain hsource with
+          ⟨hsourceEnv, _hsourceContains⟩
+        rcases lvalTyping_defined_location_whenInitialized hsafe hsourceEnv with
+          ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+            hsourceValid⟩
+        rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+        cases hsourceValid with
+        | @box ownedLocation ownedSlot inner hownedSlot _hinnerValid =>
+            have hlocEq : location = ownedLocation := by
+              simpa [ProgramStore.loc, hsourceLoc, hsourceSlot] using hloc.symm
+            have hprotectedOwned :
+                RuntimeFrame.ProtectedByBase store b ownedLocation := by
+              simpa [hlocEq] using hprotected
+            have hownsAt :
+                ProgramStore.OwnsAt store ownedLocation sourceLocation :=
+              ⟨sourceLifetime, by simpa [owningRef] using hsourceSlot⟩
+            have hsourceProtected :
+                RuntimeFrame.ProtectedByBase store b sourceLocation :=
+              protectedByBase_parent_of_ownsAt hvalidStore
+                (var_not_owned hheap) hprotectedOwned hownsAt
+            exact ih hsourceLoc hsourceProtected
+  | boxFull hsource ih =>
+      rename_i source inner sourceLifetime
+      intro hloc hprotected
+      by_cases hchain :
+          ChainGuard env (LVal.base lhs) (LVal.base source)
+      · simpa [LVal.base] using hchain
+      · rcases
+          LValTyping.transport_into_source_of_outside_chain
+            hsafeEnv htySafe hnotWrite hne hbLook hgraftContains hguardB
+            hchain hsource with
+          ⟨hsourceEnv, _hsourceContains⟩
+        rcases lvalTyping_defined_location_whenInitialized hsafe hsourceEnv with
+          ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+            hsourceValid⟩
+        rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+        cases hsourceValid with
+        | @boxFull ownedLocation ownedSlot inner hownedSlot _hinnerValid =>
+            have hlocEq : location = ownedLocation := by
+              simpa [ProgramStore.loc, hsourceLoc, hsourceSlot] using hloc.symm
+            have hprotectedOwned :
+                RuntimeFrame.ProtectedByBase store b ownedLocation := by
+              simpa [hlocEq] using hprotected
+            have hownsAt :
+                ProgramStore.OwnsAt store ownedLocation sourceLocation :=
+              ⟨sourceLifetime, by simpa [owningRef] using hsourceSlot⟩
+            have hsourceProtected :
+                RuntimeFrame.ProtectedByBase store b sourceLocation :=
+              protectedByBase_parent_of_ownsAt hvalidStore
+                (var_not_owned hheap) hprotectedOwned hownsAt
+            exact ih hsourceLoc hsourceProtected
+  | borrow hsource htarget ihSource ihTarget =>
+      rename_i source target mutable borrowLifetime targetLifetime targetTy
+      intro hloc hprotected
+      by_cases hchain :
+          ChainGuard env (LVal.base lhs) (LVal.base source)
+      · simpa [LVal.base] using hchain
+      · rcases
+          LValTyping.transport_into_source_of_outside_chain
+            hsafeEnv htySafe hnotWrite hne hbLook hgraftContains hguardB
+            hchain hsource with
+          ⟨hsourceEnv, hsourceContains⟩
+        rcases hsourceContains PartialTyContains.here with
+          ⟨holder, hholderOutside, hholderContains⟩
+        rcases lvalTyping_defined_location_whenInitialized hsafe hsourceEnv with
+          ⟨sourceLocation, sourceSlot, hsourceLoc, hsourceSlot,
+            hsourceValid⟩
+        rcases sourceSlot with ⟨sourceValue, sourceLifetime⟩
+        cases hsourceValid with
+        | @borrowLive borrowedLocation mutable target _hinitialized htargetLoc =>
+            have hlocEq : location = borrowedLocation := by
+              simpa [ProgramStore.loc, hsourceLoc, hsourceSlot] using hloc.symm
+            have hprotectedBorrowed :
+                RuntimeFrame.ProtectedByBase store b borrowedLocation := by
+              simpa [hlocEq] using hprotected
+            have htargetChain := ihTarget htargetLoc hprotectedBorrowed
+            exact False.elim
+              (hholderOutside
+                (chain_entry_env3 hsafeEnv htySafe hnotWrite hne hbLook
+                  hgraftContains hguardB hholderContains htargetChain).2)
+        | @borrowStale borrowedLocation mutable target hstale =>
+            by_cases htargetChain :
+                ChainGuard env (LVal.base lhs) (LVal.base target)
+            · exact False.elim
+                (hholderOutside
+                  (chain_entry_env3 hsafeEnv htySafe hnotWrite hne hbLook
+                    hgraftContains hguardB hholderContains htargetChain).2)
+            · rcases
+                LValTyping.transport_into_source_of_outside_chain
+                  hsafeEnv htySafe hnotWrite hne hbLook hgraftContains hguardB
+                  htargetChain htarget with
+                ⟨htargetEnv, _⟩
+              exact False.elim (hstale ⟨_, _, htargetEnv⟩)
+
+/-- A value stored in an off-chain variable slot cannot owner-reach the leaf of
+the guarded changed slot. -/
+theorem ownerReaches_stored_ne_guarded_chain_leaf {env : Env}
+    {store : ProgramStore} {lhs : LVal} {b y : Name}
+    {k : Nat} {leafLoc : Location}
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hleafChain : OwnsChain store (VariableProjection b) k leafLoc)
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hyOutside : ¬ ChainGuard env (LVal.base lhs) y) :
+    ∀ {value : PartialValue} {partialTy : PartialTy}
+      {lifetime : Lifetime},
+      store.slotAt (VariableProjection y) = some ⟨value, lifetime⟩ →
+      ¬ RuntimeFrame.OwnerReaches store value partialTy leafLoc := by
+  intro value partialTy lifetime hstored
+  have hstorageNeRoot : VariableProjection y ≠ VariableProjection b := by
+    intro hEq
+    have hyb : y = b := by
+      simpa [VariableProjection] using hEq
+    exact hyOutside (hyb ▸ hguardB)
+  exact ownerReaches_stored_ne_chain_leaf hvalidStore
+    (var_not_owned hheap) (var_not_owned hheap) hstorageNeRoot
+    hleafChain hstored
+
+/-- Loc-read routes hitting the guarded leaf must be rooted on the source write
+chain. -/
+theorem locReads_chain_protected_base_on_chain
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    {leafLoc : Location}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hleafProtected : RuntimeFrame.ProtectedByBase store b leafLoc) :
+    ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
+      LValTyping env₃ lv partialTy lifetime →
+      RuntimeFrame.LocReads store lv leafLoc →
+      ChainGuard env (LVal.base lhs) (LVal.base lv) := by
+  intro lv partialTy lifetime htyping
+  induction htyping with
+  | var hslot =>
+      intro hreads
+      cases hreads
+  | box hsource ih =>
+      intro hreads
+      cases hreads with
+      | here hloc =>
+          exact by
+            simpa [LVal.base] using
+              lval_loc_chain_protected_base_on_chain
+                hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne
+                hbLook hgraftContains hguardB hsource hloc hleafProtected
+      | there hsourceReads =>
+          exact ih hsourceReads
+  | boxFull hsource ih =>
+      intro hreads
+      cases hreads with
+      | here hloc =>
+          exact by
+            simpa [LVal.base] using
+              lval_loc_chain_protected_base_on_chain
+                hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne
+                hbLook hgraftContains hguardB hsource hloc hleafProtected
+      | there hsourceReads =>
+          exact ih hsourceReads
+  | borrow hsource htarget ihSource ihTarget =>
+      intro hreads
+      cases hreads with
+      | here hloc =>
+          exact by
+            simpa [LVal.base] using
+              lval_loc_chain_protected_base_on_chain
+                hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne
+                hbLook hgraftContains hguardB hsource hloc hleafProtected
+      | there hsourceReads =>
+          exact ihSource hsourceReads
+
+/-- Borrow-dependency routes from an off-chain value cannot hit the guarded
+leaf. -/
+theorem borrowDependencyWhenInitialized_chain_leaf_ne_of_outside_chain
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    {leafLoc : Location}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hleafProtected : RuntimeFrame.ProtectedByBase store b leafLoc) :
+    ∀ {value : PartialValue} {partialTy : PartialTy}
+      {dependency : Location},
+      (∀ {mutable : Bool} {target : LVal},
+        PartialTyContains partialTy (.borrow mutable target) →
+        ∃ holder, ¬ ChainGuard env (LVal.base lhs) holder ∧
+          env₃ ⊢ holder ↝ (.borrow mutable target)) →
+      RuntimeFrame.BorrowDependencyWhenInitialized env₃ store value
+        partialTy dependency →
+      dependency = leafLoc →
+      False := by
+  intro value partialTy dependency hcontains hdependency
+  induction hdependency with
+  | @borrow location dependency mutable target hinitialized _hloc hreads =>
+      intro hdependencyEq
+      rcases hinitialized with ⟨targetTy, targetLifetime, htargetTyping⟩
+      have htargetGuard :
+          ChainGuard env (LVal.base lhs) (LVal.base target) :=
+        locReads_chain_protected_base_on_chain
+          hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne hbLook
+          hgraftContains hguardB hleafProtected htargetTyping
+          (by simpa [hdependencyEq] using hreads)
+      rcases hcontains PartialTyContains.here with
+        ⟨holder, hholderOutside, hholderContains⟩
+      exact hholderOutside
+        (chain_entry_env3 hsafeEnv htySafe hnotWrite hne hbLook
+          hgraftContains hguardB hholderContains htargetGuard).2
+  | boxInner _hslot _hinner ih =>
+      intro hdependencyEq
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.box hcontainsInner))
+        hdependencyEq
+  | boxFullInner _hslot _hinner ih =>
+      intro hdependencyEq
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.tyBox hcontainsInner))
+        hdependencyEq
+
+/-- Values whose contained borrows are held off the guarded chain cannot reach
+the guarded leaf, assuming their owner roots also do not reach that leaf. -/
+theorem reachesWhenInitialized_chain_leaf_ne_of_outside_chain
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    {leafLoc : Location} {value : PartialValue} {partialTy : PartialTy}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ y, y ≠ b → env₃.slotAt y = env.slotAt y)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hleafProtected : RuntimeFrame.ProtectedByBase store b leafLoc)
+    (hcontains : ∀ {mutable : Bool} {target : LVal},
+      PartialTyContains partialTy (.borrow mutable target) →
+      ∃ holder, ¬ ChainGuard env (LVal.base lhs) holder ∧
+        env₃ ⊢ holder ↝ (.borrow mutable target))
+    (hownerNoReach :
+      ¬ RuntimeFrame.OwnerReaches store value partialTy leafLoc) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized env₃ store value partialTy location →
+      location ≠ leafLoc := by
+  intro location hreach
+  induction hreach with
+  | undefOf hskel hstrength howner =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using
+          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
+  | boxHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxHere hslot)
+  | boxInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.box hcontainsInner))
+        (by
+          intro howner
+          exact hownerNoReach (RuntimeFrame.OwnerReaches.boxInner hslot howner))
+        hlocation
+  | boxFullHere hslot =>
+      intro hlocation
+      exact hownerNoReach
+        (by simpa [hlocation] using RuntimeFrame.OwnerReaches.boxFullHere hslot)
+  | boxFullInner hslot _hinner ih =>
+      intro hlocation
+      exact ih
+        (by
+          intro mutable target hcontainsInner
+          exact hcontains (PartialTyContains.tyBox hcontainsInner))
+        (by
+          intro howner
+          exact hownerNoReach
+            (RuntimeFrame.OwnerReaches.boxFullInner hslot howner))
+        hlocation
+  | borrow hinitialized hloc hreads =>
+      intro hlocation
+      exact
+        borrowDependencyWhenInitialized_chain_leaf_ne_of_outside_chain
+          hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne hbLook
+          hgraftContains hguardB hleafProtected hcontains
+          (RuntimeFrame.BorrowDependencyWhenInitialized.borrow
+            hinitialized hloc hreads)
+          hlocation
+
+/-- Stored off-chain sibling slots do not reach the guarded chain leaf. -/
+theorem reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain
+    {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
+    {b y : Name} {bslot : EnvSlot} {graftTy : PartialTy}
+    {leafLoc : Location} {k : Nat}
+    {otherEnvSlot : EnvSlot} {oldValue : PartialValue}
+    (hsafe : SafeAbstraction store env)
+    (hvalidStore : ValidStore store)
+    (hheap : StoreOwnerTargetsHeap store)
+    (hsafeEnv : BorrowSafeEnv env)
+    (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
+    (hnotWrite : ¬ WriteProhibited env₃ lhs)
+    (hne : ∀ z, z ≠ b → env₃.slotAt z = env.slotAt z)
+    (hbLook : env₃.slotAt b = some { bslot with ty := graftTy })
+    (hgraftContains : ∀ {mutable : Bool} {u : LVal},
+      PartialTyContains graftTy (.borrow mutable u) →
+      PartialTyContains (.ty rhsTy) (.borrow mutable u))
+    (hguardB : ChainGuard env (LVal.base lhs) b)
+    (hleafChain : OwnsChain store (VariableProjection b) k leafLoc)
+    (hyOutside : ¬ ChainGuard env (LVal.base lhs) y)
+    (henvY : env.slotAt y = some otherEnvSlot)
+    (hstoreY : store.slotAt (VariableProjection y) =
+      some { value := oldValue, lifetime := otherEnvSlot.lifetime }) :
+    ∀ {location : Location},
+      RuntimeFrame.ReachesWhenInitialized env₃ store oldValue
+        otherEnvSlot.ty location →
+      location ≠ leafLoc := by
+  have hyb : y ≠ b := by
+    intro hy
+    exact hyOutside (hy ▸ hguardB)
+  have henvY₃ : env₃.slotAt y = some otherEnvSlot := by
+    rw [hne y hyb, henvY]
+  intro location hreach
+  exact reachesWhenInitialized_chain_leaf_ne_of_outside_chain
+    hsafe hvalidStore hheap hsafeEnv htySafe hnotWrite hne hbLook
+    hgraftContains hguardB (protectedByBase_of_ownsChain hleafChain)
+    (by
+      intro mutable target hcontains
+      exact ⟨y, hyOutside, ⟨otherEnvSlot, henvY₃, hcontains⟩⟩)
+    (ownerReaches_stored_ne_guarded_chain_leaf hvalidStore hheap hleafChain
+      hguardB hyOutside hstoreY)
+    hreach
+
 end Paper
 end LwRust
 
