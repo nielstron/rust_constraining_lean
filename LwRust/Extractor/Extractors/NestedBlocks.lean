@@ -10,7 +10,8 @@ calculus has no such term, so this version uses `epsilonTerm` (`()`) where an
 expression is required and omits unavailable statement-position fragments.
 Incomplete block-body frontiers are closed with a final `epsilonTerm`.  Partial
 assignment frontiers keep only the RHS statement extraction; the LHS is not
-rebuilt.
+rebuilt.  Integer frontiers and bare block-start frontiers are treated as
+unavailable fragments rather than as self-contained generated terms.
 -/
 
 namespace ConservativeExtractor
@@ -19,19 +20,13 @@ namespace ConservativeExtractor
 abbrev epsilonTerm : Term :=
   .val .unit
 
-/-- The lifetime of a block synthesized directly below `lifetime`. -/
-def childLifetime (lifetime : Lifetime) : Lifetime :=
-  { path := lifetime.path ++ [0] }
-
 mutual
 
 /-- Extract a partial expression in value position (`ast_copier.visit_expr`). -/
 def extractTerm (currentLifetime : Lifetime) : PartialTerm → Term
   | Generated.PartialTerm.cutoff => epsilonTerm
   | Generated.PartialTerm.done term => term
-  | Generated.PartialTerm.intN n => SyntaxCtor.ctermInt_ctor n
-  | Generated.PartialTerm.blockStart =>
-      SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime) [epsilonTerm]
+  | Generated.PartialTerm.intN _ => epsilonTerm
   | Generated.PartialTerm.blockTerms lifetime terms =>
       SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)
   | frontier =>
@@ -45,8 +40,7 @@ def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | Generated.PartialTerm.cutoff => []
   | Generated.PartialTerm.done term => [term]
   | Generated.PartialTerm.intN _ => []
-  | Generated.PartialTerm.blockStart =>
-      [SyntaxCtor.ctermBlock_ctor (childLifetime currentLifetime) [epsilonTerm]]
+  | Generated.PartialTerm.blockStart => []
   | Generated.PartialTerm.blockTerms lifetime terms =>
       [SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)]
   | Generated.PartialTerm.letMutStart => []
@@ -158,14 +152,6 @@ theorem stmtsTyping_epsilon_closed {env env₂ : Env} {typing : StoreTyping}
   | nil => exact .singleton epsilonTerm_typed
   | cons hterm _ ih => exact .cons hterm ih
 
-theorem epsilonBlock_typed {env : Env} {typing : StoreTyping}
-    {lifetime : Lifetime} :
-    TermTyping env typing lifetime
-      (SyntaxCtor.ctermBlock_ctor (childLifetime lifetime) [epsilonTerm])
-      .unit (env.dropLifetime (childLifetime lifetime)) :=
-  TermTyping.block ⟨0, rfl⟩
-    (TermListTyping.singleton epsilonTerm_typed) WellFormedTy.unit rfl
-
 theorem headD_typed {env env' : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {stmts : List Term}
     (hstmts : StmtsTyping env typing lifetime stmts env') :
@@ -196,10 +182,10 @@ theorem extractTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
   case intN =>
       cases hcomp
       simp only [extractTerm]
-      exact ⟨ty, env₂, htyped⟩
+      exact ⟨.unit, env, epsilonTerm_typed⟩
   case blockStart =>
-      simp only [extractTerm]
-      exact ⟨.unit, _, epsilonBlock_typed⟩
+      simp only [extractTerm, extractTermStmts]
+      exact ⟨.unit, env, epsilonTerm_typed⟩
   case blockTerms blockLifetime terms =>
       cases hcomp with
       | ctermBlock_blockTerms hterms =>
@@ -228,9 +214,6 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
   case done =>
       simp only [extractTermStmts]
       exact ⟨env₂, .cons htyped .nil⟩
-  case ctermBlock_blockStart =>
-      simp only [extractTermStmts]
-      exact ⟨_, .cons epsilonBlock_typed .nil⟩
   case ctermBlock_blockTerms hterms =>
       cases htyped with
       | «block» hchild hlist hwf _ =>
