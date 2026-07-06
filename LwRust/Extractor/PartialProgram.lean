@@ -20,7 +20,7 @@ export Generated (
   CompletesTerm
 )
 
-abbrev CompletesProgram : PartialProgram → Program → Prop :=
+abbrev CompletesProgram : PartialProgram → RawProgram → Prop :=
   CompletesTerm
 
 end ConservativeExtractor

@@ -16,12 +16,12 @@ MARKER = "/-- INSERT GRAMMAR HERE --/"
 CATS = {
     "cty": ("Ty", "PartialTy", "CompletesTy"),
     "clval": ("LVal", "PartialLVal", "CompletesLVal"),
-    "cterm": ("Term", "PartialTerm", "CompletesTerm"),
+    "cterm": ("RawTerm", "PartialTerm", "CompletesTerm"),
 }
 
 LIST_CATS = {
     "clval": ("List LVal", "PartialLVals", "CompletesLVals"),
-    "cterm": ("List Term", "PartialTerms", "CompletesTerms"),
+    "cterm": ("List RawTerm", "PartialTerms", "CompletesTerms"),
 }
 
 ATOM_TYPES = {

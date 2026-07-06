@@ -20,8 +20,8 @@ mutual
 
 inductive PartialTerms where
   | cutoff
-  | done (xs : List Term)
-  | elems (pre : List Term) (tail : Option PartialTerm)
+  | done (xs : List RawTerm)
+  | elems (pre : List RawTerm) (tail : Option PartialTerm)
   deriving Repr
 
 inductive PartialTy where
@@ -61,13 +61,13 @@ inductive PartialLVal where
 
 inductive PartialTerm where
   | cutoff
-  | done (x : Term)
+  | done (x : RawTerm)
   -- partial syntax: `num ...`
   -- derived from: SyntaxCtor.ctermInt_ctor {n}
   | intN (n : Int)
-  -- partial syntax: `block lifetime { term,* ...`
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
-  | blockTerms (lifetime : Lifetime) (terms : PartialTerms)
+  -- partial syntax: `block { term,* ...`
+  -- derived from: SyntaxCtor.ctermBlock_ctor {terms}
+  | blockTerms (terms : PartialTerms)
   -- partial syntax: `let mut name ...`
   -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
   | letMutName (name : PartialName)
@@ -94,7 +94,7 @@ inductive PartialTerm where
   -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
   | copyOperand (operand : PartialLVal)
   -- partial syntax: `block ...`
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
+  -- derived from: SyntaxCtor.ctermBlock_ctor {terms}
   | blockStart
   -- partial syntax: `let ...`
   -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
@@ -125,15 +125,15 @@ inductive CompletesName : PartialName → Name → Prop where
 
 mutual
 
-inductive CompletesTerms : PartialTerms → List Term → Prop where
+inductive CompletesTerms : PartialTerms → List RawTerm → Prop where
   | done {xs} :
       CompletesTerms (PartialTerms.done xs) xs
   | cutoff {xs} :
       CompletesTerms PartialTerms.cutoff xs
-  | elemsDone {pre suffix : List Term} :
+  | elemsDone {pre suffix : List RawTerm} :
       CompletesTerms (PartialTerms.elems pre none) (pre ++ suffix)
-  | elemsTail {pre suffix : List Term} {frontier : PartialTerm}
-      {frontierCompletion : Term} :
+  | elemsTail {pre suffix : List RawTerm} {frontier : PartialTerm}
+      {frontierCompletion : RawTerm} :
       CompletesTerm frontier frontierCompletion →
       CompletesTerms (PartialTerms.elems pre (some frontier))
         (pre ++ frontierCompletion :: suffix)
@@ -191,7 +191,7 @@ inductive CompletesLVal : PartialLVal → LVal → Prop where
   | clvalDeref_derefStart {operand : LVal} :
       CompletesLVal (PartialLVal.derefStart) (SyntaxCtor.clvalDeref_ctor operand)
 
-inductive CompletesTerm : PartialTerm → Term → Prop where
+inductive CompletesTerm : PartialTerm → RawTerm → Prop where
   | done {x} :
       CompletesTerm (PartialTerm.done x) x
   | cutoff {x} :
@@ -200,34 +200,34 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   -- derived from: SyntaxCtor.ctermInt_ctor {n}
   | ctermInt_intN {n : Int} :
       CompletesTerm (PartialTerm.intN n) (SyntaxCtor.ctermInt_ctor n)
-  -- partial syntax: `block lifetime { term,* ...`
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
-  | ctermBlock_blockTerms {lifetime : Lifetime} {terms : PartialTerms} {terms' : List Term} :
+  -- partial syntax: `block { term,* ...`
+  -- derived from: SyntaxCtor.ctermBlock_ctor {terms}
+  | ctermBlock_blockTerms {terms : PartialTerms} {terms' : List RawTerm} :
       CompletesTerms terms terms' →
-      CompletesTerm (PartialTerm.blockTerms lifetime terms) (SyntaxCtor.ctermBlock_ctor lifetime terms')
+      CompletesTerm (PartialTerm.blockTerms terms) (SyntaxCtor.ctermBlock_ctor terms')
   -- partial syntax: `let mut name ...`
   -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
-  | ctermLetMut_letMutName {name : PartialName} {name' : Name} {initialiser : Term} :
+  | ctermLetMut_letMutName {name : PartialName} {name' : Name} {initialiser : RawTerm} :
       CompletesName name name' →
       CompletesTerm (PartialTerm.letMutName name) (SyntaxCtor.ctermLetMut_ctor name' initialiser)
   -- partial syntax: `let mut name := term ...`
   -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
-  | ctermLetMut_letMutRhs {name : Name} {term : PartialTerm} {term' : Term} :
+  | ctermLetMut_letMutRhs {name : Name} {term : PartialTerm} {term' : RawTerm} :
       CompletesTerm term term' →
       CompletesTerm (PartialTerm.letMutRhs name term) (SyntaxCtor.ctermLetMut_ctor name term')
   -- partial syntax: `lval ...`
   -- derived from: SyntaxCtor.ctermAssign_ctor {lhs} {rhs}
-  | ctermAssign_lvalStart {lval : PartialLVal} {lval' : LVal} {rhs : Term} :
+  | ctermAssign_lvalStart {lval : PartialLVal} {lval' : LVal} {rhs : RawTerm} :
       CompletesLVal lval lval' →
       CompletesTerm (PartialTerm.lvalStart lval) (SyntaxCtor.ctermAssign_ctor lval' rhs)
   -- partial syntax: `lval := term ...`
   -- derived from: SyntaxCtor.ctermAssign_ctor {lhs} {rhs}
-  | ctermAssign_assignRhs {lhs : LVal} {rhs : PartialTerm} {rhs' : Term} :
+  | ctermAssign_assignRhs {lhs : LVal} {rhs : PartialTerm} {rhs' : RawTerm} :
       CompletesTerm rhs rhs' →
       CompletesTerm (PartialTerm.assignRhs lhs rhs) (SyntaxCtor.ctermAssign_ctor lhs rhs')
   -- partial syntax: `box term ...`
   -- derived from: SyntaxCtor.ctermBox_ctor {operand}
-  | ctermBox_boxOperand {operand : PartialTerm} {operand' : Term} :
+  | ctermBox_boxOperand {operand : PartialTerm} {operand' : RawTerm} :
       CompletesTerm operand operand' →
       CompletesTerm (PartialTerm.boxOperand operand) (SyntaxCtor.ctermBox_ctor operand')
   -- partial syntax: `& lval ...`
@@ -251,16 +251,16 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
       CompletesLVal operand operand' →
       CompletesTerm (PartialTerm.copyOperand operand) (SyntaxCtor.ctermCopy_ctor operand')
   -- partial syntax: `block ...`
-  -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
-  | ctermBlock_blockStart {lifetime : Lifetime} {terms : List Term} :
-      CompletesTerm (PartialTerm.blockStart) (SyntaxCtor.ctermBlock_ctor lifetime terms)
+  -- derived from: SyntaxCtor.ctermBlock_ctor {terms}
+  | ctermBlock_blockStart {terms : List RawTerm} :
+      CompletesTerm (PartialTerm.blockStart) (SyntaxCtor.ctermBlock_ctor terms)
   -- partial syntax: `let ...`
   -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
-  | ctermLetMut_letMutStart {name : Name} {initialiser : Term} :
+  | ctermLetMut_letMutStart {name : Name} {initialiser : RawTerm} :
       CompletesTerm (PartialTerm.letMutStart) (SyntaxCtor.ctermLetMut_ctor name initialiser)
   -- partial syntax: `box ...`
   -- derived from: SyntaxCtor.ctermBox_ctor {operand}
-  | ctermBox_boxStart {operand : Term} :
+  | ctermBox_boxStart {operand : RawTerm} :
       CompletesTerm (PartialTerm.boxStart) (SyntaxCtor.ctermBox_ctor operand)
   -- partial syntax: `& ...`
   -- derived from: SyntaxCtor.ctermBorrowShared_ctor {operand}
