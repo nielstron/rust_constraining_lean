@@ -7,27 +7,8 @@ grammar (`paper/lw_rust_followup.pdf`).
 
 ## Scope
 
-The mechanised language is **exactly the paper's core calculus**
+The mechanised language is the paper's core calculus
 (Figure 1):
-
-- Borrows are single-target (the follow-up's grammar) and the environment
-  write is the follow-up's strong update — no weak-update unions, no
-  multi-target fan-out.
-- The environment invariant `WellFormedEnv` is the paper's two-part
-  Definition 4.8 (contained borrows well-formed, slots outlive the current
-  lifetime), with one strengthening kept in part (i): a borrow target's
-  *base variable's* slot must also outlive the reference
-  (`LValBaseOutlives`; see `DIFFERENCES.md`).
-- The typing rules match the printed figures with **one** amended premise:
-  `T-Declare`'s freshness check is stated on the post-initializer `Γ₂`
-  rather than the printed `Γ₁` — we read the printed `x ∉ dom(Γ₁)` as a
-  typo, since only the `Γ₂` form rejects the shadow chain
-  `let mut x = (let mut x = t)` that Section 5.2 says is not permitted
-  (the follow-up's `T-Block` makes the same assumption), and on well-formed
-  environments `Γ₂`-freshness implies `Γ₁`-freshness.
-  `T-Block`'s `LifetimeChild` premise
-  formalises the paper's ambient lexical-nesting assumption in a slightly
-  stronger form (immediate child rather than mere nesting).
 
 See `DIFFERENCES.md` for the precise, itemised comparison with the paper.
 
@@ -87,6 +68,15 @@ to stay:
   terminal-safety half of Theorem 4.12 assume `SourceTerm`; source-initial
   empty-store wrappers derive it from typability, so the headline
   empty-initial theorems carry no extra premise.
+- **`T-Declare`'s freshness check is stated on the post-initializer `Γ₂`**
+  rather than the printed `Γ₁`. We read the printed `x ∉ dom(Γ₁)` as a
+  typo, since only the `Γ₂` form rejects the shadow chain
+  `let mut x = (let mut x = t)` that Section 5.2 says is not permitted
+  (the follow-up's `T-Block` makes the same assumption), and on well-formed
+  environments `Γ₂`-freshness implies `Γ₁`-freshness.
+- **`T-Block`'s `LifetimeChild` premise
+  formalises the paper's ambient lexical-nesting assumption in a slightly
+  stronger form** (immediate child rather than mere nesting).
 - **`R-Declare` is an update rule; freshness is proof-side.**  The raw
   reduction relation is broader than the typed states covered by
   soundness; the declaration freshness intended by the paper is recovered
