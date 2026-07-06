@@ -77,6 +77,7 @@ to stay:
 - **`T-Block`'s `LifetimeChild` premise
   formalises the paper's ambient lexical-nesting assumption in a slightly
   stronger form** (immediate child rather than mere nesting).
+- **LValBaseOutlives** Definition 4.8(i) and L-Borrow carry an extra "borrow target's base slot outlives the reference" conjunct not present in the printed definitions.
 - **`R-Declare` is an update rule; freshness is proof-side.**  The raw
   reduction relation is broader than the typed states covered by
   soundness; the declaration freshness intended by the paper is recovered
