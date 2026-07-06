@@ -16,11 +16,14 @@ def ProgramWellTyped (program : Program) : Prop :=
       LwRust.Paper.StoreTyping.empty LwRust.Core.Lifetime.root
       program ty env
 
-def programWellTyped : Program → Prop :=
-  ProgramWellTyped
+def RawProgramWellTyped (program : RawProgram) : Prop :=
+  ProgramWellTyped (RawTerm.annotateProgram program)
 
-theorem programWellTyped_complete :
-    CheckerComplete ProgramWellTyped programWellTyped := by
+def rawProgramWellTyped : RawProgram → Prop :=
+  RawProgramWellTyped
+
+theorem rawProgramWellTyped_complete :
+    CheckerComplete RawProgramWellTyped rawProgramWellTyped := by
   intro program hprogram
   exact hprogram
 

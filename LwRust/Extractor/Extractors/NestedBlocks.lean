@@ -5,54 +5,62 @@ A syntax-directed LwRust frontier extractor mirroring the expression/statement
 split in `rust_constraining`'s `ast_copier.rs`, cut down to the current core
 syntax.
 
+The extractor works over unannotated source syntax (`RawTerm`).  Block
+lifetimes are inserted only by `RawTerm.annotateProgram`, before the existing
+annotated core type checker is run.
+
 The old extractor used a synthetic diverging `missing` term.  The current core
-calculus has no such term, so this version uses `epsilonTerm` (`()`) where an
-expression is required and omits unavailable statement-position fragments.
-Incomplete block-body frontiers are closed with a final `epsilonTerm`.  Partial
-assignment frontiers keep only the RHS statement extraction; the LHS is not
-rebuilt.  Integer frontiers and bare block-start frontiers are treated as
+calculus has no such term, so this version uses `rawEpsilonTerm` (`()`) where
+an expression is required and omits unavailable statement-position fragments.
+Incomplete block-body frontiers are closed with a final `rawEpsilonTerm`.
+Partial assignment frontiers keep only the RHS statement extraction; the LHS is
+not rebuilt.  Integer frontiers and bare block-start frontiers are treated as
 unavailable fragments rather than as self-contained generated terms.
 -/
 
 namespace ConservativeExtractor
 
-/-- The core-calculus replacement for the old `missing` expression. -/
+/-- The annotated core-calculus replacement for the old `missing` expression. -/
 abbrev epsilonTerm : Term :=
+  .val .unit
+
+/-- The unannotated source counterpart of `epsilonTerm`. -/
+abbrev rawEpsilonTerm : RawTerm :=
   .val .unit
 
 mutual
 
 /-- Extract a partial expression in value position (`ast_copier.visit_expr`). -/
-def extractTerm (currentLifetime : Lifetime) : PartialTerm → Term
-  | Generated.PartialTerm.cutoff => epsilonTerm
+def extractTerm : PartialTerm → RawTerm
+  | Generated.PartialTerm.cutoff => rawEpsilonTerm
   | Generated.PartialTerm.done term => term
-  | Generated.PartialTerm.intN _ => epsilonTerm
-  | Generated.PartialTerm.blockTerms lifetime terms =>
-      SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)
+  | Generated.PartialTerm.intN _ => rawEpsilonTerm
+  | Generated.PartialTerm.blockTerms terms =>
+      .block (extractTerms terms)
   | frontier =>
-      (extractTermStmts currentLifetime frontier).headD epsilonTerm
+      (extractTermStmts frontier).headD rawEpsilonTerm
 
 /-- Extract a partial expression in statement position
 (`ast_copier.visit_expr_stmt`): recursively keep child expressions that can
 still constrain later checking, but do not rebuild constraining parents around
 partial frontiers. -/
-def extractTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
+def extractTermStmts : PartialTerm → List RawTerm
   | Generated.PartialTerm.cutoff => []
   | Generated.PartialTerm.done term => [term]
   | Generated.PartialTerm.intN _ => []
   | Generated.PartialTerm.blockStart => []
-  | Generated.PartialTerm.blockTerms lifetime terms =>
-      [SyntaxCtor.ctermBlock_ctor lifetime (extractTerms lifetime terms)]
+  | Generated.PartialTerm.blockTerms terms =>
+      [.block (extractTerms terms)]
   | Generated.PartialTerm.letMutStart => []
   | Generated.PartialTerm.letMutName _ => []
   | Generated.PartialTerm.letMutRhs _ term =>
-      extractTermStmts currentLifetime term
+      extractTermStmts term
   | Generated.PartialTerm.lvalStart _ => []
   | Generated.PartialTerm.assignRhs _ rhs =>
-      extractTermStmts currentLifetime rhs
+      extractTermStmts rhs
   | Generated.PartialTerm.boxStart => []
   | Generated.PartialTerm.boxOperand operand =>
-      extractTermStmts currentLifetime operand
+      extractTermStmts operand
   | Generated.PartialTerm.tokenAmpStart => []
   | Generated.PartialTerm.borrowSharedOperand _ => []
   | Generated.PartialTerm.borrowMutOperand _ => []
@@ -62,24 +70,24 @@ termination_by p => (sizeOf p, 0)
 
 /-- Extract a block-body frontier (`ast_copier.visit_stmts`), preserving the
 complete statement prefix and statement-extracting the single partial tail.
-Incomplete bodies are closed with `epsilonTerm`, the core replacement for the
-old `missing` placeholder. -/
-def extractTerms (currentLifetime : Lifetime) : PartialTerms → List Term
-  | Generated.PartialTerms.cutoff => [epsilonTerm]
+Incomplete bodies are closed with `rawEpsilonTerm`, the source replacement for
+the old `missing` placeholder. -/
+def extractTerms : PartialTerms → List RawTerm
+  | Generated.PartialTerms.cutoff => [rawEpsilonTerm]
   | Generated.PartialTerms.done xs => xs
-  | Generated.PartialTerms.elems pre none => pre ++ [epsilonTerm]
+  | Generated.PartialTerms.elems pre none => pre ++ [rawEpsilonTerm]
   | Generated.PartialTerms.elems pre (some tail) =>
-      pre ++ extractTermStmts currentLifetime tail ++ [epsilonTerm]
+      pre ++ extractTermStmts tail ++ [rawEpsilonTerm]
 termination_by ps => (sizeOf ps, 0)
 
 end
 
-def extractProgram : PartialProgram → Program :=
-  extractTerm LwRust.Core.Lifetime.root
+def extractProgram : PartialProgram → RawProgram :=
+  extractTerm
 
-/-- Convenience checker using the restored nested-block extractor. -/
+/-- Extract raw source syntax, annotate it algorithmically, then typecheck. -/
 def nestedBlocksPrefixChecker : PartialProgram → Prop :=
-  ExtractorPrefixChecker programWellTyped extractProgram
+  ExtractorPrefixChecker rawProgramWellTyped extractProgram
 
 section TypedExtraction
 
@@ -152,49 +160,60 @@ theorem stmtsTyping_epsilon_closed {env env₂ : Env} {typing : StoreTyping}
   | nil => exact .singleton epsilonTerm_typed
   | cons hterm _ ih => exact .cons hterm ih
 
-theorem headD_typed {env env' : Env} {typing : StoreTyping}
-    {lifetime : Lifetime} {stmts : List Term}
-    (hstmts : StmtsTyping env typing lifetime stmts env') :
+theorem rawEpsilonTerm_typed {env : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} :
+    TermTyping env typing lifetime
+      (RawTerm.annotate lifetime rawEpsilonTerm) .unit env := by
+  simpa [rawEpsilonTerm, RawTerm.annotate] using
+    (epsilonTerm_typed (env := env) (typing := typing) (lifetime := lifetime))
+
+theorem rawHeadD_typed {env env' : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} {stmts : List RawTerm}
+    (hstmts : StmtsTyping env typing lifetime
+      (RawTerm.annotateList lifetime stmts) env') :
     ∃ ty' env'', TermTyping env typing lifetime
-      (stmts.headD epsilonTerm) ty' env'' := by
-  cases hstmts with
-  | nil => exact ⟨.unit, env, epsilonTerm_typed⟩
-  | cons hfirst _ => exact ⟨_, _, hfirst⟩
+      (RawTerm.annotate lifetime (stmts.headD rawEpsilonTerm)) ty' env'' := by
+  cases stmts with
+  | nil =>
+      exact ⟨.unit, env, rawEpsilonTerm_typed⟩
+  | cons term rest =>
+      cases hstmts with
+      | cons hfirst _ =>
+          exact ⟨_, _, by simpa [RawTerm.annotateList] using hfirst⟩
 
 set_option maxRecDepth 4096 in
 set_option maxHeartbeats 1000000 in
 mutual
 
-theorem extractTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
-    {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+theorem extractTerm_typed {p : PartialTerm} {completion : RawTerm}
+    {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    {currentLifetime : Lifetime}
     (hcomp : CompletesTerm p completion)
-    (htyped : TermTyping env typing currentLifetime completion ty env₂) :
+    (htyped : TermTyping env typing currentLifetime
+      (RawTerm.annotate currentLifetime completion) ty env₂) :
     ∃ ty' env', TermTyping env typing currentLifetime
-      (extractTerm currentLifetime p) ty' env' := by
+      (RawTerm.annotate currentLifetime (extractTerm p)) ty' env' := by
   cases p
-  case cutoff =>
-      simp only [extractTerm]
-      exact ⟨.unit, env, epsilonTerm_typed⟩
   case done =>
       cases hcomp
       simp only [extractTerm]
       exact ⟨ty, env₂, htyped⟩
+  case cutoff =>
+      simp only [extractTerm]
+      exact ⟨.unit, env, rawEpsilonTerm_typed⟩
   case intN =>
       cases hcomp
       simp only [extractTerm]
-      exact ⟨.unit, env, epsilonTerm_typed⟩
-  case blockStart =>
-      simp only [extractTerm, extractTermStmts]
-      exact ⟨.unit, env, epsilonTerm_typed⟩
-  case blockTerms blockLifetime terms =>
+      exact ⟨.unit, env, rawEpsilonTerm_typed⟩
+  case blockTerms terms =>
       cases hcomp with
       | ctermBlock_blockTerms hterms =>
           cases htyped with
           | «block» hchild hlist hwf _ =>
               obtain ⟨ty', envBody, hlist', hdisj⟩ :=
                 extractTerms_typed hterms hlist
-              simp only [extractTerm]
-              refine ⟨ty', envBody.dropLifetime blockLifetime,
+              simp only [extractTerm, RawTerm.annotate]
+              refine ⟨ty', envBody.dropLifetime (RawTerm.childLifetime currentLifetime),
                 TermTyping.block hchild hlist' ?_ rfl⟩
               rcases hdisj with rfl | ⟨rfl, rfl⟩
               · exact WellFormedTy.unit
@@ -202,25 +221,27 @@ theorem extractTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
   all_goals
     simp only [extractTerm]
     obtain ⟨env', hstmts⟩ := extractTermStmts_typed hcomp htyped
-    exact headD_typed hstmts
+    exact rawHeadD_typed hstmts
 
-theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
-    {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+theorem extractTermStmts_typed {p : PartialTerm} {completion : RawTerm}
+    {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    {currentLifetime : Lifetime}
     (hcomp : CompletesTerm p completion)
-    (htyped : TermTyping env typing currentLifetime completion ty env₂) :
+    (htyped : TermTyping env typing currentLifetime
+      (RawTerm.annotate currentLifetime completion) ty env₂) :
     ∃ env', StmtsTyping env typing currentLifetime
-      (extractTermStmts currentLifetime p) env' := by
+      (RawTerm.annotateList currentLifetime (extractTermStmts p)) env' := by
   cases hcomp
   case done =>
-      simp only [extractTermStmts]
+      simp only [extractTermStmts, RawTerm.annotateList]
       exact ⟨env₂, .cons htyped .nil⟩
   case ctermBlock_blockTerms hterms =>
       cases htyped with
       | «block» hchild hlist hwf _ =>
           obtain ⟨ty', envBody, hlist', hdisj⟩ :=
             extractTerms_typed hterms hlist
-          simp only [extractTermStmts]
-          refine ⟨envBody.dropLifetime _,
+          simp only [extractTermStmts, RawTerm.annotateList, RawTerm.annotate]
+          refine ⟨envBody.dropLifetime (RawTerm.childLifetime currentLifetime),
             .cons (TermTyping.block hchild hlist' ?_ rfl) .nil⟩
           rcases hdisj with rfl | ⟨rfl, rfl⟩
           · exact WellFormedTy.unit
@@ -241,42 +262,57 @@ theorem extractTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           simp only [extractTermStmts]
           exact extractTermStmts_typed hoperand hoperand'
   all_goals
-    simp only [extractTermStmts]
+    simp only [extractTermStmts, RawTerm.annotateList]
     exact ⟨env, .nil⟩
 termination_by (sizeOf p, 0)
 decreasing_by
   all_goals decreasing_tactic
 
-theorem extractTerms_typed {currentLifetime : Lifetime} {ps : PartialTerms}
-    {completions : List Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+theorem extractTerms_typed {ps : PartialTerms} {completions : List RawTerm}
+    {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    {currentLifetime : Lifetime}
     (hcomp : CompletesTerms ps completions)
-    (hlist : TermListTyping env typing currentLifetime completions ty env₂) :
+    (hlist : TermListTyping env typing currentLifetime
+      (RawTerm.annotateList currentLifetime completions) ty env₂) :
     ∃ ty' env', TermListTyping env typing currentLifetime
-        (extractTerms currentLifetime ps) ty' env' ∧
+        (RawTerm.annotateList currentLifetime (extractTerms ps)) ty' env' ∧
       (ty' = .unit ∨ (ty' = ty ∧ env' = env₂)) := by
   cases hcomp
   case done =>
       simp only [extractTerms]
       exact ⟨ty, env₂, hlist, Or.inr ⟨rfl, rfl⟩⟩
   case cutoff =>
+      simp only [extractTerms, RawTerm.annotateList]
+      exact ⟨.unit, env, .singleton rawEpsilonTerm_typed, Or.inl rfl⟩
+  case elemsDone pre suffix =>
+      have hstmts : StmtsTyping env typing currentLifetime
+          (RawTerm.annotateList currentLifetime pre ++
+            RawTerm.annotateList currentLifetime suffix) env₂ := by
+        simpa [RawTerm.annotateList_append] using
+          (termListTyping_toStmts hlist)
+      obtain ⟨mid, hpre, _⟩ := stmtsTyping_append_inv hstmts
       simp only [extractTerms]
-      exact ⟨.unit, env, .singleton epsilonTerm_typed, Or.inl rfl⟩
-  case elemsDone =>
-      obtain ⟨mid, hpre, _⟩ :=
-        stmtsTyping_append_inv (termListTyping_toStmts hlist)
-      simp only [extractTerms]
-      exact ⟨.unit, mid, stmtsTyping_epsilon_closed hpre, Or.inl rfl⟩
-  case elemsTail hfrontier =>
-      obtain ⟨mid, hpre, hrest⟩ :=
-        stmtsTyping_append_inv (termListTyping_toStmts hlist)
+      refine ⟨.unit, mid, ?_, Or.inl rfl⟩
+      have hclosed := stmtsTyping_epsilon_closed hpre
+      simpa [RawTerm.annotateList_append, RawTerm.annotateList,
+        rawEpsilonTerm, RawTerm.annotate]
+        using hclosed
+  case elemsTail pre suffix _frontier frontierCompletion hfrontier =>
+      have hstmts : StmtsTyping env typing currentLifetime
+          (RawTerm.annotateList currentLifetime pre ++
+            RawTerm.annotateList currentLifetime (frontierCompletion :: suffix)) env₂ := by
+        simpa [RawTerm.annotateList_append, RawTerm.annotateList] using
+          (termListTyping_toStmts hlist)
+      obtain ⟨mid, hpre, hrest⟩ := stmtsTyping_append_inv hstmts
       cases hrest with
       | cons hfrontier' _ =>
           obtain ⟨env', hstmts⟩ := extractTermStmts_typed hfrontier hfrontier'
           simp only [extractTerms]
           refine ⟨.unit, env', ?_, Or.inl rfl⟩
-          have happend :=
+          have hclosed :=
             stmtsTyping_epsilon_closed (stmtsTyping_append hpre hstmts)
-          simpa [List.append_assoc] using happend
+          simpa [RawTerm.annotateList_append, RawTerm.annotateList,
+            rawEpsilonTerm, RawTerm.annotate, List.append_assoc] using hclosed
 termination_by (sizeOf ps, 0)
 decreasing_by
   all_goals decreasing_tactic
@@ -284,16 +320,17 @@ decreasing_by
 end
 
 theorem extractProgram_wellTyped_of_completion
-    {p : PartialProgram} {full : Program}
+    {p : PartialProgram} {full : RawProgram}
     (hCompletion : CompletesProgram p full)
-    (hFull : ProgramWellTyped full) :
-    ProgramWellTyped (extractProgram p) := by
+    (hFull : RawProgramWellTyped full) :
+    RawProgramWellTyped (extractProgram p) := by
   obtain ⟨ty, env, htyped⟩ := hFull
-  obtain ⟨ty', env', htyped'⟩ := extractTerm_typed hCompletion htyped
+  obtain ⟨ty', env', htyped'⟩ :=
+    extractTerm_typed hCompletion htyped
   exact ⟨ty', env', htyped'⟩
 
 theorem nestedBlocksPrefixChecker_complete :
-    PrefixCheckerComplete ProgramWellTyped CompletesProgram
+    PrefixCheckerComplete RawProgramWellTyped CompletesProgram
       nestedBlocksPrefixChecker := by
   intro p hp
   rcases hp with ⟨full, hCompletion, hFull⟩
@@ -302,34 +339,35 @@ theorem nestedBlocksPrefixChecker_complete :
 end TypedExtraction
 
 /--
-At a block-body statement boundary, the extracted block is one generated
+At a block-body statement boundary, the extracted raw block is one generated
 completion of the partial block.
 -/
 theorem extractProgram_completedStatementBoundary_completes
-    {lifetime : Lifetime} {pre : List Term} :
+    {pre : List RawTerm} :
     CompletesProgram
-      (Generated.PartialTerm.blockTerms lifetime
+      (Generated.PartialTerm.blockTerms
         (Generated.PartialTerms.elems pre none))
       (extractProgram
-        (Generated.PartialTerm.blockTerms lifetime
+        (Generated.PartialTerm.blockTerms
           (Generated.PartialTerms.elems pre none))) := by
   simpa [CompletesProgram, extractProgram, extractTerm, extractTerms] using
     (Generated.CompletesTerm.ctermBlock_blockTerms
       (Generated.CompletesTerms.elemsDone
-        (pre := pre) (suffix := [epsilonTerm])))
+        (pre := pre) (suffix := [rawEpsilonTerm])))
 
 /--
-Soundness at a completed-statement boundary: if this extracted approximation checks,
-there is a well-typed completion of the partial block.
+Soundness at a completed-statement boundary: if this extracted approximation
+checks after annotation, there is a well-typed raw completion of the partial
+block.
 -/
 theorem extractProgram_completedStatementBoundary_sound
-    {lifetime : Lifetime} {pre : List Term}
-    (hExtracted : ProgramWellTyped
+    {pre : List RawTerm}
+    (hExtracted : RawProgramWellTyped
       (extractProgram
-        (Generated.PartialTerm.blockTerms lifetime
+        (Generated.PartialTerm.blockTerms
           (Generated.PartialTerms.elems pre none)))) :
-    Completable ProgramWellTyped CompletesProgram
-      (Generated.PartialTerm.blockTerms lifetime
+    Completable RawProgramWellTyped CompletesProgram
+      (Generated.PartialTerm.blockTerms
         (Generated.PartialTerms.elems pre none)) := by
   exact ⟨_,
     extractProgram_completedStatementBoundary_completes,

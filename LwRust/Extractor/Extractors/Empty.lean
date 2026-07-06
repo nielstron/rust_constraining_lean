@@ -12,23 +12,25 @@ conservativity alone is cheap; the value of an extractor is its precision
 
 namespace ConservativeExtractor
 
-def emptyProgram : Program :=
+def emptyProgram : RawProgram :=
   .val .unit
 
-def emptyProgramExtractor (_ : PartialProgram) : Program :=
+def emptyProgramExtractor (_ : PartialProgram) : RawProgram :=
   emptyProgram
 
 theorem emptyProgramExtractor_wellTyped_conservative :
-    Conservative ProgramWellTyped CompletesProgram emptyProgramExtractor := by
+    Conservative RawProgramWellTyped CompletesProgram emptyProgramExtractor := by
   intro p hInvalid full _hCompletion hFull
-  exact hInvalid ⟨.unit, LwRust.Paper.Env.empty,
-    LwRust.Paper.TermTyping.const LwRust.Paper.ValueTyping.unit⟩
+  exact hInvalid ⟨.unit, LwRust.Paper.Env.empty, by
+    simpa [RawProgramWellTyped, RawTerm.annotateProgram, RawTerm.annotate,
+      emptyProgram, emptyProgramExtractor] using
+      (LwRust.Paper.TermTyping.const LwRust.Paper.ValueTyping.unit)⟩
 
 theorem emptyProgramExtractor_prefixChecker_complete :
-    PrefixCheckerComplete ProgramWellTyped CompletesProgram
-      (ExtractorPrefixChecker programWellTyped emptyProgramExtractor) := by
+    PrefixCheckerComplete RawProgramWellTyped CompletesProgram
+      (ExtractorPrefixChecker rawProgramWellTyped emptyProgramExtractor) := by
   exact conservative_extractors_give_complete_prefix_checkers
     emptyProgramExtractor_wellTyped_conservative
-    programWellTyped_complete
+    rawProgramWellTyped_complete
 
 end ConservativeExtractor
