@@ -336,6 +336,14 @@ theorem nestedBlocksPrefixChecker_complete :
   rcases hp with ⟨full, hCompletion, hFull⟩
   exact extractProgram_wellTyped_of_completion hCompletion hFull
 
+theorem nestedBlocksPrefixChecker_complete_of_wellTypedAnnotation :
+    PrefixCheckerComplete RawProgramHasWellTypedAnnotation CompletesProgram
+      nestedBlocksPrefixChecker := by
+  intro p hp
+  apply nestedBlocksPrefixChecker_complete
+  rcases hp with ⟨full, hCompletion, hFull⟩
+  exact ⟨full, hCompletion, rawProgramWellTyped_of_wellTypedAnnotation hFull⟩
+
 end TypedExtraction
 
 /--

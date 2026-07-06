@@ -80,6 +80,89 @@ def annotateProgram : RawProgram → Program :=
   | cons term rest ih =>
       simp [annotateList, ih]
 
+mutual
+
+/--
+`Annotates raw annotated` says that `annotated` is one possible insertion of
+block-lifetime annotations into the unannotated source term `raw`.
+
+The relation is deliberately structural: block annotations may choose any
+lifetime, including one that is not a valid child of its parent.  Validity of
+those choices is checked later by `TermTyping`.
+-/
+inductive Annotates : RawTerm → Term → Prop where
+  | block {terms : List RawTerm} {blockLifetime : Lifetime}
+      {annotatedTerms : List Term} :
+      AnnotatesList terms annotatedTerms →
+      Annotates (.block terms) (.block blockLifetime annotatedTerms)
+  | letMut {name : Name} {initialiser : RawTerm} {annotatedInitialiser : Term} :
+      Annotates initialiser annotatedInitialiser →
+      Annotates (.letMut name initialiser) (.letMut name annotatedInitialiser)
+  | assign {lhs : LVal} {rhs : RawTerm} {annotatedRhs : Term} :
+      Annotates rhs annotatedRhs →
+      Annotates (.assign lhs rhs) (.assign lhs annotatedRhs)
+  | box {operand : RawTerm} {annotatedOperand : Term} :
+      Annotates operand annotatedOperand →
+      Annotates (.box operand) (.box annotatedOperand)
+  | borrow {mutable : Bool} {operand : LVal} :
+      Annotates (.borrow mutable operand) (.borrow mutable operand)
+  | move {operand : LVal} :
+      Annotates (.move operand) (.move operand)
+  | copy {operand : LVal} :
+      Annotates (.copy operand) (.copy operand)
+  | val {value : Value} :
+      Annotates (.val value) (.val value)
+
+inductive AnnotatesList : List RawTerm → List Term → Prop where
+  | nil :
+      AnnotatesList [] []
+  | cons {term : RawTerm} {rest : List RawTerm}
+      {annotatedTerm : Term} {annotatedRest : List Term} :
+      Annotates term annotatedTerm →
+      AnnotatesList rest annotatedRest →
+      AnnotatesList (term :: rest) (annotatedTerm :: annotatedRest)
+
+end
+
+def AnnotatesProgram (raw : RawProgram) (annotated : Program) : Prop :=
+  Annotates raw annotated
+
+mutual
+
+theorem annotate_annotates (currentLifetime : Lifetime) :
+    ∀ raw : RawTerm, Annotates raw (annotate currentLifetime raw)
+  | .block terms =>
+      Annotates.block (annotateList_annotates (childLifetime currentLifetime) terms)
+  | .letMut _ initialiser =>
+      Annotates.letMut (annotate_annotates currentLifetime initialiser)
+  | .assign _ rhs =>
+      Annotates.assign (annotate_annotates currentLifetime rhs)
+  | .box operand =>
+      Annotates.box (annotate_annotates currentLifetime operand)
+  | .borrow _ _ =>
+      Annotates.borrow
+  | .move _ =>
+      Annotates.move
+  | .copy _ =>
+      Annotates.copy
+  | .val _ =>
+      Annotates.val
+
+theorem annotateList_annotates (currentLifetime : Lifetime) :
+    ∀ raws : List RawTerm,
+      AnnotatesList raws (annotateList currentLifetime raws)
+  | [] => AnnotatesList.nil
+  | term :: rest =>
+      AnnotatesList.cons
+        (annotate_annotates currentLifetime term)
+        (annotateList_annotates currentLifetime rest)
+
+end
+
+theorem annotateProgram_annotates (raw : RawProgram) :
+    AnnotatesProgram raw (annotateProgram raw) :=
+  annotate_annotates LwRust.Core.Lifetime.root raw
+
 end RawTerm
 
 namespace CompleteDsl
