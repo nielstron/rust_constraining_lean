@@ -23,9 +23,8 @@ namespace CompleteDsl
 
 def tyUnit : Ty := .unit
 def tyInt : Ty := .int
-def tyBool : Ty := .bool
-def tyBorrow (mutable : Bool) (targets : List LVal) : Ty :=
-  .borrow mutable targets
+def tyBorrow (mutable : Bool) (target : LVal) : Ty :=
+  .borrow mutable target
 def tyBox (element : Ty) : Ty := .box element
 
 def lvalVar (x : Name) : LVal := .var x
@@ -33,7 +32,6 @@ def lvalDeref (operand : LVal) : LVal := .deref operand
 
 def unit : Term := .val .unit
 def int (n : Int) : Term := .val (.int n)
-def bool (b : Bool) : Term := .val (.bool b)
 def block (lifetime : Lifetime) (terms : List Term) : Term :=
   .block lifetime terms
 def letMut (x : Name) (initialiser : Term) : Term :=
@@ -45,9 +43,6 @@ def borrow (mutable : Bool) (operand : LVal) : Term :=
   .borrow mutable operand
 def move (operand : LVal) : Term := .move operand
 def copy (operand : LVal) : Term := .copy operand
-def eq (lhs rhs : Term) : Term := .eq lhs rhs
-def ite (condition trueBranch falseBranch : Term) : Term :=
-  .ite condition trueBranch falseBranch
 
 end CompleteDsl
 
@@ -62,9 +57,8 @@ declare_syntax_cat cterm
 
 syntax (name := ctyUnit) "cty_unit" : cty
 syntax (name := ctyInt) "cty_int" : cty
-syntax (name := ctyBool) "cty_bool" : cty
-syntax (name := ctyBorrowShared) "&" "[" clval,* "]" : cty
-syntax (name := ctyBorrowMut) "&" "mut" "[" clval,* "]" : cty
+syntax (name := ctyBorrowShared) "&" clval : cty
+syntax (name := ctyBorrowMut) "&" "mut" clval : cty
 syntax (name := ctyBox) "box" cty : cty
 
 syntax (name := clvalVar) ident : clval
@@ -72,8 +66,6 @@ syntax (name := clvalDeref) "*" clval : clval
 
 syntax (name := ctermUnit) "()" : cterm
 syntax (name := ctermInt) num : cterm
-syntax (name := ctermTrue) "true" : cterm
-syntax (name := ctermFalse) "false" : cterm
 syntax (name := ctermBlock) "block" term "{" cterm,* "}" : cterm
 syntax (name := ctermLetMut) "let" "mut" ident ":=" cterm : cterm
 syntax (name := ctermAssign) clval ":=" cterm : cterm
@@ -82,8 +74,6 @@ syntax (name := ctermBorrowShared) "&" clval : cterm
 syntax (name := ctermBorrowMut) "&" "mut" clval : cterm
 syntax (name := ctermMove) clval : cterm
 syntax (name := ctermCopy) "copy" clval : cterm
-syntax (name := ctermEq) cterm "==" cterm : cterm
-syntax (name := ctermIte) "if" cterm cterm "else" cterm : cterm
 
 /-!
 Checked constructor annotations for the generator.
@@ -102,14 +92,11 @@ abbrev ctyUnit_ctor : Ty :=
 abbrev ctyInt_ctor : Ty :=
   show Ty from .int
 
-abbrev ctyBool_ctor : Ty :=
-  show Ty from .bool
+abbrev ctyBorrowShared_ctor (target : LVal) : Ty :=
+  LwRust.Core.Ty.borrow Bool.false target
 
-abbrev ctyBorrowShared_ctor (targets : List LVal) : Ty :=
-  LwRust.Core.Ty.borrow Bool.false targets
-
-abbrev ctyBorrowMut_ctor (targets : List LVal) : Ty :=
-  LwRust.Core.Ty.borrow Bool.true targets
+abbrev ctyBorrowMut_ctor (target : LVal) : Ty :=
+  LwRust.Core.Ty.borrow Bool.true target
 
 abbrev ctyBox_ctor (element : Ty) : Ty :=
   show Ty from (.box element)
@@ -125,12 +112,6 @@ abbrev ctermUnit_ctor : Term :=
 
 abbrev ctermInt_ctor (n : Int) : Term :=
   show Term from (.val (.int n))
-
-abbrev ctermTrue_ctor : Term :=
-  LwRust.Core.Term.val (LwRust.Core.Value.bool Bool.true)
-
-abbrev ctermFalse_ctor : Term :=
-  LwRust.Core.Term.val (LwRust.Core.Value.bool Bool.false)
 
 abbrev ctermBlock_ctor (lifetime : Lifetime) (terms : List Term) : Term :=
   show Term from (.block lifetime terms)
@@ -155,12 +136,6 @@ abbrev ctermMove_ctor (operand : LVal) : Term :=
 
 abbrev ctermCopy_ctor (operand : LVal) : Term :=
   show Term from (.copy operand)
-
-abbrev ctermEq_ctor (lhs rhs : Term) : Term :=
-  show Term from (.eq lhs rhs)
-
-abbrev ctermIte_ctor (condition trueBranch falseBranch : Term) : Term :=
-  show Term from (.ite condition trueBranch falseBranch)
 
 end SyntaxCtor
 

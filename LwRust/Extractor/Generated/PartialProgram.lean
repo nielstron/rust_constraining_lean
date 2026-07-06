@@ -18,12 +18,6 @@ inductive PartialName where
 
 mutual
 
-inductive PartialLVals where
-  | cutoff
-  | done (xs : List LVal)
-  | elems (pre : List LVal) (tail : Option PartialLVal)
-  deriving Repr
-
 inductive PartialTerms where
   | cutoff
   | done (xs : List Term)
@@ -33,18 +27,18 @@ inductive PartialTerms where
 inductive PartialTy where
   | cutoff
   | done (x : Ty)
-  -- partial syntax: `& [ lval,* ...`
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
-  | borrowSharedTargets (targets : PartialLVals)
-  -- partial syntax: `& mut [ lval,* ...`
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
-  | borrowMutTargets (targets : PartialLVals)
+  -- partial syntax: `& lval ...`
+  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {target}
+  | borrowSharedTargets (target : PartialLVal)
+  -- partial syntax: `& mut lval ...`
+  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {target}
+  | borrowMutTargets (target : PartialLVal)
   -- partial syntax: `box ty ...`
   -- derived from: SyntaxCtor.ctyBox_ctor {element}
   | boxElement (element : PartialTy)
   -- partial syntax: `& ...`
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
+  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {target}
+  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {target}
   | tokenAmpStart
   -- partial syntax: `box ...`
   -- derived from: SyntaxCtor.ctyBox_ctor {element}
@@ -83,7 +77,6 @@ inductive PartialTerm where
   -- partial syntax: `lval ...`
   -- derived from: SyntaxCtor.ctermAssign_ctor {lhs} {rhs}
   -- derived from: SyntaxCtor.ctermMove_ctor {operand}
-  -- derived from: SyntaxCtor.ctermEq_ctor (SyntaxCtor.ctermMove_ctor {lval}) {rhs}
   | lvalStart (lval : PartialLVal)
   -- partial syntax: `lval := term ...`
   -- derived from: SyntaxCtor.ctermAssign_ctor {lhs} {rhs}
@@ -100,21 +93,6 @@ inductive PartialTerm where
   -- partial syntax: `copy lval ...`
   -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
   | copyOperand (operand : PartialLVal)
-  -- partial syntax: `term ...`
-  -- derived from: SyntaxCtor.ctermEq_ctor {lhs} {rhs}
-  | termPrefix (lhs : PartialTerm)
-  -- partial syntax: `term == term ...`
-  -- derived from: SyntaxCtor.ctermEq_ctor {lhs} {rhs}
-  | eqRhs (lhs : Term) (rhs : PartialTerm)
-  -- partial syntax: `if term ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | iteCondition (condition : PartialTerm)
-  -- partial syntax: `if term term ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | iteTrueBranch (condition : Term) (trueBranch : PartialTerm)
-  -- partial syntax: `if term term else term ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | iteFalseBranch (condition : Term) (trueBranch : Term) (falseBranch : PartialTerm)
   -- partial syntax: `block ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
   | blockStart
@@ -131,9 +109,6 @@ inductive PartialTerm where
   -- partial syntax: `copy ...`
   -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
   | copyStart
-  -- partial syntax: `if ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | iteStart
   deriving Repr
 
 end
@@ -149,19 +124,6 @@ inductive CompletesName : PartialName → Name → Prop where
       CompletesName (PartialName.prefix x) y
 
 mutual
-
-inductive CompletesLVals : PartialLVals → List LVal → Prop where
-  | done {xs} :
-      CompletesLVals (PartialLVals.done xs) xs
-  | cutoff {xs} :
-      CompletesLVals PartialLVals.cutoff xs
-  | elemsDone {pre suffix : List LVal} :
-      CompletesLVals (PartialLVals.elems pre none) (pre ++ suffix)
-  | elemsTail {pre suffix : List LVal} {frontier : PartialLVal}
-      {frontierCompletion : LVal} :
-      CompletesLVal frontier frontierCompletion →
-      CompletesLVals (PartialLVals.elems pre (some frontier))
-        (pre ++ frontierCompletion :: suffix)
 
 inductive CompletesTerms : PartialTerms → List Term → Prop where
   | done {xs} :
@@ -181,29 +143,29 @@ inductive CompletesTy : PartialTy → Ty → Prop where
       CompletesTy (PartialTy.done x) x
   | cutoff {x} :
       CompletesTy PartialTy.cutoff x
-  -- partial syntax: `& [ lval,* ...`
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
-  | ctyBorrowShared_borrowSharedTargets {targets : PartialLVals} {targets' : List LVal} :
-      CompletesLVals targets targets' →
-      CompletesTy (PartialTy.borrowSharedTargets targets) (SyntaxCtor.ctyBorrowShared_ctor targets')
-  -- partial syntax: `& mut [ lval,* ...`
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
-  | ctyBorrowMut_borrowMutTargets {targets : PartialLVals} {targets' : List LVal} :
-      CompletesLVals targets targets' →
-      CompletesTy (PartialTy.borrowMutTargets targets) (SyntaxCtor.ctyBorrowMut_ctor targets')
+  -- partial syntax: `& lval ...`
+  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {target}
+  | ctyBorrowShared_borrowSharedTargets {target : PartialLVal} {target' : LVal} :
+      CompletesLVal target target' →
+      CompletesTy (PartialTy.borrowSharedTargets target) (SyntaxCtor.ctyBorrowShared_ctor target')
+  -- partial syntax: `& mut lval ...`
+  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {target}
+  | ctyBorrowMut_borrowMutTargets {target : PartialLVal} {target' : LVal} :
+      CompletesLVal target target' →
+      CompletesTy (PartialTy.borrowMutTargets target) (SyntaxCtor.ctyBorrowMut_ctor target')
   -- partial syntax: `box ty ...`
   -- derived from: SyntaxCtor.ctyBox_ctor {element}
   | ctyBox_boxElement {element : PartialTy} {element' : Ty} :
       CompletesTy element element' →
       CompletesTy (PartialTy.boxElement element) (SyntaxCtor.ctyBox_ctor element')
   -- partial syntax: `& ...`
-  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {targets}
-  | ctyBorrowShared_tokenAmpStart {targets : List LVal} :
-      CompletesTy (PartialTy.tokenAmpStart) (SyntaxCtor.ctyBorrowShared_ctor targets)
+  -- derived from: SyntaxCtor.ctyBorrowShared_ctor {target}
+  | ctyBorrowShared_tokenAmpStart {target : LVal} :
+      CompletesTy (PartialTy.tokenAmpStart) (SyntaxCtor.ctyBorrowShared_ctor target)
   -- partial syntax: `& ...`
-  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {targets}
-  | ctyBorrowMut_tokenAmpStart {targets : List LVal} :
-      CompletesTy (PartialTy.tokenAmpStart) (SyntaxCtor.ctyBorrowMut_ctor targets)
+  -- derived from: SyntaxCtor.ctyBorrowMut_ctor {target}
+  | ctyBorrowMut_tokenAmpStart {target : LVal} :
+      CompletesTy (PartialTy.tokenAmpStart) (SyntaxCtor.ctyBorrowMut_ctor target)
   -- partial syntax: `box ...`
   -- derived from: SyntaxCtor.ctyBox_ctor {element}
   | ctyBox_boxStart {element : Ty} :
@@ -288,31 +250,6 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   | ctermCopy_copyOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
       CompletesTerm (PartialTerm.copyOperand operand) (SyntaxCtor.ctermCopy_ctor operand')
-  -- partial syntax: `term ...`
-  -- derived from: SyntaxCtor.ctermEq_ctor {lhs} {rhs}
-  | ctermEq_termPrefix {lhs : PartialTerm} {lhs' : Term} {rhs : Term} :
-      CompletesTerm lhs lhs' →
-      CompletesTerm (PartialTerm.termPrefix lhs) (SyntaxCtor.ctermEq_ctor lhs' rhs)
-  -- partial syntax: `term == term ...`
-  -- derived from: SyntaxCtor.ctermEq_ctor {lhs} {rhs}
-  | ctermEq_eqRhs {lhs : Term} {rhs : PartialTerm} {rhs' : Term} :
-      CompletesTerm rhs rhs' →
-      CompletesTerm (PartialTerm.eqRhs lhs rhs) (SyntaxCtor.ctermEq_ctor lhs rhs')
-  -- partial syntax: `if term ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | ctermIte_iteCondition {condition : PartialTerm} {condition' : Term} {trueBranch : Term} {falseBranch : Term} :
-      CompletesTerm condition condition' →
-      CompletesTerm (PartialTerm.iteCondition condition) (SyntaxCtor.ctermIte_ctor condition' trueBranch falseBranch)
-  -- partial syntax: `if term term ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | ctermIte_iteTrueBranch {condition : Term} {trueBranch : PartialTerm} {trueBranch' : Term} {falseBranch : Term} :
-      CompletesTerm trueBranch trueBranch' →
-      CompletesTerm (PartialTerm.iteTrueBranch condition trueBranch) (SyntaxCtor.ctermIte_ctor condition trueBranch' falseBranch)
-  -- partial syntax: `if term term else term ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | ctermIte_iteFalseBranch {condition : Term} {trueBranch : Term} {falseBranch : PartialTerm} {falseBranch' : Term} :
-      CompletesTerm falseBranch falseBranch' →
-      CompletesTerm (PartialTerm.iteFalseBranch condition trueBranch falseBranch) (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch')
   -- partial syntax: `block ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
   | ctermBlock_blockStart {lifetime : Lifetime} {terms : List Term} :
@@ -337,15 +274,6 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
   | ctermCopy_copyStart {operand : LVal} :
       CompletesTerm (PartialTerm.copyStart) (SyntaxCtor.ctermCopy_ctor operand)
-  -- partial syntax: `if ...`
-  -- derived from: SyntaxCtor.ctermIte_ctor {condition} {trueBranch} {falseBranch}
-  | ctermIte_iteStart {condition : Term} {trueBranch : Term} {falseBranch : Term} :
-      CompletesTerm (PartialTerm.iteStart) (SyntaxCtor.ctermIte_ctor condition trueBranch falseBranch)
-  -- partial syntax: `lval ...`
-  -- derived from: SyntaxCtor.ctermEq_ctor (SyntaxCtor.ctermMove_ctor {lval}) {rhs}
-  | ctermEq_lvalStart {lval : PartialLVal} {lval' : LVal} {rhs : Term} :
-      CompletesLVal lval lval' →
-      CompletesTerm (PartialTerm.lvalStart lval) (SyntaxCtor.ctermEq_ctor (SyntaxCtor.ctermMove_ctor lval') rhs)
 
 end
 

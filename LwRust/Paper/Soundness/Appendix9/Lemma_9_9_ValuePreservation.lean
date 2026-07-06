@@ -6,9 +6,7 @@ import LwRust.Paper.Soundness.Lemma_4_11_Preservation
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then the final
 > value is abstracted by the result type: `S₂ ▷ v ∼ T`.
 
-Status: **proven** for the strengthened Section 4 typing system over source
-continuations.  This is the value-validity conjunct of
-`TerminalStateSafe`, established by Preservation (Lemma 4.11).
+Status: proved as the value-validity projection of Preservation (Lemma 4.11).
 The file also exposes representative redex-level frame lemmas for move/value
 cases.
 -/
@@ -18,24 +16,27 @@ namespace LwRust.Paper.Soundness
 open LwRust.Paper LwRust.Core
 
 /--
-Appendix 9.9, Value Preservation, as the value-abstraction projection of
+Appendix 9.9, Value Preservation: the value-abstraction projection of
 Lemma 4.11.
 -/
 theorem lemma_9_9_valuePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
     SourceTerm term →
-      ValidRuntimeState store term →
-      ValidStoreTyping store term typing →
-      WellFormedEnv env₁ lifetime →
-      store ∼ₛ env₁ →
+    ValidRuntimeState store term →
+    ValidStoreTyping store term typing →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    Env.FiniteSupport env₁ →
+    Linearizable env₁ →
+    store ≈ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    ValidPartialValueWhenInitialized env₂ finalStore (.value finalValue)
-      (.ty ty) := by
-    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
-    exact (preservation hsource hvalid hstoreTyping
-      hwellFormed hsafe htyping hmulti).2.2
+    ValidValue finalStore finalValue ty := by
+    intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hfinite hlinear
+      hsafe htyping hmulti
+    exact (lemma_4_11_preservation hsource hvalid hstoreTyping hwellFormed
+      hborrowSafe hfinite hlinear hsafe htyping hmulti).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

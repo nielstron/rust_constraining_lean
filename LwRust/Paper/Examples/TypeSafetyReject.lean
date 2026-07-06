@@ -3,11 +3,11 @@ import LwRust.Paper.Soundness.Helpers.Frame
 import LwRust.Paper.Soundness.InitialStates
 
 /-!
-Build-checked rejected examples.
+Build-checked type-safety examples.
 
-These files state rejection as negated typing derivations.  That keeps the
-Lean build green while showing that the type-and-borrow safety theorem cannot
-be applied to the program.
+The first examples state rejection as negated typing derivations.  The final
+section is a positive regression test for ordinary mutable-borrow assignment:
+`let mut x = 0; let mut p = &mut x; *p = 1`.
 -/
 
 namespace LwRust
@@ -19,7 +19,7 @@ def invalidBorrowIntSlot : EnvSlot :=
   { ty := .ty .int, lifetime := InvalidBorrowExample.l }
 
 def invalidBorrowYSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [InvalidBorrowExample.x]),
+  { ty := .ty (Ty.borrow true InvalidBorrowExample.x),
     lifetime := InvalidBorrowExample.l }
 
 /--
@@ -92,18 +92,17 @@ theorem invalidBorrowExample_rejected :
               cases htail2 with
               | singleton hassign =>
                   cases hdeclareX with
-                  | declare _freshX hinitX _freshXOut _cohX hxEnv =>
+                  | declare hinitX _hfreshOutX hxEnv =>
                       cases hinitX with
                       | const _ =>
                           cases hdeclareY with
-                          | declare _freshY hinitY _freshYOut _cohY hyEnv =>
+                          | declare hinitY _hfreshOutY hyEnv =>
                               cases hinitY with
                               | mutBorrow _hLvY _mutableY _notWriteY =>
                                   rename_i _valueLifetimeY borrowedTy
                                   cases hassign with
                                     | assign _hRhs _hLhsPost _hshape _hwell
-                                        hwrite _hnoStale _hranked _hcoherent
-                                        _hrhsTargets hnotWrite =>
+                                        hwrite hnotWrite =>
                                       cases _hRhs with
                                       | const hvalue =>
                                       cases hvalue
@@ -115,110 +114,253 @@ theorem invalidBorrowExample_rejected :
                                           | strong =>
                                           exact hnotWrite (by
                                             left
-                                            refine ⟨"y", [InvalidBorrowExample.x],
-                                              InvalidBorrowExample.x, ?_,
-                                              by simp, by simp [PathConflicts]⟩
+                                            refine ⟨"y", InvalidBorrowExample.x, ?_,
+                                              by simp [PathConflicts]⟩
                                             refine ⟨
                                               { ty := .ty (Ty.borrow true
-                                                  [InvalidBorrowExample.x]),
+                                                  InvalidBorrowExample.x),
                                                 lifetime := InvalidBorrowExample.l },
                                               ?_, PartialTyContains.here⟩
                                             simp [Env.update, InvalidBorrowExample.x,
                                               InvalidBorrowExample.l, LVal.base])
               | cons _hhead htail => cases htail
 
-/-- Paper Section 6.1.3's joined environment after
-`if ... { p = &mut a; } else { q = &mut a; }`. -/
-def rootIntSlot : EnvSlot :=
-  { ty := .ty .int, lifetime := Lifetime.root }
+namespace MutableBorrowAssignmentExample
 
-def paperConditionalPSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [.var "x", .var "a"]),
-    lifetime := Lifetime.root }
+def l : Lifetime := [0]
+def x : LVal := .var "x"
+def p : LVal := .var "p"
 
-def paperConditionalQSlot : EnvSlot :=
-  { ty := .ty (Ty.borrow true [.var "y", .var "a"]),
-    lifetime := Lifetime.root }
+def xSlot : EnvSlot :=
+  { ty := .ty .int, lifetime := l }
 
-def paperConditionalJoinEnv : Env :=
-  (((((Env.empty.update "a" rootIntSlot).update "x" rootIntSlot).update
-    "y" rootIntSlot).update "p" paperConditionalPSlot).update
-    "q" paperConditionalQSlot)
+def pSlot : EnvSlot :=
+  { ty := .ty (.borrow true x), lifetime := l }
 
-def paperRejectedIfElse : Term :=
-  .ite (.val (.bool true))
-    (.assign (.var "p") (.borrow true (.var "a")))
-    (.assign (.var "q") (.borrow true (.var "a")))
+def envX : Env :=
+  Env.empty.update "x" xSlot
+
+def envP : Env :=
+  envX.update "p" pSlot
+
+def prefixTerms : List Term :=
+  [.letMut "x" (.val (.int 0)),
+    .letMut "p" (.borrow true x)]
+
+private theorem envX_slot_x : envX.slotAt "x" = some xSlot := by
+  simp [envX]
+
+private theorem envP_slot_x : envP.slotAt "x" = some xSlot := by
+  simp [envP, envX, Env.update]
+
+private theorem envP_slot_p : envP.slotAt "p" = some pSlot := by
+  simp [envP]
+
+private theorem envX_no_borrow_contains {y : Name} {mutable : Bool}
+    {target : LVal} :
+    ¬ envX ⊢ y ↝ (.borrow mutable target) := by
+  rintro ⟨slot, hslot, hcontains⟩
+  by_cases hy : y = "x"
+  · subst hy
+    have hslotEq : slot = xSlot :=
+      Option.some.inj (hslot.symm.trans envX_slot_x)
+    subst hslotEq
+    cases hcontains
+  · simp [envX, Env.empty, Env.update, hy] at hslot
+
+private theorem envX_not_writeProhibited_x :
+    ¬ WriteProhibited envX x := by
+  intro hwrite
+  rcases hwrite with hread | himm
+  · rcases hread with ⟨_holder, _target, hcontains, _hconflict⟩
+    exact envX_no_borrow_contains hcontains
+  · rcases himm with ⟨_holder, _target, hcontains, _hconflict⟩
+    exact envX_no_borrow_contains hcontains
+
+private theorem envX_x_typing :
+    LValTyping envX x (.ty .int) l := by
+  exact LValTyping.var (slot := xSlot) envX_slot_x
+
+private theorem envX_x_mutable :
+    Mutable envX x := by
+  exact Mutable.var envX_slot_x
+
+private theorem borrow_x_typing :
+    TermTyping envX StoreTyping.empty l (.borrow true x) (.borrow true x) envX := by
+  exact TermTyping.mutBorrow envX_x_typing envX_x_mutable
+    envX_not_writeProhibited_x
+
+private theorem declare_x_typing :
+    TermTyping Env.empty StoreTyping.empty l
+      (.letMut "x" (.val (.int 0))) .unit envX := by
+  unfold envX xSlot l
+  exact TermTyping.declare
+    (TermTyping.const ValueTyping.int)
+    (by simp [Env.fresh, Env.empty])
+    rfl
+
+private theorem envX_fresh_p : envX.fresh "p" := by
+  simp [Env.fresh, envX, Env.update, Env.empty]
+
+private theorem declare_p_typing :
+    TermTyping envX StoreTyping.empty l
+      (.letMut "p" (.borrow true x)) .unit envP := by
+  unfold envP pSlot
+  exact TermTyping.declare borrow_x_typing envX_fresh_p rfl
+
+private theorem prefix_typing :
+    TermListTyping Env.empty StoreTyping.empty l prefixTerms .unit envP := by
+  unfold prefixTerms
+  exact TermListTyping.cons declare_x_typing
+    (TermListTyping.singleton declare_p_typing)
+
+private theorem envP_p_contains :
+    envP ⊢ "p" ↝ (.borrow true x) := by
+  exact ⟨pSlot, envP_slot_p, by
+    unfold pSlot
+    exact PartialTyContains.here⟩
+
+private theorem envP_guard_x :
+    ChainGuard envP (LVal.base (.deref p)) "x" := by
+  exact ChainGuard.step ChainGuard.base envP_p_contains rfl
+
+private theorem envP_writeProhibited_x :
+    WriteProhibited envP (.var "x") :=
+  WriteProhibited.of_contains_conflict envP_p_contains
+    (by simp [PathConflicts, x, LVal.base])
 
 /--
-The paper notes that the Section 6.1.3 conditional join is not borrow safe:
-`p` and `q` may both contain mutable borrows whose target lists include `a`.
-This remains the counterexample to a global `BorrowSafeEnv` conclusion for
-joined approximations.  The relaxed `T-If` rule no longer rejects the join for
-that reason; runtime safety must be stated path-sensitively.
+The typed empty-initial prefix creates a nontrivial `ChainGuard` node that is
+write-prohibited by the very mutable borrow that placed it on the chain.
 -/
-theorem paperConditionalJoinEnv_not_borrowSafe :
-    ¬ BorrowSafeEnv paperConditionalJoinEnv := by
-  intro hsafe
-  have hp : paperConditionalJoinEnv ⊢ "p" ↝
-      (.borrow true [.var "x", .var "a"]) := by
-    refine ⟨paperConditionalPSlot, ?_, PartialTyContains.here⟩
-    simp [paperConditionalJoinEnv, paperConditionalPSlot, paperConditionalQSlot,
-      rootIntSlot, Env.update]
-  have hq : paperConditionalJoinEnv ⊢ "q" ↝
-      (.borrow true [.var "y", .var "a"]) := by
-    refine ⟨paperConditionalQSlot, ?_, PartialTyContains.here⟩
-    simp [paperConditionalJoinEnv, paperConditionalPSlot, paperConditionalQSlot,
-      rootIntSlot, Env.update]
-  have hpq : "p" = "q" :=
-    hsafe "p" "q" true [.var "x", .var "a"] [.var "y", .var "a"]
-      (.var "a") (.var "a") hp hq (by simp) (by simp)
-      (by simp [PathConflicts, LVal.base])
-  contradiction
+theorem empty_typed_prefix_has_guarded_writeProhibited_node :
+    ∃ env y,
+      TermListTyping Env.empty StoreTyping.empty l prefixTerms .unit env ∧
+        ChainGuard env (LVal.base (.deref p)) y ∧
+        WriteProhibited env (.var y) := by
+  exact ⟨envP, "x", prefix_typing, envP_guard_x, envP_writeProhibited_x⟩
 
-theorem paperRejectedIfElse_join_rejected :
-    ¬ BorrowSafeEnv paperConditionalJoinEnv :=
-  paperConditionalJoinEnv_not_borrowSafe
+private theorem envP_x_typing :
+    LValTyping envP x (.ty .int) l := by
+  exact LValTyping.var (slot := xSlot) envP_slot_x
 
-/-! ### The minimal RHS-target obligation rejects the multi-target fan-out
-counterexample.
+private theorem envP_p_typing :
+    LValTyping envP p (.ty (.borrow true x)) l := by
+  exact LValTyping.var (slot := pSlot) envP_slot_p
 
-The broad `ContainedBorrowsWellFormed` of the assign result was load-bearing
-exactly because writing through a multi-target borrow `&mut[x,z]` whose targets
-have different lifetimes fans the RHS into a longer-lived slot, and the lhs's
-`targetLifetime` is only the *intersection* of the targets' lifetimes.  The
-minimal replacement `EnvWriteRhsTargetsWellFormed` is UNSATISFIABLE in exactly
-that situation: here the result slot `x @ [0]` holds a borrow of `w @ [0,0]`
-(the RHS edge), and `[0,0]` does not outlive `[0]`, so the obligation fails — it
-rejects the dangling write, confirming the replacement is sound, not merely
-derivable. -/
-def fanoutRejectSlotX : EnvSlot :=
-  { ty := .ty (.borrow true [.var "w"]), lifetime := ([0] : Lifetime) }
+private theorem envP_deref_p_typing :
+    LValTyping envP (.deref p) (.ty .int) l := by
+  exact LValTyping.borrow envP_p_typing envP_x_typing
 
-def fanoutRejectSlotW : EnvSlot :=
-  { ty := .ty .int, lifetime := ([0, 0] : Lifetime) }
+def afterWriteX : Env :=
+  envP.update "x" xSlot
 
-def fanoutRejectEnv : Env :=
-  { slotAt := fun n =>
-      if n = "x" then some fanoutRejectSlotX
-      else if n = "w" then some fanoutRejectSlotW else none }
+def afterAssign : Env :=
+  afterWriteX.update "p" pSlot
 
-example :
-    ¬ EnvWriteRhsTargetsWellFormed fanoutRejectEnv (.borrow true [.var "w"]) := by
-  intro h
-  obtain ⟨tTy, tLf, htyp, hle, _⟩ :=
-    h "x" fanoutRejectSlotX true [.var "w"] (.var "w")
-      (by simp [fanoutRejectEnv])
-      (PartialTyContains.here)
-      (by simp)
-      ⟨true, [.var "w"], PartialTyContains.here, by simp⟩
-  rcases LValTyping.var_inv htyp with ⟨slot, hslot, _hty, hlf⟩
-  simp only [fanoutRejectEnv, if_neg (by decide : ("w" : Name) ≠ "x")] at hslot
-  injection hslot with hslotEq
-  subst hslotEq
-  rw [← hlf] at hle
-  simp [fanoutRejectSlotW, fanoutRejectSlotX, LifetimeOutlives,
-    Core.Lifetime.contains] at hle
+private theorem write_x :
+    EnvWrite envP x .int afterWriteX := by
+  unfold afterWriteX x xSlot
+  exact EnvWrite.intro
+    (env₁ := envP) (env₂ := envP) (lv := .var "x") (slot := xSlot)
+    (ty := .int) (updatedTy := .ty .int)
+    envP_slot_x
+    UpdateAtPath.strong
+
+private theorem write_deref_p :
+    EnvWrite envP (.deref p) .int afterAssign := by
+  have hupdate :
+      UpdateAtPath envP (LVal.path (.deref p)) pSlot.ty .int afterWriteX
+        pSlot.ty := by
+    change UpdateAtPath envP [()] (.ty (.borrow true x)) .int afterWriteX
+      (.ty (.borrow true x))
+    exact UpdateAtPath.mutBorrow write_x
+  unfold afterAssign p pSlot
+  exact EnvWrite.intro
+    (env₁ := envP) (env₂ := afterWriteX) (lv := .deref (.var "p"))
+    (slot := pSlot) (ty := .int) (updatedTy := pSlot.ty)
+    envP_slot_p
+    hupdate
+
+private theorem afterAssign_slot_x : afterAssign.slotAt "x" = some xSlot := by
+  simp [afterAssign, afterWriteX, envP, envX, Env.update]
+
+private theorem afterAssign_slot_p : afterAssign.slotAt "p" = some pSlot := by
+  simp [afterAssign]
+
+private theorem afterAssign_contains_borrow_base_ne_p {holder : Name}
+    {mutable : Bool} {target : LVal} :
+    afterAssign ⊢ holder ↝ (.borrow mutable target) →
+    LVal.base target ≠ "p" := by
+  intro hcontains hbase
+  rcases hcontains with ⟨slot, hslot, hcontainsTy⟩
+  by_cases hhp : holder = "p"
+  · subst hhp
+    have hslotEq : slot = pSlot :=
+      Option.some.inj (hslot.symm.trans afterAssign_slot_p)
+    subst hslotEq
+    cases hcontainsTy with
+    | here =>
+        simp [x, LVal.base] at hbase
+  · by_cases hhx : holder = "x"
+    · subst hhx
+      have hslotEq : slot = xSlot :=
+        Option.some.inj (hslot.symm.trans afterAssign_slot_x)
+      subst hslotEq
+      cases hcontainsTy
+    · simp [afterAssign, afterWriteX, envP, envX, Env.empty, Env.update,
+        hhp, hhx] at hslot
+
+private theorem afterAssign_not_writeProhibited_deref_p :
+    ¬ WriteProhibited afterAssign (.deref p) := by
+  intro hwrite
+  rcases hwrite with hread | himm
+  · rcases hread with ⟨_holder, _target, hcontains, hconflict⟩
+    exact afterAssign_contains_borrow_base_ne_p hcontains
+      (by simpa [PathConflicts, p, LVal.base] using hconflict)
+  · rcases himm with ⟨_holder, _target, hcontains, hconflict⟩
+    exact afterAssign_contains_borrow_base_ne_p hcontains
+      (by simpa [PathConflicts, p, LVal.base] using hconflict)
+
+/--
+The same empty-initial prefix reaches an environment where the ordinary write
+`*p = 1` satisfies the current `T-Assign` side conditions.
+-/
+theorem standard_mut_borrow_assignment_side_conditions :
+    ∃ envBefore envAfter lhs rhs oldTy targetLifetime rhsTy,
+      TermListTyping Env.empty StoreTyping.empty l prefixTerms .unit envBefore ∧
+        TermTyping envBefore StoreTyping.empty l rhs rhsTy envBefore ∧
+        LValTyping envBefore lhs oldTy targetLifetime ∧
+        ShapeCompatible envBefore oldTy (.ty rhsTy) ∧
+        WellFormedTy envBefore rhsTy targetLifetime ∧
+        EnvWrite envBefore lhs rhsTy envAfter ∧
+        ¬ WriteProhibited envAfter lhs := by
+  exact ⟨envP, afterAssign, .deref p, .val (.int 1), .ty .int, l, .int,
+    prefix_typing,
+    TermTyping.const ValueTyping.int,
+    envP_deref_p_typing,
+    ShapeCompatible.int,
+    WellFormedTy.int,
+    write_deref_p,
+    afterAssign_not_writeProhibited_deref_p⟩
+
+theorem standard_mut_borrow_assignment_typing :
+    TermListTyping Env.empty StoreTyping.empty l
+      (prefixTerms ++ [.assign (.deref p) (.val (.int 1))])
+      .unit afterAssign := by
+  unfold prefixTerms
+  exact TermListTyping.cons declare_x_typing
+    (TermListTyping.cons declare_p_typing
+      (TermListTyping.singleton
+        (TermTyping.assign
+          (TermTyping.const ValueTyping.int)
+          envP_deref_p_typing
+          ShapeCompatible.int
+          WellFormedTy.int
+          write_deref_p
+          afterAssign_not_writeProhibited_deref_p)))
+
+end MutableBorrowAssignmentExample
 
 end Paper
 end LwRust
