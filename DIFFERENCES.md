@@ -1,19 +1,19 @@
 # Differences between the Lean formalization and `paper/`
 
-Scope: comparison of the Lean development under `LwRust/Paper/` with
-`paper/lw_rust.pdf` (the core FR calculus) and `paper/lw_rust_followup.pdf`.
+Scope: comparison of the Lean development under `FWRust/Paper/` with
+`paper/fw_rust.pdf` (the core FR calculus) and `paper/fw_rust_followup.pdf`.
 The references point to actual definitions, constructors, or theorem
 statements, not source comments.
 
 There is no `sorry`, `admit`, Lean `axiom`, or other proof escape hatch in
-`LwRust/`.
+`FWRust/`.
 
 ## Summary
 
 The formalization now covers **exactly the paper's core calculus** (Figure 1):
 the Section 6.1 extension (booleans, equality, conditionals) and the synthetic
 diverging `missing` placeholder that earlier versions carried have been
-removed.  The restored extractor subsystem is cut back to the current core
+removed.  The restored sealor subsystem is cut back to the current core
 syntax and uses the core `ϵ`/unit term for expression holes while omitting
 unavailable statement-position fragments, rather than reintroducing `missing`.
 Consequently there are no environment joins from control flow, and the

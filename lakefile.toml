@@ -1,9 +1,9 @@
-name = "lw_rust"
+name = "fw_rust"
 version = "0.1.0"
-defaultTargets = ["LwRust"]
+defaultTargets = ["FWRust"]
 
 [[lean_lib]]
-name = "LwRust"
+name = "FWRust"
 
 [[require]]
 name = "mathlib"

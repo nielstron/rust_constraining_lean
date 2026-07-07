@@ -7,9 +7,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "LwRust" / "Extractor" / "CompleteProgram.lean"
-TEMPLATE = ROOT / "LwRust" / "Extractor" / "Template" / "PartialProgram.lean"
-OUTPUT = ROOT / "LwRust" / "Extractor" / "Generated" / "PartialProgram.lean"
+SOURCE = ROOT / "FWRust" / "Sealor" / "CompleteProgram.lean"
+TEMPLATE = ROOT / "FWRust" / "Sealor" / "Template" / "PartialProgram.lean"
+OUTPUT = ROOT / "FWRust" / "Sealor" / "Generated" / "PartialProgram.lean"
 MARKER = "/-- INSERT GRAMMAR HERE --/"
 
 

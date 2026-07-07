@@ -1,9 +1,9 @@
 # Rust Constraining Formalization
 
-Lean mechanisation of the core FR calculus from the paper "A Lightweight
-Formalism for Reference Lifetimes and Borrowing in Rust"
-(`paper/lw_rust.pdf`), with the follow-up paper's single-target borrow
-grammar (`paper/lw_rust_followup.pdf`).
+Lean mechanisation of FWRust (FeatherWeight Rust), the core FR calculus from
+the paper "A Lightweight Formalism for Reference Lifetimes and Borrowing in Rust"
+(`paper/fw_rust.pdf`), with the follow-up paper's single-target borrow
+grammar (`paper/fw_rust_followup.pdf`).
 
 ## Scope
 
@@ -14,7 +14,7 @@ See `DIFFERENCES.md` for the precise, itemised comparison with the paper.
 
 ## Proof status
 
-There is no `sorry`, `admit`, or `axiom` anywhere in `LwRust/`.
+There is no `sorry`, `admit`, or `axiom` anywhere in `FWRust/`.
 
 - **Statics: complete.**  Lemma 4.9 (borrow invariance), Lemma 4.10
   (progress, with the finite-store interface `OperationalStoreProgress`
