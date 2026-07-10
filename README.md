@@ -2,7 +2,7 @@
 
 Lean mechanisation of FWRust (FeatherWeight Rust), the core FR calculus from
 the paper "A Lightweight Formalism for Reference Lifetimes and Borrowing in Rust"
-[1], with the follow-up paper's single-target borrow grammar [2].
+[1], with the follow-up paper's corrections for non-cyclicity [2].
 
 ## Setup
 
@@ -21,7 +21,9 @@ precompiled cache before building, optionally run `lake exe cache get`.
 
 The mechanised language is the paper's core calculus (Figure 1).
 
-See `DIFFERENCES.md` for the precise, itemised comparison with the paper.
+See `PAPER_CLAIMS.md` for a claim-by-claim map from the paper to Lean
+declarations.
+See `DIFFERENCES.md` for the precise, itemised comparison of changes to claims in [1,2].
 
 ## Corrections relative to the printed paper
 

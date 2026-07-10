@@ -17,8 +17,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE_ROOT = "anonymous-code-submission"
-DEFAULT_OUTPUT = ROOT / "dist" / "anonymous-code-submission.zip"
+ARCHIVE_ROOT = "lean-mechanization"
+DEFAULT_OUTPUT = ROOT / "dist" / "lean-mechanization.zip"
 
 def run_git(*args: str) -> bytes:
     return subprocess.check_output(["git", "-C", str(ROOT), *args])

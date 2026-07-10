@@ -27,6 +27,14 @@ def CheckerComplete
     (checker : Complete → Prop) : Prop :=
   ∀ c, L c → checker c
 
+/-- A complete-program checker is sound when acceptance implies membership in
+the target language. Together with `CheckerComplete`, this is the paper's
+assumption that the underlying compiler is exact. -/
+def CheckerSound
+    (L : Complete → Prop)
+    (checker : Complete → Prop) : Prop :=
+  ∀ c, checker c → L c
+
 def PrefixCheckerComplete
     (L : Complete → Prop)
     (Completes : Partial → Complete → Prop)
@@ -41,6 +49,15 @@ def PrefixCheckerSoundOn
     (Completes : Partial → Complete → Prop)
     (prefixChecker : Partial → Prop) : Prop :=
   ∀ p, Class p → prefixChecker p → Completable L Completes p
+
+/-- A sealor is sound on `Class` when a valid sealed program witnesses that
+the original partial input has a valid completion. -/
+def SealorSoundOn
+    (Class : Partial → Prop)
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (sealFn : Partial → Complete) : Prop :=
+  ∀ p, Class p → L (sealFn p) → Completable L Completes p
 
 /-- A complete syntax tree extends a string when parsing the string with some
 appended suffix produces that tree. -/
@@ -69,6 +86,21 @@ theorem conservative_sealors_give_complete_prefix_checkers
   apply hChecker
   exact Classical.byContradiction (fun hSealInvalid =>
     hSeal p hSealInvalid c hCompletes hValid)
+
+/-- The soundness direction of Theorem 3.2: sealor soundness and compiler
+soundness imply soundness of the induced generative compiler. -/
+theorem sealor_soundness_lifts_to_prefix_checkers
+    {Class : Partial → Prop}
+    {L : Complete → Prop}
+    {Completes : Partial → Complete → Prop}
+    {sealFn : Partial → Complete}
+    {checker : Complete → Prop}
+    (hSeal : SealorSoundOn Class L Completes sealFn)
+    (hChecker : CheckerSound L checker) :
+    PrefixCheckerSoundOn Class L Completes
+      (SealorPrefixChecker checker sealFn) := by
+  intro p hClass hAccepted
+  exact hSeal p hClass (hChecker (sealFn p) hAccepted)
 
 theorem conservative_accepts_all_completable_sealings
     {L : Complete → Prop}
