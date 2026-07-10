@@ -41,3 +41,26 @@ borrow-safety, finite-support, and linearizability assumptions required by the
 mechanization. These assumptions are discharged for programs typed from the
 empty initial state by the corresponding declarations in
 [`FWRust.Paper.Soundness.InitialStates`](FWRust/Paper/Soundness/InitialStates.lean).
+
+## Section 6.1 control-flow extension
+
+The extension is namespaced separately as `FWRust.Conditional.Paper`; its
+`T-If` constructor has only guard/branch typing and type/environment joins.
+
+| Conditional-extension claim | Lean declaration |
+| --- | --- |
+| Minimal T-If rule | [`FWRust.Conditional.Paper.TermTyping.ite`](FWRust/Conditional/Paper/Typing.lean) |
+| Weak joined-result well-formedness is derived | [`FWRust.Conditional.Paper.wellFormedTyWhenInitialized_join`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Rank-free, path-local lvalue back-transport | [`FWRust.Conditional.Paper.lvalTyping_back_of_envStrengthens`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Lemma 4.9, Borrow Invariance | [`FWRust.Conditional.Paper.typingPreservesWellFormedWhenInitialized_of_sourceTerm`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Lemma 4.10, Progress | [`FWRust.Conditional.Paper.Soundness.lemma_4_10_progress`](FWRust/Conditional/Paper/Soundness/Lemma_4_10_Progress.lean) |
+| Lemma 4.11, Preservation | [`FWRust.Conditional.Paper.Soundness.lemma_4_11_preservation`](FWRust/Conditional/Paper/Soundness/Lemma_4_11_Preservation.lean) |
+| Total empty-initial type/runtime safety | [`FWRust.Conditional.Paper.emptyInitial_typeAndBorrowSafety_total`](FWRust/Conditional/Paper/Soundness/InitialStates.lean) |
+| Coherent non-linear join independence regression | [`FWRust.Conditional.Paper.LinearJoinCounterexample`](FWRust/Conditional/Paper/Examples/LinearJoinCounterexample.lean) |
+
+The total empty-initial theorem requires only typing and the syntactic
+`MissingFree` premise (generated `missing` terms intentionally self-loop).  It
+derives source syntax, runtime/store validity, finite support, initial
+well-formedness, and safe abstraction internally.  See `CONDITIONALS.md` for
+the extension's local assignment/declaration corrections and the stale-aware
+interpretation of terminal safety.

@@ -1,11 +1,17 @@
 # Differences between the Lean formalization and the published FR papers
 
+This file's numbered comparison describes the reduced `FWRust.Paper` core used
+by the sealor development.  The separate `FWRust.Conditional` library restores
+the Section 6.1 equality/conditional extension and finite borrow target lists;
+see `CONDITIONALS.md` for its rule and proof differences.
+
 ### 1. Rule premises relative to the printed figures
 
-Borrows are single-target (the follow-up paper's grammar): without
-conditionals there are no joins, so target lists — which only ever modelled
-join uncertainty — are gone, and the `write` function is the follow-up's
-strong update (no weak-update unions, no fan-out).
+In the reduced core, borrows are single-target (the follow-up paper's grammar):
+without conditionals there are no joins, so target lists — which only ever
+modelled join uncertainty — are gone, and the `write` function is the
+follow-up's strong update (no weak-update unions, no fan-out).  The conditional
+library instead uses the paper's finite lists, joins, and weak-update fan-out.
 
 Smaller deviations in and around the rules:
 

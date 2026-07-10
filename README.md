@@ -19,13 +19,24 @@ precompiled cache before building, optionally run `lake exe cache get`.
 
 ## Scope
 
-The mechanised language is the paper's core calculus. The repository further contains a mechanization of the corrected typing rules and operational semantics from [1] (including adaptations suggested by [2]).
-Finally the repository contains the sealor and completeness/soundness techniques developed in the paper.
+The mechanised language includes both the paper's reduced core calculus
+(`FWRust.Paper`) and its Section 6.1 control-flow extension with equality and
+conditionals (`FWRust.Conditional`).  The extension restores finite borrow
+target lists and proves progress, preservation, and total empty-initial
+type/runtime safety without the historical joined-environment shape,
+well-formedness, coherence, or linearizability premises on `T-If`.
+
+The repository further contains a mechanization of the corrected typing rules
+and operational semantics from [1] (including adaptations suggested by [2]),
+as well as the sealor and completeness/soundness techniques developed in the
+paper.
 
 See `PAPER_CLAIMS.md` for a claim-by-claim map from the paper to Lean
 declarations.
 See `DIFFERENCES.md` for the precise, itemised comparison of changes to claims
 in [1,2].
+See `CONDITIONALS.md` for the conditional extension, its minimized `T-If`
+interface, and the remaining local mechanization corrections.
 
 ## References
 
