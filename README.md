@@ -4,6 +4,19 @@ Lean mechanisation of FWRust (FeatherWeight Rust), the core FR calculus from
 the paper "A Lightweight Formalism for Reference Lifetimes and Borrowing in Rust"
 [1], with the follow-up paper's single-target borrow grammar [2].
 
+## Setup
+
+Install Lean through [elan](https://github.com/leanprover/elan), then run from
+the repository root:
+
+```sh
+lake build
+```
+
+The pinned Lean toolchain and dependencies are specified by `lean-toolchain`
+and `lake-manifest.json`; Lake retrieves them automatically.  To use Mathlib's
+precompiled cache before building, optionally run `lake exe cache get`.
+
 ## Scope
 
 The mechanised language is the paper's core calculus (Figure 1).
