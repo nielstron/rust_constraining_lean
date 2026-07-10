@@ -1,7 +1,7 @@
 import Std
 
 /-!
-Syntax for the core FR calculus in Figure 1 of `fw_rust.pdf`.
+Syntax for the core FR calculus in Figure 1 of [1].
 -/
 
 namespace FWRust

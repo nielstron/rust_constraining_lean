@@ -2,8 +2,7 @@
 
 Lean mechanisation of FWRust (FeatherWeight Rust), the core FR calculus from
 the paper "A Lightweight Formalism for Reference Lifetimes and Borrowing in Rust"
-(`paper/fw_rust.pdf`), with the follow-up paper's single-target borrow
-grammar (`paper/fw_rust_followup.pdf`).
+[1], with the follow-up paper's single-target borrow grammar [2].
 
 ## Scope
 
@@ -50,3 +49,13 @@ These deviations strengthen or repair the paper's claims:
   terminal-safety half of Theorem 4.12 assume `SourceTerm`; source-initial
   empty-store wrappers derive it from typability, so the headline
   empty-initial theorems carry no extra premise.
+
+## References
+
+[1] David J. Pearce. “A Lightweight Formalism for Reference Lifetimes and
+Borrowing in Rust.” *ACM Transactions on Programming Languages and Systems*
+43(1), Article 3, 2021. https://doi.org/10.1145/3443420
+
+[2] Etienne Payet, David J. Pearce, and Fausto Spoto. “On the Termination of
+Borrow Checking in Featherweight Rust.” *NASA Formal Methods (NFM 2022)*,
+pages 411–430, 2022. https://doi.org/10.1007/978-3-031-06773-0_22
