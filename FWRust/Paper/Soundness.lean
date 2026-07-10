@@ -3,6 +3,7 @@ import FWRust.Paper.Soundness.Lemma_4_9_BorrowInvariance
 import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 import FWRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
 import FWRust.Paper.Soundness.InitialStates
+import FWRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_1_SafeStrengthening
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_2_TransitiveStrengthening
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_3_Location
@@ -36,6 +37,6 @@ In brief:
   derive `SourceTerm` from empty-store typability.
 
 The lemma files form a linear chain following the paper order
-(4.10 → 4.9 → 4.11 → 4.12), with the source-initial corollaries and the
+(4.10 → 4.9 → 4.11 → 4.12 → 4.14), with the source-initial corollaries and the
 Appendix 9 results layered on top.
 -/

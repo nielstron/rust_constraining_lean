@@ -66,8 +66,10 @@ package the paper's implicit finite heap model.
 Lifetimes are paths with prefix order, the canonical lexical-nesting model,
 rather than an arbitrary partial order.
 
-### 7. Corollary 4.14 is not reproduced as a standalone theorem
+### 7. Corollary 4.14 uses the strengthened core form
 
-The paper's global borrow-safe-environment corollary is not established as a
-separate theorem; borrow safety is instead threaded as a preservation
-hypothesis/conclusion pair.
+`corollary_4_14_borrowSafety` establishes the Appendix's strengthened result
+for the branch-free core: source typing preserves a well-formed, borrow-safe
+result environment, and installing the result type at an arbitrary fresh name
+preserves both properties.  The empty-initial wrapper derives its source and
+initial-invariant premises from typability

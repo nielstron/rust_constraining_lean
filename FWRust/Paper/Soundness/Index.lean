@@ -3,6 +3,7 @@ import FWRust.Paper.Soundness.Lemma_4_9_BorrowInvariance
 import FWRust.Paper.Soundness.Lemma_4_10_Progress
 import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 import FWRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
+import FWRust.Paper.Soundness.Corollary_4_14_BorrowSafety
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_1_SafeStrengthening
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_2_TransitiveStrengthening
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_3_Location
@@ -35,6 +36,7 @@ statements.
 * `Lemma_4_10_Progress`                  — Lemma 4.10   (proven)
 * `Lemma_4_11_Preservation`              — Lemma 4.11   (general source-continuation wrapper)
 * `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for source terms)
+* `Corollary_4_14_BorrowSafety`          — Corollary 4.14 (strengthened core form)
 * `InitialStates`                        — source-initial wrappers, deriving `SourceTerm` from typability
 
 ## Appendix 9

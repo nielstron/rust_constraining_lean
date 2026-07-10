@@ -2,3 +2,4 @@
 FeatherweightRust
 .DS_Store
 __pycache__
+/dist/
