@@ -31,6 +31,7 @@ def sealTerm (currentLifetime : Lifetime) : PartialTerm → Term
       SyntaxCtor.ctermBlock_ctor lifetime (sealTerms lifetime terms)
   | frontier =>
       (sealTermStmts currentLifetime frontier).headD epsilonTerm
+termination_by p => (sizeOf p, 1)
 
 /-- Seal a partial expression in statement position
 (`ast_copier.visit_expr_stmt`): recursively keep child expressions that can
@@ -65,11 +66,12 @@ complete statement prefix and sealing the single partial tail.
 Incomplete bodies are closed with `epsilonTerm`, the core replacement for the
 old `missing` placeholder. -/
 def sealTerms (currentLifetime : Lifetime) : PartialTerms → List Term
-  | Generated.PartialTerms.cutoff => [epsilonTerm]
+  | Generated.PartialTerms.cutoff => [epsilonTerm, epsilonTerm]
   | Generated.PartialTerms.done xs => xs
-  | Generated.PartialTerms.elems pre none => pre ++ [epsilonTerm]
+  | Generated.PartialTerms.elems pre none =>
+      pre ++ [epsilonTerm, epsilonTerm]
   | Generated.PartialTerms.elems pre (some tail) =>
-      pre ++ sealTermStmts currentLifetime tail ++ [epsilonTerm]
+      pre ++ [sealTerm currentLifetime tail, epsilonTerm]
 termination_by ps => (sizeOf ps, 0)
 
 end
@@ -152,6 +154,19 @@ theorem stmtsTyping_epsilon_closed {env env₂ : Env} {typing : StoreTyping}
   | nil => exact .singleton epsilonTerm_typed
   | cons hterm _ ih => exact .cons hterm ih
 
+/-- Closing a statement run with the sealed tail and a final epsilon gives the
+paper's block-body shape `pre ++ [seal tail, epsilon]`. -/
+theorem stmtsTyping_term_epsilon_closed {env mid env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {stmts : List Term}
+    {term : Term} {ty : Ty}
+    (hstmts : StmtsTyping env typing lifetime stmts mid)
+    (hterm : TermTyping mid typing lifetime term ty env₂) :
+    TermListTyping env typing lifetime
+      (stmts ++ [term, epsilonTerm]) .unit env₂ := by
+  have happend : StmtsTyping env typing lifetime (stmts ++ [term]) env₂ :=
+    stmtsTyping_append hstmts (.cons hterm .nil)
+  simpa [List.append_assoc] using stmtsTyping_epsilon_closed happend
+
 theorem headD_typed {env env' : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {stmts : List Term}
     (hstmts : StmtsTyping env typing lifetime stmts env') :
@@ -203,6 +218,9 @@ theorem sealTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
     simp only [sealTerm]
     obtain ⟨env', hstmts⟩ := sealTermStmts_typed hcomp htyped
     exact headD_typed hstmts
+termination_by (sizeOf p, 1)
+decreasing_by
+  all_goals subst_vars; decreasing_tactic
 
 theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
     {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
@@ -260,23 +278,23 @@ theorem sealTerms_typed {currentLifetime : Lifetime} {ps : PartialTerms}
       exact ⟨ty, env₂, hlist, Or.inr ⟨rfl, rfl⟩⟩
   case cutoff =>
       simp only [sealTerms]
-      exact ⟨.unit, env, .singleton epsilonTerm_typed, Or.inl rfl⟩
+      exact ⟨.unit, env, .cons epsilonTerm_typed (.singleton epsilonTerm_typed),
+        Or.inl rfl⟩
   case elemsDone =>
       obtain ⟨mid, hpre, _⟩ :=
         stmtsTyping_append_inv (termListTyping_toStmts hlist)
       simp only [sealTerms]
-      exact ⟨.unit, mid, stmtsTyping_epsilon_closed hpre, Or.inl rfl⟩
+      exact ⟨.unit, mid,
+        stmtsTyping_term_epsilon_closed hpre epsilonTerm_typed, Or.inl rfl⟩
   case elemsTail hfrontier =>
       obtain ⟨mid, hpre, hrest⟩ :=
         stmtsTyping_append_inv (termListTyping_toStmts hlist)
       cases hrest with
       | cons hfrontier' _ =>
-          obtain ⟨env', hstmts⟩ := sealTermStmts_typed hfrontier hfrontier'
+          obtain ⟨ty', env', hsealed⟩ := sealTerm_typed hfrontier hfrontier'
           simp only [sealTerms]
-          refine ⟨.unit, env', ?_, Or.inl rfl⟩
-          have happend :=
-            stmtsTyping_epsilon_closed (stmtsTyping_append hpre hstmts)
-          simpa [List.append_assoc] using happend
+          exact ⟨.unit, env',
+            stmtsTyping_term_epsilon_closed hpre hsealed, Or.inl rfl⟩
 termination_by (sizeOf ps, 0)
 decreasing_by
   all_goals decreasing_tactic
@@ -299,7 +317,30 @@ theorem nestedBlocksPrefixChecker_complete :
   rcases hp with ⟨full, hCompletion, hFull⟩
   exact sealProgram_wellTyped_of_completion hCompletion hFull
 
+/-- String-level global completeness, conditional only on the parser bridge
+from extendable strings to the generated partial-syntax realization relation. -/
+theorem nestedBlocksPrefixChecker_complete_on_strings
+    (parse : String → Option Program)
+    (decode : String → PartialProgram)
+    (hDecode : ∀ rawPrefix,
+      Completable ProgramWellTyped (StringExtensionCompletes parse) rawPrefix →
+      Completable ProgramWellTyped CompletesProgram (decode rawPrefix)) :
+    PrefixCheckerComplete ProgramWellTyped (StringExtensionCompletes parse)
+      (fun rawPrefix => nestedBlocksPrefixChecker (decode rawPrefix)) :=
+  partialSyntax_completeness_lifts_to_strings parse decode
+    nestedBlocksPrefixChecker_complete hDecode
+
 end TypedSealing
+
+section StatementBoundary
+
+open FWRust.Paper
+
+/-- Partial programs exactly at a completed block-statement boundary. -/
+def CompletedStatementBoundary (partialProgram : PartialProgram) : Prop :=
+  ∃ lifetime pre,
+    partialProgram = Generated.PartialTerm.blockTerms lifetime
+      (Generated.PartialTerms.elems pre none)
 
 /--
 At a block-body statement boundary, the sealed block is one generated
@@ -314,9 +355,28 @@ theorem sealProgram_completedStatementBoundary_completes
         (Generated.PartialTerm.blockTerms lifetime
           (Generated.PartialTerms.elems pre none))) := by
   simpa [CompletesProgram, sealProgram, sealTerm, sealTerms] using
-    (Generated.CompletesTerm.ctermBlock_blockTerms
+      (Generated.CompletesTerm.ctermBlock_blockTerms
       (Generated.CompletesTerms.elemsDone
-        (pre := pre) (suffix := [epsilonTerm])))
+        (pre := pre) (suffix := [epsilonTerm, epsilonTerm])))
+
+/-- Paper-level statement-boundary soundness for arbitrary typing environments,
+store typings, ambient lifetimes, and result types.  The sealed term itself is
+a well-typed realization of the partial block. -/
+theorem sealProgram_completedStatementBoundary_sound_general
+    {blockLifetime currentLifetime : Lifetime} {pre : List Term}
+    {env result : Env} {typing : StoreTyping} {ty : Ty}
+    (hSealed : TermTyping env typing currentLifetime
+      (sealProgram
+        (Generated.PartialTerm.blockTerms blockLifetime
+          (Generated.PartialTerms.elems pre none))) ty result) :
+    ∃ completion completionTy completionResult,
+      CompletesProgram
+        (Generated.PartialTerm.blockTerms blockLifetime
+          (Generated.PartialTerms.elems pre none)) completion ∧
+      TermTyping env typing currentLifetime completion completionTy
+        completionResult := by
+  exact ⟨_, ty, result,
+    sealProgram_completedStatementBoundary_completes, hSealed⟩
 
 /--
 Soundness at a completed-statement boundary: if this sealed approximation checks,
@@ -334,5 +394,35 @@ theorem sealProgram_completedStatementBoundary_sound
   exact ⟨_,
     sealProgram_completedStatementBoundary_completes,
     hSealed⟩
+
+/-- The generated prefix checker is sound on completed statement boundaries. -/
+theorem nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries :
+    PrefixCheckerSoundOn CompletedStatementBoundary ProgramWellTyped
+      CompletesProgram nestedBlocksPrefixChecker := by
+  intro partialProgram hBoundary hAccepted
+  rcases hBoundary with ⟨lifetime, pre, rfl⟩
+  exact sealProgram_completedStatementBoundary_sound hAccepted
+
+/-- String-level selective soundness, conditional on the parser bridge from
+partial-syntax realizations back to actual string extensions. -/
+theorem nestedBlocksPrefixChecker_sound_on_statementBoundary_strings
+    (parse : String → Option Program)
+    (decode : String → PartialProgram)
+    (StringStatementBoundary : String → Prop)
+    (hBoundary : ∀ rawPrefix,
+      StringStatementBoundary rawPrefix →
+      CompletedStatementBoundary (decode rawPrefix))
+    (hRealizes : ∀ rawPrefix complete,
+      CompletesProgram (decode rawPrefix) complete →
+      StringExtensionCompletes parse rawPrefix complete) :
+    PrefixCheckerSoundOn StringStatementBoundary ProgramWellTyped
+      (StringExtensionCompletes parse)
+      (fun rawPrefix => nestedBlocksPrefixChecker (decode rawPrefix)) :=
+  partialSyntax_soundness_lifts_to_strings parse decode
+    StringStatementBoundary
+    nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries
+    hBoundary hRealizes
+
+end StatementBoundary
 
 end ConservativeSealor

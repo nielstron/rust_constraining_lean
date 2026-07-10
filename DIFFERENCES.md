@@ -70,5 +70,4 @@ rather than an arbitrary partial order.
 
 The paper's global borrow-safe-environment corollary is not established as a
 separate theorem; borrow safety is instead threaded as a preservation
-hypothesis/conclusion pair.  (The old fan-out counterexample to its
-preservation died with multi-target borrows.)
+hypothesis/conclusion pair.
