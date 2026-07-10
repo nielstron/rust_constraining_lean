@@ -3,8 +3,7 @@ import FWRust.Paper.Soundness.Helpers.Eqv
 /-!
 # Soundness helpers: Runtime facts
 
-Runtime/value/location facts that survive the single-target, branch-free core.
-The old join and write fan-out support is intentionally absent.
+Runtime, value, and location facts for the single-target core.
 -/
 
 namespace FWRust

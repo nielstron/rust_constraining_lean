@@ -7,8 +7,7 @@ grammar (`paper/fw_rust_followup.pdf`).
 
 ## Scope
 
-The mechanised language is the paper's core calculus
-(Figure 1):
+The mechanised language is the paper's core calculus (Figure 1).
 
 See `DIFFERENCES.md` for the precise, itemised comparison with the paper.
 

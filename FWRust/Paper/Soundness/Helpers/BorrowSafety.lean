@@ -3,10 +3,8 @@ import FWRust.Paper.Soundness.Lemma_4_9_BorrowInvariance
 /-!
 # Borrow-Safety Helpers
 
-Phase D1 keeps borrow safety as a single-target invariant.  The old
-target-list selection, join, and fan-out helper layer has been removed; this
-file now contains only the small structural facts still useful to downstream
-preservation statements.
+Structural borrow-safety facts for single-target borrow annotations and the
+downstream preservation statements.
 -/
 
 namespace FWRust

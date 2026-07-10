@@ -19,14 +19,14 @@ import FWRust.Paper.Soundness.Appendix9.Lemma_9_10_StorePreservation
 
 One file per core lemma/theorem of `fw_rust.pdf` Section 4 and Appendix 9.  Each
 file states the paper result, wires it to the mechanization in
-`FWRust.Paper.Soundness`, and records its status.  The README separates the
-remaining shortcuts to eliminate from intentional repairs/strengthenings to
-keep.  Move sources are lvalue-general where the paper permits them; moves
+`FWRust.Paper.Soundness`, and records its status.  The README documents the
+intentional repairs and strengthenings relative to the paper.  Move sources are
+lvalue-general where the paper permits them; moves
 through borrowed references are intentionally untypeable because `EnvMove`
-follows the paper's `Strike` definition.  The current shortcuts include
-restricted sequence/block drops.  Theorem 4.12 proves terminal safety and
-terminal existence for source terms in the core calculus.  Lemma 4.10 provides
-the local progress theorem used for nontermination-friendly safety statements.
+follows the paper's `Strike` definition.  Theorem 4.12 proves terminal safety
+and terminal existence for source terms in the core calculus.  Lemma 4.10
+provides the local progress theorem used for nontermination-friendly safety
+statements.
 
 ## Section 4
 
@@ -43,8 +43,8 @@ the local progress theorem used for nontermination-friendly safety statements.
 * `Appendix9.Lemma_9_2_TransitiveStrengthening` — proven
 * `Appendix9.Lemma_9_3_Location`                — proven (location availability)
 * `Appendix9.Corollary_9_4_ReadPreservation`    — proven
-* `Appendix9.Lemma_9_5_DropPreservation`        — partial; Section 4 uses strengthened block rule
-* `Appendix9.Lemma_9_6_UpdatePreservation`      — split support; Section 4 uses rule-carried update facts
+* `Appendix9.Lemma_9_5_DropPreservation`        — framed support used by the closed Section 4 proof
+* `Appendix9.Lemma_9_6_UpdatePreservation`      — static/runtime support used by assignment preservation
 * `Appendix9.Lemma_9_7_ValueTyping`             — proven
 * `Appendix9.Lemma_9_8_AliasPreservation`       — mechanized for structural fragments
 * `Appendix9.Lemma_9_9_ValuePreservation`       — proven as Preservation value projection

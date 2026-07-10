@@ -18,7 +18,7 @@ Preservation (Lemma 4.11).  Mechanized support:
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
 * block `R-BlockB` — via Lemma 9.5
-  (`preservation_blockB_value_multistep_runtime_of_runtimeDrop`) for terminal
+  (`preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`) for terminal
   value blocks.
 
 The theorem below derives the store-preservation projection from Lemma 4.11.

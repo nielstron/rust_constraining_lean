@@ -3,8 +3,7 @@ import FWRust.Paper.Soundness.Lemma_4_10_Progress
 /-!
 # Lemma 4.9 (Borrow Invariance)
 
-Single-target Phase D1 support.  The obsolete target-list join and fan-out
-machinery has been removed from this file.
+Borrow invariance and terminal-safety support for the single-target calculus.
 -/
 
 namespace FWRust

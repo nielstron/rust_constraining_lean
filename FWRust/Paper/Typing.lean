@@ -440,7 +440,7 @@ mutual
         simpa [PartialTy.vars] using h
 end
 
-/-- Structural shape equality of full types, ignoring borrow *target lists* but
+/-- Structural shape equality of full types, ignoring the borrow target but
 keeping the `mutable` flag. -/
 def Ty.sameShape : Ty → Ty → Prop
   | .unit, .unit => True
@@ -760,9 +760,7 @@ contained borrow types.  The containment premises already imply the relevant
 variables are present in the environment.
 
 This lives here (rather than with the Section 4.3 helpers) because assignment
-and preservation helpers need the predicate near the typing relation.  It is
-not required by the relaxed `T-If` join: joined environments may be static
-approximations that are not globally borrow-safe.
+and preservation helpers need the predicate near the typing relation.
 -/
 def BorrowSafeEnv (env : Env) : Prop :=
   ∀ x y mutable targetMutable targetOther,
@@ -852,7 +850,7 @@ inductive WellFormedTy : Env → Ty → Lifetime → Prop where
 Weak type well-formedness for stale loan annotations.
 
 This mirrors `WellFormedTy`, but borrow targets only need to be well formed
-when initialized.  A type may therefore carry a conservative borrow target list
+when initialized.  A type may therefore carry a conservative borrow target
 whose base slot is still live but whose full lvalue is currently moved out.
 -/
 inductive WellFormedTyWhenInitialized : Env → Ty → Lifetime → Prop where

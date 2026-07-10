@@ -23,8 +23,7 @@ ends with the paper-facing statement) and in the Appendix 9 files.  Generic,
 reusable typing/runtime facts live under `Soundness.Helpers`.
 
 Section 4 is mechanized for the strengthened calculus documented in the README.
-The README separates shortcuts to eliminate from intentional repairs and
-strengthenings to keep.  In brief:
+In brief:
 
 * move sources are lvalue-general where the paper permits them; `EnvMove` is
   intentionally `Strike`-based and therefore cannot move out through borrowed

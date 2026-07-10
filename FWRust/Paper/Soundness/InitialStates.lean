@@ -702,11 +702,10 @@ theorem sourceInitial_declare_value_typeAndBorrowSafety
       MultiStep.trans (Step.declare (lifetime := lifetime) rfl) MultiStep.refl⟩
 
 /--
-**Lemma 4.9.** Source-initial borrow invariance through the legacy
-ranked/fresh-coherence wrapper.
+**Lemma 4.9.** Compatibility alias for source-initial borrow invariance.
 
-The wrapper no longer requires the old global assignment/declaration
-obligations; the typing derivation carries the required local facts.
+The historical name is retained for callers; the current typing derivation
+already carries the required assignment and declaration facts.
 -/
 theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
@@ -727,7 +726,7 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence_fu
   intro hsource htyping
   exact sourceInitial_borrowInvariance_full hsource htyping
 
-/-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried obligation route. -/
+/-- **Lemma 4.9.** Compatibility alias for source-initial borrow invariance. -/
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
       {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
       SourceTerm term →

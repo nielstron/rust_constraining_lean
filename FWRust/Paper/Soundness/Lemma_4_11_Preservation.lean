@@ -3,9 +3,9 @@ import FWRust.Paper.Soundness.Helpers.BorrowSafety
 /-!
 # Lemma 4.11 (Preservation)
 
-Fresh Phase D3 rebuild.  The old multi-target preservation development has
-been moved to `Lemma_4_11_Preservation.lean.reference` for consultation while
-this file is rebuilt around the single-target typing rules.
+Preservation for the single-target typing rules.  The proof establishes the
+static invariants needed by assignment and the runtime validity and safe-
+abstraction conclusions for source continuations.
 -/
 
 namespace FWRust
@@ -5198,12 +5198,13 @@ theorem typingPreservesWellFormedWhenInitialized_of_sourceTerm
       exact ihRest (SourceTerm.block_tail hsource) hhead.1)
     htyping hsource hwellFormed
 
-/-! ### Strict collapse: foundation twins
+/-! ### Strict well-formedness support
 
-Strict counterparts of the initialized-conditional projection and bound
-lemmas.  With single-target borrows and no joins, moved-out borrow targets
-cannot arise, so the strict (paper) predicates are maintainable and the
-conditional family becomes obsolete.
+Strict counterparts of initialized-conditional projection and bound lemmas.
+The conditional predicates remain necessary during assignment because a type
+may retain a conservative loan annotation whose target has been moved out.
+These lemmas recover strict paper predicates when the surrounding typing and
+well-formedness hypotheses establish that the relevant targets are live.
 -/
 
 theorem LValTyping.partialTyBorrowsWellFormedInSlot {env : Env} :
@@ -16048,7 +16049,7 @@ theorem source_entry_select_final_tail_linearized_locReads_ne
 `EnvWrite.select_final` reduces the original assignment to this situation.  The
 helper discharges the source-entry read exclusions for entries outside the
 final tail, entries targeting the final base, and entries in the final tail.
-This legacy helper keeps the tail case as an explicit local side condition:
+This specialized helper keeps the tail case as an explicit local side condition:
 the selected final node itself must not be write-prohibited in the source
 environment.  The main assignment typing rule does not require this condition;
 borrow-authorized writes through mutable references are accepted. -/

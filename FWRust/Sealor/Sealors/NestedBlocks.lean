@@ -2,8 +2,8 @@ import FWRust.Sealor.Checkers
 
 /-!
 A syntax-directed FWRust frontier sealor mirroring the expression/statement
-split in `rust_constraining`'s `ast_copier.rs`, cut down to the current core
-syntax.
+split in `../rust_constraining/constraining/src/ast_copier.rs`, specialized to
+the FWRust core syntax.
 
 The old sealor used a synthetic diverging `missing` term.  The current core
 calculus has no such term, so this version uses `epsilonTerm` (`()`) where an
@@ -77,7 +77,7 @@ end
 def sealProgram : PartialProgram → Program :=
   sealTerm FWRust.Core.Lifetime.root
 
-/-- Convenience checker using the restored nested-block sealor. -/
+/-- Convenience checker using the nested-block sealor. -/
 def nestedBlocksPrefixChecker : PartialProgram → Prop :=
   SealorPrefixChecker programWellTyped sealProgram
 

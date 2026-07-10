@@ -1116,7 +1116,7 @@ Initialized-invariant progress.
 
 This is the operational core: stale borrow annotations may appear in the
 environment, but progress only dereferences a borrow when the typing derivation
-also supplies initialized target-list typing evidence.
+also supplies typing evidence for its initialized target.
 -/
 theorem progress_whenInitialized {store : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :

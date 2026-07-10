@@ -3,8 +3,8 @@ import FWRust.Paper.Soundness.Helpers.AppendixPrelim
 /-!
 # Soundness helpers: Eqv
 
-Exact type equivalence utilities.  The main strengthening transport now uses
-ordinary `PartialTy.eqv`; `eqvX` remains only as a stricter local relation.
+Exact type-equivalence utilities.  `eqvX` is a local relation stricter than
+ordinary `PartialTy.eqv`.
 -/
 
 namespace FWRust

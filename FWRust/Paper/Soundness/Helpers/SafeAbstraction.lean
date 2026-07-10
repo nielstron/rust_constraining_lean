@@ -59,9 +59,10 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
   | undef {store : ProgramStore} {ty : Ty} :
       ValidPartialValue store .undef (.undef ty)
   /--
-  V-Undef-live.  A statically moved-out slot may still contain the concrete
-  value from a branch that did not execute the move.  The value remains valid at
-  some pre-move partial type that weakens to the carried `undef` shadow.
+  V-Undef-live.  A statically moved-out partial type may still correspond to a
+  concrete runtime value.  The constructor records skeleton validity at a
+  pre-move partial type and a strengthening from that type to the carried
+  `undef` shadow.
   -/
   | undefOf {store : ProgramStore} {value : PartialValue}
       {oldTy : PartialTy} {ty : Ty} :
@@ -1106,7 +1107,7 @@ infix:50 " ≈ₛ " => FullSafeAbstraction
 /--
 Safe abstraction for environments with stale loan annotations.  Domain and
 lifetime agreement are unchanged; the slot value relation is weakened only at
-borrow annotations whose target list is not currently initialized.
+borrow annotations whose target is not currently initialized.
 -/
 def SafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
   (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
@@ -1250,9 +1251,9 @@ theorem safeAbstractionWhenInitialized_of_domain_and_slots
 Transport safe abstraction across an environment shape/strengthening map when
 the runtime store itself is unchanged.
 
-This is the store-side counterpart to positive-rank write/fan-out shape maps:
-same-shape strengthening is safe for already-initialized runtime values, while
-the two slot maps provide exact domain agreement.
+This is the store-side counterpart to the shape maps produced by environment
+writes: same-shape strengthening is safe for already-initialized runtime values,
+while the two slot maps provide exact domain agreement.
 -/
 theorem safeAbstraction_transport_sameShape {store : ProgramStore}
     {env result : Env} :

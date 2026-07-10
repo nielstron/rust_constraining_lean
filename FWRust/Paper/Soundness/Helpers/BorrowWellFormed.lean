@@ -3,9 +3,8 @@ import FWRust.Paper.Soundness.Helpers.SafeAbstraction
 /-!
 # Soundness helpers: Borrow well-formedness
 
-Single-target borrow well-formedness and lifetime utilities for the branch-free
-core.  The old target-list, join, and fan-out write helpers are intentionally
-absent in Phase D1.
+Single-target borrow well-formedness and lifetime utilities for the core
+calculus.
 -/
 
 namespace FWRust

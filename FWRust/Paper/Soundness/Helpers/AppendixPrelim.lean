@@ -3,8 +3,8 @@ import FWRust.Paper.Soundness.Helpers.BorrowWellFormed
 /-!
 # Soundness helpers: Appendix preliminaries
 
-Single-target preliminaries that remain after deleting target-list joins and
-fan-out write machinery.
+Preliminary strengthening and environment-shape facts used by the Appendix 9
+and preservation developments.
 -/
 
 namespace FWRust
