@@ -1,68 +1,11 @@
 # Differences between the Lean formalization and `paper/`
 
-Scope: comparison of the Lean development under `FWRust/Paper/` with
-`paper/fw_rust.pdf` (the core FR calculus) and `paper/fw_rust_followup.pdf`.
-The references point to actual definitions, constructors, or theorem
-statements, not source comments.
-
-There is no `sorry`, `admit`, Lean `axiom`, or other proof escape hatch in
-`FWRust/`.
-
-## Summary
-
-The formalization now covers **exactly the paper's core calculus** (Figure 1):
-the Section 6.1 extension (booleans, equality, conditionals) and the synthetic
-diverging `missing` placeholder that earlier versions carried have been
-removed.  The restored sealor subsystem is cut back to the current core
-syntax and uses the core `ϵ`/unit term for expression holes while omitting
-unavailable statement-position fragments, rather than reintroducing `missing`.
-Consequently there are no environment joins from control flow, and the
-termination of the core calculus is unconditional: every reduction step
-strictly decreases term size (`step_size_lt`), and Theorem 4.12's total form
-(`theorem_4_12_typeAndBorrowSafety_total`,
-`emptyInitial_typeAndBorrowSafety_total`) states terminal execution plus
-safety for well-typed source programs with no divergence caveats.  The
-single-target runtime preservation proof is compiled and exported as
-`preservation` / `lemma_4_11_preservation`; Theorem 4.12 and the empty-initial
-wrappers call it directly rather than carrying a terminal-safety assumption.
-
-`WellFormedEnv` and its stale-aware variant are the paper's two-part
-Definition 4.8 (contained borrows well-formed, slots outlive the current
-lifetime).  The old `Coherent` conjunct is gone.  The follow-up paper's
-`LinearizedBy`/`Linearizable` rank vocabulary is restored as proof-side
-infrastructure for the assignment cycle argument, but it is not a conjunct of
-`WellFormedEnv` and is not a typing-rule premise.  One strengthening remains
-in part (i) — and likewise in `WellFormedTy`'s L-Borrow case: the borrow
-target's *base variable's* slot must also outlive the reference
-(`LValBaseOutlives`), a conjunct not present in the printed definitions (see
-§1a below).
-
-## Remaining differences
-
 ### 1. Rule premises relative to the printed figures
 
 Borrows are single-target (the follow-up paper's grammar): without
 conditionals there are no joins, so target lists — which only ever modelled
 join uncertainty — are gone, and the `write` function is the follow-up's
-strong update (no weak-update unions, no fan-out).  With that, every
-previously-necessary extra premise became removable:
-
-- `T-Assign` carries exactly the paper's six premises (rhs typing, lvalue
-  typing, shape compatibility, rhs well-formedness at the target lifetime,
-  the environment write, and `¬ writeProhibited` on the result).  The
-  historical coherence, rank, stale-target, and rhs-target lifetime premises
-  are not rule premises.  `LinearizedBy`/`Linearizable` exist only as
-  follow-up-paper proof infrastructure for preservation's cycle exclusion.
-- `T-Declare`'s freshness premise is stated on the post-initializer
-  environment: `env₂.fresh x` where the printed rule says `x ∉ dom(Γ₁)`.
-  We read the printed premise as a typo for `Γ₂`: the `Γ₁` form fails to
-  reject the shadow chain `let mut x = (let mut x = t)` (where `x` re-enters
-  the environment through the initializer), which the paper's Section 5.2
-  explicitly treats as not permitted and the follow-up's T-Block assumes
-  away.  The two forms are logically independent on raw environments, but on
-  well-formed environments `Γ₂`-freshness implies `Γ₁`-freshness (typing
-  only ever drops block-local slots, so domains grow monotonically), so no
-  paper-intended program is rejected.
+strong update (no weak-update unions, no fan-out).
 
 Smaller deviations in and around the rules:
 
@@ -78,7 +21,7 @@ Smaller deviations in and around the rules:
   lists only `int` and immutable borrows (the follow-up's complement
   characterization agrees with the Lean definition).
 
-### 1a. `LValBaseOutlives` strengthening of Definition 4.8(i) / L-Borrow
+### 2. `LValBaseOutlives` strengthening of Definition 4.8(i) / L-Borrow
 
 `BorrowTargetsWellFormedInSlot` (Definition 4.8(i)) and
 `BorrowTargetsWellFormed` (L-Borrow, reached through `WellFormedTy` premises
@@ -87,19 +30,6 @@ borrow target's base variable must outlive the reference.  The printed
 definitions only require `Γ ⊢ w : ⟨T⟩^m ∧ m ≥ n`; since lvalue typing
 returns the target's lifetime without constraining intervening base slots,
 this is a genuine extra requirement of the mechanisation.
-
-### 2. Final statements are strict; the stale-aware family is internal
-
-The headline theorem statements conclude the strict paper predicates
-(`FullTerminalStateSafe`: strict abstraction `≈ₛ` plus `ValidValue`),
-matching the paper's `S₂ ∼ Γ₂` and value validity.  The per-redex
-preservation helpers in the development still run over the stale-aware
-`WhenInitialized` family — stale borrow annotations treated as protection
-tokens rather than fully dereferenceable borrows — and upgrade to the strict
-form at the end (`TerminalStateSafe.full_of_wellFormed`).  With conditionals
-removed, stale annotations plausibly cannot arise at all; collapsing the
-interior to the strict predicates is optional cleanup
-(`OBLIGATIONS.md` §2).
 
 ### 3. Non-initial preservation wrappers carry derived-invariant hypotheses
 
