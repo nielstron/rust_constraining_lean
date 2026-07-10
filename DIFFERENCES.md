@@ -20,18 +20,14 @@ Smaller deviations in and around the rules:
 - `CopyTy` additionally counts `unit` as copyable; printed Definition 3.6
   lists only `int` and immutable borrows (the follow-up's complement
   characterization agrees with the Lean definition).
-
-### 2. `LValBaseOutlives` strengthening of Definition 4.8(i) / L-Borrow
-
-`BorrowTargetsWellFormedInSlot` (Definition 4.8(i)) and
-`BorrowTargetsWellFormed` (L-Borrow, reached through `WellFormedTy` premises
-of `T-Block` and `T-Assign`) each carry a third conjunct: the slot of the
+- `L-Borrow` uses a strengthed `BorrowTargetsWellFormedInSlot` (Definition 4.8(i)) and
+`BorrowTargetsWellFormed`: each carry a third conjunct: the slot of the
 borrow target's base variable must outlive the reference.  The printed
 definitions only require `Γ ⊢ w : ⟨T⟩^m ∧ m ≥ n`; since lvalue typing
 returns the target's lifetime without constraining intervening base slots,
 this is a genuine extra requirement of the mechanisation.
 
-### 3. Non-initial preservation wrappers carry derived-invariant hypotheses
+### 2. Non-initial preservation wrappers carry derived-invariant hypotheses
 
 Beyond Definition 4.8, general (arbitrary starting state) preservation carries
 `BorrowSafeEnv Γ₁` (paper Definition 4.13), finite environment support, and
@@ -46,14 +42,14 @@ from Definition-4.8-only states.  They discharge at the empty initial
 environment, so the empty-initial headline theorems match the paper's
 statements.
 
-### 4. Assignment operational semantics order
+### 3. Assignment operational semantics order
 
 Lean's R-Assign reads the old slot, writes the new value, then drops the old
 value from the post-write store — the reference implementation's order rather
 than the printed rule's drop-then-write (the printed appendix proof appears
 to use the wrong order in Lemma 9.6).
 
-### 5. Abstract store model premises
+### 4. Abstract store model premises
 
 `ProgramStore` is an arbitrary `Location → Option StoreSlot`; progress
 therefore takes `OperationalStoreProgress` (implied by finite support), and
@@ -61,15 +57,7 @@ runtime validity (`ValidRuntimeState`) adds concrete-store invariants (owners
 allocated, owner targets on the heap, heap slots at root lifetime).  These
 package the paper's implicit finite heap model.
 
-### 6. Lifetimes are a concrete tree order
+### 5. Lifetimes are a concrete tree order
 
 Lifetimes are paths with prefix order, the canonical lexical-nesting model,
 rather than an arbitrary partial order.
-
-### 7. Corollary 4.14 uses the strengthened core form
-
-`corollary_4_14_borrowSafety` establishes the Appendix's strengthened result
-for the branch-free core: source typing preserves a well-formed, borrow-safe
-result environment, and installing the result type at an arbitrary fresh name
-preserves both properties.  The empty-initial wrapper derives its source and
-initial-invariant premises from typability
