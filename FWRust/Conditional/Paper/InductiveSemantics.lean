@@ -143,6 +143,53 @@ inductive Step : ProgramStore → Lifetime → Term → ProgramStore → Term �
       Step store₁ lifetime (.ite condition trueBranch falseBranch) store₂
         (.ite condition' trueBranch falseBranch)
 
+  /-- R-While: enter the loop by evaluating a fresh copy of its condition. -/
+  | whileStart {store : ProgramStore} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} :
+      Step store lifetime (.whileLoop bodyLifetime condition body) store
+        (.whileCond bodyLifetime condition condition body)
+
+  /-- R-Sub, condition evaluation context of a running loop. -/
+  | subWhileCond {store₁ store₂ : ProgramStore} {lifetime bodyLifetime : Lifetime}
+      {conditionInFlight conditionInFlight' condition body : Term} :
+      Step store₁ lifetime conditionInFlight store₂ conditionInFlight' →
+      Step store₁ lifetime
+        (.whileCond bodyLifetime conditionInFlight condition body) store₂
+        (.whileCond bodyLifetime conditionInFlight' condition body)
+
+  /-- R-WhileF: a false condition exits with unit. -/
+  | whileCondFalse {store : ProgramStore} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} :
+      Step store lifetime
+        (.whileCond bodyLifetime (.val (.bool false)) condition body) store
+        (.val .unit)
+
+  /-- R-WhileT: a true condition starts a scoped body iteration.  The trailing
+  unit makes ordinary block sequencing drop the body's result before the body
+  lifetime itself is dropped. -/
+  | whileCondTrue {store : ProgramStore} {lifetime bodyLifetime : Lifetime}
+      {condition body : Term} :
+      Step store lifetime
+        (.whileCond bodyLifetime (.val (.bool true)) condition body) store
+        (.whileBody bodyLifetime
+          (.block bodyLifetime [body, .val .unit]) condition body)
+
+  /-- R-Sub, scoped body evaluation context of a running loop. -/
+  | subWhileBody {store₁ store₂ : ProgramStore} {lifetime bodyLifetime : Lifetime}
+      {bodyInFlight bodyInFlight' condition body : Term} :
+      Step store₁ lifetime bodyInFlight store₂ bodyInFlight' →
+      Step store₁ lifetime
+        (.whileBody bodyLifetime bodyInFlight condition body) store₂
+        (.whileBody bodyLifetime bodyInFlight' condition body)
+
+  /-- R-WhileIter: after the scoped iteration has produced a value, start the
+  next iteration with a fresh condition copy. -/
+  | whileBodyDone {store : ProgramStore} {lifetime bodyLifetime : Lifetime}
+      {value : Value} {condition body : Term} :
+      Step store lifetime
+        (.whileBody bodyLifetime (.val value) condition body) store
+        (.whileCond bodyLifetime condition condition body)
+
 /--
 Paper Lemma 4.11 uses the reflexive-transitive closure of the reduction
 relation; this is that multi-step relation.
@@ -265,6 +312,243 @@ theorem diverges_multistep_not_value {store finalStore : ProgramStore}
     Term.Diverges term →
     ¬ MultiStep store lifetime term finalStore (.val value) :=
   fun hdiv hmulti => Term.Diverges.no_value (hdiv.multiStep hmulti)
+
+/-! ## While-loop run decomposition
+
+A while loop reduces through the two in-flight runtime forms
+(`Term.whileCond`, `Term.whileBody`).  A terminating run decomposes into
+finitely many complete iterations followed by a `false` condition. -/
+
+/-- The in-flight runtime forms of a running while loop. -/
+inductive WhileForm (bodyLifetime : Lifetime) (condition body : Term) :
+    Term → Prop where
+  | cond (conditionInFlight : Term) :
+      WhileForm bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body)
+  | body (bodyInFlight : Term) :
+      WhileForm bodyLifetime condition body
+        (.whileBody bodyLifetime bodyInFlight condition body)
+
+/-- Iteration structure of a terminating while run, indexed by the runtime
+form at which the run starts. -/
+inductive WhileRunEnds (lifetime bodyLifetime : Lifetime)
+    (condition body : Term) : Term → ProgramStore → ProgramStore → Prop where
+  | exit {conditionInFlight : Term} {store store' : ProgramStore} :
+      MultiStep store lifetime conditionInFlight store' (.val (.bool false)) →
+      WhileRunEnds lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body) store store'
+  | iterate {conditionInFlight : Term}
+      {store store₁ store₂ store' : ProgramStore} {blockValue : Value} :
+      MultiStep store lifetime conditionInFlight store₁ (.val (.bool true)) →
+      MultiStep store₁ lifetime (.block bodyLifetime [body, .val .unit])
+        store₂ (.val blockValue) →
+      WhileRunEnds lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime condition condition body) store₂ store' →
+      WhileRunEnds lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body) store store'
+  | bodyPhase {bodyInFlight : Term} {store store₁ store' : ProgramStore}
+      {blockValue : Value} :
+      MultiStep store lifetime bodyInFlight store₁ (.val blockValue) →
+      WhileRunEnds lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime condition condition body) store₁ store' →
+      WhileRunEnds lifetime bodyLifetime condition body
+        (.whileBody bodyLifetime bodyInFlight condition body) store store'
+
+theorem WhileRunEnds.prependCond {lifetime bodyLifetime : Lifetime}
+    {condition body conditionInFlight conditionInFlight' : Term}
+    {store store₂ finalStore : ProgramStore}
+    (hstep : Step store lifetime conditionInFlight store₂ conditionInFlight')
+    (hends : WhileRunEnds lifetime bodyLifetime condition body
+      (.whileCond bodyLifetime conditionInFlight' condition body) store₂
+      finalStore) :
+    WhileRunEnds lifetime bodyLifetime condition body
+      (.whileCond bodyLifetime conditionInFlight condition body) store
+      finalStore := by
+  cases hends with
+  | exit hcond => exact .exit (MultiStep.trans hstep hcond)
+  | iterate hcond hblock hrest =>
+      exact .iterate (MultiStep.trans hstep hcond) hblock hrest
+
+theorem WhileRunEnds.prependBody {lifetime bodyLifetime : Lifetime}
+    {condition body bodyInFlight bodyInFlight' : Term}
+    {store store₂ finalStore : ProgramStore}
+    (hstep : Step store lifetime bodyInFlight store₂ bodyInFlight')
+    (hends : WhileRunEnds lifetime bodyLifetime condition body
+      (.whileBody bodyLifetime bodyInFlight' condition body) store₂
+      finalStore) :
+    WhileRunEnds lifetime bodyLifetime condition body
+      (.whileBody bodyLifetime bodyInFlight condition body) store finalStore := by
+  cases hends with
+  | bodyPhase hbody hrest => exact .bodyPhase (MultiStep.trans hstep hbody) hrest
+
+/-- Reachable states of a running while loop: still mid-condition, exited,
+mid-body, or past a completed iteration and continuing canonically. -/
+inductive WhileRunReaches (lifetime bodyLifetime : Lifetime)
+    (condition body : Term) :
+    Term → ProgramStore → Term → ProgramStore → Prop where
+  | condPhase {conditionInFlight conditionInFlight' : Term}
+      {store store' : ProgramStore} :
+      MultiStep store lifetime conditionInFlight store' conditionInFlight' →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body) store
+        (.whileCond bodyLifetime conditionInFlight' condition body) store'
+  | exited {conditionInFlight : Term} {store store' : ProgramStore} :
+      MultiStep store lifetime conditionInFlight store' (.val (.bool false)) →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body) store
+        (.val .unit) store'
+  | enterBody {conditionInFlight bodyInFlight' : Term}
+      {store store₁ store' : ProgramStore} :
+      MultiStep store lifetime conditionInFlight store₁ (.val (.bool true)) →
+      MultiStep store₁ lifetime (.block bodyLifetime [body, .val .unit])
+        store' bodyInFlight' →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body) store
+        (.whileBody bodyLifetime bodyInFlight' condition body) store'
+  | iterate {conditionInFlight current : Term}
+      {store store₁ store₂ store' : ProgramStore} {blockValue : Value} :
+      MultiStep store lifetime conditionInFlight store₁ (.val (.bool true)) →
+      MultiStep store₁ lifetime (.block bodyLifetime [body, .val .unit])
+        store₂ (.val blockValue) →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime condition condition body) store₂ current
+        store' →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime conditionInFlight condition body) store
+        current store'
+  | bodyPhase {bodyInFlight bodyInFlight' : Term}
+      {store store' : ProgramStore} :
+      MultiStep store lifetime bodyInFlight store' bodyInFlight' →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileBody bodyLifetime bodyInFlight condition body) store
+        (.whileBody bodyLifetime bodyInFlight' condition body) store'
+  | bodyDone {bodyInFlight current : Term} {store store₁ store' : ProgramStore}
+      {blockValue : Value} :
+      MultiStep store lifetime bodyInFlight store₁ (.val blockValue) →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileCond bodyLifetime condition condition body) store₁ current
+        store' →
+      WhileRunReaches lifetime bodyLifetime condition body
+        (.whileBody bodyLifetime bodyInFlight condition body) store current
+        store'
+
+theorem WhileRunReaches.prependCond {lifetime bodyLifetime : Lifetime}
+    {condition body conditionInFlight conditionInFlight' current : Term}
+    {store store₂ finalStore : ProgramStore}
+    (hstep : Step store lifetime conditionInFlight store₂ conditionInFlight')
+    (hreach : WhileRunReaches lifetime bodyLifetime condition body
+      (.whileCond bodyLifetime conditionInFlight' condition body) store₂
+      current finalStore) :
+    WhileRunReaches lifetime bodyLifetime condition body
+      (.whileCond bodyLifetime conditionInFlight condition body) store
+      current finalStore := by
+  cases hreach with
+  | condPhase hms => exact .condPhase (MultiStep.trans hstep hms)
+  | exited hms => exact .exited (MultiStep.trans hstep hms)
+  | enterBody hcond hblock =>
+      exact .enterBody (MultiStep.trans hstep hcond) hblock
+  | iterate hcond hblock hrest =>
+      exact .iterate (MultiStep.trans hstep hcond) hblock hrest
+
+theorem WhileRunReaches.prependBody {lifetime bodyLifetime : Lifetime}
+    {condition body bodyInFlight bodyInFlight' current : Term}
+    {store store₂ finalStore : ProgramStore}
+    (hstep : Step store lifetime bodyInFlight store₂ bodyInFlight')
+    (hreach : WhileRunReaches lifetime bodyLifetime condition body
+      (.whileBody bodyLifetime bodyInFlight' condition body) store₂ current
+      finalStore) :
+    WhileRunReaches lifetime bodyLifetime condition body
+      (.whileBody bodyLifetime bodyInFlight condition body) store current
+      finalStore := by
+  cases hreach with
+  | bodyPhase hms => exact .bodyPhase (MultiStep.trans hstep hms)
+  | bodyDone hms hrest => exact .bodyDone (MultiStep.trans hstep hms) hrest
+
+/-- Prefix inversion for the while runtime forms. -/
+theorem multistep_while_form_prefix_inv {store finalStore : ProgramStore}
+    {lifetime bodyLifetime : Lifetime} {start condition body finalTerm : Term} :
+    MultiStep store lifetime start finalStore finalTerm →
+    WhileForm bodyLifetime condition body start →
+    WhileRunReaches lifetime bodyLifetime condition body start store
+      finalTerm finalStore := by
+  intro hmulti
+  induction hmulti with
+  | refl =>
+      intro hform
+      cases hform with
+      | cond conditionInFlight => exact .condPhase MultiStep.refl
+      | body bodyInFlight => exact .bodyPhase MultiStep.refl
+  | trans hstep hrest ih =>
+      intro hform
+      cases hform with
+      | cond conditionInFlight =>
+          cases hstep with
+          | subWhileCond hinner =>
+              exact .prependCond hinner (ih (WhileForm.cond _))
+          | whileCondFalse =>
+              obtain ⟨hstoreEq, htermEq⟩ := multistep_value_inv hrest
+              subst hstoreEq
+              subst htermEq
+              exact .exited MultiStep.refl
+          | whileCondTrue =>
+              have hbody := ih (WhileForm.body _)
+              cases hbody with
+              | bodyPhase hms => exact .enterBody MultiStep.refl hms
+              | bodyDone hms hrest' => exact .iterate MultiStep.refl hms hrest'
+      | body bodyInFlight =>
+          cases hstep with
+          | subWhileBody hinner =>
+              exact .prependBody hinner (ih (WhileForm.body _))
+          | whileBodyDone =>
+              exact .bodyDone MultiStep.refl (ih (WhileForm.cond _))
+
+/-- A terminal run from a while runtime form yields unit and decomposes into
+complete iterations followed by a false condition. -/
+theorem multistep_while_form_to_value_inv {store finalStore : ProgramStore}
+    {lifetime bodyLifetime : Lifetime} {start condition body : Term}
+    {value : Value} :
+    MultiStep store lifetime start finalStore (.val value) →
+    WhileForm bodyLifetime condition body start →
+    value = .unit ∧
+      WhileRunEnds lifetime bodyLifetime condition body start store
+        finalStore := by
+  intro hmulti
+  generalize hfinal : Term.val value = final at hmulti
+  induction hmulti with
+  | refl =>
+      intro hform
+      subst hfinal
+      cases hform
+  | trans hstep hrest ih =>
+      intro hform
+      cases hform with
+      | cond conditionInFlight =>
+          cases hstep with
+          | subWhileCond hinner =>
+              obtain ⟨hvalue, hends⟩ := ih hfinal (WhileForm.cond _)
+              exact ⟨hvalue, hends.prependCond hinner⟩
+          | whileCondFalse =>
+              subst hfinal
+              obtain ⟨hstoreEq, hterm⟩ := multistep_value_inv hrest
+              subst hstoreEq
+              cases hterm
+              exact ⟨rfl, .exit MultiStep.refl⟩
+          | whileCondTrue =>
+              obtain ⟨hvalue, hends⟩ := ih hfinal (WhileForm.body _)
+              cases hends with
+              | bodyPhase hblock hrest' =>
+                  exact ⟨hvalue, .iterate MultiStep.refl hblock hrest'⟩
+      | body bodyInFlight =>
+          cases hstep with
+          | subWhileBody hinner =>
+              obtain ⟨hvalue, hends⟩ := ih hfinal (WhileForm.body _)
+              cases hends with
+              | bodyPhase hbody hrest' =>
+                  exact ⟨hvalue, .bodyPhase (MultiStep.trans hinner hbody)
+                    hrest'⟩
+          | whileBodyDone =>
+              obtain ⟨hvalue, hends⟩ := ih hfinal (WhileForm.cond _)
+              exact ⟨hvalue, .bodyPhase MultiStep.refl hends⟩
 
 theorem multistep_append {store₁ store₂ store₃ : ProgramStore} {lifetime : Lifetime}
     {term₁ term₂ term₃ : Term} :
@@ -399,13 +683,28 @@ theorem Term.MissingFree.step {store store' : ProgramStore}
       exact ⟨trivial, ih hfree.2⟩
   | subIte _ ih =>
       exact ⟨ih hfree.1, hfree.2⟩
+  | whileStart =>
+      exact ⟨hfree.1, hfree⟩
+  | subWhileCond _ ih =>
+      exact ⟨ih hfree.1, hfree.2⟩
+  | whileCondFalse =>
+      trivial
+  | whileCondTrue =>
+      exact ⟨(by
+          simpa [Term.MissingFree, Term.MissingFreeList] using hfree.2.2),
+        hfree.2⟩
+  | subWhileBody _ ih =>
+      exact ⟨ih hfree.1, hfree.2⟩
+  | whileBodyDone =>
+      exact ⟨hfree.2.1, hfree.2⟩
 
 theorem step_size_lt {store store' : ProgramStore} {lifetime : Lifetime}
     {term term' : Term} :
     term.MissingFree →
+    term.LoopFree →
     Step store lifetime term store' term' →
     term'.size < term.size := by
-  intro hfree hstep
+  intro hfree hloopFree hstep
   induction hstep with
   | missing =>
       exact False.elim hfree
@@ -416,25 +715,28 @@ theorem step_size_lt {store store' : ProgramStore} {lifetime : Lifetime}
       simp [Term.size]
       omega
   | blockA _ ih =>
-      have hinner := ih hfree.1
+      have hinner := ih hfree.1 hloopFree.1
       simp [Term.size, Term.sizeList]
       omega
   | subBox _ ih | subDeclare _ ih | subAssign _ ih =>
-      have hinner := ih hfree
+      have hinner := ih hfree hloopFree
       simp [Term.size]
       omega
   | subEqLeft _ ih =>
-      have hinner := ih hfree.1
+      have hinner := ih hfree.1 hloopFree.1
       simp [Term.size]
       omega
   | subEqRight _ ih =>
-      have hinner := ih hfree.2
+      have hinner := ih hfree.2 hloopFree.2
       simp [Term.size]
       omega
   | subIte _ ih =>
-      have hinner := ih hfree.1
+      have hinner := ih hfree.1 hloopFree.1
       simp [Term.size]
       omega
+  | whileStart | subWhileCond _ _ | whileCondFalse | whileCondTrue
+    | subWhileBody _ _ | whileBodyDone =>
+      exact False.elim hloopFree
 
 theorem multistep_first_step_of_not_terminal {store finalStore : ProgramStore}
     {lifetime : Lifetime} {term : Term} {finalValue : Value} :

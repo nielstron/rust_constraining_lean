@@ -3,6 +3,7 @@ import FWRust.Conditional.Paper.Soundness.Lemma_4_9_BorrowInvariance
 import FWRust.Conditional.Paper.Soundness.Lemma_4_10_Progress
 import FWRust.Conditional.Paper.Soundness.Lemma_4_11_Preservation
 import FWRust.Conditional.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
+import FWRust.Conditional.Paper.Soundness.LoopReachableSafety
 import FWRust.Conditional.Paper.Soundness.Appendix9.Lemma_9_1_SafeStrengthening
 import FWRust.Conditional.Paper.Soundness.Appendix9.Lemma_9_2_TransitiveStrengthening
 import FWRust.Conditional.Paper.Soundness.Appendix9.Lemma_9_3_Location
@@ -25,10 +26,11 @@ keep.  Move sources are lvalue-general where the paper permits them; moves
 through borrowed references are intentionally untypeable because `EnvMove`
 follows the paper's `Strike` definition.  The current shortcuts include
 restricted sequence/block drops.  Theorem 4.12 proves terminal safety and
-terminal existence for `Term.MissingFree` source terms; the lower-level bridge
-keeps the explicit terminal-run form for generated terms that may contain
-`.missing`.  Lemma 4.10 provides the local progress theorem used for
-nontermination-friendly safety statements.
+terminal existence for source terms satisfying both `Term.MissingFree` and
+`Term.LoopFree`; the lower-level bridge keeps the explicit terminal-run form
+for terms that may contain `.missing` or nonterminating loops.  Lemma 4.10
+provides local progress, and `LoopReachableSafety` lifts it to every finite
+execution prefix.
 
 ## Section 4
 
@@ -36,7 +38,8 @@ nontermination-friendly safety statements.
 * `Lemma_4_9_BorrowInvariance`           — Lemma 4.9    (core wrapper proven)
 * `Lemma_4_10_Progress`                  — Lemma 4.10   (proven)
 * `Lemma_4_11_Preservation`              — Lemma 4.11   (general source-continuation wrapper)
-* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for `Term.MissingFree`)
+* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for the missing- and loop-free fragment)
+* `LoopReachableSafety`                  — every finite prefix remains terminal-or-steppable, including loops
 * `InitialStates`                        — source-initial wrappers, deriving `SourceTerm` from typability
 
 ## Appendix 9

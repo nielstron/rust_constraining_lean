@@ -10890,6 +10890,111 @@ theorem preservation_block_terminal_multistep_runtime_whenInitialized_of_first_s
   · rcases hblockBCase with ⟨value, store', hterms, hdrops, htail⟩
     exact hblockB value store' hterms hdrops htail
 
+/-- Terminal preservation for a finite execution of a running while loop.
+
+The induction follows the concrete `WhileRunEnds` derivation, not the ambient
+borrow graph or the syntax size of the loop.  After a true iteration the body
+value is discarded, the body lifetime is dropped by the ordinary block rules,
+and the caller-supplied back-edge transport re-establishes the loop-head safe
+abstraction. -/
+theorem preservation_whileRunEnds
+    {lifetime bodyLifetime : Lifetime} {condition body : Term}
+    {envInv env₂ env₃ : Env} {bodyTy : Ty}
+    (hchild : LifetimeChild lifetime bodyLifetime)
+    (hsourceCondition : SourceTerm condition)
+    (hsourceBody : SourceTerm body)
+    (ihCondition : ∀ store finalStore finalValue,
+      ValidRuntimeState store condition →
+      SafeAbstraction store envInv →
+      MultiStep store lifetime condition finalStore (.val finalValue) →
+      WellFormedEnvWhenInitialized env₂ lifetime ∧
+        TerminalStateSafe finalStore finalValue env₂ .bool)
+    (ihBody : ∀ store finalStore finalValue,
+      ValidRuntimeState store body →
+      WellFormedEnvWhenInitialized env₂ bodyLifetime →
+      SafeAbstraction store env₂ →
+      MultiStep store bodyLifetime body finalStore (.val finalValue) →
+      WellFormedEnvWhenInitialized env₃ bodyLifetime ∧
+        TerminalStateSafe finalStore finalValue env₃ bodyTy ∧
+        ∀ endStore : ProgramStore,
+          SafeAbstraction endStore (env₃.dropLifetime bodyLifetime) →
+          SafeAbstraction endStore envInv) :
+    ∀ form startStore endStore,
+      WhileRunEnds lifetime bodyLifetime condition body form
+        startStore endStore →
+      form = .whileCond bodyLifetime condition condition body →
+      SafeAbstraction startStore envInv →
+      ValidRuntimeState startStore condition →
+      WellFormedEnvWhenInitialized env₂ lifetime ∧
+        TerminalStateSafe endStore .unit env₂ .unit := by
+  intro form startStore endStore hends
+  induction hends with
+  | exit =>
+      rename_i hcond
+      intro heq hsafe hvalid
+      cases heq
+      rcases ihCondition _ _ _ hvalid hsafe hcond with
+        ⟨hwellCondition, hterminalCondition⟩
+      exact ⟨hwellCondition,
+        validRuntimeState_of_sourceTerm sourceTerm_unit_value
+          hterminalCondition.1,
+        hterminalCondition.2.1,
+        ValidPartialValueWhenInitialized.unit⟩
+  | iterate =>
+      rename_i hcond hblock _hrest ih
+      intro heq hsafe hvalid
+      cases heq
+      rcases ihCondition _ _ _ hvalid hsafe hcond with
+        ⟨hwellCondition, hterminalCondition⟩
+      rcases multistep_block_head_to_value_inv hblock with
+        ⟨midStore, bodyValue, hbodyRun, hblockCont⟩
+      rcases ihBody _ _ _
+          (validRuntimeState_of_sourceTerm hsourceBody
+            hterminalCondition.1)
+          (WellFormedEnvWhenInitialized.weaken hwellCondition
+            (LifetimeChild.outlives hchild))
+          hterminalCondition.2.1 hbodyRun with
+        ⟨hwellBody, hterminalBody, hinvariant⟩
+      have hvalidConsBlock :
+          ValidRuntimeState midStore
+            (.block bodyLifetime [.val bodyValue, .val .unit]) :=
+        validRuntimeState_block_value_cons_of_value_source_tail
+          sourceTerm_unit_block hterminalBody.1
+      rcases preservation_block_terminal_multistep_runtime_whenInitialized_of_first_step
+          (env' := env₃.dropLifetime bodyLifetime) (ty := .unit)
+          (by
+            intro value next rest store₀ hterms hdrops htail
+            cases hterms
+            have hseqStep :
+                Step midStore lifetime
+                  (.block bodyLifetime [.val bodyValue, .val .unit])
+                  store₀ (.block bodyLifetime [.val .unit]) :=
+              Step.seq hdrops
+            have hvalidAfterSeq :
+                ValidRuntimeState store₀
+                  (.block bodyLifetime [.val .unit]) :=
+              validRuntimeState_seq_step hvalidConsBlock hseqStep
+            have hsafeAfterSeq : SafeAbstraction store₀ env₃ :=
+              safeAbstraction_seq_value_drop_whenInitialized
+                hterminalBody.2.1 hvalidConsBlock hwellBody hdrops
+            exact preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop
+              hvalidAfterSeq hsafeAfterSeq hchild hwellBody
+              WellFormedTy.unit ValidPartialValueWhenInitialized.unit htail)
+          (by
+            intro term rest store₀ term' hterms hstep htail
+            cases hterms
+            exact False.elim (value_no_step hstep))
+          (by
+            intro value store₀ hterms _hdropsLifetime _htail
+            simp at hterms)
+          hblockCont with
+        ⟨hvalidIterEnd, hsafeIterEnd, _hvalidValueIterEnd⟩
+      exact ih rfl (hinvariant _ hsafeIterEnd)
+        (validRuntimeState_of_sourceTerm hsourceCondition hvalidIterEnd)
+  | bodyPhase =>
+      intro heq _hsafe _hvalid
+      cases heq
+
 /--
 Bounded preservation.
 
@@ -10950,6 +11055,7 @@ theorem preservation_bounded
           (env₂.dropLifetime blockLifetime) ty)
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
+    ?whileLoopDiverging ?whileLoop
     ?singleton ?cons htyping hsize rfl hsource store finalStore finalValue
     hvalidRuntime hvalidStoreTyping hwellFormed hsafe hmulti).2
   -- T-Val: a value is already terminal.
@@ -11579,6 +11685,97 @@ theorem preservation_bounded
       exact ihFalse (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
         rfl hsourceFalse midStore finalStore finalValue hvalidFalse
         hstoreTypingFalse hwellCondition hterminalCondition.2.1 hfalseMulti
+  -- T-WhileDiv: a terminating run can only leave through a false condition;
+  -- completing the diverging body is impossible.
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
+      _bodyTy hchild _hcondition _hbody hdiverges ihCondition _ihBody
+      hsize htypingEq hsource store finalStore finalValue hvalidRuntime
+      hvalidStoreTyping hwellFormed hsafe hmulti
+    cases htypingEq
+    have hsourceCondition : SourceTerm _condition :=
+      SourceTerm.while_condition hsource
+    rcases multistep_first_step_of_not_terminal (by simp [Terminal])
+        hmulti with ⟨_store', _term', hstep, hrest⟩
+    cases hstep
+    obtain ⟨hvalue, hends⟩ :=
+      multistep_while_form_to_value_inv hrest (WhileForm.cond _)
+    subst hvalue
+    exact preservation_whileRunEnds (env₃ := _env₃) (bodyTy := _bodyTy)
+      hchild hsourceCondition (SourceTerm.while_body hsource)
+      (fun s fs fv hvalid hsafe' hm =>
+        ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceCondition s fs fv hvalid
+          (validStoreTyping_sourceTerm_of_validStoreTyping
+            hsourceCondition hvalidStoreTyping.while_condition)
+          hwellFormed hsafe' hm)
+      (fun _s _fs _fv _hvalid _hwell _hsafe' hm =>
+        absurd hm (diverges_multistep_not_value hdiverges))
+      _ _ _ hends rfl hsafe
+      (validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime)
+  -- T-While: the join is used as a may-invariant.  At entry and at every
+  -- back edge we transport only initialized evidence along EnvStrengthens;
+  -- this is why no same-shape, coherence, or global ranking premise is needed.
+  case whileLoop =>
+    intro _env₁ _envBack _envInv _env₂ _env₃ _typing _lifetime
+      _bodyLifetime _condition _body _bodyTy hchild hjoin hcontained
+      _hnameFresh _hcondition _hbody hdropEq ihCondition ihBody
+      hsize htypingEq hsource store finalStore finalValue hvalidRuntime
+      hvalidStoreTyping hwellFormed hsafe hmulti
+    cases htypingEq
+    have hsourceCondition : SourceTerm _condition :=
+      SourceTerm.while_condition hsource
+    have hsourceBody : SourceTerm _body :=
+      SourceTerm.while_body hsource
+    have hentryStrengthens : EnvStrengthens _env₁ _envInv :=
+      EnvJoin.le_left hjoin
+    have hbackStrengthens : EnvStrengthens _envBack _envInv :=
+      EnvJoin.le_right hjoin
+    have hwellInv : WellFormedEnvWhenInitialized _envInv _lifetime :=
+      ⟨hcontained,
+        EnvSlotsOutlive.of_lifetimesPreserved hwellFormed.2
+          (EnvStrengthens.lifetimesPreserved hentryStrengthens)⟩
+    have hentryInitBack :
+        ∀ {targets : List LVal},
+          BorrowTargetsInitialized _envInv targets →
+            BorrowTargetsInitialized _env₁ targets := by
+      intro targets hinitialized
+      exact borrowTargetsInitialized_back_of_envStrengthens
+        hentryStrengthens hinitialized
+    have hbackInitBack :
+        ∀ {targets : List LVal},
+          BorrowTargetsInitialized _envInv targets →
+            BorrowTargetsInitialized _envBack targets := by
+      intro targets hinitialized
+      exact borrowTargetsInitialized_back_of_envStrengthens
+        hbackStrengthens hinitialized
+    rcases multistep_first_step_of_not_terminal (by simp [Terminal])
+        hmulti with ⟨_store', _term', hstep, hrest⟩
+    cases hstep
+    obtain ⟨hvalue, hends⟩ :=
+      multistep_while_form_to_value_inv hrest (WhileForm.cond _)
+    subst hvalue
+    exact preservation_whileRunEnds hchild hsourceCondition hsourceBody
+      (fun s fs fv hvalid hsafe' hm =>
+        ihCondition (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+          rfl hsourceCondition s fs fv hvalid
+          (validStoreTyping_sourceTerm_of_validStoreTyping
+            hsourceCondition hvalidStoreTyping.while_condition)
+          hwellInv hsafe' hm)
+      (fun s fs fv hvalid hwell hsafe' hm => by
+        rcases ihBody (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
+            rfl hsourceBody s fs fv hvalid
+            (validStoreTyping_sourceTerm_of_validStoreTyping hsourceBody
+              hvalidStoreTyping.while_body)
+            hwell hsafe' hm with ⟨hwellBody, hterminalBody⟩
+        exact ⟨hwellBody, hterminalBody,
+          fun endStore hsafeBack =>
+            safeAbstractionWhenInitialized_transport_strengthening
+              hbackInitBack (hdropEq ▸ hsafeBack) hbackStrengthens⟩)
+      _ _ _ hends rfl
+      (safeAbstractionWhenInitialized_transport_strengthening
+        hentryInitBack hsafe hentryStrengthens)
+      (validRuntimeState_of_sourceTerm hsourceCondition hvalidRuntime)
   -- Block list, singleton case.
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm _ih hsize htypingEq hsource

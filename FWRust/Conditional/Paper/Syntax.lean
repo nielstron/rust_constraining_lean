@@ -101,6 +101,15 @@ inductive Term where
   /-- Section 6.1 control-flow extension (Figure 5): equality comparator and conditional -/
   | eq (lhs rhs : Term)
   | ite (condition trueBranch falseBranch : Term)
+  /-- Source while loop.  The body is evaluated in `bodyLifetime`; the two
+  constructors below are runtime-only phases that retain pristine copies of
+  the condition and body for the next iteration. -/
+  | whileLoop (bodyLifetime : Lifetime) (condition body : Term)
+  /-- Runtime form while the current condition copy is being evaluated. -/
+  | whileCond (bodyLifetime : Lifetime)
+      (conditionInFlight condition body : Term)
+  /-- Runtime form while the current scoped body copy is being evaluated. -/
+  | whileBody (bodyLifetime : Lifetime) (bodyInFlight condition body : Term)
   deriving BEq, Repr
 
 mutual
@@ -120,6 +129,11 @@ mutual
     | .eq lhs rhs => 1 + lhs.size + rhs.size
     | .ite condition trueBranch falseBranch =>
         1 + condition.size + trueBranch.size + falseBranch.size
+    | .whileLoop _ condition body => 1 + condition.size + body.size
+    | .whileCond _ conditionInFlight condition body =>
+        1 + conditionInFlight.size + condition.size + body.size
+    | .whileBody _ bodyInFlight condition body =>
+        1 + bodyInFlight.size + condition.size + body.size
 
   def Term.sizeList : List Term → Nat
     | [] => 0
@@ -148,10 +162,44 @@ mutual
     | .eq lhs rhs => lhs.MissingFree ∧ rhs.MissingFree
     | .ite condition trueBranch falseBranch =>
         condition.MissingFree ∧ trueBranch.MissingFree ∧ falseBranch.MissingFree
+    | .whileLoop _ condition body =>
+        condition.MissingFree ∧ body.MissingFree
+    | .whileCond _ conditionInFlight condition body =>
+        conditionInFlight.MissingFree ∧ condition.MissingFree ∧ body.MissingFree
+    | .whileBody _ bodyInFlight condition body =>
+        bodyInFlight.MissingFree ∧ condition.MissingFree ∧ body.MissingFree
 
   def Term.MissingFreeList : List Term → Prop
     | [] => True
     | term :: rest => term.MissingFree ∧ Term.MissingFreeList rest
+end
+
+mutual
+  /-- Syntactic exclusion of while loops and their runtime-only phases.
+
+  Unlike `MissingFree`, this predicate says only that no loop occurs.  The
+  terminating fragment of the extended calculus therefore requires both
+  predicates rather than overloading either one. -/
+  def Term.LoopFree : Term → Prop
+    | .block _ terms => Term.LoopFreeList terms
+    | .letMut _ initialiser => initialiser.LoopFree
+    | .assign _ rhs => rhs.LoopFree
+    | .box operand => operand.LoopFree
+    | .borrow _ _ => True
+    | .move _ => True
+    | .copy _ => True
+    | .val _ => True
+    | .missing => True
+    | .eq lhs rhs => lhs.LoopFree ∧ rhs.LoopFree
+    | .ite condition trueBranch falseBranch =>
+        condition.LoopFree ∧ trueBranch.LoopFree ∧ falseBranch.LoopFree
+    | .whileLoop _ _ _ => False
+    | .whileCond _ _ _ _ => False
+    | .whileBody _ _ _ _ => False
+
+  def Term.LoopFreeList : List Term → Prop
+    | [] => True
+    | term :: rest => term.LoopFree ∧ Term.LoopFreeList rest
 end
 
 theorem Term.MissingFreeList.of_mem {terms : List Term} {term : Term} :
@@ -221,6 +269,57 @@ theorem Term.MissingFree.ite_falseBranch {condition trueBranch falseBranch : Ter
     falseBranch.MissingFree :=
   fun hfree => hfree.2.2
 
+theorem Term.MissingFree.while_condition {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    Term.MissingFree (.whileLoop bodyLifetime condition body) →
+    condition.MissingFree :=
+  fun hfree => hfree.1
+
+theorem Term.MissingFree.while_body {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    Term.MissingFree (.whileLoop bodyLifetime condition body) →
+    body.MissingFree :=
+  fun hfree => hfree.2
+
+theorem Term.MissingFree.whileCond_inFlight {bodyLifetime : Lifetime}
+    {conditionInFlight condition body : Term} :
+    Term.MissingFree
+      (.whileCond bodyLifetime conditionInFlight condition body) →
+    conditionInFlight.MissingFree :=
+  fun hfree => hfree.1
+
+theorem Term.MissingFree.whileCond_condition {bodyLifetime : Lifetime}
+    {conditionInFlight condition body : Term} :
+    Term.MissingFree
+      (.whileCond bodyLifetime conditionInFlight condition body) →
+    condition.MissingFree :=
+  fun hfree => hfree.2.1
+
+theorem Term.MissingFree.whileCond_body {bodyLifetime : Lifetime}
+    {conditionInFlight condition body : Term} :
+    Term.MissingFree
+      (.whileCond bodyLifetime conditionInFlight condition body) →
+    body.MissingFree :=
+  fun hfree => hfree.2.2
+
+theorem Term.MissingFree.whileBody_inFlight {bodyLifetime : Lifetime}
+    {bodyInFlight condition body : Term} :
+    Term.MissingFree (.whileBody bodyLifetime bodyInFlight condition body) →
+    bodyInFlight.MissingFree :=
+  fun hfree => hfree.1
+
+theorem Term.MissingFree.whileBody_condition {bodyLifetime : Lifetime}
+    {bodyInFlight condition body : Term} :
+    Term.MissingFree (.whileBody bodyLifetime bodyInFlight condition body) →
+    condition.MissingFree :=
+  fun hfree => hfree.2.1
+
+theorem Term.MissingFree.whileBody_body {bodyLifetime : Lifetime}
+    {bodyInFlight condition body : Term} :
+    Term.MissingFree (.whileBody bodyLifetime bodyInFlight condition body) →
+    body.MissingFree :=
+  fun hfree => hfree.2.2
+
 theorem Term.MissingFree.not_diverges {term : Term} :
     term.MissingFree →
     ¬ term.Diverges := by
@@ -230,6 +329,75 @@ theorem Term.MissingFree.not_diverges {term : Term} :
       exact hfree
   | block hmem _hinner ih =>
       exact ih (Term.MissingFreeList.of_mem hfree hmem)
+
+theorem Term.LoopFreeList.of_mem {terms : List Term} {term : Term} :
+    Term.LoopFreeList terms →
+    term ∈ terms →
+    term.LoopFree := by
+  intro hfree hmem
+  induction terms with
+  | nil =>
+      cases hmem
+  | cons head tail ih =>
+      rcases hfree with ⟨hhead, htail⟩
+      rcases List.mem_cons.mp hmem with hterm | hmem
+      · subst hterm
+        exact hhead
+      · exact ih htail hmem
+
+theorem Term.LoopFreeList.tail {term : Term} {rest : List Term} :
+    Term.LoopFreeList (term :: rest) →
+    Term.LoopFreeList rest :=
+  fun hfree => hfree.2
+
+theorem Term.LoopFree.block_head {lifetime : Lifetime} {term : Term}
+    {rest : List Term} :
+    Term.LoopFree (.block lifetime (term :: rest)) →
+    term.LoopFree :=
+  fun hfree => hfree.1
+
+theorem Term.LoopFree.block_tail {lifetime : Lifetime} {term next : Term}
+    {rest : List Term} :
+    Term.LoopFree (.block lifetime (term :: next :: rest)) →
+    Term.LoopFree (.block lifetime (next :: rest)) :=
+  fun hfree => hfree.2
+
+theorem Term.LoopFree.box_inner {term : Term} :
+    Term.LoopFree (.box term) → term.LoopFree :=
+  fun hfree => hfree
+
+theorem Term.LoopFree.declare_inner {x : Name} {term : Term} :
+    Term.LoopFree (.letMut x term) → term.LoopFree :=
+  fun hfree => hfree
+
+theorem Term.LoopFree.assign_inner {lhs : LVal} {rhs : Term} :
+    Term.LoopFree (.assign lhs rhs) → rhs.LoopFree :=
+  fun hfree => hfree
+
+theorem Term.LoopFree.eq_lhs {lhs rhs : Term} :
+    Term.LoopFree (.eq lhs rhs) → lhs.LoopFree :=
+  fun hfree => hfree.1
+
+theorem Term.LoopFree.eq_rhs {lhs rhs : Term} :
+    Term.LoopFree (.eq lhs rhs) → rhs.LoopFree :=
+  fun hfree => hfree.2
+
+theorem Term.LoopFree.ite_condition {condition trueBranch falseBranch : Term} :
+    Term.LoopFree (.ite condition trueBranch falseBranch) →
+    condition.LoopFree :=
+  fun hfree => hfree.1
+
+theorem Term.LoopFree.ite_trueBranch
+    {condition trueBranch falseBranch : Term} :
+    Term.LoopFree (.ite condition trueBranch falseBranch) →
+    trueBranch.LoopFree :=
+  fun hfree => hfree.2.1
+
+theorem Term.LoopFree.ite_falseBranch
+    {condition trueBranch falseBranch : Term} :
+    Term.LoopFree (.ite condition trueBranch falseBranch) →
+    falseBranch.LoopFree :=
+  fun hfree => hfree.2.2
 
 end Core
 end FWRust.Conditional

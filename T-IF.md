@@ -172,6 +172,7 @@ environment is reachable from an empty source program.
 
 The closed-world result
 [`emptyInitial_typeAndBorrowSafety_total`](FWRust/Conditional/Paper/Soundness/InitialStates.lean)
-then proves concrete evaluation to a value and `TerminalStateSafe` for
-missing-free programs typed from the empty environment, without any global
+then proves concrete evaluation to a value and `TerminalStateSafe` for the
+explicitly missing- and loop-free fragment typed from the empty environment,
+without any global
 same-shape, coherence, or linearizability premise on conditional joins.

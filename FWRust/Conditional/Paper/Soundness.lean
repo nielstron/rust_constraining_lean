@@ -2,6 +2,7 @@ import FWRust.Conditional.Paper.Soundness.Lemma_4_10_Progress
 import FWRust.Conditional.Paper.Soundness.Lemma_4_9_BorrowInvariance
 import FWRust.Conditional.Paper.Soundness.Lemma_4_11_Preservation
 import FWRust.Conditional.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
+import FWRust.Conditional.Paper.Soundness.LoopReachableSafety
 import FWRust.Conditional.Paper.Soundness.InitialStates
 import FWRust.Conditional.Paper.Soundness.Appendix9.Lemma_9_1_SafeStrengthening
 import FWRust.Conditional.Paper.Soundness.Appendix9.Lemma_9_2_TransitiveStrengthening
@@ -30,9 +31,11 @@ strengthenings to keep.  In brief:
   intentionally `Strike`-based and therefore cannot move out through borrowed
   references, matching Definition 3.18;
 * theorem interface: the lower-level safety bridge still accepts an explicit
-  `TerminatesAsValue` witness for generated terms that may contain `.missing`,
-  while the paper-facing Theorem 4.12 wrapper proves terminal existence for
-  source terms satisfying `Term.MissingFree`.  The nontermination-friendly local
+  `TerminatesAsValue` witness for generated terms that may contain `.missing`
+  or nonterminating loops, while the total Theorem 4.12 wrapper proves terminal
+  existence for source terms satisfying both `Term.MissingFree` and
+  `Term.LoopFree`.  The nontermination-friendly all-prefix statement is
+  `reachableProgressWhenInitialized`; the local
   safety statement is `progress_runtime_step`; for states maintained by the
   stale-aware preservation invariant, use
   `theorem_4_12_typeAndBorrowStep_of_preservationInvariant`;

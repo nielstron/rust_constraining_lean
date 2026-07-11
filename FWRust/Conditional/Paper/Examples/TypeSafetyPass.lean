@@ -50,13 +50,18 @@ theorem scalarCopyComparison_missingFree :
   unfold scalarCopyComparison
   simp [Term.MissingFree]
 
+theorem scalarCopyComparison_loopFree :
+    scalarCopyComparison.LoopFree := by
+  unfold scalarCopyComparison
+  simp [Term.LoopFree]
+
 theorem scalarCopyComparison_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root scalarCopyComparison finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .bool :=
   emptyInitial_typeAndBorrowSafety_total scalarCopyComparison_typing
-    scalarCopyComparison_missingFree
+    scalarCopyComparison_missingFree scalarCopyComparison_loopFree
 
 /--
 Accepted `if/else` example for the control-flow extension: both branches return
@@ -88,13 +93,18 @@ theorem ifThenElseInt_missingFree :
   unfold ifThenElseInt
   simp [Term.MissingFree]
 
+theorem ifThenElseInt_loopFree :
+    ifThenElseInt.LoopFree := by
+  unfold ifThenElseInt
+  simp [Term.LoopFree]
+
 theorem ifThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifThenElseInt_typing
-    ifThenElseInt_missingFree
+    ifThenElseInt_missingFree ifThenElseInt_loopFree
 
 /--
 Accepted `if/else` example with a nontrivial boolean guard.  The conditional
@@ -127,13 +137,18 @@ theorem ifEqThenElseInt_missingFree :
   unfold ifEqThenElseInt scalarCopyComparison
   simp [Term.MissingFree]
 
+theorem ifEqThenElseInt_loopFree :
+    ifEqThenElseInt.LoopFree := by
+  unfold ifEqThenElseInt scalarCopyComparison
+  simp [Term.LoopFree]
+
 theorem ifEqThenElseInt_typeSafety :
     ∃ finalStore finalValue,
       MultiStep ProgramStore.empty Lifetime.root ifEqThenElseInt finalStore
         (.val finalValue) ∧
       TerminalStateSafe finalStore finalValue Env.empty .int :=
   emptyInitial_typeAndBorrowSafety_total ifEqThenElseInt_typing
-    ifEqThenElseInt_missingFree
+    ifEqThenElseInt_missingFree ifEqThenElseInt_loopFree
 
 /--
 Regression outline for the relaxed `T-If` join.

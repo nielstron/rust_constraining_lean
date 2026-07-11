@@ -13,17 +13,16 @@ Paper statement (Section 4.5):
 
 The paper states terminal existence directly and then notes in Section 4.5.2
 that this relies on termination of the presented calculus.  The integrated
-mechanization also includes generated `.missing`, a well-typed self-looping
-placeholder.  The lower-level `typeAndBorrowSafety` theorem therefore remains
-conditional on an explicit `TerminatesAsValue` witness, while the paper-facing
-`theorem_4_12_typeAndBorrowSafety` wrapper proves that witness for source terms
-that satisfy `Term.MissingFree`.
+mechanization includes both generated `.missing`, a well-typed self-looping
+placeholder, and source `while` loops.  The lower-level `typeAndBorrowSafety`
+theorem therefore remains conditional on an explicit `TerminatesAsValue`
+witness, while the total wrapper proves that witness for the syntactically
+terminating fragment satisfying both `Term.MissingFree` and `Term.LoopFree`.
 
 The preservation-backed terminal safety component is scoped to `SourceTerm`
 continuations for arbitrary runtime store typings.  Empty-initial wrappers such
 as `emptyInitial_typeAndBorrowSafety` derive `SourceTerm` from typability under
-`StoreTyping.empty`; their total forms still require `Term.MissingFree`, since
-`.missing` is intentionally typable.
+`StoreTyping.empty`; their total forms require both exclusion predicates.
 -/
 
 namespace FWRust.Conditional
@@ -51,13 +50,12 @@ theorem validPartialValueWhenInitialized_bool_inv {env : Env}
       cases value <;> simp
 
 /--
-Missing-free source continuations terminate.
+Missing- and loop-free source continuations terminate.
 
-The only looping operational rule in the integrated calculus is the generated
-`missing` self-loop.  For source-shaped terms that syntactically exclude that
-placeholder, the typed evaluation tree is finite: each recursive call follows a
-proper subterm, while terminal preservation supplies the safe abstraction needed
-to continue after a subterm has evaluated.
+For source-shaped terms that syntactically exclude both generated `missing` and
+source `while`, the typed evaluation tree is finite: each recursive call follows
+a proper subterm, while terminal preservation supplies the safe abstraction
+needed to continue after a subterm has evaluated.
 -/
 theorem terminatesAsValue_missingFree_bounded
     (fuel : Nat) {store : ProgramStore} {env₁ env₂ : Env}
@@ -65,6 +63,7 @@ theorem terminatesAsValue_missingFree_bounded
     term.size ≤ fuel →
     SourceTerm term →
     term.MissingFree →
+    term.LoopFree →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
@@ -74,17 +73,18 @@ theorem terminatesAsValue_missingFree_bounded
     TerminatesAsValue store lifetime term := by
   induction fuel generalizing store env₁ env₂ typing lifetime term ty with
   | zero =>
-      intro hsize _hsource _hfree _hvalidRuntime _hvalidStoreTyping
+      intro hsize _hsource _hfree _hloopFree _hvalidRuntime _hvalidStoreTyping
         _hwellFormed _hsafe _hfinite _htyping
       cases term <;> simp [Term.size] at hsize
   | succ fuel ihFuel =>
-  intro hsize hsource hfree hvalidRuntime hvalidStoreTyping hwellFormed hsafe
+  intro hsize hsource hfree hloopFree hvalidRuntime hvalidStoreTyping hwellFormed hsafe
     hfinite htyping
   refine TermTyping.rec
     (motive_1 := fun env currentTyping lifetime term ty env₂ _ =>
       term.size ≤ fuel.succ →
       SourceTerm term →
       term.MissingFree →
+      term.LoopFree →
       ∀ store,
         ValidRuntimeState store term →
         ValidStoreTyping store term currentTyping →
@@ -96,6 +96,7 @@ theorem terminatesAsValue_missingFree_bounded
       Term.size (.block blockLifetime terms) ≤ fuel.succ →
       SourceTerm (.block blockLifetime terms) →
       Term.MissingFree (.block blockLifetime terms) →
+      Term.LoopFree (.block blockLifetime terms) →
       ∀ outerLifetime store,
         LifetimeChild outerLifetime blockLifetime →
         ValidRuntimeState store (.block blockLifetime terms) →
@@ -106,19 +107,22 @@ theorem terminatesAsValue_missingFree_bounded
         TerminatesAsValue store outerLifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
-    ?singleton ?cons htyping hsize hsource hfree store hvalidRuntime
+    ?whileLoopDiverging ?whileLoop
+    ?singleton ?cons htyping hsize hsource hfree hloopFree store hvalidRuntime
     hvalidStoreTyping hwellFormed hsafe hfinite
   case const =>
     intro _env _typing _lifetime value _ty _hvalueTyping _hsize _hsource _hfree
+      _hloopFree
       store _hvalidRuntime _hvalidStoreTyping _hwellFormed _hsafe _hfinite
     exact ⟨store, value, MultiStep.refl⟩
   case missing =>
     intro _env _typing _lifetime _ty _hwellTy _hloanFree _hsize _hsource hfree
+      _hloopFree
       _store _hvalidRuntime _hvalidStoreTyping _hwellFormed _hsafe _hfinite
     exact False.elim hfree
   case copy =>
     intro _env _typing _lifetime _valueLifetime lv _ty hLv hcopy hnotRead
-      _hsize _hsource _hfree store _hvalidRuntime _hvalidStoreTyping
+      _hsize _hsource _hfree _hloopFree store _hvalidRuntime _hvalidStoreTyping
       _hwellFormed hsafe _hfinite
     have htermTyping : TermTyping _env _typing _lifetime (.copy lv) _ty _env :=
       TermTyping.copy hLv hcopy hnotRead
@@ -130,7 +134,7 @@ theorem terminatesAsValue_missingFree_bounded
           exact ⟨_, _, MultiStep.trans (Step.copy hread) MultiStep.refl⟩
   case move =>
     intro _env₁ _env₂ _typing _lifetime _valueLifetime lv _ty hLv hnotWrite
-      hmove _hsize _hsource _hfree store _hvalidRuntime _hvalidStoreTyping
+      hmove _hsize _hsource _hfree _hloopFree store _hvalidRuntime _hvalidStoreTyping
       _hwellFormed hsafe _hfinite
     have htermTyping : TermTyping _env₁ _typing _lifetime (.move lv) _ty _env₂ :=
       TermTyping.move hLv hnotWrite hmove
@@ -142,7 +146,7 @@ theorem terminatesAsValue_missingFree_bounded
           exact ⟨_, _, MultiStep.trans (Step.move hread hwrite) MultiStep.refl⟩
   case mutBorrow =>
     intro _env _typing _lifetime _valueLifetime lv _ty hLv hmutable hnotWrite
-      _hsize _hsource _hfree store _hvalidRuntime _hvalidStoreTyping
+      _hsize _hsource _hfree _hloopFree store _hvalidRuntime _hvalidStoreTyping
       _hwellFormed hsafe _hfinite
     have htermTyping :
         TermTyping _env _typing _lifetime (.borrow true lv) (.borrow true [lv]) _env :=
@@ -155,7 +159,7 @@ theorem terminatesAsValue_missingFree_bounded
           exact ⟨_, _, MultiStep.trans (Step.borrow hloc) MultiStep.refl⟩
   case immBorrow =>
     intro _env _typing _lifetime _valueLifetime lv _ty hLv hnotRead
-      _hsize _hsource _hfree store _hvalidRuntime _hvalidStoreTyping
+      _hsize _hsource _hfree _hloopFree store _hvalidRuntime _hvalidStoreTyping
       _hwellFormed hsafe _hfinite
     have htermTyping :
         TermTyping _env _typing _lifetime (.borrow false lv) (.borrow false [lv]) _env :=
@@ -168,10 +172,11 @@ theorem terminatesAsValue_missingFree_bounded
           exact ⟨_, _, MultiStep.trans (Step.borrow hloc) MultiStep.refl⟩
   case box =>
     intro _env₁ _env₂ _typing _lifetime inner _ty hinner ih hsize hsource hfree
-      store hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
+      hloopFree store hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.box_inner hsource)
         (Term.MissingFree.box_inner hfree)
+        (Term.LoopFree.box_inner hloopFree)
         store
         (validRuntimeState_of_sourceTerm (SourceTerm.box_inner hsource) hvalidRuntime)
         (validStoreTyping_box_inner hvalidStoreTyping)
@@ -189,20 +194,21 @@ theorem terminatesAsValue_missingFree_bounded
           MultiStep.refl)⟩
   case block =>
     intro _env₁ _env₂ _env₃ _typing _lifetime blockLifetime terms _ty hchild
-      _hterms _hwellTy _hdrop ih hsize hsource hfree store hvalidRuntime
+      _hterms _hwellTy _hdrop ih hsize hsource hfree hloopFree store hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hfinite
-    exact ih hsize hsource hfree _lifetime store hchild hvalidRuntime
+    exact ih hsize hsource hfree hloopFree _lifetime store hchild hvalidRuntime
       hvalidStoreTyping
       (WellFormedEnvWhenInitialized.weaken hwellFormed
         (LifetimeChild.outlives hchild))
       hsafe hfinite
   case declare =>
     intro _env₁ _env₂ _env₃ _typing _lifetime x inner _ty _hfresh hinner
-      _hfreshOut _hcoh _henv ih hsize hsource hfree store hvalidRuntime
+      _hfreshOut _hcoh _henv ih hsize hsource hfree hloopFree store hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.declare_inner hsource)
         (Term.MissingFree.declare_inner hfree)
+        (Term.LoopFree.declare_inner hloopFree)
         store
         (validRuntimeState_declare_inner hvalidRuntime)
         (validStoreTyping_declare_inner hvalidStoreTyping)
@@ -214,11 +220,12 @@ theorem terminatesAsValue_missingFree_bounded
   case assign =>
     intro _env₁ _env₂ _env₃ _typing _lifetime _targetLifetime lhs _oldTy rhs
       rhsTy hRhs hLhsPost hshape hwellTy hwrite hnoStale hranked hcoh
-      hcontained hnotWrite ih hsize hsource hfree store hvalidRuntime
+      hcontained hnotWrite ih hsize hsource hfree hloopFree store hvalidRuntime
       hvalidStoreTyping hwellFormed hsafe hfinite
     rcases ih (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.assign_inner hsource)
         (Term.MissingFree.assign_inner hfree)
+        (Term.LoopFree.assign_inner hloopFree)
         store
         (validRuntimeState_of_sourceTerm (SourceTerm.assign_inner hsource)
           hvalidRuntime)
@@ -247,11 +254,12 @@ theorem terminatesAsValue_missingFree_bounded
   case eq =>
     intro _env₁ _env₂ _env₃ _envGhost ghost _typing _lifetime lhs rhs lhsTy
       rhsTy hLhs hfresh htypeFresh htyFresh hstoreFresh hghostRhs hnotMention
-      henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize hsource hfree store
+      henvEq _hcopyL _hcopyR _hshape ihL _ihGhost hsize hsource hfree hloopFree store
       hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
     rcases ihL (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.eq_lhs hsource)
         (Term.MissingFree.eq_lhs hfree)
+        (Term.LoopFree.eq_lhs hloopFree)
         store
         (validRuntimeState_of_sourceTerm (SourceTerm.eq_lhs hsource) hvalidRuntime)
         hvalidStoreTyping.eq_lhs
@@ -280,6 +288,7 @@ theorem terminatesAsValue_missingFree_bounded
     rcases ihFuel (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.eq_rhs hsource)
         (Term.MissingFree.eq_rhs hfree)
+        (Term.LoopFree.eq_rhs hloopFree)
         (validRuntimeState_of_sourceTerm (SourceTerm.eq_rhs hsource)
           hterminalLeft.1)
         (validStoreTyping_sourceTerm_of_validStoreTyping
@@ -300,11 +309,12 @@ theorem terminatesAsValue_missingFree_bounded
     intro _env₁ _env₂ _env₃ _env₄ _env₅ _typing _lifetime condition trueBranch
       falseBranch _trueTy _falseTy _joinTy hcondition _htrue _hfalse _hjoin
       _henvJoin ihCondition ihTrue ihFalse
-      hsize hsource hfree store hvalidRuntime hvalidStoreTyping hwellFormed
+      hsize hsource hfree hloopFree store hvalidRuntime hvalidStoreTyping hwellFormed
       hsafe hfinite
     rcases ihCondition (by simp [Term.size] at hsize ⊢; omega)
         (SourceTerm.ite_condition hsource)
         (Term.MissingFree.ite_condition hfree)
+        (Term.LoopFree.ite_condition hloopFree)
         store
         (validRuntimeState_of_sourceTerm (SourceTerm.ite_condition hsource)
           hvalidRuntime)
@@ -330,6 +340,7 @@ theorem terminatesAsValue_missingFree_bounded
       rcases ihTrue (by simp [Term.size] at hsize ⊢; omega)
           (SourceTerm.ite_trueBranch hsource)
           (Term.MissingFree.ite_trueBranch hfree)
+          (Term.LoopFree.ite_trueBranch hloopFree)
           midStore
           (validRuntimeState_of_sourceTerm (SourceTerm.ite_trueBranch hsource)
             hterminalCondition.1)
@@ -344,6 +355,7 @@ theorem terminatesAsValue_missingFree_bounded
       rcases ihFalse (by simp [Term.size] at hsize ⊢; omega)
           (SourceTerm.ite_falseBranch hsource)
           (Term.MissingFree.ite_falseBranch hfree)
+          (Term.LoopFree.ite_falseBranch hloopFree)
           midStore
           (validRuntimeState_of_sourceTerm (SourceTerm.ite_falseBranch hsource)
             hterminalCondition.1)
@@ -357,7 +369,7 @@ theorem terminatesAsValue_missingFree_bounded
   case iteDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
       _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
-      _ihCondition _ihTrue _ihFalse _hsize _hsource hfree _store _hvalidRuntime
+      _ihCondition _ihTrue _ihFalse _hsize _hsource hfree _hloopFree _store _hvalidRuntime
       _hvalidStoreTyping _hwellFormed _hsafe _hfinite
     exact False.elim
       ((Term.MissingFree.not_diverges
@@ -365,18 +377,32 @@ theorem terminatesAsValue_missingFree_bounded
   case iteTrueDiverging =>
     intro _env₁ _env₂ _env₃ _env₄ _typing _lifetime _condition _trueBranch
       _falseBranch _trueTy _falseTy _hcondition _htrue _hfalse hdiverges
-      _ihCondition _ihTrue _ihFalse _hsize _hsource hfree _store _hvalidRuntime
+      _ihCondition _ihTrue _ihFalse _hsize _hsource hfree _hloopFree _store _hvalidRuntime
       _hvalidStoreTyping _hwellFormed _hsafe _hfinite
     exact False.elim
       ((Term.MissingFree.not_diverges
         (Term.MissingFree.ite_trueBranch hfree)) hdiverges)
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition _body
+      _bodyTy _hchild _hcondition _hbody _hdiverges _ihCondition _ihBody
+      _hsize _hsource _hfree hloopFree _store _hvalidRuntime
+      _hvalidStoreTyping _hwellFormed _hsafe _hfinite
+    exact False.elim hloopFree
+  case whileLoop =>
+    intro _env₁ _envBack _envInv _env₂ _env₃ _typing _lifetime
+      _bodyLifetime _condition _body _bodyTy _hchild _hjoin _hcontained
+      _hnameFresh _hcondition _hbody _hdrop _ihCondition _ihBody
+      _hsize _hsource _hfree hloopFree _store _hvalidRuntime
+      _hvalidStoreTyping _hwellFormed _hsafe _hfinite
+    exact False.elim hloopFree
   case singleton =>
     intro _env₁ _env₂ _typing blockLifetime inner _ty hinner ih hsize hsource
-      hfree outerLifetime store hchild hvalidRuntime hvalidStoreTyping hwellFormed
+      hfree hloopFree outerLifetime store hchild hvalidRuntime hvalidStoreTyping hwellFormed
       hsafe hfinite
     rcases ih (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
         (SourceTerm.block_head hsource)
         (Term.MissingFree.block_head hfree)
+        (Term.LoopFree.block_head hloopFree)
         store
         (validRuntimeState_block_singleton_inner hvalidRuntime)
         (validStoreTyping_block_singleton_inner hvalidStoreTyping)
@@ -394,7 +420,7 @@ theorem terminatesAsValue_missingFree_bounded
           MultiStep.refl)⟩
   case cons =>
     intro _env₁ _env₂ _env₃ _typing blockLifetime head rest _termTy _finalTy
-      hhead hrest ihHead ihRest hsize hsource hfree outerLifetime store hchild
+      hhead hrest ihHead ihRest hsize hsource hfree hloopFree outerLifetime store hchild
       hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
     cases rest with
     | nil =>
@@ -408,8 +434,13 @@ theorem terminatesAsValue_missingFree_bounded
           Term.MissingFree.block_head hfree
         have hfreeTail : Term.MissingFree (.block blockLifetime (next :: restTail)) :=
           Term.MissingFree.block_tail hfree
+        have hloopFreeHead : head.LoopFree :=
+          Term.LoopFree.block_head hloopFree
+        have hloopFreeTail : Term.LoopFree
+            (.block blockLifetime (next :: restTail)) :=
+          Term.LoopFree.block_tail hloopFree
         rcases ihHead (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            hsourceHead hfreeHead store
+            hsourceHead hfreeHead hloopFreeHead store
             (validRuntimeState_block_head hvalidRuntime)
             (validStoreTyping_block_head hvalidStoreTyping)
             hwellFormed hsafe hfinite with
@@ -454,7 +485,7 @@ theorem terminatesAsValue_missingFree_bounded
         have hfiniteAfterDrop : storeAfterDrop.FiniteSupport :=
           hfiniteMid.step hseqStep
         rcases ihRest (by simp [Term.size, Term.sizeList] at hsize ⊢; omega)
-            hsourceTail hfreeTail outerLifetime storeAfterDrop hchild
+            hsourceTail hfreeTail hloopFreeTail outerLifetime storeAfterDrop hchild
             hvalidTailAfter htailStoreTyping hwellInner hsafeTailAfter
             hfiniteAfterDrop with
           ⟨finalStore, finalValue, hmultiTail⟩
@@ -468,6 +499,7 @@ theorem terminatesAsValue_missingFree {store : ProgramStore} {env₁ env₂ : En
     {typing : StoreTyping} {lifetime : Lifetime} {term : Term} {ty : Ty} :
     SourceTerm term →
     term.MissingFree →
+    term.LoopFree →
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnvWhenInitialized env₁ lifetime →
@@ -475,10 +507,10 @@ theorem terminatesAsValue_missingFree {store : ProgramStore} {env₁ env₂ : En
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term := by
-  intro hsource hfree hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
+  intro hsource hfree hloopFree hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
     htyping
   exact terminatesAsValue_missingFree_bounded term.size (Nat.le_refl _)
-    hsource hfree hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
+    hsource hfree hloopFree hvalidRuntime hvalidStoreTyping hwellFormed hsafe hfinite
     htyping
 
 /--
@@ -736,18 +768,19 @@ theorem theorem_4_12_typeAndBorrowStep_of_preservationInvariant
     hsafe hstore htyping hnotTerminal
 
 /--
-Theorem 4.12, Type and Borrow Safety for missing-free source continuations.
+Theorem 4.12, Type and Borrow Safety for the terminating source fragment.
 
 The lower-level `typeAndBorrowSafety` theorem remains conditional because the
 integrated language includes the generated diverging `.missing` term.  This
-paper-facing wrapper proves the terminal run for source terms that exclude that
-placeholder.
+paper-facing wrapper proves the terminal run for source terms that exclude both
+that placeholder and `while`.
 -/
 theorem theorem_4_12_typeAndBorrowSafety
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hsource : SourceTerm term)
     (hfree : term.MissingFree)
+    (hloopFree : term.LoopFree)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
@@ -761,21 +794,23 @@ theorem theorem_4_12_typeAndBorrowSafety
           TerminalStateSafe finalStore finalValue env₂ ty :=
   typeAndBorrowSafety hsource hvalid hstoreTyping hwellFormed hsafe
     (OperationalStoreProgress.of_finiteSupport hfinite) htyping
-    (terminatesAsValue_missingFree hsource hfree hvalid hstoreTyping
+    (terminatesAsValue_missingFree hsource hfree hloopFree hvalid hstoreTyping
       (WellFormedEnv.whenInitialized hwellFormed) hsafe hfinite
       htyping)
 
 /--
 Theorem 4.12, Type and Borrow Safety, total form.
 
-Generated terms may contain `missing`, which diverges by self-loop.  For
-missing-free source terms, terminal execution is derived rather than assumed.
+Generated terms may contain `missing`, which diverges by self-loop, and source
+terms may contain nonterminating loops.  For missing- and loop-free source
+terms, terminal execution is derived rather than assumed.
 -/
 theorem theorem_4_12_typeAndBorrowSafety_total
     {store : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty}
     (hsource : SourceTerm term)
     (hfree : term.MissingFree)
+    (hloopFree : term.LoopFree)
     (hvalid : ValidRuntimeState store term)
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
@@ -786,7 +821,7 @@ theorem theorem_4_12_typeAndBorrowSafety_total
         ∃ finalStore finalValue,
           MultiStep store lifetime term finalStore (.val finalValue) ∧
           TerminalStateSafe finalStore finalValue env₂ ty :=
-  theorem_4_12_typeAndBorrowSafety hsource hfree hvalid hstoreTyping hwellFormed
+  theorem_4_12_typeAndBorrowSafety hsource hfree hloopFree hvalid hstoreTyping hwellFormed
     hsafe hfinite htyping
 
 end FWRust.Conditional.Paper.Soundness

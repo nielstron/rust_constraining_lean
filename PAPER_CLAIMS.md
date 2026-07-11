@@ -55,12 +55,34 @@ The extension is namespaced separately as `FWRust.Conditional.Paper`; its
 | Lemma 4.9, Borrow Invariance | [`FWRust.Conditional.Paper.typingPreservesWellFormedWhenInitialized_of_sourceTerm`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
 | Lemma 4.10, Progress | [`FWRust.Conditional.Paper.Soundness.lemma_4_10_progress`](FWRust/Conditional/Paper/Soundness/Lemma_4_10_Progress.lean) |
 | Lemma 4.11, Preservation | [`FWRust.Conditional.Paper.Soundness.lemma_4_11_preservation`](FWRust/Conditional/Paper/Soundness/Lemma_4_11_Preservation.lean) |
-| Total empty-initial type/runtime safety | [`FWRust.Conditional.Paper.emptyInitial_typeAndBorrowSafety_total`](FWRust/Conditional/Paper/Soundness/InitialStates.lean) |
+| Total empty-initial type/runtime safety for the established loop-free conditional fragment | [`FWRust.Conditional.Paper.emptyInitial_typeAndBorrowSafety_total`](FWRust/Conditional/Paper/Soundness/InitialStates.lean) |
 | Coherent non-linear join independence regression | [`FWRust.Conditional.Paper.LinearJoinCounterexample`](FWRust/Conditional/Paper/Examples/LinearJoinCounterexample.lean) |
 
-The total empty-initial theorem requires only typing and the syntactic
-`MissingFree` premise (generated `missing` terms intentionally self-loop).  It
-derives source syntax, runtime/store validity, finite support, initial
-well-formedness, and safe abstraction internally.  See `CONDITIONALS.md` for
-the extension's local assignment/declaration corrections and the stale-aware
-interpretation of terminal safety.
+For the established terminating fragment, the total empty-initial theorem uses
+both syntactic `MissingFree` and `LoopFree` premises: generated `missing` terms
+self-loop, and source loops need not terminate.  It derives source syntax,
+runtime/store validity, finite support, initial well-formedness, and safe
+abstraction internally.  See `CONDITIONALS.md` for the local
+assignment/declaration corrections and stale-aware terminal safety.
+
+## Native while-loop extension (beyond the paper)
+
+The following build-checked declarations describe the while extension.  They
+are extension claims, not claims made by Pearce (2021).
+
+| While-extension component | Lean declaration | Current boundary |
+| --- | --- | --- |
+| Source loop and two runtime phases | [`Term.whileLoop`, `Term.whileCond`, `Term.whileBody`](FWRust/Conditional/Paper/Syntax.lean) | Integrated |
+| Six loop reduction rules | [`Step.whileStart`](FWRust/Conditional/Paper/InductiveSemantics.lean) through [`Step.whileBodyDone`](FWRust/Conditional/Paper/InductiveSemantics.lean) | Integrated |
+| Minimal normal loop rule | [`FWRust.Conditional.Paper.TermTyping.whileLoop`](FWRust/Conditional/Paper/Typing.lean) | Seven premises |
+| Diverging-body loop rule | [`FWRust.Conditional.Paper.TermTyping.whileLoopDiverging`](FWRust/Conditional/Paper/Typing.lean) | Four premises |
+| Finite terminal-run decomposition | [`FWRust.Conditional.Paper.WhileRunEnds`](FWRust/Conditional/Paper/InductiveSemantics.lean) | Used by preservation |
+| Finite reachable-prefix decomposition | [`FWRust.Conditional.Paper.WhileRunReaches`](FWRust/Conditional/Paper/InductiveSemantics.lean) | Used by all-prefix progress |
+| Loop-local terminal preservation | [`FWRust.Conditional.Paper.preservation_whileRunEnds`](FWRust/Conditional/Paper/Soundness/Lemma_4_11_Preservation.lean) | Integrated into Lemma 4.11 |
+| Every finite prefix is terminal or can step | [`FWRust.Conditional.Paper.reachableProgressWhenInitialized`](FWRust/Conditional/Paper/Soundness/LoopReachableSafety.lean) | No termination premise |
+| Focused minimal-loop reachable safety | [`FWRust.Conditional.Paper.whileLoop_reachableProgress`](FWRust/Conditional/Paper/Soundness/LoopReachableSafety.lean) | Exposes exactly T-While's seven premises |
+| Syntactic exclusion used by a terminating fragment | [`Term.LoopFree`](FWRust/Conditional/Paper/Syntax.lean) | Required with `MissingFree` by total wrappers |
+
+See [`WHILE.md`](WHILE.md) for the exact premises and the distinction between
+finite-run terminal preservation, safety of arbitrary reachable prefixes, and
+total termination.

@@ -52,9 +52,10 @@ conditional can still be typed and executed.
 
 ## Safety results
 
-The extension proves borrow invariance, progress, single- and multi-step
-preservation, and total type/runtime safety for missing-free source programs.
-The most direct closed-world result is
+The established loop-free equality/conditional fragment proves borrow
+invariance, progress, single- and multi-step preservation, and total
+type/runtime safety for missing-free source programs.  Its most direct
+closed-world result is
 `emptyInitial_typeAndBorrowSafety_total`: typing from the empty environment and
 empty store typing yields a terminating value, a concrete multistep execution,
 and `TerminalStateSafe` for the joined result environment and type.
@@ -64,6 +65,45 @@ that only the other branch keeps live, the joined annotation may retain that
 target as a conservative protection token.  Runtime validity is required for
 the targets that are actually initialized; demanding all joined targets remain
 fully live would reject safe programs.
+
+## Native while-loop work
+
+The same namespace now contains native `whileLoop`, `whileCond`, and
+`whileBody` terms, six small-step loop rules, and minimized `T-While` and
+`T-WhileDiv` constructors.  The normal rule retains only an entry/back-edge
+environment join, weak initialized-target well-formedness for the invariant,
+ghost-name hygiene, condition/body typing, and body-scope drop equality.  It
+does not restore the historical same-shape, coherence, global ranking,
+borrow-safety, body-result well-formedness, or duplicate entry-typing premises.
+
+Loop run decompositions and a loop-local finite-run terminal-preservation
+helper are integrated into progress, borrow invariance, preservation, and the
+headline safety wrappers.  `reachableProgressWhenInitialized` additionally
+proves that every finite execution prefix, including `whileCond` and
+`whileBody` phases, is terminal or can step.  `MissingFree` alone no longer
+implies termination once native loops are admitted: total wrappers also require
+`LoopFree`, while actual loops use the all-prefix theorem or terminal safety
+conditional on `TerminatesAsValue`.
+
+See [`WHILE.md`](WHILE.md) for the rules, premise audit, transport proof, and
+proof map.
+
+## Conditional extractor
+
+`FWRust.Conditional.Sealor` is an isolated frontier extractor for the extended
+syntax.  It follows `rust_constraining/constraining/src/ast_copier.rs` by
+closing incomplete branches with the polymorphic, diverging `.missing` term:
+an absent/incomplete else becomes panic, and an incomplete then branch is
+completed with panic in both arms.  The accompanying Lean proofs show that a
+well-typed completion yields a well-typed sealed program and establish the
+conservative prefix-checker property.
+
+For a generic recursively incomplete `else if`, the current formal extractor
+uses a conservative statement fallback.  Rebuilding the exact outer chain
+would require either synthesizing a fresh branch join or rebasing an arbitrary
+nested completion into a fresh child lifetime; neither operation follows from
+the present completion relation.  The limitation is explicit in the extractor
+module and its build-checked examples.
 
 ## Remaining mechanization corrections
 

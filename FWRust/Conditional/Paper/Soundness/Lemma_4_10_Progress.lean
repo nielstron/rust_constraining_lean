@@ -296,11 +296,12 @@ theorem ProgramStore.FiniteSupport.step {store store' : ProgramStore}
   | declare hstore =>
       exact fun hfs => hstore ▸ hfs.declare
   | seq hdrops => exact ProgramStore.FiniteSupport.drops hdrops
-  | blockA _ ih => exact ih
+  | blockA _ ih | subWhileCond _ ih | subWhileBody _ ih => exact ih
   | blockB hdrops => exact ProgramStore.FiniteSupport.dropsLifetime hdrops
   | subBox _ ih | subDeclare _ ih | subAssign _ ih => exact ih
   | eqTrue | eqFalse _ | iteTrue | iteFalse => exact id
   | subEqLeft _ ih | subEqRight _ ih | subIte _ ih => exact ih
+  | whileStart | whileCondFalse | whileCondTrue | whileBodyDone => exact id
 
 /-- Finite support is preserved along any execution. -/
 theorem ProgramStore.FiniteSupport.multiStep {store store' : ProgramStore}
@@ -1066,7 +1067,8 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
         OperationalStoreProgress store →
         ProgressResult store lifetime (.block blockLifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block ?declare ?assign ?eq ?ite
-    ?iteDiverging ?iteTrueDiverging ?singleton ?cons htyping
+    ?iteDiverging ?iteTrueDiverging ?whileLoopDiverging ?whileLoop
+    ?singleton ?cons htyping
   case const =>
     intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
@@ -1189,6 +1191,17 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
       | const hvalueTyping =>
           exact progress_ite_value hvalueTyping hvst.ite_condition
     · exact progress_subIte hstepCondition
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing lifetime _bodyLifetime _condition _body
+      _bodyTy _hchild _hcondition _hbody _hdiverges _ihCondition _ihBody
+      _hsize _hvst _hslotsOutlive _hsafe _hstore
+    exact Or.inr ⟨store, _, Step.whileStart⟩
+  case whileLoop =>
+    intro _env₁ _envBack _envInv _env₂ _env₃ _typing lifetime _bodyLifetime
+      _condition _body _bodyTy _hchild _hjoin _hcontained _hnameFresh
+      _hcondition _hbody _hdrop _ihCondition _ihBody
+      _hsize _hvst _hslotsOutlive _hsafe _hstore
+    exact Or.inr ⟨store, _, Step.whileStart⟩
   case singleton =>
     intro _env₁ _env₂ _typing _blockLifetime _term _ty _hterm ih hsize hvst outerLifetime
       hwf hsafe hstore

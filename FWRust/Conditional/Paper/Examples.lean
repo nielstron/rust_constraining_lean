@@ -6,6 +6,7 @@ import FWRust.Conditional.Paper.Examples.ThinningFalse
 import FWRust.Conditional.Paper.Examples.StaleBoxedBorrow
 import FWRust.Conditional.Paper.Examples.BoxDerefPending
 import FWRust.Conditional.Paper.Examples.LinearJoinCounterexample
+import FWRust.Conditional.Paper.Examples.WhileSafety
 
 /-!
 Build-checked paper examples.
@@ -21,4 +22,6 @@ Build-checked paper examples.
   projection.
 * `LinearJoinCounterexample` separates join coherence from global static
   linearizability and checks the premise-free constant conditional regression.
+* `WhileSafety` checks a terminating loop and shows that T-While accepts an
+  invariant whose live loans form a non-linearizable cycle.
 -/

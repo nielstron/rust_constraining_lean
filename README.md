@@ -21,10 +21,20 @@ precompiled cache before building, optionally run `lake exe cache get`.
 
 The mechanised language includes both the paper's reduced core calculus
 (`FWRust.Paper`) and its Section 6.1 control-flow extension with equality and
-conditionals (`FWRust.Conditional`).  The extension restores finite borrow
-target lists and proves progress, preservation, and total empty-initial
+conditionals (`FWRust.Conditional`).  The loop-free extension restores finite
+borrow target lists and proves progress, preservation, and total empty-initial
 type/runtime safety without the historical joined-environment shape,
 well-formedness, coherence, or linearizability premises on `T-If`.
+
+The conditional namespace now also contains a native while-loop syntax,
+six-rule operational semantics, and minimal normal/diverging typing rules.
+The loop rules are integrated through progress, weak borrow invariance,
+terminal preservation, and an all-finite-prefix theorem showing that every
+reachable state is terminal or can step.  The normal proof uses initialized
+back-transport rather than the historical same-shape, coherence, global
+ranking, or borrow-safety assumptions.  Total termination is stated only for
+the separate `MissingFree` and `LoopFree` fragment.  See `WHILE.md` for the
+exact rules and proof map.
 
 The repository further contains a mechanization of the corrected typing rules
 and operational semantics from [1] (including adaptations suggested by [2]),
@@ -37,6 +47,14 @@ See `DIFFERENCES.md` for the precise, itemised comparison of changes to claims
 in [1,2].
 See `CONDITIONALS.md` for the conditional extension, its minimized `T-If`
 interface, and the remaining local mechanization corrections.
+See `WHILE.md` for the native loop phases, minimized `T-While` rules, and the
+distinction between terminal preservation, reachable-state safety, and
+termination.
+
+`FWRust.Conditional.Sealor` provides the isolated conditional extractor:
+incomplete `if` branches are closed with the typed diverging `missing` term,
+following the panic insertion strategy of `rust_constraining`'s
+`ast_copier.rs`, without changing the reduced-core sealor.
 
 ## References
 

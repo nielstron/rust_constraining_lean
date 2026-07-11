@@ -1397,6 +1397,33 @@ theorem BorrowTargetsWellFormedInSlot.erase_ghost {env : Env} {ghost : Name}
     houtlives,
     LValBaseOutlives.erase_ghost (hnot target hmem) hbase⟩
 
+/-- Weak borrow-target well-formedness is stable under erasing a type-fresh
+ghost.  An initialized target in the erased environment is first lifted to the
+original environment; the original weak invariant supplies its lifetime bound,
+and the resulting typing/base evidence is erased again. -/
+theorem BorrowTargetsWellFormedInSlotWhenInitialized.erase_ghost
+    {env : Env} {ghost : Name} {slotLifetime : Lifetime}
+    {targets : List LVal} :
+    BorrowTargetsWellFormedInSlotWhenInitialized env slotLifetime targets →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    (∀ target, target ∈ targets → ¬ LVal.Mentions ghost target) →
+    BorrowTargetsWellFormedInSlotWhenInitialized
+      (env.erase ghost) slotLifetime targets := by
+  intro hwell hfresh hnot target hmem
+  rcases hwell target hmem with ⟨hbase, hinitialized⟩
+  have hnotTarget : ¬ LVal.Mentions ghost target := hnot target hmem
+  refine ⟨LValBaseOutlives.erase_ghost hnotTarget hbase, ?_⟩
+  rintro ⟨targetTy, targetLifetime, htargetTyping⟩
+  have htargetTypingEnv :
+      LValTyping env target (.ty targetTy) targetLifetime :=
+    LValTyping.erase_to_env.1 htargetTyping
+  rcases hinitialized ⟨targetTy, targetLifetime, htargetTypingEnv⟩ with
+    ⟨resultTy, resultLifetime, hresultTyping, houtlives, hresultBase⟩
+  exact ⟨resultTy, resultLifetime,
+    LValTyping.erase_ghost.1 hresultTyping hfresh hnotTarget,
+    houtlives,
+    LValBaseOutlives.erase_ghost hnotTarget hresultBase⟩
+
 theorem LValTargetsMaybeTyping.erase_ghost {env : Env} {ghost : Name}
     {targets : List LVal} {partialTy : PartialTy} {lifetime : Lifetime} :
     LValTargetsMaybeTyping env targets partialTy lifetime →
@@ -1439,6 +1466,34 @@ theorem ContainedBorrowsWellFormed.erase_ghost {env : Env} {ghost : Name} :
       ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
     not_mentions_of_partialTy_contains_allVars hslotFresh hcontainsTy
   exact BorrowTargetsWellFormedInSlot.erase_ghost
+    (hcontained x slot mutable targets hslotOrig
+      ⟨slot, hslotOrig, hcontainsTy⟩)
+    hfresh htargetsNot
+
+/-- The stale-aware contained-borrow invariant is stable under erasing a
+type-fresh ghost. -/
+theorem ContainedBorrowsWellFormedWhenInitialized.erase_ghost
+    {env : Env} {ghost : Name} :
+    ContainedBorrowsWellFormedWhenInitialized env →
+    Env.TypeNameFresh (env.erase ghost) ghost →
+    ContainedBorrowsWellFormedWhenInitialized (env.erase ghost) := by
+  intro hcontained hfresh x slot mutable targets hslot hcontains
+  rcases hcontains with ⟨containsSlot, hcontainsSlot, hcontainsTy⟩
+  have hslotEq : slot = containsSlot := by
+    rw [hslot] at hcontainsSlot
+    exact Option.some.inj hcontainsSlot
+  subst containsSlot
+  have hslotOrig : env.slotAt x = some slot := by
+    by_cases hx : x = ghost
+    · subst hx
+      simp [Env.erase] at hslot
+    · simpa [Env.erase, hx] using hslot
+  have hslotFresh : ghost ∉ PartialTy.allVars slot.ty :=
+    hfresh x slot hslot
+  have htargetsNot :
+      ∀ target, target ∈ targets → ¬ LVal.Mentions ghost target :=
+    not_mentions_of_partialTy_contains_allVars hslotFresh hcontainsTy
+  exact BorrowTargetsWellFormedInSlotWhenInitialized.erase_ghost
     (hcontained x slot mutable targets hslotOrig
       ⟨slot, hslotOrig, hcontainsTy⟩)
     hfresh htargetsNot
@@ -4154,6 +4209,60 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         ⟨hfalseErased, hfreshFalse, hfalseFresh⟩
       exact ⟨TermTyping.iteTrueDiverging hconditionErased htrueErased
         hfalseErased hdiverges, hfreshFalse, hfalseFresh⟩)
+    (by
+      intro env₁ env₂ env₃ typing lifetime bodyLifetime condition body
+        bodyTy hchild hcondition hbody hdiverges ihCondition ihBody
+        hfresh hstore hnot
+      have hnotCondition : ¬ Term.Mentions ghost condition := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hnotBody : ¬ Term.Mentions ghost body := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      rcases ihCondition hfresh hstore hnotCondition with
+        ⟨hconditionErased, hfreshCond, _hboolFresh⟩
+      rcases ihBody hfreshCond hstore hnotBody with
+        ⟨hbodyErased, _hfreshBody, _hbodyFresh⟩
+      exact ⟨TermTyping.whileLoopDiverging hchild hconditionErased
+        hbodyErased hdiverges, hfreshCond, by simp [Ty.allVars]⟩)
+    (by
+      intro env₁ envBack envInv env₂ env₃ typing lifetime bodyLifetime
+        condition body bodyTy hchild hjoin hcontained hnameFresh hcondition
+        hbody hdrop ihCondition ihBody hfresh hstore hnot
+      have hnotCondition : ¬ Term.Mentions ghost condition := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hnotBody : ¬ Term.Mentions ghost body := by
+        intro hmention
+        exact hnot (by simp [Term.Mentions, hmention])
+      have hfreshInv : Env.TypeNameFresh (envInv.erase ghost) ghost := by
+        simpa [Env.eraseMany] using
+          hnameFresh [ghost] ghost (by simpa [Env.eraseMany] using hfresh)
+            hnotCondition hnotBody
+      have hnameFreshErased :
+          LoopInvariantNameFresh (env₁.erase ghost) (envInv.erase ghost)
+            condition body := by
+        intro erased checked hentryFresh hcheckedCondition hcheckedBody
+        have h :=
+          hnameFresh (ghost :: erased) checked
+            (by simpa [Env.eraseMany] using hentryFresh)
+            hcheckedCondition hcheckedBody
+        simpa [Env.eraseMany] using h
+      rcases ihCondition hfreshInv hstore hnotCondition with
+        ⟨hconditionErased, hfreshCond, _hboolFresh⟩
+      rcases ihBody hfreshCond hstore hnotBody with
+        ⟨hbodyErased, _hfreshBody, _hbodyFresh⟩
+      have hdropErased :
+          (env₃.erase ghost).dropLifetime bodyLifetime =
+            envBack.erase ghost := by
+        rw [← Env.dropLifetime_erase env₃ ghost bodyLifetime]
+        simpa [hdrop]
+      exact ⟨TermTyping.whileLoop hchild
+        (EnvJoin.erase_ghost hjoin)
+        (ContainedBorrowsWellFormedWhenInitialized.erase_ghost
+          hcontained hfreshInv)
+        hnameFreshErased hconditionErased hbodyErased hdropErased,
+        hfreshCond, by simp [Ty.allVars]⟩)
     (by
       intro env₁ env₂ typing lifetime singletonTerm ty hterm ih
         hfresh hstore hnot

@@ -74,6 +74,7 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
       typing = StoreTyping.empty → SourceTerm (.block lifetime terms))
     ?const ?missing ?copy ?move ?mutBorrow ?immBorrow ?box ?block
     ?declare ?assign ?eq ?ite ?iteDiverging ?iteTrueDiverging
+    ?whileLoopDiverging ?whileLoop
     ?singleton ?cons htyping rfl
   case const =>
     intro _env _typing _lifetime value _ty hvalueTyping htypingEq
@@ -163,6 +164,23 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     · rcases hbranchMem with htrueMem | hfalseMem
       · exact ihTrue htypingEq candidate htrueMem
       · exact ihFalse htypingEq candidate hfalseMem
+  case whileLoopDiverging =>
+    intro _env₁ _env₂ _env₃ _typing _lifetime _bodyLifetime _condition
+      _body _bodyTy _hchild _hcondition _hbody _hdiverges
+      ihCondition ihBody htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbodyMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · exact ihBody htypingEq candidate hbodyMem
+  case whileLoop =>
+    intro _env₁ _envBack _envInv _env₂ _env₃ _typing _lifetime
+      _bodyLifetime _condition _body _bodyTy _hchild _hjoin _hcontained
+      _hnameFresh _hcondition _hbody _hdrop ihCondition ihBody
+      htypingEq candidate hmem
+    simp [termValues] at hmem
+    rcases hmem with hconditionMem | hbodyMem
+    · exact ihCondition htypingEq candidate hconditionMem
+    · exact ihBody htypingEq candidate hbodyMem
   case singleton =>
     intro _env₁ _env₂ _typing _lifetime _term _ty _hterm ih htypingEq
       candidate hmem
@@ -718,25 +736,27 @@ theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
     htyping
 
 /--
-**Theorem 4.12, empty-initial terminal-safety form.**  Any missing-free term
+**Theorem 4.12, empty-initial terminal-safety form.**  Any missing- and loop-free term
 typed from the empty initial environment and store typing has a safe terminal
-state.  The `MissingFree` premise is necessary because generated `.missing`
-syntax is well typed and diverges by self-loop.
+state.  The exclusion premises are necessary because generated `.missing`
+syntax and source loops may diverge.
 -/
 theorem emptyInitial_typeAndBorrowSafety_total {term : Term}
     {lifetime : Lifetime} {ty : Ty} {env₂ : Env} :
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     term.MissingFree →
+    term.LoopFree →
     ∃ finalStore finalValue,
         MultiStep ProgramStore.empty lifetime term finalStore
           (.val finalValue) ∧
         TerminalStateSafe finalStore finalValue env₂ ty := by
-  intro htyping hfree
+  intro htyping hfree hloopFree
   rcases emptyInitialRuntimeSoundnessHypotheses_of_typing htyping with
     ⟨hvalidRuntime, hvalidStoreTyping, hsafe, hwellFormed, _hstoreProgress,
       _hrefs⟩
   have hsource : SourceTerm term := termTyping_empty_sourceTerm htyping
-  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hfree hvalidRuntime hvalidStoreTyping
+  exact (Soundness.theorem_4_12_typeAndBorrowSafety_total hsource hfree hloopFree
+    hvalidRuntime hvalidStoreTyping
     (hwellFormed lifetime) hsafe
     ProgramStore.finiteSupport_empty htyping).2
 
