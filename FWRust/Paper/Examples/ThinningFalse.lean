@@ -1,4 +1,4 @@
-import FWRust.Conditional.Paper.Typing
+import FWRust.Paper.Typing
 
 /-!
 The old environment-thinning counterexample used an empty borrow target list as
@@ -7,7 +7,7 @@ typable by `LValTargetsTyping`, so that historical construction is not a valid
 typing derivation in the current calculus.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -19,4 +19,4 @@ theorem no_empty_lval_targets_typing {env : Env} {partialTy : PartialTy}
   cases htyping
 
 end Paper
-end FWRust.Conditional
+end FWRust

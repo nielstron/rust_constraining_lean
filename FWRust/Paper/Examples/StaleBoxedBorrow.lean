@@ -1,5 +1,5 @@
-import FWRust.Conditional.Paper.Soundness.Helpers.BorrowWellFormed
-import FWRust.Conditional.Paper.Soundness.Helpers.BorrowSafety
+import FWRust.Paper.Soundness.Helpers.BorrowWellFormed
+import FWRust.Paper.Soundness.Helpers.BorrowSafety
 
 /-!
 # Stale borrow annotations from joins
@@ -80,7 +80,7 @@ records the live joined environment and the direct write prohibition on `x`, and
 also records that `*p` is not currently typable until box projection is fixed.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -1993,4 +1993,4 @@ theorem boxJoin_result_not_wellFormed :
             ⟨targetTy, targetLifetime, htyping⟩
 
 end Paper
-end FWRust.Conditional
+end FWRust

@@ -1,4 +1,4 @@
-import FWRust.Conditional.Paper.Soundness.InitialStates
+import FWRust.Paper.Soundness.InitialStates
 
 /-!
 Build-checked accepted paper-style examples.
@@ -9,7 +9,7 @@ program reduces to a terminal value whose final state is safe at initialized
 places.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -3942,4 +3942,4 @@ theorem retargetAfterIf_terms_typing :
                 retargetAfterIf_final_write_typing))))))
 
 end Paper
-end FWRust.Conditional
+end FWRust

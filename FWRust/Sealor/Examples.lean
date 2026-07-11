@@ -1,4 +1,4 @@
-import FWRust.Conditional.Sealor.NestedBlocks
+import FWRust.Sealor.Sealors.NestedBlocks
 
 /-!
 # Build-checked conditional sealor examples
@@ -7,13 +7,13 @@ These examples cover the two `ast_copier` conditional completions and the
 recursive fallback used for an incomplete `else if` in statement position.
 -/
 
-namespace FWRust.Conditional.Sealor.Examples
+namespace ConservativeSealor.Examples
 
-open FWRust.Conditional.Core
-open FWRust.Conditional.Paper
-open FWRust.Conditional.Sealor
+open FWRust.Core
+open FWRust.Paper
+open ConservativeSealor
 
-abbrev truth : Term := .val (.bool true)
+abbrev truth : Term := .val (.bool Bool.true)
 abbrev unitTerm : Term := .val .unit
 
 def branchLifetime : Lifetime :=
@@ -48,16 +48,39 @@ def missingElsePartial : PartialProgram :=
 
 theorem missingElsePartial_completes :
     CompletesProgram missingElsePartial completeUnitIf :=
-  CompletesTerm.iteTrueBranch CompletesTerm.done
+  Generated.CompletesTerm.ctermIte_iteTrueBranch Generated.CompletesTerm.done
 
 theorem missingElse_seal_shape :
     sealProgram missingElsePartial = .ite truth unitTerm .missing :=
   by simp [sealProgram, missingElsePartial, sealTerm, sealTermStmts,
-    missingTerm]
+    branchRebuildable, missingTerm]
 
 theorem missingElse_sealed_wellTyped :
     ProgramWellTyped (sealProgram missingElsePartial) :=
   sealProgram_wellTyped_of_completion missingElsePartial_completes
+    ⟨.unit, Env.empty, completeUnitIf_typing⟩
+
+/-! ## Missing then branch -/
+
+/-- The parser has completed the condition but has not produced a then
+branch.  This is the direct counterpart of `ast_copier`'s both-panic
+fallback. -/
+def missingThenPartial : PartialProgram :=
+  .iteTrueBranch truth .cutoff
+
+theorem missingThenPartial_completes :
+    CompletesProgram missingThenPartial completeUnitIf :=
+  Generated.CompletesTerm.ctermIte_iteTrueBranch
+    Generated.CompletesTerm.cutoff
+
+theorem missingThen_seal_shape :
+    sealProgram missingThenPartial = .ite truth .missing .missing := by
+  simp [sealProgram, missingThenPartial, sealTerm, sealTermStmts,
+    branchRebuildable, missingTerm]
+
+theorem missingThen_sealed_wellTyped :
+    ProgramWellTyped (sealProgram missingThenPartial) :=
+  sealProgram_wellTyped_of_completion missingThenPartial_completes
     ⟨.unit, Env.empty, completeUnitIf_typing⟩
 
 /-! ## Incomplete then block -/
@@ -87,15 +110,25 @@ theorem completeThenBlockIf_typing :
 
 theorem incompleteThenPartial_completes :
     CompletesProgram incompleteThenPartial completeThenBlockIf := by
-  exact CompletesTerm.iteTrueBranch
-    (CompletesTerm.blockTerms
-      (CompletesTerms.elemsDone (suffix := [unitTerm])))
+  exact Generated.CompletesTerm.ctermIte_iteTrueBranch
+    (Generated.CompletesTerm.ctermBlock_blockTerms
+      (Generated.CompletesTerms.elemsDone (suffix := [unitTerm])))
 
 theorem incompleteThen_seal_shape :
     sealProgram incompleteThenPartial =
       .ite truth (.block branchLifetime [.missing]) .missing :=
   by simp [sealProgram, incompleteThenPartial, sealTerm, sealTermStmts,
-    sealTerms, missingTerm]
+    sealTerms, branchRebuildable, missingTerm]
+
+/-- The synthesized then block is panic-terminated. -/
+theorem incompleteThen_trueBranch_diverges :
+    Term.Diverges (.block branchLifetime [.missing]) :=
+  Term.Diverges.block (by simp) Term.Diverges.missing
+
+/-- The synthesized else branch is also a panic/missing completion. -/
+theorem incompleteThen_falseBranch_diverges :
+    Term.Diverges (.missing : Term) :=
+  Term.Diverges.missing
 
 theorem incompleteThen_sealed_wellTyped :
     ProgramWellTyped (sealProgram incompleteThenPartial) :=
@@ -129,15 +162,15 @@ theorem completeElseBlockIf_typing :
 
 theorem incompleteElsePartial_completes :
     CompletesProgram incompleteElsePartial completeElseBlockIf := by
-  exact CompletesTerm.iteFalseBranch
-    (CompletesTerm.blockTerms
-      (CompletesTerms.elemsDone (suffix := [unitTerm])))
+  exact Generated.CompletesTerm.ctermIte_iteFalseBranch
+    (Generated.CompletesTerm.ctermBlock_blockTerms
+      (Generated.CompletesTerms.elemsDone (suffix := [unitTerm])))
 
 theorem incompleteElse_seal_shape :
     sealProgram incompleteElsePartial =
       .ite truth unitTerm (.block branchLifetime [.missing]) := by
   simp [sealProgram, incompleteElsePartial, sealTerm, sealTermStmts,
-    sealTerms, missingTerm]
+    sealTerms, branchRebuildable, missingTerm]
 
 theorem incompleteElse_sealed_wellTyped :
     ProgramWellTyped (sealProgram incompleteElsePartial) :=
@@ -191,10 +224,10 @@ def completeElseIfProgram : Program :=
 
 theorem elseIfProgramPartial_completes :
     CompletesProgram elseIfProgramPartial completeElseIfProgram := by
-  exact CompletesTerm.blockTerms
-    (CompletesTerms.elemsFrontier
-      (CompletesTerm.iteFalseBranch
-        (CompletesTerm.iteTrueBranch CompletesTerm.done)))
+  exact Generated.CompletesTerm.ctermBlock_blockTerms
+    (Generated.CompletesTerms.elemsTail
+      (Generated.CompletesTerm.ctermIte_iteFalseBranch
+        (Generated.CompletesTerm.ctermIte_iteTrueBranch Generated.CompletesTerm.done)))
 
 theorem completeElseIfProgram_wellTyped :
     ProgramWellTyped completeElseIfProgram := by
@@ -205,18 +238,19 @@ theorem completeElseIfProgram_wellTyped :
 theorem elseIf_statement_seal_shape :
     sealTermStmts branchLifetime elseIfFrontier =
       [truth, .ite truth unitTerm .missing] :=
-  by simp [elseIfFrontier, sealTermStmts, missingTerm]
+  by simp [elseIfFrontier, sealTermStmts, sealTerm, branchRebuildable,
+    missingTerm]
 
 theorem elseIf_program_seal_shape :
     sealProgram elseIfProgramPartial =
       .block branchLifetime
         [truth, .ite truth unitTerm .missing, .missing] :=
   by simp [sealProgram, elseIfProgramPartial, elseIfFrontier, sealTerm,
-    sealTermStmts, sealTerms, missingTerm]
+    sealTermStmts, sealTerms, branchRebuildable, missingTerm]
 
 theorem elseIf_sealed_wellTyped :
     ProgramWellTyped (sealProgram elseIfProgramPartial) :=
   sealProgram_wellTyped_of_completion elseIfProgramPartial_completes
     completeElseIfProgram_wellTyped
 
-end FWRust.Conditional.Sealor.Examples
+end ConservativeSealor.Examples

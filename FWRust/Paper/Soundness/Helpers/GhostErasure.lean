@@ -1,4 +1,4 @@
-import FWRust.Conditional.Paper.Soundness.Helpers.RuntimeFacts
+import FWRust.Paper.Soundness.Helpers.RuntimeFacts
 
 /-!
 # Ghost-slot erasure
@@ -9,7 +9,7 @@ environment; this includes `undef` shadows because shape compatibility can still
 inspect their carried type.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -4308,4 +4308,4 @@ theorem TermTyping.erase_ghost {env envGhost : Env} {ghost : Name}
   simpa [Env.erase_update_same_of_fresh hfresh] using herased
 
 end Paper
-end FWRust.Conditional
+end FWRust

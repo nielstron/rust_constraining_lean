@@ -8,13 +8,19 @@ import FWRust.Paper.Soundness.Helpers.BorrowSafety
 > if `S ∼ Γ` and the assignment `w = v` is well typed with `write₀(Γ, w, T) = Γ₂`
 > and `S ⊢ v ∼ T`, then `write(S, w, v) ∼ Γ₂`.
 
-Status: the static and runtime parts are integrated into the assignment case of
-the closed Preservation proof.  Static preservation transports well-formedness,
-borrow safety, and linearizability across the single-target `EnvWrite` relation.
-Runtime preservation follows the selected write chain, proves the necessary
-reachability frame conditions, and preserves the safe abstraction across the
-store write and cleanup drop.  The reusable assignment lemmas live in
-`Lemma_4_11_Preservation` and `Soundness.Helpers.ValuePreservation`.
+Status: split into a **static** half and a **runtime** half.
+
+* Static (Definition 4.8 well-formedness preserved by `write₀`): mechanized by
+  the explicit-obligation assignment lemmas in `FWRust.Paper.Soundness`, gated on
+  `UpdateBorrowInvariantObligations` plus the rule-carried RHS-rank and
+  write-coherence premises.  This is the `T-Assign` case of Lemma 4.9.
+* Runtime (safe abstraction preserved by the store `write`): mechanized for
+  direct variable assignment, the one-step owned-dereference case used by owner
+  replacement, and the direct mutable-reference fan-out case `*p := v`.  The
+  remaining Lemma 4.11 holes are the recursive Appendix 9.6 cases: owner-chain
+  writes below more than one box, and nested mutable-borrow fan-out where the
+  runtime reference selects one target while recursive `write_k` calls join all
+  possible target environments.
 
 The runtime statement must use the corrected assignment order implemented by
 `Step.assign`: read the overwritten slot, write the new value, then drop the

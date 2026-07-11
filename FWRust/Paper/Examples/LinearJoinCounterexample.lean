@@ -1,7 +1,7 @@
-import FWRust.Conditional.Paper.Typing
-import FWRust.Conditional.Paper.InductiveSemantics
+import FWRust.Paper.Typing
+import FWRust.Paper.InductiveSemantics
 
-namespace FWRust.Conditional.Paper.LinearJoinCounterexample
+namespace FWRust.Paper.LinearJoinCounterexample
 
 open Core
 
@@ -916,4 +916,4 @@ theorem falseMid_coherent : Coherent falseMidEnv := by
     exact ⟨.ty .int, Lifetime.root,
       LValTargetsMaybeTyping.singleton (LValTyping.var falseMid_b)⟩
 
-end FWRust.Conditional.Paper.LinearJoinCounterexample
+end FWRust.Paper.LinearJoinCounterexample

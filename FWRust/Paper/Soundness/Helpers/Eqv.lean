@@ -3,8 +3,8 @@ import FWRust.Paper.Soundness.Helpers.AppendixPrelim
 /-!
 # Soundness helpers: Eqv
 
-Exact type-equivalence utilities.  `eqvX` is a local relation stricter than
-ordinary `PartialTy.eqv`.
+Exact type equivalence utilities.  The main strengthening transport now uses
+ordinary `PartialTy.eqv`; `eqvX` remains only as a stricter local relation.
 -/
 
 namespace FWRust
@@ -15,15 +15,17 @@ open Core
 /-! ### Exact type equivalence (`eqvX`)
 
 `eqvX` is stricter than `Ty.eqv`: box contents must be syntactically equal.
-Borrow targets are single lvalues in the branch-free core, so borrow equivalence
-records exact target equality. -/
+Exact target-list determinism is intentionally not stated here: target-list
+joins may reorder borrow-target lists under boxes, so `eqvX` would be too
+strong for those joins. -/
 
 /-- Exact type equivalence: like `Ty.eqv` but `box` contents must be *equal*. -/
 def Ty.eqvX : Ty → Ty → Prop
   | .unit, .unit => True
   | .int, .int => True
+  | .bool, .bool => True
   | .borrow m₁ t₁, .borrow m₂ t₂ =>
-      m₁ = m₂ ∧ t₁ = t₂
+      m₁ = m₂ ∧ t₁ ⊆ t₂ ∧ t₂ ⊆ t₁
   | .box t₁, .box t₂ => t₁ = t₂
   | _, _ => False
 

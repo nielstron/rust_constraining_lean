@@ -3,7 +3,7 @@ import FWRust.Paper.Soundness.Lemma_4_9_BorrowInvariance
 import FWRust.Paper.Soundness.Lemma_4_10_Progress
 import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 import FWRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
-import FWRust.Paper.Soundness.Corollary_4_14_BorrowSafety
+import FWRust.Paper.Soundness.LoopReachableSafety
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_1_SafeStrengthening
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_2_TransitiveStrengthening
 import FWRust.Paper.Soundness.Appendix9.Lemma_9_3_Location
@@ -18,16 +18,19 @@ import FWRust.Paper.Soundness.Appendix9.Lemma_9_10_StorePreservation
 /-!
 # Section 4 (Soundness) + Appendix 9, organized by result
 
-One file per core lemma/theorem of [1], Section 4 and Appendix 9.  Each
+One file per core lemma/theorem of `lw_rust.pdf` Section 4 and Appendix 9.  Each
 file states the paper result, wires it to the mechanization in
-`FWRust.Paper.Soundness`, and records its status.  The README documents the
-intentional repairs and strengthenings relative to the paper.  Move sources are
-lvalue-general where the paper permits them; moves
+`FWRust.Paper.Soundness`, and records its status.  The README separates the
+remaining shortcuts to eliminate from intentional repairs/strengthenings to
+keep.  Move sources are lvalue-general where the paper permits them; moves
 through borrowed references are intentionally untypeable because `EnvMove`
-follows the paper's `Strike` definition.  Theorem 4.12 proves terminal safety
-and terminal existence for source terms in the core calculus.  Lemma 4.10
-provides the local progress theorem used for nontermination-friendly safety
-statements.
+follows the paper's `Strike` definition.  The current shortcuts include
+restricted sequence/block drops.  Theorem 4.12 proves terminal safety and
+terminal existence for source terms satisfying both `Term.MissingFree` and
+`Term.LoopFree`; the lower-level bridge keeps the explicit terminal-run form
+for terms that may contain `.missing` or nonterminating loops.  Lemma 4.10
+provides local progress, and `LoopReachableSafety` lifts it to every finite
+execution prefix.
 
 ## Section 4
 
@@ -35,8 +38,8 @@ statements.
 * `Lemma_4_9_BorrowInvariance`           — Lemma 4.9    (core wrapper proven)
 * `Lemma_4_10_Progress`                  — Lemma 4.10   (proven)
 * `Lemma_4_11_Preservation`              — Lemma 4.11   (general source-continuation wrapper)
-* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for source terms)
-* `Corollary_4_14_BorrowSafety`          — Corollary 4.14 (strengthened core form)
+* `Theorem_4_12_TypeAndBorrowSafety`     — Theorem 4.12 (total for the missing- and loop-free fragment)
+* `LoopReachableSafety`                  — every finite prefix remains terminal-or-steppable, including loops
 * `InitialStates`                        — source-initial wrappers, deriving `SourceTerm` from typability
 
 ## Appendix 9
@@ -45,8 +48,8 @@ statements.
 * `Appendix9.Lemma_9_2_TransitiveStrengthening` — proven
 * `Appendix9.Lemma_9_3_Location`                — proven (location availability)
 * `Appendix9.Corollary_9_4_ReadPreservation`    — proven
-* `Appendix9.Lemma_9_5_DropPreservation`        — framed support used by the closed Section 4 proof
-* `Appendix9.Lemma_9_6_UpdatePreservation`      — static/runtime support used by assignment preservation
+* `Appendix9.Lemma_9_5_DropPreservation`        — partial; Section 4 uses strengthened block rule
+* `Appendix9.Lemma_9_6_UpdatePreservation`      — split support; Section 4 uses rule-carried update facts
 * `Appendix9.Lemma_9_7_ValueTyping`             — proven
 * `Appendix9.Lemma_9_8_AliasPreservation`       — mechanized for structural fragments
 * `Appendix9.Lemma_9_9_ValuePreservation`       — proven as Preservation value projection

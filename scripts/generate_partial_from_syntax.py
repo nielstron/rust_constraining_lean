@@ -459,6 +459,36 @@ def derive_states(
                     Rule(prod, sname, fields, None, prefix_len, field_map)
                 )
 
+    # A bare lvalue is itself a complete term via move, so the same `lval ...`
+    # frontier can also be completed as the left-hand side of equality.
+    # This extra realization is not visible from the declarative grammar:
+    # `ctermEq` starts with a `cterm`, while the parser shares its initial
+    # lvalue frontier with move and assignment.
+    if any(prod.name == "ctermEq" for prod in productions):
+        lval_eq_prod = Production(
+            name="ctermEq",
+            target_cat="cterm",
+            elems=[
+                Elem("cat", "clval", "clval"),
+                Elem("token", '"=="'),
+                Elem("cat", "cterm", "cterm"),
+            ],
+            ast="SyntaxCtor.ctermEq_ctor (SyntaxCtor.ctermMove_ctor {lval}) {rhs}",
+            field_names=["lval", "rhs"],
+            field_types=["LVal", "Term"],
+        )
+        lval_fields = [("lval", "PartialLVal")]
+        add_state(states["cterm"], "lvalStart", lval_fields)
+        rules["cterm"].append(
+            Rule(
+                lval_eq_prod,
+                "lvalStart",
+                lval_fields,
+                0,
+                field_map=(("lval", "lval"),),
+            )
+        )
+
     return states, rules
 
 

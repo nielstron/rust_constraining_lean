@@ -1,88 +1,98 @@
 # Paper-to-Lean claim map
 
-This file contains a mapping between claims in our work and claims of Pearce (2021) and their mechanized statements.
+This file maps claims from Pearce (2021) to declarations in the canonical FW
+Rust formalization.  The native while-loop results are listed separately
+because they extend the paper.
 
 ## Generative-compiler framework
 
 | Claim | Lean declaration |
 | --- | --- |
-| Definition 3.1, sealor completeness | [`ConservativeSealor.Conservative`](FWRust/Sealor/Definitions.lean#L19) |
-| Definition 3.1, prefixes admitting a valid continuation | [`ConservativeSealor.Completable`](FWRust/Sealor/Definitions.lean#L13) |
-| Definition 3.1, selective soundness | [`ConservativeSealor.SealorSoundOn`](FWRust/Sealor/Definitions.lean#L55) |
-| Theorem 3.2, completeness lifts to the generative compiler | [`ConservativeSealor.conservative_sealors_give_complete_prefix_checkers`](FWRust/Sealor/Definitions.lean#L75) |
-| Theorem 3.2, soundness lifts to the generative compiler | [`ConservativeSealor.sealor_soundness_lifts_to_prefix_checkers`](FWRust/Sealor/Definitions.lean#L92) |
+| Definition 3.1, sealor completeness | [`ConservativeSealor.Conservative`](FWRust/Sealor/Definitions.lean) |
+| Definition 3.1, prefixes admitting a valid continuation | [`ConservativeSealor.Completable`](FWRust/Sealor/Definitions.lean) |
+| Definition 3.1, selective soundness | [`ConservativeSealor.SealorSoundOn`](FWRust/Sealor/Definitions.lean) |
+| Theorem 3.2, completeness lifts to the generative compiler | [`ConservativeSealor.conservative_sealors_give_complete_prefix_checkers`](FWRust/Sealor/Definitions.lean) |
+| Theorem 3.2, soundness lifts to the generative compiler | [`ConservativeSealor.sealor_soundness_lifts_to_prefix_checkers`](FWRust/Sealor/Definitions.lean) |
 
-## FR sealor
+## FW Rust sealor
+
+The canonical extractor retains the core let/assignment/box/borrow/copy
+frontiers and also handles Boolean, equality, and conditional syntax.
 
 | Claim | Lean declaration |
 | --- | --- |
-| Theorem 5.1, SFR maintains well-typedness of realizations | [`ConservativeSealor.sealTerm_typed`](FWRust/Sealor/Sealors/NestedBlocks.lean#L183) |
-| Corollary 5.2, SFR is globally complete for partial syntax | [`ConservativeSealor.nestedBlocksPrefixChecker_complete`](FWRust/Sealor/Sealors/NestedBlocks.lean#L313) |
-| Theorem 5.3, SFR is globally complete for arbitrary strings | [`ConservativeSealor.nestedBlocksPrefixChecker_complete_on_strings`](FWRust/Sealor/Sealors/NestedBlocks.lean#L322) |
-| Lemma 5.4, statement boundaries realize SFR's output | [`ConservativeSealor.sealProgram_completedStatementBoundary_completes`](FWRust/Sealor/Sealors/NestedBlocks.lean#L349) |
-| Theorem 5.5, SFR reflects well-typedness onto realizations at statement boundaries | [`ConservativeSealor.sealProgram_completedStatementBoundary_sound_general`](FWRust/Sealor/Sealors/NestedBlocks.lean#L365) |
-| Corollary 5.6, SFR is sound for partial syntax at statement boundaries | [`ConservativeSealor.nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries`](FWRust/Sealor/Sealors/NestedBlocks.lean#L399) |
-| Theorem 5.7, SFR is sound at statement boundaries for arbitrary strings | [`ConservativeSealor.nestedBlocksPrefixChecker_sound_on_statementBoundary_strings`](FWRust/Sealor/Sealors/NestedBlocks.lean#L408) |
+| Theorem 5.1, SFR maintains well-typedness of realizations | [`ConservativeSealor.sealTerm_typed`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Corollary 5.2, SFR is globally complete for partial syntax | [`ConservativeSealor.nestedBlocksPrefixChecker_complete`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Theorem 5.3, SFR is globally complete for arbitrary strings | [`ConservativeSealor.nestedBlocksPrefixChecker_complete_on_strings`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Lemma 5.4, statement boundaries realize SFR's output | [`ConservativeSealor.sealProgram_completedStatementBoundary_completes`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Theorem 5.5, SFR reflects well-typedness onto realizations at statement boundaries | [`ConservativeSealor.sealProgram_completedStatementBoundary_sound_general`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Corollary 5.6, SFR is sound for partial syntax at statement boundaries | [`ConservativeSealor.nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Theorem 5.7, SFR is sound at statement boundaries for arbitrary strings | [`ConservativeSealor.nestedBlocksPrefixChecker_sound_on_statementBoundary_strings`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
 
-Theorems 5.3 and 5.7 are mechanized conditional on a premise that encodes the existence of a complete parser from strings to partial ASTs. Such a parser and proof are not formalized in this mechanization.
+Theorems 5.3 and 5.7 are conditional on a premise encoding the required bridge
+between strings and generated partial ASTs.  A complete parser and its proof
+are not formalized here.
 
-## FR metatheory
+## FW Rust metatheory
 
 | Claim by Pearce (2021) | Lean declaration |
 | --- | --- |
-| Lemma 4.9, Borrow Invariance | [`FWRust.Paper.typingPreservesWellFormed_of_sourceTerm`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean#L7347) |
-| Lemma 4.10, Progress | [`FWRust.Paper.Soundness.lemma_4_10_progress`](FWRust/Paper/Soundness/Lemma_4_10_Progress.lean#L1285) |
-| Lemma 4.11, Preservation | [`FWRust.Paper.Soundness.lemma_4_11_preservation`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean#L17070) |
-| Theorem 4.12, Type and Borrow Safety | [`FWRust.Paper.Soundness.theorem_4_12_typeAndBorrowSafety_total`](FWRust/Paper/Soundness/Theorem_4_12_TypeAndBorrowSafety.lean#L536) |
-| Corollary 4.14, Borrow Safety | [`FWRust.Paper.Soundness.corollary_4_14_borrowSafety`](FWRust/Paper/Soundness/Corollary_4_14_BorrowSafety.lean#L39) |
+| Lemma 4.9, Borrow Invariance | [`FWRust.Paper.typingPreservesWellFormed_of_sourceTerm`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Lemma 4.10, Progress | [`FWRust.Paper.Soundness.lemma_4_10_progress`](FWRust/Paper/Soundness/Lemma_4_10_Progress.lean) |
+| Lemma 4.11, Preservation | [`FWRust.Paper.Soundness.lemma_4_11_preservation`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean) |
+| Theorem 4.12, Type and Borrow Safety for the terminating fragment | [`FWRust.Paper.Soundness.theorem_4_12_typeAndBorrowSafety_total`](FWRust/Paper/Soundness/Theorem_4_12_TypeAndBorrowSafety.lean) |
 
-The arbitrary-state Lean results expose the additional source-continuation,
-borrow-safety, finite-support, and linearizability assumptions required by the
-mechanization. These assumptions are discharged for programs typed from the
-empty initial state by the corresponding declarations in
-[`FWRust.Paper.Soundness.InitialStates`](FWRust/Paper/Soundness/InitialStates.lean).
+The arbitrary-state results expose concrete starting-state hypotheses such as
+runtime validity, valid store typing, input well-formedness, safe abstraction,
+and operational store progress.  Assignment and declaration obligations are
+carried locally by their typing rules.  Empty-initial declarations such as
+[`FWRust.Paper.emptyInitial_typeAndBorrowSafety_total`](FWRust/Paper/Soundness/InitialStates.lean)
+derive the required source syntax, runtime/store invariants, finite support,
+and safe abstraction from typing.
 
-## Section 6.1 control-flow extension
+There is intentionally no declaration for the old strong reading of
+Corollary 4.14.  With control-flow joins, an annotation may retain a stale
+target as a conservative protection token even though that target is not a
+live runtime pointer.  The preserved runtime statement is the stale-aware
+`TerminalStateSafe` conclusion of Lemma 4.11 and Theorem 4.12.
 
-The extension is namespaced separately as `FWRust.Conditional.Paper`; its
-`T-If` constructor has only guard/branch typing and type/environment joins.
+## Section 6.1 control flow
 
-| Conditional-extension claim | Lean declaration |
+The Section 6.1 constructs are part of `FWRust.Paper`.  `T-If` has only
+guard/branch typing and type/environment joins.
+
+| Control-flow claim | Lean declaration |
 | --- | --- |
-| Minimal T-If rule | [`FWRust.Conditional.Paper.TermTyping.ite`](FWRust/Conditional/Paper/Typing.lean) |
-| Weak joined-result well-formedness is derived | [`FWRust.Conditional.Paper.wellFormedTyWhenInitialized_join`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
-| Rank-free, path-local lvalue back-transport | [`FWRust.Conditional.Paper.lvalTyping_back_of_envStrengthens`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
-| Lemma 4.9, Borrow Invariance | [`FWRust.Conditional.Paper.typingPreservesWellFormedWhenInitialized_of_sourceTerm`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
-| Lemma 4.10, Progress | [`FWRust.Conditional.Paper.Soundness.lemma_4_10_progress`](FWRust/Conditional/Paper/Soundness/Lemma_4_10_Progress.lean) |
-| Lemma 4.11, Preservation | [`FWRust.Conditional.Paper.Soundness.lemma_4_11_preservation`](FWRust/Conditional/Paper/Soundness/Lemma_4_11_Preservation.lean) |
-| Total empty-initial type/runtime safety for the established loop-free conditional fragment | [`FWRust.Conditional.Paper.emptyInitial_typeAndBorrowSafety_total`](FWRust/Conditional/Paper/Soundness/InitialStates.lean) |
-| Coherent non-linear join independence regression | [`FWRust.Conditional.Paper.LinearJoinCounterexample`](FWRust/Conditional/Paper/Examples/LinearJoinCounterexample.lean) |
+| Minimal five-premise T-If rule | [`FWRust.Paper.TermTyping.ite`](FWRust/Paper/Typing.lean) |
+| Weak joined-result well-formedness is derived | [`FWRust.Paper.wellFormedTyWhenInitialized_join`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Rank-free, path-local lvalue back-transport | [`FWRust.Paper.lvalTyping_back_of_envStrengthens`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Initialized Borrow Invariance | [`FWRust.Paper.typingPreservesWellFormedWhenInitialized_of_sourceTerm`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean) |
+| Progress | [`FWRust.Paper.Soundness.lemma_4_10_progress`](FWRust/Paper/Soundness/Lemma_4_10_Progress.lean) |
+| Preservation | [`FWRust.Paper.Soundness.lemma_4_11_preservation`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean) |
+| Total empty-initial type/runtime safety for missing- and loop-free terms | [`FWRust.Paper.emptyInitial_typeAndBorrowSafety_total`](FWRust/Paper/Soundness/InitialStates.lean) |
+| Coherent non-linear join independence regression | [`FWRust.Paper.LinearJoinCounterexample`](FWRust/Paper/Examples/LinearJoinCounterexample.lean) |
 
-For the established terminating fragment, the total empty-initial theorem uses
-both syntactic `MissingFree` and `LoopFree` premises: generated `missing` terms
-self-loop, and source loops need not terminate.  It derives source syntax,
-runtime/store validity, finite support, initial well-formedness, and safe
-abstraction internally.  See `CONDITIONALS.md` for the local
-assignment/declaration corrections and stale-aware terminal safety.
+The total empty-initial theorem requires syntactic `MissingFree` and `LoopFree`:
+generated `missing` terms self-loop, and source loops need not terminate.  See
+`CONDITIONALS.md` for the stale-aware safety argument and local rule repairs.
 
-## Native while-loop extension (beyond the paper)
+## Native while-loop extension
 
-The following build-checked declarations describe the while extension.  They
-are extension claims, not claims made by Pearce (2021).
+These declarations describe an extension beyond Pearce (2021).
 
-| While-extension component | Lean declaration | Current boundary |
+| While component | Lean declaration | Boundary |
 | --- | --- | --- |
-| Source loop and two runtime phases | [`Term.whileLoop`, `Term.whileCond`, `Term.whileBody`](FWRust/Conditional/Paper/Syntax.lean) | Integrated |
-| Six loop reduction rules | [`Step.whileStart`](FWRust/Conditional/Paper/InductiveSemantics.lean) through [`Step.whileBodyDone`](FWRust/Conditional/Paper/InductiveSemantics.lean) | Integrated |
-| Minimal normal loop rule | [`FWRust.Conditional.Paper.TermTyping.whileLoop`](FWRust/Conditional/Paper/Typing.lean) | Seven premises |
-| Diverging-body loop rule | [`FWRust.Conditional.Paper.TermTyping.whileLoopDiverging`](FWRust/Conditional/Paper/Typing.lean) | Four premises |
-| Finite terminal-run decomposition | [`FWRust.Conditional.Paper.WhileRunEnds`](FWRust/Conditional/Paper/InductiveSemantics.lean) | Used by preservation |
-| Finite reachable-prefix decomposition | [`FWRust.Conditional.Paper.WhileRunReaches`](FWRust/Conditional/Paper/InductiveSemantics.lean) | Used by all-prefix progress |
-| Loop-local terminal preservation | [`FWRust.Conditional.Paper.preservation_whileRunEnds`](FWRust/Conditional/Paper/Soundness/Lemma_4_11_Preservation.lean) | Integrated into Lemma 4.11 |
-| Every finite prefix is terminal or can step | [`FWRust.Conditional.Paper.reachableProgressWhenInitialized`](FWRust/Conditional/Paper/Soundness/LoopReachableSafety.lean) | No termination premise |
-| Focused minimal-loop reachable safety | [`FWRust.Conditional.Paper.whileLoop_reachableProgress`](FWRust/Conditional/Paper/Soundness/LoopReachableSafety.lean) | Exposes exactly T-While's seven premises |
-| Syntactic exclusion used by a terminating fragment | [`Term.LoopFree`](FWRust/Conditional/Paper/Syntax.lean) | Required with `MissingFree` by total wrappers |
+| Source loop and two runtime phases | [`Term.whileLoop`, `Term.whileCond`, `Term.whileBody`](FWRust/Paper/Syntax.lean) | Integrated |
+| Six loop reduction rules | [`Step.whileStart`](FWRust/Paper/InductiveSemantics.lean) through [`Step.whileBodyDone`](FWRust/Paper/InductiveSemantics.lean) | Integrated |
+| Minimal normal loop rule | [`FWRust.Paper.TermTyping.whileLoop`](FWRust/Paper/Typing.lean) | Seven premises |
+| Diverging-body loop rule | [`FWRust.Paper.TermTyping.whileLoopDiverging`](FWRust/Paper/Typing.lean) | Four premises |
+| Finite terminal-run decomposition | [`FWRust.Paper.WhileRunEnds`](FWRust/Paper/InductiveSemantics.lean) | Used by preservation |
+| Finite reachable-prefix decomposition | [`FWRust.Paper.WhileRunReaches`](FWRust/Paper/InductiveSemantics.lean) | Used by all-prefix progress |
+| Loop-local terminal preservation | [`FWRust.Paper.preservation_whileRunEnds`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean) | Integrated into Lemma 4.11 |
+| Every finite prefix is terminal or can step | [`FWRust.Paper.reachableProgressWhenInitialized`](FWRust/Paper/Soundness/LoopReachableSafety.lean) | No termination premise |
+| Focused minimal-loop reachable safety | [`FWRust.Paper.whileLoop_reachableProgress`](FWRust/Paper/Soundness/LoopReachableSafety.lean) | Exposes T-While's seven premises |
+| Syntactic loop exclusion for total wrappers | [`Term.LoopFree`](FWRust/Paper/Syntax.lean) | Used with `MissingFree` |
 
-See [`WHILE.md`](WHILE.md) for the exact premises and the distinction between
+See [`WHILE.md`](WHILE.md) for the exact rules and the distinction between
 finite-run terminal preservation, safety of arbitrary reachable prefixes, and
 total termination.

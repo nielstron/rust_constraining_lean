@@ -1,10 +1,27 @@
 import FWRust.Paper.Examples.Operational
+import FWRust.Paper.Examples.NoStaleRegression
+import FWRust.Paper.Examples.TypeSafetyPass
 import FWRust.Paper.Examples.TypeSafetyReject
+import FWRust.Paper.Examples.ThinningFalse
+import FWRust.Paper.Examples.StaleBoxedBorrow
+import FWRust.Paper.Examples.BoxDerefPending
+import FWRust.Paper.Examples.LinearJoinCounterexample
+import FWRust.Paper.Examples.WhileSafety
 
 /-!
 Build-checked paper examples.
 
 * `Operational` contains reduction witnesses for the operational examples.
-* `TypeSafetyReject` contains rejected examples plus a positive mutable-borrow
-  assignment regression.
+* `NoStaleRegression` contains a source-shaped regression for the no-stale
+  assignment side condition.
+* `TypeSafetyPass` contains accepted examples with type-safety corollaries.
+* `TypeSafetyReject` contains rejected examples and the specific failed premise.
+* `StaleBoxedBorrow` records why stale loan annotations are conservative
+  protection tokens, not necessarily live dereferenceable borrows.
+* `BoxDerefPending` records declared-box lvalue examples for full box lvalue
+  projection.
+* `LinearJoinCounterexample` separates join coherence from global static
+  linearizability and checks the premise-free constant conditional regression.
+* `WhileSafety` checks a terminating loop and shows that T-While accepts an
+  invariant whose live loans form a non-linearizable cycle.
 -/

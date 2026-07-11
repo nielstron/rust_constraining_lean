@@ -6,8 +6,9 @@ import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then `S₂ ∼ Γ₂`
 > (the final store is safely abstracted by the result environment).
 
-Status: proved as the `FullSafeAbstraction finalStore env₂` projection of
-Preservation (Lemma 4.11).  Mechanized support:
+Status: mechanized through Preservation (Lemma 4.11).  This is the
+`SafeAbstraction finalStore env₂` conjunct of
+`TerminalStateSafe`.  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
   `preservation_declare_redex_runtime_of_validValue` (uses Lemma 9.7);
@@ -18,10 +19,11 @@ Preservation (Lemma 4.11).  Mechanized support:
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
 * block `R-BlockB` — via Lemma 9.5
-  (`preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`) for terminal
+  (`preservation_blockB_value_multistep_runtime_of_runtimeDrop`) for terminal
   value blocks.
 
-The theorem below derives the store-preservation projection from Lemma 4.11.
+The move, assignment, sequence-drop, and block-drop cases are discharged in
+`preservation`; the theorem below records the full store-preservation projection.
 -/
 
 namespace FWRust.Paper.Soundness
@@ -29,27 +31,23 @@ namespace FWRust.Paper.Soundness
 open FWRust.Paper FWRust.Core
 
 /--
-Appendix 9.10, Store Preservation: the safe-abstraction projection of
+Appendix 9.10, Store Preservation, as the safe-abstraction projection of
 Lemma 4.11.
 -/
 theorem lemma_9_10_storePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {term : Term} {ty : Ty} {finalValue : Value} :
     SourceTerm term →
-    ValidRuntimeState store term →
-    ValidStoreTyping store term typing →
-    WellFormedEnv env₁ lifetime →
-    BorrowSafeEnv env₁ →
-    Env.FiniteSupport env₁ →
-    Linearizable env₁ →
-    store ≈ₛ env₁ →
+      ValidRuntimeState store term →
+      ValidStoreTyping store term typing →
+      WellFormedEnv env₁ lifetime →
+      store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    FullSafeAbstraction finalStore env₂ := by
-    intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hfinite hlinear
-      hsafe htyping hmulti
-    exact (lemma_4_11_preservation hsource hvalid hstoreTyping hwellFormed
-      hborrowSafe hfinite hlinear hsafe htyping hmulti).2.1
+    SafeAbstraction finalStore env₂ := by
+    intro hsource hvalid hstoreTyping hwellFormed hsafe htyping hmulti
+    exact (preservation hsource hvalid hstoreTyping
+      hwellFormed hsafe htyping hmulti).2.1
 
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete
@@ -63,9 +61,9 @@ theorem lemma_9_10_assign_var_envShape_frame
     store ≈ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
-    EnvWrite env (.var x) ty env' →
-    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
-      ∃ mutable target, envSlot.ty = .ty (.borrow mutable target)) →
+    EnvWrite 0 env (.var x) ty env' →
+    (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨ envSlot.ty = .ty .bool ∨
+      ∃ mutable targets, envSlot.ty = .ty (.borrow mutable targets)) →
     ValidValue store value ty →
     store.read (.var x) = some oldSlot →
     store.write (.var x) (.value value) = some storeAfterWrite →

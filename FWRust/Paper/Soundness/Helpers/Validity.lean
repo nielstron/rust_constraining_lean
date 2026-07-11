@@ -55,6 +55,11 @@ def PartialValueNonOwner (value : PartialValue) : Prop :=
   intro ref
   exact Or.inl (by simp)
 
+@[simp] theorem partialValueNonOwner_bool (value : Bool) :
+    PartialValueNonOwner (.value (.bool value)) := by
+  intro ref
+  exact Or.inl (by simp)
+
 @[simp] theorem partialValueNonOwner_borrowed (location : Location) :
     PartialValueNonOwner (.value (.ref { location := location, owner := false })) := by
   intro ref
@@ -92,6 +97,8 @@ theorem eq_owningRef_of_mem_valueOwningLocations {value : Value} {owned : Locati
   | unit =>
       simp [valueOwningLocations, valueOwnedLocation?] at hmem
   | int _ =>
+      simp [valueOwningLocations, valueOwnedLocation?] at hmem
+  | bool _ =>
       simp [valueOwningLocations, valueOwnedLocation?] at hmem
   | ref ref =>
       cases ref with
@@ -153,6 +160,15 @@ def termValues : Term → List Value
   | .move _ => []
   | .copy _ => []
   | .val value => [value]
+  | .missing => []
+  | .eq lhs rhs => termValues lhs ++ termValues rhs
+  | .ite condition trueBranch falseBranch =>
+      termValues condition ++ termValues trueBranch ++ termValues falseBranch
+  | .whileLoop _ condition body => termValues condition ++ termValues body
+  | .whileCond _ conditionInFlight condition body =>
+      termValues conditionInFlight ++ termValues condition ++ termValues body
+  | .whileBody _ bodyInFlight condition body =>
+      termValues bodyInFlight ++ termValues condition ++ termValues body
 
 def termOwningLocations (term : Term) : List Location :=
   List.flatMap valueOwningLocations (termValues term)
@@ -162,6 +178,7 @@ def termOwningLocations (term : Term) : List Location :=
 def SourceValue : Value → Prop
   | .unit => True
   | .int _ => True
+  | .bool _ => True
   | .ref _ => False
 
 def SourceTerm (term : Term) : Prop :=
@@ -175,6 +192,8 @@ theorem sourceValue_no_owningLocations {value : Value} :
   | unit =>
       rfl
   | int _ =>
+      rfl
+  | bool _ =>
       rfl
   | ref ref =>
       cases hsource
@@ -240,6 +259,64 @@ theorem SourceTerm.assign_inner {lhs : LVal} {rhs : Term} :
     SourceTerm rhs := by
   intro hsource value hmem
   exact hsource value (by simpa [termValues] using hmem)
+
+theorem SourceTerm.eq_lhs {lhs rhs : Term} :
+    SourceTerm (.eq lhs rhs) →
+    SourceTerm lhs := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inl hmem)
+
+theorem SourceTerm.eq_rhs {lhs rhs : Term} :
+    SourceTerm (.eq lhs rhs) →
+    SourceTerm rhs := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr hmem)
+
+theorem SourceTerm.ite_condition {condition trueBranch falseBranch : Term} :
+    SourceTerm (.ite condition trueBranch falseBranch) →
+    SourceTerm condition := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inl hmem)
+
+theorem SourceTerm.ite_trueBranch {condition trueBranch falseBranch : Term} :
+    SourceTerm (.ite condition trueBranch falseBranch) →
+    SourceTerm trueBranch := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr (Or.inl hmem))
+
+theorem SourceTerm.ite_falseBranch {condition trueBranch falseBranch : Term} :
+    SourceTerm (.ite condition trueBranch falseBranch) →
+    SourceTerm falseBranch := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr (Or.inr hmem))
+
+theorem SourceTerm.while_condition {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    SourceTerm (.whileLoop bodyLifetime condition body) →
+    SourceTerm condition := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inl hmem)
+
+theorem SourceTerm.while_body {bodyLifetime : Lifetime}
+    {condition body : Term} :
+    SourceTerm (.whileLoop bodyLifetime condition body) →
+    SourceTerm body := by
+  intro hsource value hmem
+  exact hsource value (by
+    simp [termValues] at hmem ⊢
+    exact Or.inr hmem)
 
 theorem sourceTerm_unit_value : SourceTerm (.val .unit) := by
   intro value hmem
@@ -839,6 +916,9 @@ theorem validTerm_value (value : Value) :
       simp [ValidTerm, termOwningLocations, termValues, valueOwningLocations,
         valueOwnedLocation?]
   | int _ =>
+      simp [ValidTerm, termOwningLocations, termValues, valueOwningLocations,
+        valueOwnedLocation?]
+  | bool _ =>
       simp [ValidTerm, termOwningLocations, termValues, valueOwningLocations,
         valueOwnedLocation?]
   | ref ref =>

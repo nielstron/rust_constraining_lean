@@ -1,4 +1,4 @@
-import FWRust.Conditional.Paper.Soundness
+import FWRust.Paper.Soundness
 
 /-!
 Focused witnesses for the minimal loop rule `T-While`.
@@ -10,7 +10,7 @@ derivation is an executable independence witness for dropping the historical
 global-ranking premise from `T-While`.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 namespace WhileSafety
 
@@ -218,4 +218,4 @@ theorem cyclicFalseLoop_exits (store : ProgramStore) :
 
 end WhileSafety
 end Paper
-end FWRust.Conditional
+end FWRust

@@ -1,4 +1,4 @@
-import FWRust.Conditional.Paper.Soundness.Helpers.AppendixPrelim
+import FWRust.Paper.Soundness.Helpers.AppendixPrelim
 
 /-!
 Regression examples for the assignment-side no-stale side condition.
@@ -8,7 +8,7 @@ It imports the preliminary inversion helpers only to keep the finite typing
 proofs readable.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -2053,4 +2053,4 @@ theorem noStaleIf_final_write_rejected_by_noStale
     (by simp [noStaleIfDerefP]) noStaleIf_p_may_read_through_deref_p
 
 end Paper
-end FWRust.Conditional
+end FWRust

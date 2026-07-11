@@ -19,27 +19,34 @@ precompiled cache before building, optionally run `lake exe cache get`.
 
 ## Scope
 
-The mechanised language includes both the paper's reduced core calculus
-(`FWRust.Paper`) and its Section 6.1 control-flow extension with equality and
-conditionals (`FWRust.Conditional`).  The loop-free extension restores finite
-borrow target lists and proves progress, preservation, and total empty-initial
-type/runtime safety without the historical joined-environment shape,
-well-formedness, coherence, or linearizability premises on `T-If`.
+`FWRust.Paper` is the canonical calculus.  It contains the core language,
+finite borrow-target lists, Booleans and equality, Section 6.1 conditionals,
+and a native while-loop extension.  It also contains the corrected typing
+rules and operational semantics from [1], including the non-cyclicity lessons
+from [2].
 
-The conditional namespace now also contains a native while-loop syntax,
-six-rule operational semantics, and minimal normal/diverging typing rules.
-The loop rules are integrated through progress, weak borrow invariance,
-terminal preservation, and an all-finite-prefix theorem showing that every
-reachable state is terminal or can step.  The normal proof uses initialized
-back-transport rather than the historical same-shape, coherence, global
-ranking, or borrow-safety assumptions.  Total termination is stated only for
-the separate `MissingFree` and `LoopFree` fragment.  See `WHILE.md` for the
-exact rules and proof map.
+The conditional metatheory proves progress, preservation, and total
+empty-initial type/runtime safety for the missing- and loop-free fragment.  Its
+five-premise `T-If` rule does not assume the historical same-shape, joined
+well-formedness, coherence, global linearizability, or joined borrow-safety
+conditions.  The key is to treat a join as a static may-approximation and
+transport only the branch that actually ran, using stale-aware initialized
+validity.  See `T-IF.md` for the argument.
 
-The repository further contains a mechanization of the corrected typing rules
-and operational semantics from [1] (including adaptations suggested by [2]),
-as well as the sealor and completeness/soundness techniques developed in the
-paper.
+Loops have a source form, two runtime phases, six reduction rules, and minimal
+normal and diverging typing rules.  The proofs cover progress, weak borrow
+invariance, terminal preservation, and every finite execution prefix.  The
+normal loop rule similarly avoids historical same-shape, coherence, global
+ranking, and borrow-safety premises.  Because loops can diverge, the theorem
+that derives termination from syntax requires both `MissingFree` and
+`LoopFree`; loop programs instead use the all-prefix no-stuck theorem or
+terminal safety conditional on a terminating run.  See `WHILE.md`.
+
+`FWRust.Sealor` is the corresponding frontier extractor and generative-compiler
+development.  It retains the core let/assignment/box/borrow/copy frontiers and
+adds Boolean, equality, and conditional syntax.  Incomplete conditional
+branches are closed with the typed diverging `missing` term, following the
+panic-insertion strategy of `rust_constraining`'s `ast_copier.rs`.
 
 See `PAPER_CLAIMS.md` for a claim-by-claim map from the paper to Lean
 declarations.
@@ -50,11 +57,6 @@ interface, and the remaining local mechanization corrections.
 See `WHILE.md` for the native loop phases, minimized `T-While` rules, and the
 distinction between terminal preservation, reachable-state safety, and
 termination.
-
-`FWRust.Conditional.Sealor` provides the isolated conditional extractor:
-incomplete `if` branches are closed with the typed diverging `missing` term,
-following the panic insertion strategy of `rust_constraining`'s
-`ast_copier.rs`, without changing the reduced-core sealor.
 
 ## References
 

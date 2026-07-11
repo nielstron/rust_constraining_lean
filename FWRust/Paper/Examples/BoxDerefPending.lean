@@ -1,4 +1,4 @@
-import FWRust.Conditional.Paper.Typing
+import FWRust.Paper.Typing
 
 /-!
 Examples for declared boxes as lvalues.
@@ -8,7 +8,7 @@ is an lvalue of type `int`.  These examples check that declared full-box types
 (`.ty (.box inner)`) bridge into lvalue/path typing.
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -544,4 +544,4 @@ theorem declaredBoxBorrowProgram_typing :
 end BoxDerefPending
 
 end Paper
-end FWRust.Conditional
+end FWRust

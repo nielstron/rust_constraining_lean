@@ -27,7 +27,7 @@ target typing is required only when the target is actually initialized. Strong
 `WellFormedTy` at the join is intentionally not claimed: it can be false after
 one branch moves a value.
 
-The final [`TermTyping.ite`](FWRust/Conditional/Paper/Typing.lean) rule therefore
+The final [`TermTyping.ite`](FWRust/Paper/Typing.lean) rule therefore
 has only five premises:
 
 1. the guard has type `bool`;
@@ -62,9 +62,9 @@ the target is actually initialized in the joined environment, its typing
 lifetime is bounded directly in that environment.
 
 This argument is implemented by
-[`wellFormedTyWhenInitialized_join`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean)
+[`wellFormedTyWhenInitialized_join`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean)
 and packaged with joined environment well-formedness by
-[`wellFormedWhenInitialized_iteJoin_of_obligations`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean).
+[`wellFormedWhenInitialized_iteJoin_of_obligations`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean).
 
 The proof deliberately avoids transporting a full target typing from a branch
 to the join. A moved-out target need not remain initialized merely because its
@@ -88,7 +88,7 @@ the entire joined environment.
 The historical backward-transport proof recursively unfolded the ambient
 borrow graph, so it required a global ranking to justify termination. The
 revised
-[`lvalTyping_back_of_envStrengthens`](FWRust/Conditional/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean)
+[`lvalTyping_back_of_envStrengthens`](FWRust/Paper/Soundness/Lemma_4_9_BorrowInvariance.lean)
 instead performs mutual structural induction over an actual finite
 `LValTyping`/`LValTargetsTyping` derivation.
 
@@ -122,7 +122,7 @@ interpret the join as a concrete state in which both branches executed.
 ## The preservation argument
 
 In the `T-If` case of
-[`preservation_bounded`](FWRust/Conditional/Paper/Soundness/Lemma_4_11_Preservation.lean),
+[`preservation_bounded`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean),
 the operational semantics first identifies the selected branch. Its induction
 hypothesis gives terminal safety for that branch environment and result type.
 The unselected branch is used only to derive its weak static well-formedness
@@ -163,7 +163,7 @@ name hygiene. None of these is an assumption on every `T-If` join.
 
 ## Evidence that ranking is not hidden
 
-[`LinearJoinCounterexample.lean`](FWRust/Conditional/Paper/Examples/LinearJoinCounterexample.lean)
+[`LinearJoinCounterexample.lean`](FWRust/Paper/Examples/LinearJoinCounterexample.lean)
 constructs an exact coherent environment join and proves that it is not
 `Linearizable`. A constant conditional nevertheless types with the five-premise
 `T-If` rule and executes to a value in that environment. This is deliberately
@@ -171,7 +171,7 @@ an arbitrary-static-state independence witness, not a claim that the cyclic
 environment is reachable from an empty source program.
 
 The closed-world result
-[`emptyInitial_typeAndBorrowSafety_total`](FWRust/Conditional/Paper/Soundness/InitialStates.lean)
+[`emptyInitial_typeAndBorrowSafety_total`](FWRust/Paper/Soundness/InitialStates.lean)
 then proves concrete evaluation to a value and `TerminalStateSafe` for the
 explicitly missing- and loop-free fragment typed from the empty environment,
 without any global

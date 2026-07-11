@@ -1,10 +1,10 @@
-import FWRust.Conditional.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
+import FWRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
 
 /-!
 # Reachable-state safety for native while loops
 -/
 
-namespace FWRust.Conditional
+namespace FWRust
 namespace Paper
 
 open Core
@@ -1100,4 +1100,4 @@ theorem whileLoopDiverging_reachableProgress
 
 
 end Paper
-end FWRust.Conditional
+end FWRust

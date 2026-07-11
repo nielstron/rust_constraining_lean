@@ -8,12 +8,14 @@ namespace ConservativeSealor
 
 export Generated (
   PartialName
+  PartialLVals
   PartialTerms
   PartialTy
   PartialLVal
   PartialTerm
   PartialProgram
   CompletesName
+  CompletesLVals
   CompletesTerms
   CompletesTy
   CompletesLVal

@@ -1,6 +1,6 @@
 # FW Rust while loops
 
-`FWRust.Conditional.Paper` contains a native small-step representation of
+`FWRust.Paper` contains a native small-step representation of
 `while` loops.  The loop is an extension beyond the loop-free calculus in the
 paper.  It is native rather than a recursive desugaring into `if`: each
 iteration must run the body at its lexical body lifetime, discard the body's
@@ -9,7 +9,7 @@ result, drop that lifetime, and only then return to the loop head.
 The syntax, operational phases, typing rules, run decompositions, progress,
 borrow invariance, terminal preservation, and all-finite-prefix no-stuck
 theorem are integrated and build checked.  The total-termination wrapper is
-intentionally limited to the separate missing- and loop-free fragment.
+intentionally limited to the syntactically missing- and loop-free fragment.
 
 ## Syntax and runtime phases
 
