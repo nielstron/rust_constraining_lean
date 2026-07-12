@@ -1,4 +1,5 @@
 import FWRust.Sealor.Checkers
+import FWRust.Paper.Soundness.Lemma_4_9_BorrowInvariance
 
 /-!
 A syntax-directed FWRust frontier extractor mirroring `rust_constraining`'s
@@ -45,6 +46,12 @@ than chosen freely:
   placeholder in lvalue position cannot be conservative — so lvalue frontiers
   are dropped, matching `ast_copier`, which never synthesizes a place
   expression.
+* Loops: once the guard and body lifetime have been parsed, the original guard
+  and the block-shaped body frontier are rebuilt exactly as `ast_copier` does.
+  Thus `while x { xxx;` seals to `while x { xxx; missing }`, not to a loop with
+  a synthetic guard.  The bottom effect of `missing` lets the sealed body keep
+  the completed body's back-edge environment, while conservative name
+  occurrence makes the loop-hygiene premise vacuous for an incomplete body.
 -/
 
 namespace ConservativeSealor
@@ -75,6 +82,15 @@ def branchRebuildable : PartialTerm → Bool
   | Generated.PartialTerm.done _ => Bool.true
   | Generated.PartialTerm.cutoff => Bool.true
   | Generated.PartialTerm.blockStart => Bool.true
+  | Generated.PartialTerm.blockTerms _ _ => Bool.true
+  | _ => Bool.false
+
+/-- Body frontiers produced by real Rust `while` syntax.  A completed term is
+kept verbatim; a parsed block keeps its complete statement prefix and is closed
+with `missingTerm`.  The other generated forms are parser-intermediate shapes,
+not Rust loop bodies, and conservatively become `missingTerm`. -/
+def loopBodyRebuildable : PartialTerm → Bool
+  | Generated.PartialTerm.done _ => Bool.true
   | Generated.PartialTerm.blockTerms _ _ => Bool.true
   | _ => Bool.false
 
@@ -145,6 +161,15 @@ def sealTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
           (sealTerm currentLifetime falseBranch)]
       else
         condition :: sealTermStmts currentLifetime falseBranch
+  | Generated.PartialTerm.whileStart => [missingTerm]
+  | Generated.PartialTerm.whileCondition _bodyLifetime _condition =>
+      [missingTerm]
+  | Generated.PartialTerm.whileBody bodyLifetime condition body =>
+      [SyntaxCtor.ctermWhile_ctor bodyLifetime condition
+        (if loopBodyRebuildable body then
+          sealTerm bodyLifetime body
+        else
+          missingTerm)]
 termination_by p => (sizeOf p, 0)
 
 /-- Extract a block body frontier (`ast_copier.visit_stmts`): keep the
@@ -186,6 +211,23 @@ theorem tyLoanFree_unit : TyLoanFree .unit := by
   intro mutable targets hcontains
   cases hcontains
 
+theorem missingTerm_typed {env : Env} {typing : StoreTyping}
+    {lifetime : Lifetime} :
+    TermTyping env typing lifetime missingTerm .unit env :=
+  TermTyping.missing tyLoanFree_unit
+    (fun hfinite => hfinite) (fun hwell => hwell)
+
+/-- Type a bottom-effect placeholder with a chosen unreachable continuation.
+The certificates are actual facts about that continuation, so the two bridge
+premises do not constrain the input environment. -/
+theorem missingTerm_typed_to {env result : Env} {typing : StoreTyping}
+    {lifetime : Lifetime}
+    (hfinite : Env.FiniteSupport result)
+    (hwell : WellFormedEnvWhenInitialized result lifetime) :
+    TermTyping env typing lifetime missingTerm .unit result :=
+  TermTyping.missing tyLoanFree_unit
+    (fun _ => hfinite) (fun _ => hwell)
+
 theorem epsilonTerm_typed {env : Env} {typing : StoreTyping}
     {lifetime : Lifetime} :
     TermTyping env typing lifetime epsilonTerm .unit env :=
@@ -220,6 +262,45 @@ theorem termListTyping_toStmts {typing : StoreTyping} {lifetime : Lifetime}
       | singleton hterm => exact .cons hterm .nil
       | cons hterm hrest => exact .cons hterm (ih hrest)
 
+theorem stmtsTyping_finiteSupport {env result : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {terms : List Term}
+    (hterms : StmtsTyping env typing lifetime terms result) :
+    Env.FiniteSupport env → Env.FiniteSupport result := by
+  intro hfinite
+  induction hterms with
+  | nil => exact hfinite
+  | cons hterm _ ih => exact ih (hterm.finiteSupport hfinite)
+
+theorem stmtsTyping_preservesWellFormed {env result : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {terms : List Term}
+    (hrefs : ∀ current currentLifetime,
+      StoreTypingRefsWellFormed current typing currentLifetime)
+    (hterms : StmtsTyping env typing lifetime terms result) :
+    WellFormedEnvWhenInitialized env lifetime →
+      WellFormedEnvWhenInitialized result lifetime := by
+  intro hwell
+  induction hterms with
+  | nil => exact hwell
+  | cons hterm _ ih =>
+      exact ih hrefs
+        (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+          hrefs hwell hterm).1
+
+theorem termListTyping_finiteSupport {env result : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {terms : List Term} {ty : Ty}
+    (hterms : TermListTyping env typing lifetime terms ty result) :
+    Env.FiniteSupport env → Env.FiniteSupport result :=
+  stmtsTyping_finiteSupport (termListTyping_toStmts hterms)
+
+theorem termListTyping_preservesWellFormed {env result : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {terms : List Term} {ty : Ty}
+    (hrefs : ∀ current currentLifetime,
+      StoreTypingRefsWellFormed current typing currentLifetime)
+    (hterms : TermListTyping env typing lifetime terms ty result) :
+    WellFormedEnvWhenInitialized env lifetime →
+      WellFormedEnvWhenInitialized result lifetime :=
+  stmtsTyping_preservesWellFormed hrefs (termListTyping_toStmts hterms)
+
 theorem stmtsTyping_append {env mid env₂ : Env} {typing : StoreTyping}
     {lifetime : Lifetime} {xs ys : List Term}
     (hxs : StmtsTyping env typing lifetime xs mid) :
@@ -253,8 +334,19 @@ theorem stmtsTyping_missing_closed {env env₂ : Env} {typing : StoreTyping}
     (hstmts : StmtsTyping env typing lifetime stmts env₂) :
     TermListTyping env typing lifetime (stmts ++ [missingTerm]) .unit env₂ := by
   induction hstmts with
-  | nil => exact .singleton (.missing .unit tyLoanFree_unit)
+  | nil => exact .singleton missingTerm_typed
   | cons hterm _ ih => exact .cons hterm ih
+
+/-- Close a statement prefix with a bottom-effect placeholder whose
+unreachable continuation is chosen explicitly. -/
+theorem stmtsTyping_missing_closed_to {env mid result : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {stmts : List Term}
+    (hstmts : StmtsTyping env typing lifetime stmts mid)
+    (hmissing : TermTyping mid typing lifetime missingTerm .unit result) :
+    TermListTyping env typing lifetime (stmts ++ [missingTerm]) .unit result := by
+  induction hstmts with
+  | nil => exact .singleton hmissing
+  | cons hterm _ ih => exact .cons hterm (ih hmissing)
 
 /-- Backwards-compatible name for `stmtsTyping_missing_closed`. -/
 theorem stmtsTyping_epsilon_closed {env env₂ : Env} {typing : StoreTyping}
@@ -286,7 +378,7 @@ theorem missingBlock_typed {env : Env} {typing : StoreTyping}
       (SyntaxCtor.ctermBlock_ctor (childLifetime lifetime) [missingTerm])
       .unit (env.dropLifetime (childLifetime lifetime)) :=
   TermTyping.block ⟨0, rfl⟩
-    (TermListTyping.singleton (TermTyping.missing WellFormedTy.unit tyLoanFree_unit))
+    (TermListTyping.singleton missingTerm_typed)
     WellFormedTy.unit rfl
 
 /-- Every non-`done` body extraction ends in (hence contains) `missingTerm`,
@@ -308,7 +400,7 @@ theorem headD_typed {env env' : Env} {typing : StoreTyping}
     ∃ ty' env'', TermTyping env typing lifetime
       (stmts.headD missingTerm) ty' env'' := by
   cases hstmts with
-  | nil => exact ⟨.unit, env, .missing .unit tyLoanFree_unit⟩
+  | nil => exact ⟨.unit, env, missingTerm_typed⟩
   | cons hfirst _ => exact ⟨_, _, hfirst⟩
 
 set_option maxRecDepth 4096 in
@@ -318,6 +410,10 @@ mutual
 /-- Value-position transport: only reached at the program root. -/
 theorem sealTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
     {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    (hrefs : ∀ current currentLifetime,
+      StoreTypingRefsWellFormed current typing currentLifetime)
+    (hfinite : Env.FiniteSupport env)
+    (hwell : WellFormedEnvWhenInitialized env currentLifetime)
     (hcomp : CompletesTerm p completion)
     (htyped : TermTyping env typing currentLifetime completion ty env₂) :
     ∃ ty' env', TermTyping env typing currentLifetime
@@ -325,7 +421,7 @@ theorem sealTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
   cases p
   case cutoff =>
       simp only [sealTerm]
-      exact ⟨.unit, env, .missing .unit tyLoanFree_unit⟩
+      exact ⟨.unit, env, missingTerm_typed⟩
   case done =>
       cases hcomp
       simp only [sealTerm]
@@ -342,17 +438,20 @@ theorem sealTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
       | ctermBlock_blockTerms hterms =>
           cases htyped with
           | «block» hchild hlist hwf heq =>
-              obtain ⟨ty', envBody, hlist', hdisj⟩ :=
-                sealTerms_typed hterms hlist
+              obtain ⟨ty', hlist', hdisj⟩ :=
+                sealTerms_typed hrefs hfinite
+                  (WellFormedEnvWhenInitialized.weaken hwell
+                    (LifetimeChild.outlives hchild)) hterms hlist
               simp only [sealTerm]
-              refine ⟨ty', envBody.dropLifetime blockLifetime,
-                TermTyping.block hchild hlist' ?_ rfl⟩
-              rcases hdisj with rfl | ⟨rfl, rfl⟩
+              refine ⟨ty', env₂,
+                TermTyping.block hchild hlist' ?_ heq⟩
+              rcases hdisj with rfl | rfl
               · exact WellFormedTy.unit
               · exact hwf
   all_goals
     simp only [sealTerm]
-    obtain ⟨env', hstmts⟩ := sealTermStmts_typed hcomp htyped
+    obtain ⟨env', hstmts⟩ :=
+      sealTermStmts_typed hrefs hfinite hwell hcomp htyped
     exact headD_typed hstmts
 termination_by (sizeOf p, 1)
 decreasing_by
@@ -367,6 +466,10 @@ decreasing_by
 types sequentially from the same starting environment as the completion. -/
 theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
     {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    (hrefs : ∀ current currentLifetime,
+      StoreTypingRefsWellFormed current typing currentLifetime)
+    (hfinite : Env.FiniteSupport env)
+    (hwell : WellFormedEnvWhenInitialized env currentLifetime)
     (hcomp : CompletesTerm p completion)
     (htyped : TermTyping env typing currentLifetime completion ty env₂) :
     ∃ env', StmtsTyping env typing currentLifetime
@@ -381,34 +484,36 @@ theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
   case ctermBlock_blockTerms hterms =>
       cases htyped with
       | «block» hchild hlist hwf heq =>
-          obtain ⟨ty', envBody, hlist', hdisj⟩ :=
-            sealTerms_typed hterms hlist
+          obtain ⟨ty', hlist', hdisj⟩ :=
+            sealTerms_typed hrefs hfinite
+              (WellFormedEnvWhenInitialized.weaken hwell
+                (LifetimeChild.outlives hchild)) hterms hlist
           simp only [sealTermStmts]
-          refine ⟨envBody.dropLifetime _,
-            .cons (TermTyping.block hchild hlist' ?_ rfl) .nil⟩
-          rcases hdisj with rfl | ⟨rfl, rfl⟩
+          refine ⟨env₂,
+            .cons (TermTyping.block hchild hlist' ?_ heq) .nil⟩
+          rcases hdisj with rfl | rfl
           · exact WellFormedTy.unit
           · exact hwf
   case ctermLetMut_letMutRhs hinit =>
       cases htyped with
       | declare _ hinit' _ _ _ =>
           simp only [sealTermStmts]
-          exact sealTermStmts_typed hinit hinit'
+          exact sealTermStmts_typed hrefs hfinite hwell hinit hinit'
   case ctermAssign_assignRhs hrhs =>
       cases htyped with
       | assign hrhs' _ _ _ _ _ _ _ _ =>
           simp only [sealTermStmts]
-          exact sealTermStmts_typed hrhs hrhs'
+          exact sealTermStmts_typed hrefs hfinite hwell hrhs hrhs'
   case ctermBox_boxOperand hoperand =>
       cases htyped with
       | «box» hoperand' =>
           simp only [sealTermStmts]
-          exact sealTermStmts_typed hoperand hoperand'
+          exact sealTermStmts_typed hrefs hfinite hwell hoperand hoperand'
   case ctermEq_termPrefix hlhs =>
       cases htyped with
       | eq hlhs' =>
           simp only [sealTermStmts]
-          exact sealTermStmts_typed hlhs hlhs'
+          exact sealTermStmts_typed hrefs hfinite hwell hlhs hlhs'
   case ctermEq_eqRhs hrhs =>
       cases htyped with
       | eq hlhs' =>
@@ -418,11 +523,11 @@ theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
       simp only [sealTermStmts]
       cases htyped with
       | ite hcondition' =>
-          exact sealTermStmts_typed hcondition hcondition'
+          exact sealTermStmts_typed hrefs hfinite hwell hcondition hcondition'
       | iteDiverging hcondition' =>
-          exact sealTermStmts_typed hcondition hcondition'
+          exact sealTermStmts_typed hrefs hfinite hwell hcondition hcondition'
       | iteTrueDiverging hcondition' =>
-          exact sealTermStmts_typed hcondition hcondition'
+          exact sealTermStmts_typed hrefs hfinite hwell hcondition hcondition'
   case ctermIte_iteTrueBranch condition trueBranch trueCompletion
       falseCompletion htrue =>
       obtain ⟨envMid, hcondition', tyLive, envOut, htrue'⟩ :
@@ -440,14 +545,24 @@ theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
       cases hrebuild : branchRebuildable trueBranch with
       | «true» =>
           simp
-          obtain ⟨tyLive', envLive, hlive⟩ := sealTerm_typed htrue htrue'
+          have hfiniteMid := hcondition'.finiteSupport hfinite
+          have hwellMid :=
+            (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+              hrefs hwell hcondition').1
+          obtain ⟨tyLive', envLive, hlive⟩ :=
+            sealTerm_typed hrefs hfiniteMid hwellMid htrue htrue'
           exact ⟨envLive, .cons
             (TermTyping.iteDiverging hcondition' hlive
-              (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
+              missingTerm_typed
               .missing) .nil⟩
       | «false» =>
           simp
-          obtain ⟨env', hstmts⟩ := sealTermStmts_typed htrue htrue'
+          have hfiniteMid := hcondition'.finiteSupport hfinite
+          have hwellMid :=
+            (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+              hrefs hwell hcondition').1
+          obtain ⟨env', hstmts⟩ :=
+            sealTermStmts_typed hrefs hfiniteMid hwellMid htrue htrue'
           exact ⟨env', .cons hcondition' hstmts⟩
   case ctermIte_iteFalseBranch condition trueBranch falseBranch
       falseCompletion hfalse =>
@@ -468,6 +583,10 @@ theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
             exact ⟨_, hcondition', _, _, htrue', _, _, hfalse'⟩
         | iteTrueDiverging hcondition' htrue' hfalse' =>
             exact ⟨_, hcondition', _, _, htrue', _, _, hfalse'⟩
+      have hfiniteMid := hcondition'.finiteSupport hfinite
+      have hwellMid :=
+        (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+          hrefs hwell hcondition').1
       simp only [sealTermStmts]
       cases falseBranch
       case done falseTerm =>
@@ -478,7 +597,7 @@ theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
           simp [branchRebuildable, sealTerm]
           exact ⟨envOut, .cons
             (TermTyping.iteDiverging hcondition' htrue'
-              (TermTyping.missing WellFormedTy.unit tyLoanFree_unit)
+              missingTerm_typed
               .missing) .nil⟩
       case blockStart =>
           simp [branchRebuildable, sealTerm]
@@ -496,21 +615,78 @@ theorem sealTermStmts_typed {currentLifetime : Lifetime} {p : PartialTerm}
               all_goals
                 cases hfalse' with
                 | «block» hchild hlist hwf _heq =>
-                    obtain ⟨tyBody, envBody, hlist', hdisj⟩ :=
-                      sealTerms_typed hterms hlist
+                    obtain ⟨tyBody, hlist', hdisj⟩ :=
+                      sealTerms_typed hrefs hfiniteMid
+                        (WellFormedEnvWhenInitialized.weaken hwellMid
+                          (LifetimeChild.outlives hchild)) hterms hlist
                     simp [branchRebuildable, sealTerm]
                     refine ⟨envOut, .cons
                       (TermTyping.iteDiverging hcondition' htrue'
-                        (TermTyping.block hchild hlist' ?_ rfl)
+                        (TermTyping.block hchild hlist' ?_ _heq)
                         (.block (sealTerms_diverging nofun) .missing))
                       .nil⟩
-                    rcases hdisj with rfl | ⟨rfl, rfl⟩
+                    rcases hdisj with rfl | rfl
                     · exact WellFormedTy.unit
                     · exact hwf
       all_goals
-        obtain ⟨env', hstmts⟩ := sealTermStmts_typed hfalse hfalse'
+        obtain ⟨env', hstmts⟩ :=
+          sealTermStmts_typed hrefs hfiniteMid hwellMid hfalse hfalse'
         simp only [sealTermStmts, branchRebuildable] at hstmts ⊢
         exact ⟨env', .cons hcondition' hstmts⟩
+  case ctermWhile_whileStart =>
+      simp only [sealTermStmts]
+      exact ⟨env, .cons missingTerm_typed .nil⟩
+  case ctermWhile_whileCondition _hcondition =>
+      simp only [sealTermStmts]
+      exact ⟨env, .cons missingTerm_typed .nil⟩
+  case ctermWhile_whileBody bodyLifetime condition body bodyCompletion hbody =>
+      simp only [sealTermStmts]
+      cases htyped with
+      | whileLoopDiverging hchild hcondition hbodyTyped hbodyDiverges =>
+          have hfiniteCondition := hcondition.finiteSupport hfinite
+          have hwellCondition :=
+            (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+              hrefs hwell hcondition).1
+          obtain ⟨sealedTy, hsealed, hsealedAlternative⟩ :=
+            sealLoopBody_typed hrefs hfiniteCondition
+              (WellFormedEnvWhenInitialized.weaken hwellCondition
+                (LifetimeChild.outlives hchild)) hbody hbodyTyped
+          have hdiverges :
+              (if loopBodyRebuildable body then
+                sealTerm bodyLifetime body
+              else missingTerm).Diverges :=
+            hsealedAlternative.elim id (fun hsealedExact => by
+              simpa [hsealedExact] using hbodyDiverges)
+          exact ⟨_, .cons
+            (TermTyping.whileLoopDiverging hchild hcondition hsealed hdiverges)
+            .nil⟩
+      | whileLoop hchild hjoin hcontained hnameFresh hcondition hbodyTyped
+          hdrop =>
+          have hfiniteInv : Env.FiniteSupport _ :=
+            EnvJoin.finiteSupport_left hjoin hfinite
+          have hwellInv : WellFormedEnvWhenInitialized _ currentLifetime :=
+            ⟨hcontained,
+              EnvSlotsOutlive.of_lifetimesPreserved hwell.2
+                (EnvJoin.lifetimesPreserved_left hjoin)⟩
+          have hfiniteCondition := hcondition.finiteSupport hfiniteInv
+          have hwellCondition :=
+            (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+              hrefs hwellInv hcondition).1
+          obtain ⟨sealedTy, hsealed, hsealedAlternative⟩ :=
+            sealLoopBody_typed hrefs hfiniteCondition
+              (WellFormedEnvWhenInitialized.weaken hwellCondition
+                (LifetimeChild.outlives hchild)) hbody hbodyTyped
+          have hnameFresh' : LoopInvariantNameFresh _ _ condition
+              (if loopBodyRebuildable body then
+                sealTerm bodyLifetime body
+              else missingTerm) :=
+            hsealedAlternative.elim
+              (fun hsealedDiverges =>
+                LoopInvariantNameFresh.of_diverging_body hsealedDiverges)
+              (fun hsealedExact => by simpa [hsealedExact] using hnameFresh)
+          exact ⟨_, .cons
+            (TermTyping.whileLoop hchild hjoin hcontained hnameFresh'
+              hcondition hsealed hdrop) .nil⟩
   all_goals
     simp only [sealTermStmts]
     exact ⟨env, .nil⟩
@@ -523,36 +699,114 @@ decreasing_by
 and environment (fully complete body). -/
 theorem sealTerms_typed {currentLifetime : Lifetime} {ps : PartialTerms}
     {completions : List Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    (hrefs : ∀ current currentLifetime,
+      StoreTypingRefsWellFormed current typing currentLifetime)
+    (hfinite : Env.FiniteSupport env)
+    (hwell : WellFormedEnvWhenInitialized env currentLifetime)
     (hcomp : CompletesTerms ps completions)
     (hlist : TermListTyping env typing currentLifetime completions ty env₂) :
-    ∃ ty' env', TermListTyping env typing currentLifetime
-        (sealTerms currentLifetime ps) ty' env' ∧
-      (ty' = .unit ∨ (ty' = ty ∧ env' = env₂)) := by
+    ∃ ty', TermListTyping env typing currentLifetime
+        (sealTerms currentLifetime ps) ty' env₂ ∧
+      (ty' = .unit ∨ ty' = ty) := by
   cases hcomp
   case done =>
       simp only [sealTerms]
-      exact ⟨ty, env₂, hlist, Or.inr ⟨rfl, rfl⟩⟩
+      exact ⟨ty, hlist, Or.inr rfl⟩
   case cutoff =>
       simp only [sealTerms]
-      exact ⟨.unit, env, .singleton (.missing .unit tyLoanFree_unit),
-        Or.inl rfl⟩
+      have hfiniteOut := termListTyping_finiteSupport hlist hfinite
+      have hwellOut := termListTyping_preservesWellFormed hrefs hlist hwell
+      exact ⟨.unit,
+        .singleton (missingTerm_typed_to hfiniteOut hwellOut), Or.inl rfl⟩
   case elemsDone =>
       obtain ⟨mid, hpre, _⟩ :=
         stmtsTyping_append_inv (termListTyping_toStmts hlist)
+      have hfiniteOut := termListTyping_finiteSupport hlist hfinite
+      have hwellOut := termListTyping_preservesWellFormed hrefs hlist hwell
       simp only [sealTerms]
-      exact ⟨.unit, mid, stmtsTyping_missing_closed hpre, Or.inl rfl⟩
+      exact ⟨.unit,
+        stmtsTyping_missing_closed_to hpre
+          (missingTerm_typed_to hfiniteOut hwellOut),
+        Or.inl rfl⟩
   case elemsTail hfrontier =>
       obtain ⟨mid, hpre, hrest⟩ :=
         stmtsTyping_append_inv (termListTyping_toStmts hlist)
       cases hrest with
       | cons hfrontier' hsuffix =>
-          obtain ⟨env', hstmts⟩ := sealTermStmts_typed hfrontier hfrontier'
+          have hfiniteMid := stmtsTyping_finiteSupport hpre hfinite
+          have hwellMid := stmtsTyping_preservesWellFormed hrefs hpre hwell
+          obtain ⟨env', hstmts⟩ :=
+            sealTermStmts_typed hrefs hfiniteMid hwellMid
+              hfrontier hfrontier'
+          have hfiniteOut := termListTyping_finiteSupport hlist hfinite
+          have hwellOut := termListTyping_preservesWellFormed hrefs hlist hwell
           simp only [sealTerms]
-          refine ⟨.unit, env', ?_, Or.inl rfl⟩
+          refine ⟨.unit, ?_, Or.inl rfl⟩
           have happend :=
-            stmtsTyping_missing_closed (stmtsTyping_append hpre hstmts)
+            stmtsTyping_missing_closed_to (stmtsTyping_append hpre hstmts)
+              (missingTerm_typed_to hfiniteOut hwellOut)
           simpa [List.append_assoc] using happend
 termination_by (sizeOf ps, 0)
+decreasing_by
+  all_goals decreasing_tactic
+
+/-- Faithful loop-body transport.  Real block frontiers preserve the exact
+completed body output (hence the original loop back edge); any incomplete
+frontier is syntactically diverging, while complete bodies are unchanged. -/
+theorem sealLoopBody_typed {currentLifetime : Lifetime} {p : PartialTerm}
+    {completion : Term} {env env₂ : Env} {typing : StoreTyping} {ty : Ty}
+    (hrefs : ∀ current lifetime,
+      StoreTypingRefsWellFormed current typing lifetime)
+    (hfinite : Env.FiniteSupport env)
+    (hwell : WellFormedEnvWhenInitialized env currentLifetime)
+    (hcomp : CompletesTerm p completion)
+    (htyped : TermTyping env typing currentLifetime completion ty env₂) :
+    ∃ ty',
+      TermTyping env typing currentLifetime
+        (if loopBodyRebuildable p then sealTerm currentLifetime p
+          else missingTerm) ty' env₂ ∧
+      ((if loopBodyRebuildable p then sealTerm currentLifetime p
+          else missingTerm).Diverges ∨
+        (if loopBodyRebuildable p then sealTerm currentLifetime p
+          else missingTerm) = completion) := by
+  cases hcomp
+  case done =>
+      refine ⟨ty, ?_, Or.inr ?_⟩
+      · simpa only [loopBodyRebuildable, if_true, sealTerm] using htyped
+      · simp only [loopBodyRebuildable, if_true, sealTerm]
+  case ctermBlock_blockTerms lifetime terms terms' hterms =>
+      by_cases hdone : ∃ xs, terms = Generated.PartialTerms.done xs
+      · obtain ⟨xs, rfl⟩ := hdone
+        cases hterms
+        refine ⟨ty, ?_, Or.inr ?_⟩
+        · simpa only [loopBodyRebuildable, if_true, sealTerm, sealTerms]
+            using htyped
+        · simp only [loopBodyRebuildable, if_true, sealTerm, sealTerms]
+      ·
+        cases htyped with
+        | «block» hchild hlist hwf heq =>
+            obtain ⟨sealedTy, hsealed, hsealedTy⟩ :=
+              sealTerms_typed hrefs hfinite
+                (WellFormedEnvWhenInitialized.weaken hwell
+                  (LifetimeChild.outlives hchild)) hterms hlist
+            simp only [loopBodyRebuildable, if_true, sealTerm]
+            refine ⟨sealedTy, TermTyping.block hchild hsealed ?_ heq,
+              Or.inl ?_⟩
+            · rcases hsealedTy with rfl | rfl
+              · exact WellFormedTy.unit
+              · exact hwf
+            · exact .block
+                (sealTerms_diverging (fun xs heq => hdone ⟨xs, heq⟩))
+                .missing
+  all_goals
+    simp only [loopBodyRebuildable]
+    have hfiniteOut := htyped.finiteSupport hfinite
+    have hwellOut :=
+      (typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations
+        hrefs hwell htyped).1
+    exact ⟨.unit, missingTerm_typed_to hfiniteOut hwellOut,
+      Or.inl .missing⟩
+termination_by (sizeOf p, 2)
 decreasing_by
   all_goals decreasing_tactic
 
@@ -564,7 +818,13 @@ theorem sealProgram_wellTyped_of_completion
     (hFull : ProgramWellTyped full) :
     ProgramWellTyped (sealProgram p) := by
   obtain ⟨ty, env, htyped⟩ := hFull
-  obtain ⟨ty', env', htyped'⟩ := sealTerm_typed hCompletion htyped
+  obtain ⟨ty', env', htyped'⟩ :=
+    sealTerm_typed
+      (fun current lifetime =>
+        storeTypingRefsWellFormed_empty current lifetime)
+      Env.finiteSupport_empty
+      (wellFormedEnvWhenInitialized_empty FWRust.Core.Lifetime.root)
+      hCompletion htyped
   exact ⟨ty', env', htyped'⟩
 
 end TypedSealing

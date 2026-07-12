@@ -114,6 +114,110 @@ at `GammaCond`; if it is true, `Term.Diverges body` rules out a multistep from
 the body to a value.  Consequently this rule needs no join, back-edge
 well-formedness, or loop invariant.
 
+## Partial-loop extraction
+
+The canonical `FWRust.Sealor` grammar generates three partial-source loop
+frontiers:
+
+- `PartialTerm.whileStart` for the bare `while` prefix;
+- `PartialTerm.whileCondition bodyLifetime condition` while the condition is
+  incomplete; and
+- `PartialTerm.whileBody bodyLifetime condition body` once the condition is
+  fixed and the body is incomplete.
+
+These parser states are distinct from the runtime-only `Term.whileCond` and
+`Term.whileBody` constructors above.  Their completion rules are
+[`Generated.CompletesTerm.ctermWhile_whileStart`](FWRust/Sealor/Generated/PartialProgram.lean),
+[`Generated.CompletesTerm.ctermWhile_whileCondition`](FWRust/Sealor/Generated/PartialProgram.lean),
+and
+[`Generated.CompletesTerm.ctermWhile_whileBody`](FWRust/Sealor/Generated/PartialProgram.lean).
+
+The parser has not produced a reusable Boolean guard at `whileStart` or
+`whileCondition`, so those frontiers seal to `missing`.  Once it reaches
+`whileBody`, however, the guard is a complete ordinary `Term`.  The sealor
+keeps that guard verbatim.  A completed body is also kept verbatim; a partial
+block keeps every completed statement and appends `missing` after the retained
+prefix.  In particular, the Rust prefix
+
+```text
+while x { xxx;
+```
+
+seals as the ordinary FW Rust source term
+
+```text
+while x { xxx; missing }
+```
+
+This uses only the existing `Term.whileLoop`, `Term.block`, and `Term.missing`
+constructors.  `PartialTerm.whileBody` is a parser frontier, not a new runtime
+or typing-only form.  The implementation follows the loop case of
+`rust_constraining/constraining/src/ast_copier.rs`: retain the constraints that
+were actually parsed, then make the omitted suffix diverge.
+
+### The bottom-effect insight
+
+The essential typing fact is that `missing` never returns.  `T-Missing`
+therefore gives it a *bottom effect*: its static output environment may be the
+environment that the omitted, well-typed suffix would have produced, rather
+than being forced to equal its input environment.  This freedom is guarded by
+two proof certificates:
+
+- finite support of the input must imply finite support of the chosen output;
+- weak initialized-environment well-formedness of the input must imply the
+  same property of the chosen output.
+
+Inverting the typed completion splits its body derivation at the retained
+statement prefix.  The retained statements reuse their original typing
+derivations.  From the completed body derivation,
+[`termListTyping_finiteSupport`](FWRust/Sealor/Sealors/NestedBlocks.lean) and
+[`termListTyping_preservesWellFormed`](FWRust/Sealor/Sealors/NestedBlocks.lean)
+derive the two facts about its output;
+[`missingTerm_typed_to`](FWRust/Sealor/Sealors/NestedBlocks.lean) packages them
+as the bottom-effect certificates for the closing placeholder.  The sealed
+body therefore has the same static back-edge environment as the complete body
+even though that back edge is dynamically unreachable.  The ambient
+finite-support, initialized well-formedness, and store-reference facts used in
+this derivation are the ordinary arbitrary-state safety hypotheses;
+[`sealProgram_wellTyped_of_completion`](FWRust/Sealor/Sealors/NestedBlocks.lean)
+discharges them from the empty initial program.  They are not new `T-While`
+premises.
+
+[`sealLoopBody_typed`](FWRust/Sealor/Sealors/NestedBlocks.lean) packages this
+exact-output body transport.  For a completion typed by normal `T-While`, the
+loop proof can consequently reuse the original join, invariant-side guard
+derivation, body-scope drop equality, and result environment.  It does not
+retype the guard at `GammaEntry`.  For a completion typed by `T-WhileDiv`, it
+similarly reuses the original guard and retained body derivations.  This is the
+point that avoids the historical duplicate entry-side condition/body premises:
+the proof preserves the completion's loop rule and repairs only the omitted
+suffix's effect; it does not switch a normal loop to an entry-typed
+aborting-loop rule.
+
+### Conservative ghost hygiene
+
+An unknown suffix must not be treated as mentioning no source names.  The
+predicate `Term.MayMentions` therefore treats `missing` as potentially
+mentioning every name, while agreeing with exact `Term.Mentions` on
+`Term.MissingFree` syntax.  Equality ghost erasure and
+`LoopInvariantNameFresh` use this conservative predicate.
+
+Because a sealed partial body contains a diverging `missing`, the
+non-occurrence antecedent in `LoopInvariantNameFresh` is impossible.  The
+theorem `LoopInvariantNameFresh.of_diverging_body` discharges the hygiene
+obligation without claiming that the hole is name-free.  Together with the
+bottom effect, this preserves the original normal-loop invariant without a
+freshness premise about the discarded source suffix.  The corresponding
+boundary is deliberate: an equality whose right operand itself contains a
+generated hole cannot satisfy `T-Eq`'s conservative non-occurrence premise
+(`eq_finite` likewise requires a missing-free right operand).  A completed
+equality retained before the final loop-body hole is unaffected.  The
+incomplete-body, retained-prefix, and exact-body cases are build checked in
+[`FWRust/Sealor/Examples.lean`](FWRust/Sealor/Examples.lean), including the
+generic shape theorem
+`ConservativeSealor.Examples.whileBody_statementPrefix_seal_shape` for an
+arbitrary completed prefix, including a nonempty one.
+
 ## Why the historical premises are absent
 
 The decisive observation is the same one used for `T-If`: an environment join
@@ -122,7 +226,7 @@ coexist.  A running loop has one concrete entry or back-edge state.  The proof
 transports that selected state into `GammaInv`; it never constructs a runtime
 state containing both histories.
 
-From the join, `EnvJoin.le_left` and `EnvJoin.le_right` provide
+From the join, `EnvJoin.left_le` and `EnvJoin.right_le` provide
 
 ```text
 GammaEntry <= GammaInv

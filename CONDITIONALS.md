@@ -90,7 +90,7 @@ additionally proves that every finitely reachable state, including the
 See [`WHILE.md`](WHILE.md) for the rules, premise audit, transport proof, and
 the distinction between reachable-state safety and termination.
 
-## Conditional extraction
+## Control-flow extraction
 
 `FWRust.Sealor` extends the core frontier extractor with Boolean, equality, and
 conditional syntax.  Following
@@ -107,6 +107,49 @@ require either synthesizing a fresh branch join or rebasing an arbitrary nested
 completion into a fresh child lifetime; neither operation follows from the
 current completion relation.  This boundary is explicit in the extractor and
 its build-checked examples.
+
+The generated grammar also exposes the three native-loop parser frontiers
+`PartialTerm.whileStart`, `PartialTerm.whileCondition`, and
+`PartialTerm.whileBody`.  These are partial-source states, distinct from the
+runtime-only `Term.whileCond` and `Term.whileBody` phases.  `whileStart` and
+`whileCondition` do not yet contain a complete Boolean guard and seal to
+`missing`.  At `whileBody`, the sealor retains the complete original guard and
+the parsed body prefix.  Thus
+
+```text
+while x { xxx;
+```
+
+becomes the ordinary term
+
+```text
+while x { xxx; missing }
+```
+
+using only `Term.whileLoop`, `Term.block`, and `Term.missing`.  This matches the
+loop strategy in `ast_copier.rs`; there is no extractor-only conditional or
+partial-loop constructor in the core language.
+
+The proof relies on the bottom effect of `missing`.  Because the placeholder
+cannot return, its static continuation environment can be the environment that
+the completed body would have produced.  The completion derivation supplies
+the required finite-support and weak initialized-well-formedness facts, which
+`missingTerm_typed_to` turns into effect certificates.  Consequently the
+rebuilt body has the completion's original back-edge environment, and normal
+`T-While` can reuse the original join and invariant-side guard derivation.  It
+never needs the historical duplicate entry-side guard/body typings.
+
+Ghost hygiene is deliberately conservative: `Term.MayMentions` says that
+`missing` may mention every name and agrees with exact occurrence on
+missing-free syntax.  A partial body ending in `missing` diverges, so
+`LoopInvariantNameFresh.of_diverging_body` makes the loop-hygiene implication
+vacuous without falsely declaring the unknown suffix name-free.  The partial
+block-prefix and exact-completion cases are build checked in
+[`FWRust/Sealor/Examples.lean`](FWRust/Sealor/Examples.lean); the complete proof
+is described in [`WHILE.md`](WHILE.md).  This conservatism also means an
+equality whose right operand contains a generated hole is deliberately not
+rebuildable by `T-Eq`; a complete equality retained before the final body hole
+is unaffected.
 
 ## Remaining local corrections
 

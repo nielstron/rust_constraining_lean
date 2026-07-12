@@ -116,7 +116,8 @@ theorem terminatesAsValue_missingFree_bounded
       store _hvalidRuntime _hvalidStoreTyping _hwellFormed _hsafe _hfinite
     exact ⟨store, value, MultiStep.refl⟩
   case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _hsize _hsource hfree
+    intro _env₁ _env₂ _typing _lifetime _ty _hloanFree _hfinite
+      _hwellBridge _hsize _hsource hfree
       _hloopFree
       _store _hvalidRuntime _hvalidStoreTyping _hwellFormed _hsafe _hfinite
     exact False.elim hfree

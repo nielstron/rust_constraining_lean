@@ -1175,8 +1175,8 @@ theorem TermTyping.retype_of_sourceTerm {env₁ env₂ : Env}
       cases hvalueTyping with
       | unit | int | bool => exact TermTyping.const (by constructor)
       | ref _hlookup => exact absurd hsourceValue (by simp [SourceValue]))
-    (fun hwellTy hloanFree _hsource =>
-      TermTyping.missing hwellTy hloanFree)
+    (fun hloanFree hfinite hwellFormed _hsource =>
+      TermTyping.missing hloanFree hfinite hwellFormed)
     (fun hLv hcopy hread _hsource =>
       TermTyping.copy hLv hcopy hread)
     (fun hLv hwrite hmove _hsource =>
@@ -5927,9 +5927,11 @@ theorem typingPreservesWellFormed_of_ruleCarriedObligations_core_bounded
             exact ⟨hwellFormed,
               WellFormedTy.whenInitialized
                 (valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping)⟩)
-        (fun {_env _typing _lifetime _ty} hwellTy _hloanFree _hsize
-            _htypingEq hwellFormed =>
-          ⟨hwellFormed, WellFormedTy.whenInitialized hwellTy⟩)
+        (fun {_env₁ _env₂ _typing _lifetime _ty} hloanFree
+            _hfinite hwellBridge _hsize _htypingEq hwellFormed =>
+          ⟨hwellBridge hwellFormed,
+            WellFormedTy.whenInitialized
+              (TyLoanFree.wellFormed hloanFree _env₂ _lifetime)⟩)
         (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
             _hsize _htypingEq hwellFormed =>
           ⟨hwellFormed,
@@ -6138,9 +6140,11 @@ theorem typingPreservesWellFormedWhenInitialized_of_ruleCarriedObligations_core_
             exact ⟨hwellFormed,
               WellFormedTy.whenInitialized
                 (valueTyping_result_wellFormed_of_refs (hrefs _ _) hvalueTyping)⟩)
-        (fun {_env _typing _lifetime _ty} hwellTy _hloanFree _hsize
-            _htypingEq hwellFormed =>
-          ⟨hwellFormed, WellFormedTy.whenInitialized hwellTy⟩)
+        (fun {_env₁ _env₂ _typing _lifetime _ty} hloanFree
+            _hfinite hwellBridge _hsize _htypingEq hwellFormed =>
+          ⟨hwellBridge hwellFormed,
+            WellFormedTy.whenInitialized
+              (TyLoanFree.wellFormed hloanFree _env₂ _lifetime)⟩)
         (fun {_env _typing _lifetime _valueLifetime _lv _ty} hLv hcopy _hread
             _hsize _htypingEq hwellFormed =>
           ⟨hwellFormed,

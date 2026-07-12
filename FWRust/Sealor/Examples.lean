@@ -253,4 +253,230 @@ theorem elseIf_sealed_wellTyped :
   sealProgram_wellTyped_of_completion elseIfProgramPartial_completes
     completeElseIfProgram_wellTyped
 
+/-! ## Partial `while` frontiers -/
+
+abbrev falsehood : Term :=
+  .val (.bool Bool.false)
+
+def completeFalseLoop : Term :=
+  .whileLoop branchLifetime falsehood unitTerm
+
+theorem empty_loopInvariantNameFresh (condition body : Term) :
+    LoopInvariantNameFresh Env.empty Env.empty condition body := by
+  intro erased checked hfresh _hcondition _hbody
+  exact hfresh
+
+theorem empty_containedBorrowsWellFormedWhenInitialized :
+    ContainedBorrowsWellFormedWhenInitialized Env.empty := by
+  intro name slot mutable targets hslot _hcontains
+  simp [Env.empty] at hslot
+
+theorem completeFalseLoop_typing :
+    TermTyping Env.empty StoreTyping.empty Lifetime.root completeFalseLoop
+      .unit Env.empty := by
+  unfold completeFalseLoop
+  exact TermTyping.whileLoop (envBack := Env.empty) (envInv := Env.empty)
+    branchLifetime_child
+    (by simp [EnvJoin])
+    empty_containedBorrowsWellFormedWhenInitialized
+    (empty_loopInvariantNameFresh _ _)
+    (TermTyping.const ValueTyping.bool)
+    (TermTyping.const ValueTyping.unit)
+    (by simp [Env.dropLifetime, Env.empty])
+
+/-! An in-flight condition does not yet supply a reusable Boolean guard, so it
+seals to the polymorphic missing term. -/
+
+def incompleteWhileCondition : PartialProgram :=
+  .whileCondition branchLifetime .cutoff
+
+theorem incompleteWhileCondition_completes :
+    CompletesProgram incompleteWhileCondition completeFalseLoop :=
+  Generated.CompletesTerm.ctermWhile_whileCondition
+    Generated.CompletesTerm.cutoff
+
+theorem incompleteWhileCondition_seal_shape :
+    sealProgram incompleteWhileCondition = missingTerm := by
+  simp [sealProgram, incompleteWhileCondition, sealTerm, sealTermStmts]
+
+theorem incompleteWhileCondition_sealed_wellTyped :
+    ProgramWellTyped (sealProgram incompleteWhileCondition) :=
+  sealProgram_wellTyped_of_completion incompleteWhileCondition_completes
+    ⟨.unit, Env.empty, completeFalseLoop_typing⟩
+
+/-! Once the guard is complete, it is retained.  A body not yet known to be a
+Rust block is represented by the bottom-effect missing term. -/
+
+def incompleteWhileBody : PartialProgram :=
+  .whileBody branchLifetime falsehood .cutoff
+
+theorem incompleteWhileBody_completes :
+    CompletesProgram incompleteWhileBody completeFalseLoop :=
+  Generated.CompletesTerm.ctermWhile_whileBody
+    Generated.CompletesTerm.cutoff
+
+theorem incompleteWhileBody_seal_shape :
+    sealProgram incompleteWhileBody =
+      (.whileLoop branchLifetime falsehood missingTerm) := by
+  simp [sealProgram, incompleteWhileBody, sealTerm, sealTermStmts,
+    loopBodyRebuildable]
+
+theorem incompleteWhileBody_sealed_wellTyped :
+    ProgramWellTyped (sealProgram incompleteWhileBody) :=
+  sealProgram_wellTyped_of_completion incompleteWhileBody_completes
+    ⟨.unit, Env.empty, completeFalseLoop_typing⟩
+
+/-! A determined body does not need a fallback: the exact completed loop is
+preserved and its original typing derivation is reused. -/
+
+def determinedWhileBody : PartialProgram :=
+  .whileBody branchLifetime falsehood (.done unitTerm)
+
+theorem determinedWhileBody_completes :
+    CompletesProgram determinedWhileBody completeFalseLoop :=
+  Generated.CompletesTerm.ctermWhile_whileBody
+    Generated.CompletesTerm.done
+
+theorem determinedWhileBody_seal_shape :
+    sealProgram determinedWhileBody = completeFalseLoop := by
+  simp [sealProgram, determinedWhileBody, completeFalseLoop, sealTerm,
+    sealTermStmts, loopBodyRebuildable]
+
+theorem determinedWhileBody_sealed_wellTyped :
+    ProgramWellTyped (sealProgram determinedWhileBody) :=
+  sealProgram_wellTyped_of_completion determinedWhileBody_completes
+    ⟨.unit, Env.empty, completeFalseLoop_typing⟩
+
+/-! The same two paths for a realistic block-shaped Rust loop body. -/
+
+def whileBlockLifetime : Lifetime :=
+  { path := [0, 0] }
+
+theorem whileBlockLifetime_child :
+    LifetimeChild branchLifetime whileBlockLifetime :=
+  ⟨0, rfl⟩
+
+def completeFalseBlockLoop : Term :=
+  .whileLoop branchLifetime falsehood
+    (.block whileBlockLifetime [unitTerm])
+
+theorem completeFalseBlockLoop_typing :
+    TermTyping Env.empty StoreTyping.empty Lifetime.root
+      completeFalseBlockLoop .unit Env.empty := by
+  unfold completeFalseBlockLoop
+  have hbody : TermTyping Env.empty StoreTyping.empty branchLifetime
+      (.block whileBlockLifetime [unitTerm]) .unit Env.empty := by
+    exact TermTyping.block whileBlockLifetime_child
+      (.singleton (TermTyping.const ValueTyping.unit)) WellFormedTy.unit
+      (by simp [Env.dropLifetime, Env.empty])
+  exact TermTyping.whileLoop (envBack := Env.empty) (envInv := Env.empty)
+    branchLifetime_child
+    (by simp [EnvJoin])
+    empty_containedBorrowsWellFormedWhenInitialized
+    (empty_loopInvariantNameFresh _ _)
+    (TermTyping.const ValueTyping.bool)
+    hbody
+    (by simp [Env.dropLifetime, Env.empty])
+
+def incompleteWhileBlockBody : PartialProgram :=
+  .whileBody branchLifetime falsehood
+    (.blockTerms whileBlockLifetime (.elems [] none))
+
+theorem incompleteWhileBlockBody_completes :
+    CompletesProgram incompleteWhileBlockBody completeFalseBlockLoop :=
+  Generated.CompletesTerm.ctermWhile_whileBody
+    (Generated.CompletesTerm.ctermBlock_blockTerms
+      (Generated.CompletesTerms.elemsDone (suffix := [unitTerm])))
+
+theorem incompleteWhileBlockBody_seal_shape :
+    sealProgram incompleteWhileBlockBody =
+      (.whileLoop branchLifetime falsehood
+        (.block whileBlockLifetime [missingTerm])) := by
+  simp [sealProgram, incompleteWhileBlockBody, sealTerm, sealTermStmts,
+    sealTerms, loopBodyRebuildable]
+
+/-- The exact shape needed for a source prefix such as
+`while condition { prefix;`: neither the guard nor any completed body
+statement is discarded. -/
+theorem whileBody_statementPrefix_seal_shape
+    (bodyLifetime blockLifetime : Lifetime) (condition : Term)
+    (pre : List Term) :
+    sealProgram
+        (.whileBody bodyLifetime condition
+          (.blockTerms blockLifetime (.elems pre none))) =
+      (.whileLoop bodyLifetime condition
+        (.block blockLifetime (pre ++ [missingTerm]))) := by
+  simp [sealProgram, sealTerm, sealTermStmts, sealTerms,
+    loopBodyRebuildable]
+
+/-- A build-checked nonempty instance of `while condition { statement;`.
+The extracted ordinary loop keeps both `condition` and `statement`. -/
+def incompleteWhilePrefixedBlockBody : PartialProgram :=
+  .whileBody branchLifetime falsehood
+    (.blockTerms whileBlockLifetime (.elems [unitTerm] none))
+
+theorem incompleteWhilePrefixedBlockBody_completes :
+    CompletesProgram incompleteWhilePrefixedBlockBody completeFalseBlockLoop :=
+  Generated.CompletesTerm.ctermWhile_whileBody
+    (Generated.CompletesTerm.ctermBlock_blockTerms
+      (Generated.CompletesTerms.elemsDone (suffix := [])))
+
+theorem incompleteWhilePrefixedBlockBody_seal_shape :
+    sealProgram incompleteWhilePrefixedBlockBody =
+      (.whileLoop branchLifetime falsehood
+        (.block whileBlockLifetime [unitTerm, missingTerm])) := by
+  simpa [incompleteWhilePrefixedBlockBody] using
+    whileBody_statementPrefix_seal_shape branchLifetime whileBlockLifetime
+      falsehood [unitTerm]
+
+theorem incompleteWhilePrefixedBlockBody_sealed_wellTyped :
+    ProgramWellTyped (sealProgram incompleteWhilePrefixedBlockBody) :=
+  sealProgram_wellTyped_of_completion
+    incompleteWhilePrefixedBlockBody_completes
+    ⟨.unit, Env.empty, completeFalseBlockLoop_typing⟩
+
+theorem incompleteWhileBlockBody_sealed_wellTyped :
+    ProgramWellTyped (sealProgram incompleteWhileBlockBody) :=
+  sealProgram_wellTyped_of_completion incompleteWhileBlockBody_completes
+    ⟨.unit, Env.empty, completeFalseBlockLoop_typing⟩
+
+def determinedWhileBlockBody : PartialProgram :=
+  .whileBody branchLifetime falsehood
+    (.blockTerms whileBlockLifetime (.done [unitTerm]))
+
+theorem determinedWhileBlockBody_completes :
+    CompletesProgram determinedWhileBlockBody completeFalseBlockLoop :=
+  Generated.CompletesTerm.ctermWhile_whileBody
+    (Generated.CompletesTerm.ctermBlock_blockTerms
+      Generated.CompletesTerms.done)
+
+theorem determinedWhileBlockBody_seal_shape :
+    sealProgram determinedWhileBlockBody = completeFalseBlockLoop := by
+  simp [sealProgram, determinedWhileBlockBody, completeFalseBlockLoop,
+    sealTerm, sealTermStmts, sealTerms, loopBodyRebuildable]
+
+theorem determinedWhileBlockBody_sealed_wellTyped :
+    ProgramWellTyped (sealProgram determinedWhileBlockBody) :=
+  sealProgram_wellTyped_of_completion determinedWhileBlockBody_completes
+    ⟨.unit, Env.empty, completeFalseBlockLoop_typing⟩
+
+/-! Before the parser has exposed a body lifetime, the only premise-free
+fallback is the polymorphic missing term. -/
+
+def whileStartPartial : PartialProgram :=
+  .whileStart
+
+theorem whileStartPartial_completes :
+    CompletesProgram whileStartPartial completeFalseLoop :=
+  Generated.CompletesTerm.ctermWhile_whileStart
+
+theorem whileStart_seal_shape :
+    sealProgram whileStartPartial = missingTerm := by
+  simp [sealProgram, whileStartPartial, sealTerm, sealTermStmts]
+
+theorem whileStart_sealed_wellTyped :
+    ProgramWellTyped (sealProgram whileStartPartial) :=
+  sealProgram_wellTyped_of_completion whileStartPartial_completes
+    ⟨.unit, Env.empty, completeFalseLoop_typing⟩
+
 end ConservativeSealor.Examples

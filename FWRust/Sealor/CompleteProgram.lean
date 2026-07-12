@@ -50,6 +50,8 @@ def copy (operand : LVal) : Term := .copy operand
 def eq (lhs rhs : Term) : Term := .eq lhs rhs
 def ite (condition trueBranch falseBranch : Term) : Term :=
   .ite condition trueBranch falseBranch
+def whileLoop (bodyLifetime : Lifetime) (condition body : Term) : Term :=
+  .whileLoop bodyLifetime condition body
 
 end CompleteDsl
 
@@ -88,6 +90,7 @@ syntax (name := ctermMove) clval : cterm
 syntax (name := ctermCopy) "copy" clval : cterm
 syntax (name := ctermEq) cterm "==" cterm : cterm
 syntax (name := ctermIte) "if" cterm cterm "else" cterm : cterm
+syntax (name := ctermWhile) "while" term cterm cterm : cterm
 
 /-!
 Checked constructor annotations for the generator.
@@ -171,6 +174,9 @@ abbrev ctermEq_ctor (lhs rhs : Term) : Term :=
 
 abbrev ctermIte_ctor (condition trueBranch falseBranch : Term) : Term :=
   show Term from (.ite condition trueBranch falseBranch)
+
+abbrev ctermWhile_ctor (bodyLifetime : Lifetime) (condition body : Term) : Term :=
+  show Term from (.whileLoop bodyLifetime condition body)
 
 end SyntaxCtor
 

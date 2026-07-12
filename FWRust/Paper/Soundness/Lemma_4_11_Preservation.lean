@@ -11073,7 +11073,8 @@ theorem preservation_bounded
     exact And.intro hwellFormed hterminal
   -- T-Missing: no run from `missing` reaches a value.
   case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _hsize _htypingEq hsource
+    intro _env₁ _env₂ _typing _lifetime _ty _hloanFree _hfinite
+      _hwellBridge _hsize _htypingEq hsource
       _store _finalStore _finalValue _hvalidRuntime _hvalidStoreTyping
       _hwellFormed _hsafe hmulti
     exact False.elim (multistep_missing_not_value hmulti)

@@ -665,6 +665,41 @@ mutual
     | term :: rest => Term.Mentions x term ∨ TermList.Mentions x rest
 end
 
+mutual
+  /-- Conservative syntactic occurrence used by ghost-name side conditions.
+
+  A generated `missing` placeholder stands for arbitrary omitted source, so it
+  may mention every name.  On `Term.MissingFree` syntax this coincides with the
+  ordinary, exact `Term.Mentions` predicate. -/
+  def Term.MayMentions (x : Name) : Term → Prop
+    | .block _ terms => TermList.MayMentions x terms
+    | .letMut y initialiser => y = x ∨ Term.MayMentions x initialiser
+    | .assign lhs rhs => LVal.Mentions x lhs ∨ Term.MayMentions x rhs
+    | .box operand => Term.MayMentions x operand
+    | .borrow _ operand => LVal.Mentions x operand
+    | .move operand => LVal.Mentions x operand
+    | .copy operand => LVal.Mentions x operand
+    | .val _ => False
+    | .missing => True
+    | .eq lhs rhs => Term.MayMentions x lhs ∨ Term.MayMentions x rhs
+    | .ite condition trueBranch falseBranch =>
+        Term.MayMentions x condition ∨ Term.MayMentions x trueBranch ∨
+          Term.MayMentions x falseBranch
+    | .whileLoop _ condition body =>
+        Term.MayMentions x condition ∨ Term.MayMentions x body
+    | .whileCond _ conditionInFlight condition body =>
+        Term.MayMentions x conditionInFlight ∨
+          Term.MayMentions x condition ∨ Term.MayMentions x body
+    | .whileBody _ bodyInFlight condition body =>
+        Term.MayMentions x bodyInFlight ∨ Term.MayMentions x condition ∨
+          Term.MayMentions x body
+
+  /-- Conservative occurrence in a term list. -/
+  def TermList.MayMentions (x : Name) : List Term → Prop
+    | [] => False
+    | term :: rest => Term.MayMentions x term ∨ TermList.MayMentions x rest
+end
+
 /- The finite set of variable names syntactically mentioned by a term. -/
 mutual
   def Term.names : Term → Finset Name
@@ -806,6 +841,171 @@ theorem Term.not_mentions_of_not_mem_names {x : Name} {term : Term} :
   intro hnot hmentions
   exact hnot (Term.mentions_mem_names hmentions)
 
+/-- Exact occurrences are always conservative occurrences. -/
+theorem Term.mayMentions_of_mentions {x : Name} {term : Term} :
+    Term.Mentions x term → Term.MayMentions x term := by
+  revert term
+  intro term
+  refine Term.rec
+    (motive_1 := fun term =>
+      Term.Mentions x term → Term.MayMentions x term)
+    (motive_2 := fun terms =>
+      TermList.Mentions x terms → TermList.MayMentions x terms)
+    ?block ?letMut ?assign ?box ?borrow ?move ?copy ?val ?missing ?eq ?ite
+    ?whileLoop ?whileCond ?whileBody ?nil ?cons term
+  all_goals
+    simp only [Term.Mentions, TermList.Mentions, Term.MayMentions,
+      TermList.MayMentions]
+  case block => intro _ _ ih h; exact ih h
+  case letMut =>
+    intro _ _ ih h
+    exact h.elim Or.inl (fun hinner => Or.inr (ih hinner))
+  case assign =>
+    intro _ _ ih h
+    exact h.elim Or.inl (fun hrhs => Or.inr (ih hrhs))
+  case box => intro _ ih h; exact ih h
+  case borrow => intro _ _ h; exact h
+  case move => intro _ h; exact h
+  case copy => intro _ h; exact h
+  case val => intro _ h; contradiction
+  case missing => intro h; contradiction
+  case eq =>
+    intro _ _ ihL ihR h
+    exact h.elim (fun hl => Or.inl (ihL hl)) (fun hr => Or.inr (ihR hr))
+  case ite =>
+    intro _ _ _ ihC ihT ihF h
+    rcases h with hc | ht | hf
+    · exact Or.inl (ihC hc)
+    · exact Or.inr (Or.inl (ihT ht))
+    · exact Or.inr (Or.inr (ihF hf))
+  case whileLoop =>
+    intro _ _ _ ihC ihB h
+    exact h.elim (fun hc => Or.inl (ihC hc)) (fun hb => Or.inr (ihB hb))
+  case whileCond =>
+    intro _ _ _ _ ihF ihC ihB h
+    rcases h with hf | hc | hb
+    · exact Or.inl (ihF hf)
+    · exact Or.inr (Or.inl (ihC hc))
+    · exact Or.inr (Or.inr (ihB hb))
+  case whileBody =>
+    intro _ _ _ _ ihF ihC ihB h
+    rcases h with hf | hc | hb
+    · exact Or.inl (ihF hf)
+    · exact Or.inr (Or.inl (ihC hc))
+    · exact Or.inr (Or.inr (ihB hb))
+  case nil => intro h; contradiction
+  case cons =>
+    intro _ _ ihHead ihTail h
+    exact h.elim (fun hh => Or.inl (ihHead hh))
+      (fun ht => Or.inr (ihTail ht))
+
+theorem Term.not_mentions_of_not_mayMentions {x : Name} {term : Term} :
+    ¬ Term.MayMentions x term → ¬ Term.Mentions x term := by
+  intro hnot hmentions
+  exact hnot (Term.mayMentions_of_mentions hmentions)
+
+/-- On source syntax without generated holes, conservative occurrence is exact. -/
+theorem Term.mayMentions_iff_mentions_of_missingFree {x : Name} {term : Term} :
+    term.MissingFree →
+      (Term.MayMentions x term ↔ Term.Mentions x term) := by
+  revert term
+  intro term
+  refine Term.rec
+    (motive_1 := fun term => term.MissingFree →
+      (Term.MayMentions x term ↔ Term.Mentions x term))
+    (motive_2 := fun terms => Term.MissingFreeList terms →
+      (TermList.MayMentions x terms ↔ TermList.Mentions x terms))
+    ?block ?letMut ?assign ?box ?borrow ?move ?copy ?val ?missing ?eq ?ite
+    ?whileLoop ?whileCond ?whileBody ?nil ?cons term
+  case block =>
+    intro _ _ ih hfree
+    exact ih hfree
+  case letMut =>
+    intro _ initialiser ih hfree
+    change initialiser.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ih hfree]
+  case assign =>
+    intro _ rhs ih hfree
+    change rhs.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ih hfree]
+  case box =>
+    intro operand ih hfree
+    change operand.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions] using ih hfree
+  case borrow => intro _ _ _; rfl
+  case move => intro _ _; rfl
+  case copy => intro _ _; rfl
+  case val => intro _ _; rfl
+  case missing => intro hfree; contradiction
+  case eq =>
+    intro lhs rhs ihL ihR hfree
+    change lhs.MissingFree ∧ rhs.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ihL hfree.1, ihR hfree.2]
+  case ite =>
+    intro condition trueBranch falseBranch ihC ihT ihF hfree
+    change condition.MissingFree ∧ trueBranch.MissingFree ∧
+      falseBranch.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ihC hfree.1,
+      ihT hfree.2.1, ihF hfree.2.2]
+  case whileLoop =>
+    intro _ condition body ihC ihB hfree
+    change condition.MissingFree ∧ body.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ihC hfree.1, ihB hfree.2]
+  case whileCond =>
+    intro _ inFlight condition body ihF ihC ihB hfree
+    change inFlight.MissingFree ∧ condition.MissingFree ∧ body.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ihF hfree.1,
+      ihC hfree.2.1, ihB hfree.2.2]
+  case whileBody =>
+    intro _ inFlight condition body ihF ihC ihB hfree
+    change inFlight.MissingFree ∧ condition.MissingFree ∧ body.MissingFree at hfree
+    simpa only [Term.MayMentions, Term.Mentions, ihF hfree.1,
+      ihC hfree.2.1, ihB hfree.2.2]
+  case nil => intro _; rfl
+  case cons =>
+    intro head tail ihHead ihTail hfree
+    change head.MissingFree ∧ Term.MissingFreeList tail at hfree
+    simpa only [TermList.MayMentions, TermList.Mentions,
+      ihHead hfree.1, ihTail hfree.2]
+
+theorem Term.not_mayMentions_of_missingFree_not_mentions
+    {x : Name} {term : Term} :
+    term.MissingFree →
+    ¬ Term.Mentions x term →
+    ¬ Term.MayMentions x term := by
+  intro hfree hnot
+  simpa only [Term.mayMentions_iff_mentions_of_missingFree hfree] using hnot
+
+theorem TermList.mayMentions_of_mem {x : Name} {term : Term}
+    {terms : List Term} :
+    term ∈ terms →
+    Term.MayMentions x term →
+    TermList.MayMentions x terms := by
+  intro hmem hmentions
+  induction terms with
+  | nil => simp at hmem
+  | cons head tail ih =>
+      simp only [List.mem_cons] at hmem
+      simp only [TermList.MayMentions]
+      rcases hmem with rfl | htail
+      · exact Or.inl hmentions
+      · exact Or.inr (ih htail)
+
+/-- A syntactically diverging placeholder context may stand for source that
+mentions any name. -/
+theorem Term.Diverges.mayMentions {term : Term} :
+    Term.Diverges term →
+    ∀ x, Term.MayMentions x term := by
+  intro hdiverges
+  induction hdiverges with
+  | missing =>
+      intro _x
+      simp [Term.MayMentions]
+  | block hmem _hdiverges ih =>
+      intro x
+      change TermList.MayMentions x _
+      exact TermList.mayMentions_of_mem hmem (ih x)
+
 /-- Variables occurring (in live borrows) in a partial type.
 
 `undef` shadows are moved-out and carry no live borrow, mirroring
@@ -916,21 +1116,22 @@ theorem StoreTyping.FiniteSupport.typeNameSupport {typing : StoreTyping} :
 /--
 Finite environment/store typing support gives a genuinely fresh equality ghost.
 
-The chosen name is fresh as an environment slot, absent from all names stored in
-environment/store types, absent from the left type, and absent from the right
-operand syntax.
+For a missing-free right operand, the chosen name is fresh as an environment
+slot, absent from all names stored in environment/store types, absent from the
+left type, and conservatively absent from the right operand syntax.
 -/
 theorem exists_fresh_eq_ghost {env : Env} {typing : StoreTyping}
     {lhsTy : Ty} {rhs : Term} :
     Env.FiniteSupport env →
     StoreTyping.FiniteSupport typing →
+    rhs.MissingFree →
     ∃ ghost,
       env.fresh ghost ∧
       Env.TypeNameFresh env ghost ∧
       ghost ∉ Ty.allVars lhsTy ∧
       StoreTyping.TypeNameFresh typing ghost ∧
-      ¬ Term.Mentions ghost rhs := by
-  rintro ⟨envDomain, henvDomain⟩ ⟨typingDomain, htypingDomain⟩
+      ¬ Term.MayMentions ghost rhs := by
+  rintro ⟨envDomain, henvDomain⟩ ⟨typingDomain, htypingDomain⟩ hmissingFree
   let envTypeNames : Finset Name :=
     envDomain.biUnion (fun y =>
       match env.slotAt y with
@@ -983,7 +1184,8 @@ theorem exists_fresh_eq_ghost {env : Env} {typing : StoreTyping}
         ⟨location, htypingDomain location ty hlookup, by
           simp [hlookup, hmem]⟩)
   exact ⟨ghost, henvFresh, henvTypeFresh, hnotLhsVars, hstoreTypeFresh,
-    Term.not_mentions_of_not_mem_names hnotRhsNames⟩
+    Term.not_mayMentions_of_missingFree_not_mentions hmissingFree
+      (Term.not_mentions_of_not_mem_names hnotRhsNames)⟩
 
 /-- A fixed rank function witnessing linearizability of an environment. -/
 def LinearizedBy (φ : Name → Nat) (env : Env) : Prop :=
@@ -1480,9 +1682,18 @@ def EnvJoinSameShape (branch join : Env) : Prop :=
 def LoopInvariantNameFresh (entry inv : Env) (condition body : Term) : Prop :=
   ∀ erased checked,
     Env.TypeNameFresh (entry.eraseMany erased) checked →
-    ¬ Term.Mentions checked condition →
-    ¬ Term.Mentions checked body →
+    ¬ Term.MayMentions checked condition →
+    ¬ Term.MayMentions checked body →
     Env.TypeNameFresh (inv.eraseMany erased) checked
+
+/-- A diverging body containing generated unknown source makes the loop's
+conservative name-freshness implication vacuous. -/
+theorem LoopInvariantNameFresh.of_diverging_body
+    {entry inv : Env} {condition body : Term} :
+    body.Diverges → LoopInvariantNameFresh entry inv condition body := by
+  intro hdiverges erased checked _hentry _hcondition hbody
+  exact False.elim
+    (hbody (FWRust.Paper.Term.Diverges.mayMentions hdiverges checked))
 
 /-- A join is an upper bound of its left component. -/
 theorem EnvJoin.left_le {left right join : Env} :
@@ -1593,6 +1804,30 @@ inductive WellFormedTyWhenInitialized : Env → Ty → Lifetime → Prop where
   | box {env : Env} {ty : Ty} {lifetime : Lifetime} :
       WellFormedTyWhenInitialized env ty lifetime →
       WellFormedTyWhenInitialized env (.box ty) lifetime
+
+/-- A loan-free type is well formed in every environment: only borrow types
+consult the environment, and those are excluded at every nesting depth. -/
+theorem TyLoanFree.wellFormed {ty : Ty} :
+    TyLoanFree ty → ∀ (env : Env) (lifetime : Lifetime),
+      WellFormedTy env ty lifetime := by
+  exact Ty.rec
+    (motive_1 := fun ty => TyLoanFree ty → ∀ env lifetime,
+      WellFormedTy env ty lifetime)
+    (motive_2 := fun _ => True)
+    (fun _hloan _env _lifetime => WellFormedTy.unit)
+    (fun _hloan _env _lifetime => WellFormedTy.int)
+    (fun mutable targets hloan =>
+      False.elim (hloan mutable targets PartialTyContains.here))
+    (fun _inner ih hloan env lifetime =>
+      WellFormedTy.box (ih (by
+        intro mutable targets hcontains
+        exact hloan mutable targets (PartialTyContains.tyBox hcontains))
+        env lifetime))
+    (fun _hloan _env _lifetime => WellFormedTy.bool)
+    (fun _ _ => trivial)
+    (fun _ _ => trivial)
+    (fun _ _ => trivial)
+    ty
 
 /-- Definition 3.22, compatible shape `Γ ⊢ T̃₁ ≈ T̃₂`. -/
 inductive ShapeCompatible : Env → PartialTy → PartialTy → Prop where
@@ -2065,14 +2300,20 @@ mutual
         {value : Value} {ty : Ty} :
         ValueTyping typing value ty →
         TermTyping env typing lifetime (.val value) ty env
-    /-- T-Missing: synthetic extractor placeholder.  The loan-freedom premise
-    keeps the placeholder from claiming a borrow of an existing place, which
-    would break borrow safety of the result environment. -/
-    | missing {env : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    /-- T-Missing: synthetic extractor placeholder with a bottom effect.
+
+    `.missing` never returns, so its static continuation environment may be
+    chosen independently of its input.  The two effect certificates preserve
+    finite support and weak environment well-formedness for that unreachable
+    continuation; loan-freedom keeps the placeholder from manufacturing a
+    borrow-typed value. -/
+    | missing {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
         {ty : Ty} :
-        WellFormedTy env ty lifetime →
         TyLoanFree ty →
-        TermTyping env typing lifetime .missing ty env
+        (Env.FiniteSupport env₁ → Env.FiniteSupport env₂) →
+        (WellFormedEnvWhenInitialized env₁ lifetime →
+          WellFormedEnvWhenInitialized env₂ lifetime) →
+        TermTyping env₁ typing lifetime .missing ty env₂
     /-- T-Copy. -/
     | copy {env : Env} {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
         {lv : LVal} {ty : Ty} :
@@ -2143,9 +2384,11 @@ mutual
     anonymous slot representing the left operand value that remains live while
     the right operand is evaluated.  The result environment erases `γ` again.
 
-    The explicit non-occurrence premise records that the anonymous slot is not
-    source-addressable syntax.  It is what lets the metatheory thin the ghost
-    slot back out after it has done its borrow-conflict filtering job. -/
+    The explicit conservative non-occurrence premise records that the anonymous
+    slot is not source-addressable syntax.  Since `missing` may stand for any
+    omitted source, it may mention every name and cannot discharge this premise.
+    The premise lets the metatheory thin the ghost slot back out after it has
+    done its borrow-conflict filtering job. -/
     | eq {env₁ env₂ env₃ envGhost : Env} {ghost : Name}
         {typing : StoreTyping} {lifetime : Lifetime}
         {lhs rhs : Term} {lhsTy rhsTy : Ty} :
@@ -2157,7 +2400,7 @@ mutual
         TermTyping
           (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
           typing lifetime rhs rhsTy envGhost →
-        ¬ Term.Mentions ghost rhs →
+        ¬ Term.MayMentions ghost rhs →
         env₃ = envGhost.erase ghost →
         CopyTy lhsTy →
         CopyTy rhsTy →
@@ -2274,7 +2517,7 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
     (motive_2 := fun env _typing _lifetime _terms _ty result _ =>
       Env.FiniteSupport env → Env.FiniteSupport result)
     (fun _hvalue hfinite => hfinite)
-    (fun _hwellTy _hloanFree hfinite => hfinite)
+    (fun _hloanFree hfinite _hwellFormed => hfinite)
     (fun _hlv _hcopy _hnotRead hfinite => hfinite)
     (fun _hlv _hnotWrite hmove hfinite =>
       EnvMove.finiteSupport hmove hfinite)
@@ -2317,8 +2560,9 @@ theorem TermTyping.finiteSupport {env₁ env₂ : Env} {typing : StoreTyping}
 Derived equality typing rule that chooses the anonymous equality slot from
 finite support instead of requiring callers to name it and prove freshness.
 
-The RHS is still checked in the ghost-extended environment.  The continuation
-must work for the fresh ghost chosen by `exists_fresh_eq_ghost`.
+The RHS is still checked in the ghost-extended environment.  Missing-freedom
+makes its conservative name set finite, and the continuation must work for the
+fresh ghost chosen by `exists_fresh_eq_ghost`.
 -/
 theorem TermTyping.eq_finite {env₁ env₂ env₃ : Env}
     {typing : StoreTyping} {lifetime : Lifetime}
@@ -2326,12 +2570,13 @@ theorem TermTyping.eq_finite {env₁ env₂ env₃ : Env}
     TermTyping env₁ typing lifetime lhs lhsTy env₂ →
     Env.FiniteSupport env₁ →
     StoreTyping.FiniteSupport typing →
+    rhs.MissingFree →
     (∀ ghost,
       env₂.fresh ghost →
       Env.TypeNameFresh env₂ ghost →
       ghost ∉ Ty.allVars lhsTy →
       StoreTyping.TypeNameFresh typing ghost →
-      ¬ Term.Mentions ghost rhs →
+      ¬ Term.MayMentions ghost rhs →
       ∃ envGhost,
         TermTyping
           (env₂.update ghost { ty := .ty lhsTy, lifetime := lifetime })
@@ -2341,11 +2586,11 @@ theorem TermTyping.eq_finite {env₁ env₂ env₃ : Env}
     CopyTy rhsTy →
     ShapeCompatible env₃ (.ty lhsTy) (.ty rhsTy) →
     TermTyping env₁ typing lifetime (.eq lhs rhs) .bool env₃ := by
-  intro hLhs hfiniteEnv hfiniteTyping hRhs hcopyL hcopyR hshape
+  intro hLhs hfiniteEnv hfiniteTyping hmissingFree hRhs hcopyL hcopyR hshape
   have hfiniteEnv₂ : Env.FiniteSupport env₂ :=
     hLhs.finiteSupport hfiniteEnv
   rcases exists_fresh_eq_ghost (env := env₂) (typing := typing)
-      (lhsTy := lhsTy) (rhs := rhs) hfiniteEnv₂ hfiniteTyping with
+      (lhsTy := lhsTy) (rhs := rhs) hfiniteEnv₂ hfiniteTyping hmissingFree with
     ⟨ghost, hfresh, htypeFresh, htyFresh, hstoreFresh, hnotMention⟩
   rcases hRhs ghost hfresh htypeFresh htyFresh hstoreFresh hnotMention with
     ⟨envGhost, hRhsGhost, henvEq⟩

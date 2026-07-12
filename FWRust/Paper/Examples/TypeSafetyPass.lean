@@ -29,6 +29,7 @@ theorem scalarCopyComparison_typing :
     (TermTyping.const ValueTyping.int)
     Env.finiteSupport_empty
     StoreTyping.finiteSupport_empty
+    (by simp [Term.MissingFree])
     ?_
     CopyTy.int
     CopyTy.int
@@ -973,6 +974,7 @@ theorem pointerIfCondition_typing :
       pointerIf_not_readProhibited_deref_p)
     (((Env.finiteSupport_empty.update).update).update)
     StoreTyping.finiteSupport_empty
+    (by simp [Term.MissingFree])
     ?_
     CopyTy.int
     CopyTy.int

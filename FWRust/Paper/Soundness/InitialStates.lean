@@ -84,7 +84,8 @@ theorem termTyping_empty_sourceTerm {env₂ : Env} {lifetime : Lifetime}
     subst hmem
     exact valueTyping_empty_sourceValue hvalueTyping
   case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _htypingEq
+    intro _env₁ _env₂ _typing _lifetime _ty _hloanFree _hfinite
+      _hwellBridge _htypingEq
       candidate hmem
     simp [termValues] at hmem
   case copy =>

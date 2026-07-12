@@ -17,7 +17,11 @@ because they extend the paper.
 ## FW Rust sealor
 
 The canonical extractor retains the core let/assignment/box/borrow/copy
-frontiers and also handles Boolean, equality, and conditional syntax.
+frontiers and also handles Boolean, equality, conditional, and native-while
+syntax.  Exact completed loops are retained.  Once the guard is complete, a
+partial block body retains its completed statement prefix and is closed by
+`missing`; the result is an ordinary `Term.whileLoop`, not an extractor-only
+core term.  Frontiers without a complete guard use `missing`.
 
 | Claim | Lean declaration |
 | --- | --- |
@@ -28,10 +32,25 @@ frontiers and also handles Boolean, equality, and conditional syntax.
 | Theorem 5.5, SFR reflects well-typedness onto realizations at statement boundaries | [`ConservativeSealor.sealProgram_completedStatementBoundary_sound_general`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
 | Corollary 5.6, SFR is sound for partial syntax at statement boundaries | [`ConservativeSealor.nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
 | Theorem 5.7, SFR is sound at statement boundaries for arbitrary strings | [`ConservativeSealor.nestedBlocksPrefixChecker_sound_on_statementBoundary_strings`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Generated partial-while parser frontiers | [`Generated.PartialTerm.whileStart`, `Generated.PartialTerm.whileCondition`, `Generated.PartialTerm.whileBody`](FWRust/Sealor/Generated/PartialProgram.lean) |
+| Bottom-effect placeholder with an explicit completion output | [`ConservativeSealor.missingTerm_typed_to`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Completion-derived finite-support and initialized-well-formedness certificates | [`ConservativeSealor.termListTyping_finiteSupport`, `ConservativeSealor.termListTyping_preservesWellFormed`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Faithful typing of an exact or missing-terminated loop body | [`ConservativeSealor.sealLoopBody_typed`](FWRust/Sealor/Sealors/NestedBlocks.lean) |
+| Ordinary loop shape retaining an arbitrary completed body prefix | [`ConservativeSealor.Examples.whileBody_statementPrefix_seal_shape`](FWRust/Sealor/Examples.lean) |
+| Build-checked nonempty retained-prefix completion, shape, and typing regression | [`ConservativeSealor.Examples.incompleteWhilePrefixedBlockBody_completes`, `ConservativeSealor.Examples.incompleteWhilePrefixedBlockBody_seal_shape`, `ConservativeSealor.Examples.incompleteWhilePrefixedBlockBody_sealed_wellTyped`](FWRust/Sealor/Examples.lean) |
+| Build-checked typing of incomplete-condition, incomplete-body, partial-block, and exact-loop paths | [`ConservativeSealor.Examples.incompleteWhileCondition_sealed_wellTyped`, `ConservativeSealor.Examples.incompleteWhileBody_sealed_wellTyped`, `ConservativeSealor.Examples.incompleteWhileBlockBody_sealed_wellTyped`, `ConservativeSealor.Examples.determinedWhileBlockBody_sealed_wellTyped`](FWRust/Sealor/Examples.lean) |
 
 Theorems 5.3 and 5.7 are conditional on a premise encoding the required bridge
 between strings and generated partial ASTs.  A complete parser and its proof
-are not formalized here.
+are not formalized here.  The loop-body path follows `ast_copier.rs`: it keeps
+the complete guard and visited statement prefix, then inserts the diverging
+placeholder for the unknown suffix.  The low-level transport theorem carries
+the standard arbitrary-state store-reference, finite-support, and initialized
+well-formedness hypotheses.  `sealProgram_wellTyped_of_completion` discharges
+them for the empty initial program; they are not premises added to `T-While`.
+Conservative occurrence also deliberately prevents a generated hole from
+serving as an equality right operand, while leaving completed equalities in a
+retained statement prefix unchanged.
 
 ## FW Rust metatheory
 
@@ -86,6 +105,10 @@ These declarations describe an extension beyond Pearce (2021).
 | Six loop reduction rules | [`Step.whileStart`](FWRust/Paper/InductiveSemantics.lean) through [`Step.whileBodyDone`](FWRust/Paper/InductiveSemantics.lean) | Integrated |
 | Minimal normal loop rule | [`FWRust.Paper.TermTyping.whileLoop`](FWRust/Paper/Typing.lean) | Seven premises |
 | Diverging-body loop rule | [`FWRust.Paper.TermTyping.whileLoopDiverging`](FWRust/Paper/Typing.lean) | Four premises |
+| Bottom-effect placeholder typing | [`FWRust.Paper.TermTyping.missing`](FWRust/Paper/Typing.lean) | Arbitrary continuation environment with finite-support and weak-well-formedness certificates |
+| Conservative occurrence for unknown source | [`FWRust.Paper.Term.MayMentions`](FWRust/Paper/Typing.lean) | `missing` may mention every name |
+| Conservative occurrence is exact on source without holes | [`FWRust.Paper.Term.mayMentions_iff_mentions_of_missingFree`](FWRust/Paper/Typing.lean) | Preserves ordinary ghost hygiene |
+| Diverging bodies discharge loop-name hygiene without treating holes as fresh | [`FWRust.Paper.LoopInvariantNameFresh.of_diverging_body`](FWRust/Paper/Typing.lean) | Used by faithful partial-body sealing |
 | Finite terminal-run decomposition | [`FWRust.Paper.WhileRunEnds`](FWRust/Paper/InductiveSemantics.lean) | Used by preservation |
 | Finite reachable-prefix decomposition | [`FWRust.Paper.WhileRunReaches`](FWRust/Paper/InductiveSemantics.lean) | Used by all-prefix progress |
 | Loop-local terminal preservation | [`FWRust.Paper.preservation_whileRunEnds`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean) | Integrated into Lemma 4.11 |

@@ -1073,7 +1073,8 @@ theorem progress_typing_bounded {store : ProgramStore} (fuel : Nat)
     intro _env _typing lifetime value _ty _hvalue _hsize _hvst _hwf _hsafe _hstore
     exact progress_value store lifetime value
   case missing =>
-    intro _env _typing lifetime _ty _hwellTy _hloanFree _hsize _hvst _hwf _hsafe _hstore
+    intro _env₁ _env₂ _typing lifetime _ty _hloanFree _hfinite
+      _hwellBridge _hsize _hvst _hwf _hsafe _hstore
     exact Or.inr ⟨store, .missing, Step.missing⟩
   case copy =>
     intro _env _typing lifetime _valueLifetime _lv _ty hLv hcopy hreadProhibited

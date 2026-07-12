@@ -3856,7 +3856,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     TermTyping env typing lifetime term ty envOut →
     Env.TypeNameFresh (env.erase ghost) ghost →
     StoreTyping.TypeNameFresh typing ghost →
-    ¬ Term.Mentions ghost term →
+    ¬ Term.MayMentions ghost term →
     TermTyping (env.erase ghost) typing lifetime term ty
       (envOut.erase ghost) ∧
     Env.TypeNameFresh (envOut.erase ghost) ghost ∧
@@ -3866,7 +3866,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (motive_1 := fun env typing lifetime term ty envOut _ =>
       Env.TypeNameFresh (env.erase ghost) ghost →
       StoreTyping.TypeNameFresh typing ghost →
-      ¬ Term.Mentions ghost term →
+      ¬ Term.MayMentions ghost term →
       TermTyping (env.erase ghost) typing lifetime term ty
         (envOut.erase ghost) ∧
       Env.TypeNameFresh (envOut.erase ghost) ghost ∧
@@ -3874,7 +3874,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (motive_2 := fun env typing lifetime terms ty envOut _ =>
       Env.TypeNameFresh (env.erase ghost) ghost →
       StoreTyping.TypeNameFresh typing ghost →
-      ¬ TermList.Mentions ghost terms →
+      ¬ TermList.MayMentions ghost terms →
       TermListTyping (env.erase ghost) typing lifetime terms ty
         (envOut.erase ghost) ∧
       Env.TypeNameFresh (envOut.erase ghost) ghost ∧
@@ -3884,17 +3884,14 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       exact ⟨TermTyping.const hvalue, hfresh,
         ValueTyping.typeNameFresh hvalue hstore⟩)
     (by
-      intro env typing lifetime ty hwell hloan hfresh _hstore _hnot
-      have htyFresh : ghost ∉ Ty.allVars ty :=
-        Ty.no_allVars_of_loanFree hloan ghost
-      exact ⟨TermTyping.missing
-        (WellFormedTy.erase_ghost hwell hfresh htyFresh) hloan,
-        hfresh, htyFresh⟩)
+      intro _env₁ _env₂ _typing _lifetime _ty _hloan _hfinite
+        _hwellBridge _hfresh _hstore hnot
+      exact False.elim (hnot (by simp [Term.MayMentions])))
     (by
       intro env typing lifetime valueLifetime lv ty hLv hcopy hnotRead
         hfresh _hstore hnot
       have hnotLv : ¬ LVal.Mentions ghost lv := by
-        simpa [Term.Mentions] using hnot
+        simpa [Term.MayMentions] using hnot
       have hLvErased := LValTyping.erase_ghost.1 hLv hfresh hnotLv
       have htyFresh : ghost ∉ Ty.allVars ty := by
         have := LValTyping.typeNameFresh.1 hLvErased hfresh
@@ -3907,7 +3904,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env₁ env₂ typing lifetime valueLifetime lv ty hLv hnotWrite
         hmove hfresh _hstore hnot
       have hnotLv : ¬ LVal.Mentions ghost lv := by
-        simpa [Term.Mentions] using hnot
+        simpa [Term.MayMentions] using hnot
       have hLvErased := LValTyping.erase_ghost.1 hLv hfresh hnotLv
       have htyFresh : ghost ∉ Ty.allVars ty := by
         have := LValTyping.typeNameFresh.1 hLvErased hfresh
@@ -3923,7 +3920,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env typing lifetime valueLifetime lv ty hLv hmutable hnotWrite
         hfresh _hstore hnot
       have hnotLv : ¬ LVal.Mentions ghost lv := by
-        simpa [Term.Mentions] using hnot
+        simpa [Term.MayMentions] using hnot
       have hLvErased := LValTyping.erase_ghost.1 hLv hfresh hnotLv
       have htyFresh : ghost ∉ Ty.allVars ty := by
         have := LValTyping.typeNameFresh.1 hLvErased hfresh
@@ -3942,7 +3939,7 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env typing lifetime valueLifetime lv ty hLv hnotRead
         hfresh _hstore hnot
       have hnotLv : ¬ LVal.Mentions ghost lv := by
-        simpa [Term.Mentions] using hnot
+        simpa [Term.MayMentions] using hnot
       have hLvErased := LValTyping.erase_ghost.1 hLv hfresh hnotLv
       have htyFresh : ghost ∉ Ty.allVars ty := by
         have := LValTyping.typeNameFresh.1 hLvErased hfresh
@@ -3959,8 +3956,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ typing lifetime innerTerm innerTy hInner ih
         hfresh hstore hnot
-      have hnotInner : ¬ Term.Mentions ghost innerTerm := by
-        simpa [Term.Mentions] using hnot
+      have hnotInner : ¬ Term.MayMentions ghost innerTerm := by
+        simpa [Term.MayMentions] using hnot
       rcases ih hfresh hstore hnotInner with
         ⟨hInnerErased, hfreshOut, htyFresh⟩
       exact ⟨TermTyping.box hInnerErased, hfreshOut,
@@ -3968,8 +3965,8 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ env₃ typing lifetime blockLifetime terms ty hchild
         hterms hwell hdrop ih hfresh hstore hnot
-      have hnotTerms : ¬ TermList.Mentions ghost terms := by
-        simpa [Term.Mentions] using hnot
+      have hnotTerms : ¬ TermList.MayMentions ghost terms := by
+        simpa [Term.MayMentions] using hnot
       rcases ih hfresh hstore hnotTerms with
         ⟨htermsErased, hfreshTerms, htyFresh⟩
       subst hdrop
@@ -3985,10 +3982,10 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         hfreshOutX hoblig henv ih hfresh hstore hnot
       have hxGhost : x ≠ ghost := by
         intro hx
-        exact hnot (by simp [Term.Mentions, hx])
-      have hnotInit : ¬ Term.Mentions ghost init := by
+        exact hnot (by simp [Term.MayMentions, hx])
+      have hnotInit : ¬ Term.MayMentions ghost init := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       rcases ih hfresh hstore hnotInit with
         ⟨hinitErased, hfreshInit, htyFresh⟩
       subst henv
@@ -4010,13 +4007,13 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env₁ env₂ env₃ typing lifetime targetLifetime lhs oldTy rhs
         rhsTy hRhs hLhs hshape hwell hwrite hnoStale hranked hcoh hcontained
         hnotWrite ih hfresh hstore hnot
-      have hnotRhs : ¬ Term.Mentions ghost rhs := by
+      have hnotRhs : ¬ Term.MayMentions ghost rhs := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       have hnotLhs : ¬ LVal.Mentions ghost lhs := by
         intro hmention
         have hbase := (LVal.mentions_iff_base (ghost := ghost) lhs).1 hmention
-        exact hnot (by simp [Term.Mentions, hbase])
+        exact hnot (by simp [Term.MayMentions, hbase])
       rcases ih hfresh hstore hnotRhs with
         ⟨hRhsErased, hfreshRhs, hrhsFresh⟩
       have hLhsErased := LValTyping.erase_ghost.1 hLhs hfreshRhs hnotLhs
@@ -4052,12 +4049,12 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         lhsTy rhsTy hLhs hlocalFresh hlocalTypeFresh hlocalTyFresh
         hstoreLocal hRhsGhost hnotLocalRhs henvEq hcopyL hcopyR hshape
         ihL ihRhs hfresh hstore hnot
-      have hnotLhs : ¬ Term.Mentions ghost lhs := by
+      have hnotLhs : ¬ Term.MayMentions ghost lhs := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotRhs : ¬ Term.Mentions ghost rhs := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotRhs : ¬ Term.MayMentions ghost rhs := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       rcases ihL hfresh hstore hnotLhs with
         ⟨hLhsErased, hfreshLhs, hlhsFresh⟩
       by_cases hsame : localGhost = ghost
@@ -4141,15 +4138,15 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
         falseBranch trueTy falseTy joinTy hcondition htrue hfalse htyJoin
         henvJoin
         ihCondition ihTrue ihFalse hfresh hstore hnot
-      have hnotCondition : ¬ Term.Mentions ghost condition := by
+      have hnotCondition : ¬ Term.MayMentions ghost condition := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotTrue : ¬ Term.Mentions ghost trueBranch := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotTrue : ¬ Term.MayMentions ghost trueBranch := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotFalse : ¬ Term.Mentions ghost falseBranch := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotFalse : ¬ Term.MayMentions ghost falseBranch := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       rcases ihCondition hfresh hstore hnotCondition with
         ⟨hconditionErased, hfreshCond, _hboolFresh⟩
       rcases ihTrue hfreshCond hstore hnotTrue with
@@ -4171,15 +4168,15 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env₁ env₂ env₃ env₄ typing lifetime condition trueBranch
         falseBranch trueTy falseTy hcondition htrue hfalse hdiverges
         ihCondition ihTrue ihFalse hfresh hstore hnot
-      have hnotCondition : ¬ Term.Mentions ghost condition := by
+      have hnotCondition : ¬ Term.MayMentions ghost condition := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotTrue : ¬ Term.Mentions ghost trueBranch := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotTrue : ¬ Term.MayMentions ghost trueBranch := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotFalse : ¬ Term.Mentions ghost falseBranch := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotFalse : ¬ Term.MayMentions ghost falseBranch := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       rcases ihCondition hfresh hstore hnotCondition with
         ⟨hconditionErased, hfreshCond, _hboolFresh⟩
       rcases ihTrue hfreshCond hstore hnotTrue with
@@ -4192,15 +4189,15 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env₁ env₂ env₃ env₄ typing lifetime condition trueBranch
         falseBranch trueTy falseTy hcondition htrue hfalse hdiverges
         ihCondition ihTrue ihFalse hfresh hstore hnot
-      have hnotCondition : ¬ Term.Mentions ghost condition := by
+      have hnotCondition : ¬ Term.MayMentions ghost condition := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotTrue : ¬ Term.Mentions ghost trueBranch := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotTrue : ¬ Term.MayMentions ghost trueBranch := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotFalse : ¬ Term.Mentions ghost falseBranch := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotFalse : ¬ Term.MayMentions ghost falseBranch := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       rcases ihCondition hfresh hstore hnotCondition with
         ⟨hconditionErased, hfreshCond, _hboolFresh⟩
       rcases ihTrue hfreshCond hstore hnotTrue with
@@ -4213,12 +4210,12 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env₁ env₂ env₃ typing lifetime bodyLifetime condition body
         bodyTy hchild hcondition hbody hdiverges ihCondition ihBody
         hfresh hstore hnot
-      have hnotCondition : ¬ Term.Mentions ghost condition := by
+      have hnotCondition : ¬ Term.MayMentions ghost condition := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotBody : ¬ Term.Mentions ghost body := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotBody : ¬ Term.MayMentions ghost body := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       rcases ihCondition hfresh hstore hnotCondition with
         ⟨hconditionErased, hfreshCond, _hboolFresh⟩
       rcases ihBody hfreshCond hstore hnotBody with
@@ -4229,12 +4226,12 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
       intro env₁ envBack envInv env₂ env₃ typing lifetime bodyLifetime
         condition body bodyTy hchild hjoin hcontained hnameFresh hcondition
         hbody hdrop ihCondition ihBody hfresh hstore hnot
-      have hnotCondition : ¬ Term.Mentions ghost condition := by
+      have hnotCondition : ¬ Term.MayMentions ghost condition := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
-      have hnotBody : ¬ Term.Mentions ghost body := by
+        exact hnot (by simp [Term.MayMentions, hmention])
+      have hnotBody : ¬ Term.MayMentions ghost body := by
         intro hmention
-        exact hnot (by simp [Term.Mentions, hmention])
+        exact hnot (by simp [Term.MayMentions, hmention])
       have hfreshInv : Env.TypeNameFresh (envInv.erase ghost) ghost := by
         simpa [Env.eraseMany] using
           hnameFresh [ghost] ghost (by simpa [Env.eraseMany] using hfresh)
@@ -4266,21 +4263,21 @@ theorem TermTyping.erase_ghost_pack {ghost : Name} {env : Env}
     (by
       intro env₁ env₂ typing lifetime singletonTerm ty hterm ih
         hfresh hstore hnot
-      have hnotTerm : ¬ Term.Mentions ghost singletonTerm := by
+      have hnotTerm : ¬ Term.MayMentions ghost singletonTerm := by
         intro hmention
-        exact hnot (by simp [TermList.Mentions, hmention])
+        exact hnot (by simp [TermList.MayMentions, hmention])
       rcases ih hfresh hstore hnotTerm with
         ⟨htermErased, hfreshOut, htyFresh⟩
       exact ⟨TermListTyping.singleton htermErased, hfreshOut, htyFresh⟩)
     (by
       intro env₁ env₂ env₃ typing lifetime head rest headTy finalTy
         hhead hrest ihHead ihRest hfresh hstore hnot
-      have hnotHead : ¬ Term.Mentions ghost head := by
+      have hnotHead : ¬ Term.MayMentions ghost head := by
         intro hmention
-        exact hnot (by simp [TermList.Mentions, hmention])
-      have hnotRest : ¬ TermList.Mentions ghost rest := by
+        exact hnot (by simp [TermList.MayMentions, hmention])
+      have hnotRest : ¬ TermList.MayMentions ghost rest := by
         intro hmention
-        exact hnot (by simp [TermList.Mentions, hmention])
+        exact hnot (by simp [TermList.MayMentions, hmention])
       rcases ihHead hfresh hstore hnotHead with
         ⟨hheadErased, hfreshHead, _hheadFresh⟩
       rcases ihRest hfreshHead hstore hnotRest with
@@ -4296,7 +4293,7 @@ theorem TermTyping.erase_ghost {env envGhost : Env} {ghost : Name}
     Env.TypeNameFresh env ghost →
     ghost ∉ PartialTy.vars ghostSlot.ty →
     StoreTyping.TypeNameFresh typing ghost →
-    ¬ Term.Mentions ghost term →
+    ¬ Term.MayMentions ghost term →
     TermTyping (env.update ghost ghostSlot) typing lifetime term ty envGhost →
     TermTyping env typing lifetime term ty (envGhost.erase ghost) := by
   intro hfresh htypeFresh _hslotFresh hstoreFresh hnot htyping

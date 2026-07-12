@@ -94,7 +94,8 @@ theorem reachableProgressWhenInitialized_bounded (fuel : Nat)
     subst hterm
     exact Or.inl (value_terminal _)
   case missing =>
-    intro _env _typing _lifetime _ty _hwellTy _hloanFree _hsize _htypingEq
+    intro _env₁ _env₂ _typing _lifetime _ty _hloanFree _hfinite
+      _hwellBridge _hsize _htypingEq
       _hsource store store' term' _hvalid _hvst _hwf _hsafe _hfs hmulti
     rcases multistep_missing_inv hmulti with ⟨hstore, hterm⟩
     subst hstore
