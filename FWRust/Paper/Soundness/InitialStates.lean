@@ -3,9 +3,11 @@ import FWRust.Paper.Soundness.Theorem_4_12_TypeAndBorrowSafety
 /-!
 # Source-level initial-state corollaries
 
-Concrete specializations of the Section 4 soundness results to source initial
-states (empty store, source terms).  These are demonstrations, not part of the
-paper-lemma critical path.
+Paper-facing specializations of the Section 4 soundness results to source
+initial states (empty store and empty environment).  Typability derives source
+syntax and the concrete runtime/static invariants required by the general
+kernels, so these declarations expose the paper conclusions without repeating
+those proof-side premises.
 -/
 
 namespace FWRust
@@ -366,9 +368,11 @@ theorem emptyInitial_typeAndBorrowSafety {term : Term} {lifetime : Lifetime}
       emptyInitial_preservation htyping hmulti⟩⟩
 
 /--
-**Theorem 4.12.** Empty-initial paper-facing Type and Borrow Safety wrapper.
+Compatibility wrapper for the earlier conditional Type and Borrow Safety
+bridge.  This is not the paper-facing total theorem because it assumes
+`TerminatesAsValue`; `emptyInitial_typeAndBorrowSafety_total` below proves the
+paper's terminal-existence conclusion from typing alone.
 
-This specializes the source-continuation theorem to source-initial programs.
 It has no `SourceTerm` premise because `StoreTyping.empty` typability derives
 it.
 -/
@@ -536,7 +540,11 @@ theorem sourceInitial_multistep_value_preservation
       hsafeFinal,
     hvalueFinal⟩
 
-/-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried route. -/
+/--
+Compatibility helper proving only that the source-initial output environment is
+well formed.  The paper-facing Lemma 4.9 declaration below additionally installs
+the essential fresh result slot.
+-/
 theorem sourceInitial_borrowInvariance_full {term : Term} {env₂ : Env}
     {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
@@ -546,7 +554,101 @@ theorem sourceInitial_borrowInvariance_full {term : Term} {env₂ : Env}
   exact (typingPreservesWellFormed_of_sourceTerm hsource
     (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping).1
 
-/-- **Lemma 4.9.** Compatibility form of source-initial borrow invariance. -/
+/-- Static core of the missing-borrow-safety obstruction. -/
+theorem lemma_4_9_static_missingBorrowSafety_obstruction :
+    ∃ env₁ env₃ typing lifetime term ty,
+      WellFormedEnv env₁ lifetime ∧
+        SourceTerm term ∧
+        TermTyping env₁ typing lifetime term ty env₃ ∧
+        ¬ WellFormedEnv env₃ lifetime := by
+  rcases EnvWriteStrictCounterexample.strict_assign_rule_result_counterexample with
+    ⟨env₁, env₂, env₃, typing, lifetime, lhs, rhs, oldTy,
+      targetLifetime, rhsTy, hwell, hsource, hRhs, hLhs, hshape,
+      hwellTy, hwrite, hnotWrite, hnotContained⟩
+  refine ⟨env₁, env₃, typing, lifetime, .assign lhs rhs, .unit,
+    hwell, hsource, ?_, ?_⟩
+  · exact TermTyping.assign hRhs hLhs hshape hwellTy hwrite hnotWrite
+  · intro hwell₃
+    exact hnotContained hwell₃.1
+
+/--
+Counterexample to the full printed premises of Lemma 4.9.
+
+Unlike the static projection above, this packages a concrete valid program
+store, valid store typing, and strict `FullSafeAbstraction`, as well as the
+well-formed source environment and typing derivation.  The output name is
+fresh, but adding the result slot still does not yield a well-formed
+environment.  The source environment is explicitly not borrow safe.
+-/
+theorem lemma_4_9_missingBorrowSafety_obstruction :
+    ∃ store env₁ env₂ typing lifetime term ty gamma,
+      SourceTerm term ∧
+        ValidState store term ∧
+        ValidStoreTyping store term typing ∧
+        store ≈ₛ env₁ ∧
+        WellFormedEnv env₁ lifetime ∧
+        ¬ BorrowSafeEnv env₁ ∧
+        TermTyping env₁ typing lifetime term ty env₂ ∧
+        env₂.fresh gamma ∧
+        ¬ WellFormedEnv
+          (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+          lifetime :=
+  EnvWriteStrictCounterexample.lemma_4_9_printedStatement_counterexample
+
+/--
+**Lemma 4.9 (Borrow Invariance), corrected paper-shaped form.**
+
+The conclusion is the one printed in the paper: after typing, installing the
+result type at an arbitrary fresh name yields an environment well formed at
+the ambient lifetime.  The extra `SourceTerm` and `BorrowSafeEnv` premises are
+exactly the invariants needed by the mechanised T-Assign proof; finite support
+and linearizability are not exposed here because this result does not use
+them.  The obstruction immediately above shows that borrow safety cannot be
+dropped for the current typing relation.
+-/
+theorem lemma_4_9_borrowInvariance
+    {env₁ env₂ : Env} {typing : StoreTyping} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} {gamma : Name} :
+    SourceTerm term →
+    WellFormedEnv env₁ lifetime →
+    BorrowSafeEnv env₁ →
+    TermTyping env₁ typing lifetime term ty env₂ →
+    env₂.fresh gamma →
+    WellFormedEnv
+      (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro hsource hwell hborrowSafe htyping hfresh
+  rcases typingPreservesWellFormed_of_sourceTerm
+      hsource hwell hborrowSafe htyping with
+    ⟨hwell₂, _hborrowSafe₂, hwellTy, _htySafe⟩
+  exact WellFormedEnv.update_fresh_ty hwell₂ hwellTy hfresh
+
+/--
+**Lemma 4.9 (Borrow Invariance), exact empty-initial specialization.**
+
+This has the paper's fresh-result-slot conclusion, rather than only proving
+that the output environment is well formed.  All proof-side hypotheses absent
+from the printed statement are derived from empty-initial typability:
+`SourceTerm term`, well-formedness and borrow safety of `Env.empty`.
+
+The unrestricted printed statement is not valid for the mechanised typing
+relation without a borrow-safety premise; see
+`strict_assign_rule_result_counterexample` for the T-Assign obstruction.
+-/
+theorem lemma_4_9_borrowInvariance_emptyInitial
+    {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
+    {gamma : Name} :
+    TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
+    env₂.fresh gamma →
+    WellFormedEnv
+      (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+      lifetime := by
+  intro htyping hfresh
+  exact lemma_4_9_borrowInvariance
+    (termTyping_empty_sourceTerm htyping)
+    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping hfresh
+
+/-- Initialized compatibility form; unlike Lemma 4.9, this omits its fresh result slot. -/
 theorem sourceInitial_borrowInvariance {term : Term} {env₂ : Env}
     {lifetime : Lifetime} {ty : Ty} :
     SourceTerm term →
@@ -702,10 +804,10 @@ theorem sourceInitial_declare_value_typeAndBorrowSafety
       MultiStep.trans (Step.declare (lifetime := lifetime) rfl) MultiStep.refl⟩
 
 /--
-**Lemma 4.9.** Compatibility alias for source-initial borrow invariance.
-
-The historical name is retained for callers; the current typing derivation
-already carries the required assignment and declaration facts.
+Compatibility alias for output-environment well-formedness.  It omits the
+fresh result slot of paper Lemma 4.9.  The historical name is retained for
+callers; the current typing derivation already carries the required assignment
+and declaration facts.
 -/
 theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence
     {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty}
@@ -726,7 +828,7 @@ theorem sourceInitial_borrowInvariance_of_rankedAssign_and_declFreshCoherence_fu
   intro hsource htyping
   exact sourceInitial_borrowInvariance_full hsource htyping
 
-/-- **Lemma 4.9.** Compatibility alias for source-initial borrow invariance. -/
+/-- Compatibility alias omitting paper Lemma 4.9's fresh result slot. -/
 theorem sourceInitial_borrowInvariance_of_ruleCarriedObligations
       {term : Term} {env₂ : Env} {lifetime : Lifetime} {ty : Ty} :
       SourceTerm term →

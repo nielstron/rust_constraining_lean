@@ -357,7 +357,8 @@ theorem sealProgram_completedStatementBoundary_completes
   simpa [CompletesProgram, sealProgram, sealTerm, sealTerms] using
       (Generated.CompletesTerm.ctermBlock_blockTerms
       (Generated.CompletesTerms.elemsDone
-        (pre := pre) (suffix := [epsilonTerm, epsilonTerm])))
+        (pre := pre) (frontierCompletion := epsilonTerm)
+        (suffix := [epsilonTerm])))
 
 /-- Paper-level statement-boundary soundness for arbitrary typing environments,
 store typings, ambient lifetimes, and result types.  The sealed term itself is

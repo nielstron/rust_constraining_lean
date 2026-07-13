@@ -7,12 +7,14 @@ Compatibility import for the generated partial-program grammar.
 namespace ConservativeSealor
 
 export Generated (
+  PartialInt
   PartialName
   PartialTerms
   PartialTy
   PartialLVal
   PartialTerm
   PartialProgram
+  CompletesInt
   CompletesName
   CompletesTerms
   CompletesTy

@@ -10,6 +10,9 @@ complete FWRust syntax facade in `FWRust.Sealor.CompleteProgram`.
 namespace ConservativeSealor
 namespace Generated
 
+/-- The already-decoded lexical prefix of an integer literal. -/
+abbrev PartialInt := String
+
 inductive PartialName where
   | cutoff
   | done (x : Name)
@@ -64,7 +67,7 @@ inductive PartialTerm where
   | done (x : Term)
   -- partial syntax: `num ...`
   -- derived from: SyntaxCtor.ctermInt_ctor {n}
-  | intN (n : Int)
+  | intN (n : PartialInt)
   -- partial syntax: `block lifetime { term,* ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
   | blockTerms (lifetime : Lifetime) (terms : PartialTerms)
@@ -115,12 +118,59 @@ end
 
 abbrev PartialProgram := PartialTerm
 
+/-- The digit language accepted after a numeral base prefix.
+Underscores may separate digits but cannot finish a complete token. -/
+private def numTokenDigits (isDigit : Char → Bool)
+    (chars : List Char) : Bool :=
+  chars.all (fun c => isDigit c || c == '_') &&
+    match chars.getLast? with
+    | some last => isDigit last
+    | none => false
+
+private def asciiHexDigit (c : Char) : Bool :=
+  ('0' ≤ c && c ≤ '9') || ('a' ≤ c && c ≤ 'f') ||
+    ('A' ≤ c && c ≤ 'F')
+
+/-- Surface spellings accepted by the complete facade's Lean `num` atom. -/
+private def validNumToken (spelling : String) : Bool :=
+  match spelling.toList with
+  | '0' :: 'x' :: rest | '0' :: 'X' :: rest =>
+      numTokenDigits asciiHexDigit rest
+  | '0' :: 'b' :: rest | '0' :: 'B' :: rest =>
+      numTokenDigits (fun c => c == '0' || c == '1') rest
+  | '0' :: 'o' :: rest | '0' :: 'O' :: rest =>
+      numTokenDigits (fun c => '0' ≤ c && c ≤ '7') rest
+  | chars@(first :: _) =>
+      first.isDigit && numTokenDigits (fun c => c.isDigit) chars
+  | [] => false
+
+/-- Decode exactly the valid token spellings above.  Lean's stock
+decoder omits the lexer's decimal `0_...` edge, so decimal
+underscores are normalized before calling `String.toNat?`. -/
+private def decodeNumToken? (spelling : String) : Option Nat :=
+  match spelling.toList with
+  | '0' :: 'x' :: _ | '0' :: 'X' :: _
+  | '0' :: 'b' :: _ | '0' :: 'B' :: _
+  | '0' :: 'o' :: _ | '0' :: 'O' :: _ =>
+      Lean.Syntax.decodeNatLitVal? spelling
+  | chars =>
+      (String.ofList (chars.filter (fun c => c != '_'))).toNat?
+
+/-- An integer literal realizes a `num`-token prefix when appending
+some suffix forms a valid Lean numeral, embedded into `Int`. -/
+def CompletesInt (decoded : PartialInt) (value : Int) : Prop :=
+  ∃ suffix completed,
+    validNumToken (decoded ++ suffix) = true ∧
+      decodeNumToken? (decoded ++ suffix) = some completed ∧
+      value = Int.ofNat completed
+
 inductive CompletesName : PartialName → Name → Prop where
   | done {x} :
       CompletesName (PartialName.done x) x
   | cutoff {x} :
       CompletesName PartialName.cutoff x
   | prefix {x y} :
+      x.isPrefixOf y = true →
       CompletesName (PartialName.prefix x) y
 
 mutual
@@ -128,10 +178,11 @@ mutual
 inductive CompletesTerms : PartialTerms → List Term → Prop where
   | done {xs} :
       CompletesTerms (PartialTerms.done xs) xs
-  | cutoff {xs} :
-      CompletesTerms PartialTerms.cutoff xs
-  | elemsDone {pre suffix : List Term} :
-      CompletesTerms (PartialTerms.elems pre none) (pre ++ suffix)
+  | cutoff {frontierCompletion : Term} {suffix : List Term} :
+      CompletesTerms PartialTerms.cutoff (frontierCompletion :: suffix)
+  | elemsDone {pre suffix : List Term} {frontierCompletion : Term} :
+      CompletesTerms (PartialTerms.elems pre none)
+        (pre ++ frontierCompletion :: suffix)
   | elemsTail {pre suffix : List Term} {frontier : PartialTerm}
       {frontierCompletion : Term} :
       CompletesTerm frontier frontierCompletion →
@@ -198,8 +249,9 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
       CompletesTerm PartialTerm.cutoff x
   -- partial syntax: `num ...`
   -- derived from: SyntaxCtor.ctermInt_ctor {n}
-  | ctermInt_intN {n : Int} :
-      CompletesTerm (PartialTerm.intN n) (SyntaxCtor.ctermInt_ctor n)
+  | ctermInt_intN {n : PartialInt} {n' : Int} :
+      CompletesInt n n' →
+      CompletesTerm (PartialTerm.intN n) (SyntaxCtor.ctermInt_ctor n')
   -- partial syntax: `block lifetime { term,* ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
   | ctermBlock_blockTerms {lifetime : Lifetime} {terms : PartialTerms} {terms' : List Term} :
@@ -252,28 +304,28 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
       CompletesTerm (PartialTerm.copyOperand operand) (SyntaxCtor.ctermCopy_ctor operand')
   -- partial syntax: `block ...`
   -- derived from: SyntaxCtor.ctermBlock_ctor {lifetime} {terms}
-  | ctermBlock_blockStart {lifetime : Lifetime} {terms : List Term} :
-      CompletesTerm (PartialTerm.blockStart) (SyntaxCtor.ctermBlock_ctor lifetime terms)
+  | ctermBlock_blockStart {completion : Term} :
+      CompletesTerm (PartialTerm.blockStart) completion
   -- partial syntax: `let ...`
   -- derived from: SyntaxCtor.ctermLetMut_ctor {name} {initialiser}
-  | ctermLetMut_letMutStart {name : Name} {initialiser : Term} :
-      CompletesTerm (PartialTerm.letMutStart) (SyntaxCtor.ctermLetMut_ctor name initialiser)
+  | ctermLetMut_letMutStart {completion : Term} :
+      CompletesTerm (PartialTerm.letMutStart) completion
   -- partial syntax: `box ...`
   -- derived from: SyntaxCtor.ctermBox_ctor {operand}
-  | ctermBox_boxStart {operand : Term} :
-      CompletesTerm (PartialTerm.boxStart) (SyntaxCtor.ctermBox_ctor operand)
+  | ctermBox_boxStart {completion : Term} :
+      CompletesTerm (PartialTerm.boxStart) completion
   -- partial syntax: `& ...`
   -- derived from: SyntaxCtor.ctermBorrowShared_ctor {operand}
-  | ctermBorrowShared_tokenAmpStart {operand : LVal} :
-      CompletesTerm (PartialTerm.tokenAmpStart) (SyntaxCtor.ctermBorrowShared_ctor operand)
+  | ctermBorrowShared_tokenAmpStart {completion : Term} :
+      CompletesTerm (PartialTerm.tokenAmpStart) completion
   -- partial syntax: `& ...`
   -- derived from: SyntaxCtor.ctermBorrowMut_ctor {operand}
-  | ctermBorrowMut_tokenAmpStart {operand : LVal} :
-      CompletesTerm (PartialTerm.tokenAmpStart) (SyntaxCtor.ctermBorrowMut_ctor operand)
+  | ctermBorrowMut_tokenAmpStart {completion : Term} :
+      CompletesTerm (PartialTerm.tokenAmpStart) completion
   -- partial syntax: `copy ...`
   -- derived from: SyntaxCtor.ctermCopy_ctor {operand}
-  | ctermCopy_copyStart {operand : LVal} :
-      CompletesTerm (PartialTerm.copyStart) (SyntaxCtor.ctermCopy_ctor operand)
+  | ctermCopy_copyStart {completion : Term} :
+      CompletesTerm (PartialTerm.copyStart) completion
 
 end
 

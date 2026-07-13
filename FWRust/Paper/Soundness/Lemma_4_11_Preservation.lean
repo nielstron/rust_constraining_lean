@@ -1106,13 +1106,6 @@ theorem validPartialValue_erase_of_not_reaches
   | undef =>
       intro _hreach
       exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_erase_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location (Reaches.undefOf hinner hstrength howner)))
-        hstrength
   | borrow hloc =>
       intro hreach
       refine ValidPartialValue.borrow ?_
@@ -1159,13 +1152,6 @@ theorem validPartialValueWhenInitialized_erase_of_not_reaches
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_erase_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location (Reaches.undefOf hinner hstrength howner)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -1618,8 +1604,9 @@ theorem BorrowDependencyWhenInitialized.protectedBySomeBase
   | boxFullInner _hslot _hinner ih =>
       exact ih
 
-/-- Runtime locations inspected by initialized value validity.  Stale borrow
-annotations intentionally contribute no runtime read dependencies. -/
+/-- Runtime locations inspected by initialized value validity.  This auxiliary
+relation is deliberately restricted to live borrow targets; strict framing of
+Definition 4.4 uses `Reaches`, which also tracks stale borrow resolution. -/
 inductive ReachesWhenInitialized (env : Env) (store : ProgramStore) :
     PartialValue → PartialTy → Location → Prop where
   | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty}
@@ -1701,14 +1688,6 @@ theorem validPartialValueWhenInitialized_erase_of_not_live_reaches {env : Env}
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_erase_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location
-              (ReachesWhenInitialized.undefOf hinner hstrength howner)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -1760,14 +1739,6 @@ theorem validPartialValueWhenInitialized_update_of_not_live_reaches {env : Env}
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (RuntimeFrame.validPartialValueSkeleton_update_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location
-              (ReachesWhenInitialized.undefOf hinner hstrength howner)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -2336,8 +2307,6 @@ theorem validPartialValueWhenInitialized_envWrite_var_of_no_write
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | @borrowLive location mutable target _hinitialized hloc =>
       by_cases htarget : TargetInitialized env' target
       · exact ValidPartialValueWhenInitialized.borrowLive htarget hloc
@@ -4366,8 +4335,6 @@ theorem ValidPartialValueWhenInitialized.update_fresh_env_of_partialTyBorrows
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | borrowLive hinitialized hloc =>
       rcases hinitialized with ⟨targetTy, targetLifetime, htarget⟩
       exact ValidPartialValueWhenInitialized.borrowLive
@@ -6065,6 +6032,246 @@ theorem strict_assign_rule_result_counterexample :
     moved_lhs_typing, moved_shape, moved_rhs_wellFormed, write_moved,
     resultMoved_not_writeProhibited, resultMoved_not_containedBorrowsWellFormed⟩
 
+/-! The same assignment witness realized by a concrete paper-valid store. -/
+
+private def runtimeStore : ProgramStore :=
+  (((ProgramStore.empty.update (.var "r")
+      { value := .value (.int 0), lifetime := l }).update (.var "q")
+      { value := .value (.ref { location := .var "r", owner := false }),
+        lifetime := l }).update (.var "p")
+      { value := .value (.ref { location := .var "q", owner := false }),
+        lifetime := l }).update (.var "z")
+      { value := .value (.ref { location := .var "r", owner := false }),
+        lifetime := l }
+
+private theorem runtimeStore_slot_r :
+    runtimeStore.slotAt (.var "r") =
+      some { value := .value (.int 0), lifetime := l } := by
+  simp [runtimeStore, ProgramStore.update]
+
+private theorem runtimeStore_slot_q :
+    runtimeStore.slotAt (.var "q") =
+      some
+        { value := .value (.ref { location := .var "r", owner := false }),
+          lifetime := l } := by
+  simp [runtimeStore, ProgramStore.update]
+
+private theorem runtimeStore_slot_p :
+    runtimeStore.slotAt (.var "p") =
+      some
+        { value := .value (.ref { location := .var "q", owner := false }),
+          lifetime := l } := by
+  simp [runtimeStore, ProgramStore.update]
+
+private theorem runtimeStore_slot_z :
+    runtimeStore.slotAt (.var "z") =
+      some
+        { value := .value (.ref { location := .var "r", owner := false }),
+          lifetime := l } := by
+  simp [runtimeStore, ProgramStore.update]
+
+private theorem runtimeStore_loc_deref_q :
+    runtimeStore.loc (.deref q) = some (.var "r") := by
+  simp [ProgramStore.loc, q, runtimeStore, ProgramStore.update]
+
+private theorem runtimeStore_no_ownsAt {owned storage : Location} :
+    ¬ ProgramStore.OwnsAt runtimeStore owned storage := by
+  rintro ⟨slotLifetime, hslot⟩
+  cases storage with
+  | heap address =>
+      simp [runtimeStore, ProgramStore.update] at hslot
+  | var x =>
+      by_cases hxz : x = "z"
+      · subst x
+        simp [runtimeStore, ProgramStore.update, owningRef] at hslot
+      · by_cases hxp : x = "p"
+        · subst x
+          simp [runtimeStore, ProgramStore.update, owningRef] at hslot
+        · by_cases hxq : x = "q"
+          · subst x
+            simp [runtimeStore, ProgramStore.update, owningRef] at hslot
+          · by_cases hxr : x = "r"
+            · subst x
+              simp [runtimeStore, ProgramStore.update, owningRef] at hslot
+            · simp [runtimeStore, ProgramStore.update, hxz, hxp, hxq, hxr]
+                at hslot
+
+private theorem runtimeStore_validStore : ValidStore runtimeStore := by
+  intro owned storage₁ storage₂ howns₁ _howns₂
+  exact False.elim (runtimeStore_no_ownsAt howns₁)
+
+private theorem runtimeStore_validState :
+    ValidState runtimeStore (.assign (.deref p) (.move z)) := by
+  refine ⟨runtimeStore_validStore,
+    sourceTerm_validTerm source_assign_move_z, ?_⟩
+  intro owned hmem
+  have hnone := sourceTerm_no_owningLocations source_assign_move_z
+  rw [hnone] at hmem
+  cases hmem
+
+private theorem runtimeStore_validStoreTyping :
+    ValidStoreTyping runtimeStore (.assign (.deref p) (.move z))
+      StoreTyping.empty := by
+  intro value hmem
+  simp [termValues] at hmem
+
+private theorem runtimeStore_fullSafeAbstraction :
+    runtimeStore ≈ₛ envWithZ := by
+  constructor
+  · intro x
+    by_cases hxz : x = "z"
+    · subst x
+      simp [runtimeStore, envWithZ, env, ProgramStore.update, Env.update,
+        VariableProjection]
+    · by_cases hxp : x = "p"
+      · subst x
+        simp [runtimeStore, envWithZ, env, ProgramStore.update, Env.update,
+          VariableProjection]
+      · by_cases hxq : x = "q"
+        · subst x
+          simp [runtimeStore, envWithZ, env, ProgramStore.update, Env.update,
+            VariableProjection]
+        · by_cases hxr : x = "r"
+          · subst x
+            simp [runtimeStore, envWithZ, env, ProgramStore.update, Env.update,
+              VariableProjection]
+          · simp [runtimeStore, envWithZ, env, ProgramStore.update,
+              Env.update, Env.empty, VariableProjection, hxz, hxp, hxq, hxr]
+  · intro x envSlot hslot
+    by_cases hxz : x = "z"
+    · subst x
+      have hslotEq : envSlot = zSlot :=
+        Option.some.inj (hslot.symm.trans envWithZ_slot_z)
+      subst envSlot
+      refine ⟨.value (.ref { location := .var "r", owner := false }), ?_, ?_⟩
+      · simpa [zSlot, VariableProjection] using runtimeStore_slot_z
+      · unfold zSlot rhsTy
+        exact ValidPartialValue.borrow runtimeStore_loc_deref_q
+    · by_cases hxp : x = "p"
+      · subst x
+        have hslotEq : envSlot = pSlot :=
+          Option.some.inj (hslot.symm.trans envWithZ_slot_p)
+        subst envSlot
+        refine ⟨.value (.ref { location := .var "q", owner := false }), ?_, ?_⟩
+        · simpa [pSlot, VariableProjection] using runtimeStore_slot_p
+        · unfold pSlot
+          exact ValidPartialValue.borrow (by simp [q, ProgramStore.loc])
+      · by_cases hxq : x = "q"
+        · subst x
+          have hslotEq : envSlot = qSlot :=
+            Option.some.inj (hslot.symm.trans envWithZ_slot_q)
+          subst envSlot
+          refine ⟨.value (.ref { location := .var "r", owner := false }), ?_, ?_⟩
+          · simpa [qSlot, VariableProjection] using runtimeStore_slot_q
+          · unfold qSlot
+            exact ValidPartialValue.borrow (by simp [r, ProgramStore.loc])
+        · by_cases hxr : x = "r"
+          · subst x
+            have hslotEq : envSlot = rSlot :=
+              Option.some.inj (hslot.symm.trans envWithZ_slot_r)
+            subst envSlot
+            exact ⟨.value (.int 0), by
+              simpa [rSlot, VariableProjection] using runtimeStore_slot_r,
+              ValidPartialValue.int⟩
+          · have hnone : envWithZ.slotAt x = none := by
+              simp [envWithZ, env, Env.empty, Env.update, hxz, hxp, hxq, hxr]
+            rw [hnone] at hslot
+            cases hslot
+
+private theorem assignment_typing :
+    TermTyping envWithZ StoreTyping.empty l
+      (.assign (.deref p) (.move z)) .unit resultMoved := by
+  exact TermTyping.assign rhs_move_typing moved_lhs_typing moved_shape
+    moved_rhs_wellFormed write_moved resultMoved_not_writeProhibited
+
+private def gamma : Name := "gamma"
+
+private def resultWithGamma : Env :=
+  resultMoved.update gamma { ty := .ty .unit, lifetime := l }
+
+private theorem resultMoved_fresh_gamma : resultMoved.fresh gamma := by
+  simp [Env.fresh, gamma, resultMoved, afterMovedQ, movedZ, envWithZ, env,
+    Env.update, Env.empty]
+
+private theorem resultWithGamma_slot_q :
+    resultWithGamma.slotAt "q" =
+      some { ty := .ty rhsTy, lifetime := l } := by
+  simpa [resultWithGamma, gamma, Env.update] using resultMoved_slot_q
+
+private theorem resultWithGamma_q_typing :
+    LValTyping resultWithGamma q (.ty rhsTy) l := by
+  exact LValTyping.var resultWithGamma_slot_q
+
+private theorem no_resultWithGamma_deref_q_typing :
+    ∀ {lv : LVal} {pt : PartialTy} {lf : Lifetime},
+      LValTyping resultWithGamma lv pt lf →
+      lv = .deref q →
+      False := by
+  intro lv pt lf htyping
+  induction htyping with
+  | var _hslot =>
+      intro hlv
+      cases hlv
+  | box hsource _ih =>
+      intro hlv
+      cases hlv
+      have hdet := LValTyping.deterministic hsource resultWithGamma_q_typing
+      cases hdet.1
+  | boxFull hsource _ih =>
+      intro hlv
+      cases hlv
+      have hdet := LValTyping.deterministic hsource resultWithGamma_q_typing
+      unfold rhsTy at hdet
+      cases hdet.1
+  | borrow hsource _htarget _ihSource ihTarget =>
+      intro hlv
+      cases hlv
+      have hdet := LValTyping.deterministic hsource resultWithGamma_q_typing
+      unfold rhsTy at hdet
+      cases hdet.1
+      exact ihTarget rfl
+
+private theorem resultWithGamma_not_wellFormed :
+    ¬ WellFormedEnv resultWithGamma l := by
+  intro hwell
+  have hcontainsQ :
+      resultWithGamma ⊢ "q" ↝ (.borrow true (.deref q)) :=
+    ⟨{ ty := .ty rhsTy, lifetime := l }, resultWithGamma_slot_q, by
+      unfold rhsTy
+      exact PartialTyContains.here⟩
+  rcases hwell.1 "q" { ty := .ty rhsTy, lifetime := l } true (.deref q)
+      resultWithGamma_slot_q hcontainsQ with
+    ⟨targetTy, targetLifetime, htyping, _hle, _hbase⟩
+  exact no_resultWithGamma_deref_q_typing htyping rfl
+
+/-- A closed counterexample to the literal printed premises of Lemma 4.9.
+
+The concrete store contains `r : int`, `q → r`, `p → q`, and `z → r`.
+It is a valid state, has a valid empty store typing for the source assignment,
+and fully safely abstracts the well-formed input environment.  Typing the
+assignment nevertheless produces an environment whose fresh-result-slot
+extension is not well formed.  The omitted invariant is borrow safety. -/
+theorem lemma_4_9_printedStatement_counterexample :
+    ∃ store env₁ env₂ typing lifetime term ty gamma,
+      SourceTerm term ∧
+        ValidState store term ∧
+        ValidStoreTyping store term typing ∧
+        store ≈ₛ env₁ ∧
+        WellFormedEnv env₁ lifetime ∧
+        ¬ BorrowSafeEnv env₁ ∧
+        TermTyping env₁ typing lifetime term ty env₂ ∧
+        env₂.fresh gamma ∧
+        ¬ WellFormedEnv
+          (env₂.update gamma { ty := .ty ty, lifetime := lifetime })
+          lifetime := by
+  exact ⟨runtimeStore, envWithZ, resultMoved, StoreTyping.empty, l,
+    .assign (.deref p) (.move z), .unit, gamma,
+    source_assign_move_z, runtimeStore_validState,
+    runtimeStore_validStoreTyping, runtimeStore_fullSafeAbstraction,
+    envWithZ_wellFormed, envWithZ_not_borrowSafe, assignment_typing,
+    resultMoved_fresh_gamma, by
+      simpa [resultWithGamma, gamma] using resultWithGamma_not_wellFormed⟩
+
 end EnvWriteStrictCounterexample
 
 /-- Strict forward lifetime-drop transport. -/
@@ -7094,8 +7301,6 @@ theorem validPartialValueWhenInitialized_envWrite_of_result_contains
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | borrowLive hinitialized hloc =>
       exact ValidPartialValueWhenInitialized.borrowLive
         (TargetInitialized.envWrite hcbwf hsafe htySafe hwrite hlv hshape

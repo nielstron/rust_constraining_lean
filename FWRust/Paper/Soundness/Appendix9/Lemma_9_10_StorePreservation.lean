@@ -1,4 +1,4 @@
-import FWRust.Paper.Soundness.Lemma_4_11_Preservation
+import FWRust.Paper.Soundness.Appendix9.Lemma_9_8_AliasPreservation
 
 /-!
 # Lemma 9.10 (Store Preservation)
@@ -6,8 +6,9 @@ import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then `S₂ ∼ Γ₂`
 > (the final store is safely abstracted by the result environment).
 
-Status: proved as the `FullSafeAbstraction finalStore env₂` projection of
-Preservation (Lemma 4.11).  Mechanized support:
+The multistep theorem is the `FullSafeAbstraction finalStore env₂` projection
+of Preservation (Lemma 4.11).  The one-step theorem is instead a projection of
+the independent shared terminal-redex proof in Lemma 9.8.  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
   `preservation_declare_redex_runtime_of_validValue` (uses Lemma 9.7);
@@ -21,7 +22,8 @@ Preservation (Lemma 4.11).  Mechanized support:
   (`preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`) for terminal
   value blocks.
 
-The theorem below derives the store-preservation projection from Lemma 4.11.
+The first theorem below is the multistep projection from Lemma 4.11; the
+runtime-redex wrapper later in the file is independent of it.
 -/
 
 namespace FWRust.Paper.Soundness
@@ -50,6 +52,44 @@ theorem lemma_9_10_storePreservation
       hsafe htyping hmulti
     exact (lemma_4_11_preservation hsource hvalid hstoreTyping hwellFormed
       hborrowSafe hfinite hlinear hsafe htyping hmulti).2.1
+
+/--
+The Appendix 9.10 one-step conclusion, exposed as the strict safe-abstraction
+projection of `appendix_9_oneStep_fullPreservation_of_runtime_invariants`.
+There is no `SourceTerm` or finite-support premise, so runtime-valued redexes
+such as `box (.val ownerRef)` are covered.  `RuntimeRedexBorrowSafe` is
+definitionally `True` except for assignment RHS values.
+-/
+theorem lemma_9_10_storePreservation_oneStep_of_runtime_invariants
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {finalValue : Value}
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hborrowSafe : BorrowSafeEnv env₁)
+    (hredexBorrowSafe : RuntimeRedexBorrowSafe env₁ typing term)
+    (hlinear : Linearizable env₁)
+    (hsafe : store ≈ₛ env₁)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂)
+    (hstep : Step store lifetime term finalStore (.val finalValue)) :
+    FullSafeAbstraction finalStore env₂ := by
+  exact
+    (appendix_9_oneStep_fullPreservation_of_runtime_invariants hvalid
+      hstoreTyping hwellFormed hborrowSafe hredexBorrowSafe hlinear hsafe
+      htyping hstep).2.1
+
+/-- Source-initial one-step store preservation with all extra invariants derived. -/
+theorem lemma_9_10_storePreservation_oneStep_empty
+    {finalStore : ProgramStore} {env₂ : Env} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} {finalValue : Value}
+    (htyping :
+      TermTyping Env.empty StoreTyping.empty lifetime term ty env₂)
+    (hstep :
+      Step ProgramStore.empty lifetime term finalStore (.val finalValue)) :
+    FullSafeAbstraction finalStore env₂ := by
+  exact (emptyInitial_preservation htyping
+    (MultiStep.trans hstep MultiStep.refl)).2.1
 
 /--
 Appendix 9.10, direct-variable assignment store preservation under the concrete
