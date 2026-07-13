@@ -165,7 +165,7 @@ theorem sourceInitialSoundnessHypotheses {term : Term} {lifetime : Lifetime} :
     SourceTerm term →
     ValidState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ Env.empty ∧
+    ProgramStore.empty ∼ₛ Env.empty ∧
     WellFormedEnv Env.empty lifetime ∧
     OperationalStoreProgress ProgramStore.empty := by
   intro hsource
@@ -183,7 +183,7 @@ theorem sourceInitialRuntimeSoundnessHypotheses {term : Term} {lifetime : Lifeti
     SourceTerm term →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ∼ Env.empty ∧
+    ProgramStore.empty ∼ₛ Env.empty ∧
     WellFormedEnv Env.empty lifetime ∧
     OperationalStoreProgress ProgramStore.empty := by
   intro hsource
@@ -208,7 +208,7 @@ theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-      ProgramStore.empty ∼ Env.empty ∧
+      ProgramStore.empty ∼ₛ Env.empty ∧
       (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
       OperationalStoreProgress ProgramStore.empty ∧
       (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
@@ -230,7 +230,7 @@ theorem emptyInitialInvariantPackage_of_typing {env₂ : Env}
     SourceTerm term ∧
       ValidRuntimeState ProgramStore.empty term ∧
       ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-      ProgramStore.empty ∼ Env.empty ∧
+      ProgramStore.empty ∼ₛ Env.empty ∧
       ProgramStore.empty.FiniteSupport ∧
       StaticInvariantPackage Env.empty lifetime ∧
       StaticInvariantPackage env₂ lifetime ∧

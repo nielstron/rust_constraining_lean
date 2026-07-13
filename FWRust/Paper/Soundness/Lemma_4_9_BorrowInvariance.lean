@@ -14,7 +14,7 @@ open Core
 def FullTerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) :
     Prop :=
   ValidRuntimeState store (.val value) ∧
-    FullSafeAbstraction store env ∧
+    store ∼ₛ env ∧
     ValidValue store value ty
 
 theorem FullTerminalStateSafe.transport_env_pointwise
@@ -74,8 +74,8 @@ theorem EnvSameShapeStrengthening.trans {first second third : Env} :
 theorem EnvSameShapeStrengthening.safe
     {store : ProgramStore} {source result : Env} :
     EnvSameShapeStrengthening source result →
-    store ∼ source →
-    store ∼ result := by
+    store ∼ₛ source →
+    store ∼ₛ result := by
   intro hmap hsafe
   exact fullSafeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
 

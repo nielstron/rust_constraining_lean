@@ -1316,7 +1316,7 @@ end ProtectedByBase
 theorem lval_loc_protectedBySomeBase {store : ProgramStore}
     {env : Env} {current : Lifetime} :
     WellFormedEnv env current →
-    store ∼ env →
+    store ∼ₛ env →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
       {location : Location},
       LValTyping env lv partialTy lifetime →
@@ -1388,7 +1388,7 @@ theorem lval_loc_protectedBySomeBase {store : ProgramStore}
 theorem locReads_protectedBySomeBase {store : ProgramStore}
     {env : Env} {current : Lifetime} :
     WellFormedEnv env current →
-    store ∼ env →
+    store ∼ₛ env →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
       {location : Location},
       LValTyping env lv partialTy lifetime →
@@ -1423,7 +1423,7 @@ theorem locReads_protectedBySomeBase {store : ProgramStore}
 
 theorem lval_loc_protectedBySomeBase_whenInitialized {store : ProgramStore}
     {env : Env} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
       {location : Location},
       LValTyping env lv partialTy lifetime →
@@ -1493,7 +1493,7 @@ theorem lval_loc_protectedBySomeBase_whenInitialized {store : ProgramStore}
 
 theorem locReads_protectedBySomeBase_whenInitialized {store : ProgramStore}
     {env : Env} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
       {location : Location},
       LValTyping env lv partialTy lifetime →
@@ -1553,7 +1553,7 @@ inductive BorrowDependency (store : ProgramStore) :
 theorem BorrowDependency.protectedBySomeBase
     {env : Env} {store : ProgramStore} {current slotLifetime : Lifetime} :
     WellFormedEnv env current →
-    store ∼ env →
+    store ∼ₛ env →
     ∀ {value : PartialValue} {partialTy : PartialTy}
       {dependency : Location},
       PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
@@ -1603,7 +1603,7 @@ inductive BorrowDependencyWhenInitialized (env : Env) (store : ProgramStore) :
 
 theorem BorrowDependencyWhenInitialized.protectedBySomeBase
     {env : Env} {store : ProgramStore} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ∀ {value : PartialValue} {partialTy : PartialTy}
       {dependency : Location},
       BorrowDependencyWhenInitialized env store value partialTy dependency →
@@ -1803,7 +1803,7 @@ theorem validPartialValueWhenInitialized_update_of_not_live_reaches {env : Env}
 
 theorem lval_loc_var_conflict_or_writeProhibited_whenInitialized
     {store : ProgramStore} {env : Env} {x : Name} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
       LValTyping env lv partialTy lifetime →
@@ -1880,7 +1880,7 @@ theorem lval_loc_var_conflict_or_writeProhibited_whenInitialized
 
 theorem locReads_var_conflict_or_writeProhibited_whenInitialized
     {store : ProgramStore} {env : Env} {x : Name} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
       LValTyping env lv partialTy lifetime →
@@ -1931,7 +1931,7 @@ theorem locReads_var_conflict_or_writeProhibited_whenInitialized
 
 theorem borrowDependencyWhenInitialized_var_writeProhibited
     {env : Env} {store : ProgramStore} {x holder : Name} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     ∀ {value : PartialValue} {partialTy : PartialTy} {dependency : Location},
       (∀ {mutable : Bool} {target : LVal},
@@ -1969,7 +1969,7 @@ theorem reachesWhenInitialized_var_ne_of_stored_not_writeProhibited
     {env : Env} {store : ProgramStore} {x holder : Name}
     {storage : Location} {value : PartialValue} {partialTy : PartialTy}
     {lifetime : Lifetime} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     store.slotAt storage = some { value := value, lifetime := lifetime } →
     ValidPartialValueWhenInitialized env store value partialTy →
@@ -2040,7 +2040,7 @@ theorem reachesWhenInitialized_var_ne_of_stored_not_writeProhibited
 
 theorem locReads_var_writeProhibited_or_base_whenInitialized
     {store : ProgramStore} {env : Env} {x : Name} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime},
       LValTyping env lv partialTy lifetime →
@@ -2116,7 +2116,7 @@ theorem ReachesWhenInitialized.owner_or_borrow {env : Env}
 theorem borrowDependencyWhenInitialized_var_writeProhibited_or_mem_vars
     {store : ProgramStore} {env : Env} {x : Name}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     BorrowDependencyWhenInitialized env store value partialTy dependency →
     dependency = VariableProjection x →
@@ -2192,7 +2192,7 @@ theorem reachesWhenInitialized_ne_var_of_varsProtectedIn
     {store : ProgramStore} {sourceEnv observerEnv : Env}
     {partialValue : PartialValue} {partialTy : PartialTy}
     {location : Location} {x : Name} :
-    FullSafeAbstraction store sourceEnv →
+    store ∼ₛ sourceEnv →
     StoreOwnerTargetsHeap store →
     PartialValueOwnerTargetsHeap partialValue →
     (∀ y, y ∈ PartialTy.vars partialTy →
@@ -2216,7 +2216,7 @@ theorem reachesWhenInitialized_ne_var_of_varsProtectedIn
 theorem value_reachesWhenInitialized_ne_var_of_varsProtectedIn
     {store : ProgramStore} {sourceEnv observerEnv : Env}
     {value : Value} {ty : Ty} {location : Location} {x : Name} :
-    FullSafeAbstraction store sourceEnv →
+    store ∼ₛ sourceEnv →
     StoreOwnerTargetsHeap store →
     ValueOwnerTargetsHeap value →
     (∀ y, y ∈ Ty.vars ty → WriteProhibited observerEnv (.var y)) →
@@ -2368,7 +2368,7 @@ theorem validPartialValueWhenInitialized_envWrite_var_of_no_write
 theorem lval_loc_var_conflict_or_writeProhibited_envWrite_var
     {store : ProgramStore} {env env' : Env} {x : Name}
     {envSlot : EnvSlot} {rhsTy : Ty} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) rhsTy env' →
@@ -2501,7 +2501,7 @@ theorem lval_loc_var_conflict_or_writeProhibited_envWrite_var
 theorem locReads_var_conflict_or_writeProhibited_envWrite_var
     {store : ProgramStore} {env env' : Env} {x : Name}
     {envSlot : EnvSlot} {rhsTy : Ty} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) rhsTy env' →
@@ -2558,7 +2558,7 @@ theorem locReads_var_conflict_or_writeProhibited_envWrite_var
 theorem borrowDependencyWhenInitialized_envWrite_var_writeProhibited
     {env env' : Env} {store : ProgramStore} {x holder : Name}
     {envSlot : EnvSlot} {rhsTy : Ty} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) rhsTy env' →
@@ -2602,7 +2602,7 @@ theorem reachesWhenInitialized_var_ne_of_envWrite_var_not_writeProhibited
     {env env' : Env} {store : ProgramStore} {x holder : Name}
     {envSlot : EnvSlot} {rhsTy : Ty}
     {value : PartialValue} {partialTy : PartialTy} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     StoreOwnerTargetsHeap store →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) rhsTy env' →
@@ -2627,7 +2627,7 @@ theorem preservation_move_var_multistep_runtime_of_wellFormed
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {x : Name} {finalValue : Value} {ty : Ty} :
     WellFormedEnv env₁ lifetime →
-    store ∼ env₁ →
+    store ∼ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -2897,7 +2897,7 @@ theorem dropsAvoids_of_borrowDependency_unprotected_values
     {partialTy : PartialTy} {dependency : Location} :
     Drops store values store' →
     WellFormedEnv env current →
-    store ∼ env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
@@ -2924,7 +2924,7 @@ theorem dropsAvoids_of_borrowDependencyWhenInitialized_unprotected_values
     {values : List PartialValue} {value : PartialValue}
     {partialTy : PartialTy} {dependency : Location} :
     Drops store values store' →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
@@ -3025,7 +3025,7 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
     {lifetime slotLifetime current : Lifetime} :
     Drops store values store' →
     WellFormedEnv env current →
-    store ∼ env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
@@ -3104,7 +3104,7 @@ theorem dropsAvoids_of_reaches_stored_validPartialValueWhenInitialized
     {value : PartialValue} {partialTy : PartialTy}
     {lifetime : Lifetime} :
     Drops store values store' →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
@@ -3423,11 +3423,11 @@ theorem fullSafeAbstraction_seq_value_drop
     {store store' : ProgramStore} {env : Env}
     {blockLifetime : Lifetime} {value : Value} {next : Term}
     {rest : List Term} :
-    store ∼ env →
+    store ∼ₛ env →
     ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
     WellFormedEnv env blockLifetime →
     Drops store [.value value] store' →
-    store' ∼ env := by
+    store' ∼ₛ env := by
   intro hsafe hvalidRuntime hwellFormed hdrops
   have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
     ValueOwnerTargetsHeap.partial
@@ -3529,7 +3529,7 @@ theorem fullSafeAbstraction_drops_of_orphaned_values_early
     {store store' : ProgramStore} {env : Env} {current : Lifetime}
     {values : List PartialValue} :
     WellFormedEnv env current →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ dropValue, dropValue ∈ values →
@@ -3537,7 +3537,7 @@ theorem fullSafeAbstraction_drops_of_orphaned_values_early
     (∀ owned, owned ∈ partialValuesOwningLocations values →
       ¬ ProgramStore.Owns store owned) →
     Drops store values store' →
-    FullSafeAbstraction store' env := by
+    store' ∼ₛ env := by
   intro hwell hsafe hvalidStore hheap hvaluesHeap hownersOrphaned hdrops
   refine fullSafeAbstraction_of_domain_and_slots ?domain ?slots
   · intro x
@@ -3714,7 +3714,7 @@ private theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
     {x : Name} {oldTy : PartialTy} {value finalValue : Value}
     {rhsTy : Ty} :
     WellFormedEnvWhenInitialized env lifetime →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     LValTyping env (.var x) oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -3805,7 +3805,7 @@ private theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
     | mk oldValue oldLifetime =>
         cases hlifetime
         simp [ProgramStore.update]
-  have hsafeWrite : FullSafeAbstraction writtenStore env' := by
+  have hsafeWrite : writtenStore ∼ₛ env' := by
     refine fullSafeAbstraction_update_var_partial_of_preserved
       henvX hstoreXAfter hvalidValueWrittenFull henv' ?domain ?preserve
     · intro y hyx
@@ -3898,7 +3898,7 @@ private theorem preservation_assign_var_step_runtime_whenInitialized_of_frames
     drops_storeOwnerTargetsHeap hdrops hwrittenHeap
   have hrootFinal : HeapSlotsRootLifetime store' :=
     drops_heapSlotsRootLifetime hdrops hrootWrite
-  have hsafeFinal : FullSafeAbstraction store' env' :=
+  have hsafeFinal : store' ∼ₛ env' :=
     fullSafeAbstraction_drops_of_orphaned_values_early
       hwellOut hsafeWrite hwrittenValidStore hwrittenHeap hdropValuesHeap
       hdropOwnersOrphaned hdrops
@@ -3914,7 +3914,7 @@ private theorem preservation_assign_var_step_runtime_whenInitialized_of_wellForm
     {x : Name} {oldTy : PartialTy} {value finalValue : Value}
     {rhsTy : Ty} :
     WellFormedEnvWhenInitialized env lifetime →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     LValTyping env (.var x) oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -4253,13 +4253,13 @@ theorem preservation_declare_context_terminal_multistep_runtime
     (∀ {midStore value},
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
-      FullSafeAbstraction store env₁ →
+      store ∼ₛ env₁ →
       TermTyping env₁ typing lifetime term ty env₂ →
       MultiStep store lifetime term midStore (.val value) →
       FullTerminalStateSafe midStore value env₂ ty) →
     ValidRuntimeState store (.letMut x term) →
     ValidStoreTyping store (.letMut x term) typing →
-    FullSafeAbstraction store env₁ →
+    store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     env₂.fresh x →
     env₃ = env₂.update x { ty := .ty ty, lifetime := lifetime } →
@@ -7386,7 +7386,7 @@ theorem StaticInvariantPackage.preserve_of_sourceTerm
 theorem dropLifetime_envDomain_of_storeSurvivor_whenInitialized
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime}
     {x : Name} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     DropsLifetime store lifetime store' →
     (∀ slot,
       store'.slotAt (VariableProjection x) = some slot →
@@ -7411,7 +7411,7 @@ theorem dropLifetime_envDomain_of_storeSurvivor_whenInitialized
 theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap_whenInitialized
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime}
     {x : Name} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     DropsLifetime store lifetime store' →
     StoreOwnerTargetsHeap store →
     (∃ envSlot, (env.dropLifetime lifetime).slotAt x = some envSlot) →
@@ -7431,7 +7431,7 @@ theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap_whenInitiali
 
 theorem dropLifetime_domain_equiv_of_ownerTargetsHeap_whenInitialized
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     DropsLifetime store lifetime store' →
     StoreOwnerTargetsHeap store →
     ∀ x,
@@ -7456,7 +7456,7 @@ theorem dropsAvoids_of_protectedByBase_lifetime_whenInitialized
     {store store' : ProgramStore} {env : Env}
     {parent child : Lifetime} {dropSet : List PartialValue}
     {root : Name} {location : Location} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -7536,7 +7536,7 @@ theorem lval_loc_dropsAvoids_lifetime_whenInitialized
     {store store' : ProgramStore} {env : Env}
     {parent child : Lifetime} {dropSet : List PartialValue} :
     ContainedBorrowsWellFormedWhenInitialized env →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -7666,7 +7666,7 @@ theorem locReads_dropsAvoids_lifetime_whenInitialized
     {store store' : ProgramStore} {env : Env}
     {parent child : Lifetime} {dropSet : List PartialValue} :
     ContainedBorrowsWellFormedWhenInitialized env →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -7724,7 +7724,7 @@ theorem borrowDependencyWhenInitialized_dropsAvoids_lifetime
     {parent child slotLifetime : Lifetime} {dropSet : List PartialValue}
     {value : PartialValue} {partialTy : PartialTy} {dependency : Location} :
     ContainedBorrowsWellFormedWhenInitialized env →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ dropSet ↔
@@ -8577,7 +8577,7 @@ theorem ownsChain_loc_eq_of_length {store : ProgramStore} :
 
 theorem PathSelect.runtime_leaf_whenInitialized {store : ProgramStore}
     {env : Env} {lv : LVal} {rootSlot : EnvSlot} {leafTy : PartialTy} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     env.slotAt (LVal.base lv) = some rootSlot →
     PathSelect (LVal.path lv) rootSlot.ty leafTy →
     ∃ rootStore leaf leafSlot k,
@@ -8836,7 +8836,7 @@ theorem lvalTyping_deref_borrow_loc_eq_whenInitialized
     {store : ProgramStore} {env : Env}
     {source target : LVal} {mutable : Bool}
     {borrowLifetime targetLifetime : Lifetime} {targetTy : Ty} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     LValTyping env source (.ty (.borrow mutable target)) borrowLifetime →
     LValTyping env target (.ty targetTy) targetLifetime →
     store.loc source.deref = store.loc target := by
@@ -8857,7 +8857,7 @@ theorem assign_step_prependPath_deref_borrow_whenInitialized
     {source target : LVal} {mutable : Bool}
     {borrowLifetime targetLifetime : Lifetime} {targetTy : Ty}
     {path : Path} {value finalValue : Value} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     LValTyping env source (.ty (.borrow mutable target)) borrowLifetime →
     LValTyping env target (.ty targetTy) targetLifetime →
     Step store lifetime (.assign (prependPath path source.deref) (.val value))
@@ -9019,7 +9019,7 @@ rebased lvalue typing and the concrete runtime-location equality needed to
 replay the assignment step at the hop target. -/
 theorem UpdateAtPath.pathSelect_or_hop_typed
     {store : ProgramStore} {env result : Env}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hcbwf : ContainedBorrowsWellFormed env) :
     ∀ {path : Path} {old updated : PartialTy} {rhsTy : Ty},
       UpdateAtPath env path old rhsTy result updated →
@@ -9149,7 +9149,7 @@ the same runtime location as the original lhs, and the reduced lhs has the same
 static type as the original write target. -/
 theorem EnvWrite.select_or_hop_typed
     {store : ProgramStore} {env env' : Env}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hcbwf : ContainedBorrowsWellFormed env)
     {lhs : LVal} {oldTy : PartialTy} {targetLifetime : Lifetime}
     {rhsTy : Ty} :
@@ -9207,8 +9207,8 @@ theorem TargetInitialized.transport_of_pointwise {env result : Env}
 theorem fullSafeAbstraction_transport_pointwise
     {store : ProgramStore} {env result : Env}
     (heq : ∀ y, result.slotAt y = env.slotAt y) :
-    FullSafeAbstraction store env →
-    FullSafeAbstraction store result := by
+    store ∼ₛ env →
+    store ∼ₛ result := by
   intro hsafe
   refine ⟨?domain, ?slots⟩
   · intro x
@@ -9228,7 +9228,7 @@ theorem fullSafeAbstraction_transport_pointwise
 
 theorem lvalTyping_box_ownerChainPrefix_whenInitialized
     {store : ProgramStore} {env : Env}
-    (hsafe : FullSafeAbstraction store env) :
+    (hsafe : store ∼ₛ env) :
     ∀ {lv : LVal} {inner : PartialTy} {lifetime : Lifetime},
       LValTyping env lv (.box inner) lifetime →
       ∃ envSlot rootSlot leaf leafSlot,
@@ -9509,7 +9509,7 @@ theorem EnvWrite.deref_boxFull_result_contains_of_select {env env' : Env}
 
 theorem lvalTyping_tyBox_ownerChainPrefix_whenInitialized_of_strike
     {store : ProgramStore} {env : Env}
-    (hsafe : FullSafeAbstraction store env) :
+    (hsafe : store ∼ₛ env) :
     ∀ {lv : LVal} {inner : Ty} {lifetime : Lifetime}
       {slot : EnvSlot} {struck : PartialTy} {suffix : Path},
       LValTyping env lv (.ty (.box inner)) lifetime →
@@ -10130,7 +10130,7 @@ theorem lvalTyping_vars_rank_lt {φ : Name → Nat} {env : Env}
 theorem lval_loc_protected_rank_le_base_whenInitialized
     {store : ProgramStore} {env : Env} {φ : Name → Nat} {root : Name}
     (hφ : LinearizedBy φ env)
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store) :
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
@@ -10236,7 +10236,7 @@ theorem lval_loc_protected_rank_le_base_whenInitialized
 theorem locReads_protected_rank_le_base_whenInitialized
     {store : ProgramStore} {env : Env} {φ : Name → Nat} {root : Name}
     (hφ : LinearizedBy φ env)
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store) :
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
@@ -10280,7 +10280,7 @@ theorem locReads_protected_rank_le_base_whenInitialized
 
 theorem lval_loc_chain_leaf_conflict_or_writeProhibited_whenInitialized
     {env : Env} {store : ProgramStore} {moved : LVal} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
@@ -10387,7 +10387,7 @@ theorem lval_loc_chain_leaf_conflict_or_writeProhibited_whenInitialized
 theorem locReads_chain_leaf_conflict_or_writeProhibited_whenInitialized
     {env : Env} {store : ProgramStore} {moved : LVal}
     {leafLoc : Location} {k : Nat} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     OwnsChain store (VariableProjection (LVal.base moved)) k leafLoc →
@@ -10446,7 +10446,7 @@ theorem locReads_chain_leaf_conflict_or_writeProhibited_whenInitialized
 theorem borrowDependencyWhenInitialized_chain_leaf_writeProhibited
     {env : Env} {store : ProgramStore} {moved : LVal}
     {leafLoc : Location} {k : Nat} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     OwnsChain store (VariableProjection (LVal.base moved)) k leafLoc →
@@ -10491,7 +10491,7 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_no_ownerReaches
     {env : Env} {store : ProgramStore} {moved : LVal}
     {leafLoc : Location} {k : Nat}
     {value : PartialValue} {partialTy : PartialTy} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     OwnsChain store (VariableProjection (LVal.base moved)) k leafLoc →
@@ -10588,7 +10588,7 @@ theorem LValTyping.update_var_to_source_of_no_conflicts
 theorem lval_loc_chain_leaf_conflict_or_writeProhibited_update_var_whenInitialized
     {env env' : Env} {store : ProgramStore} {moved : LVal}
     {updatedSlot : EnvSlot} {leafLoc location : Location} {k : Nat} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     env' = env.update (LVal.base moved) updatedSlot →
@@ -10752,7 +10752,7 @@ theorem lval_loc_chain_leaf_conflict_or_writeProhibited_update_var_whenInitializ
 theorem locReads_chain_leaf_conflict_or_writeProhibited_update_var_whenInitialized
     {env env' : Env} {store : ProgramStore} {moved : LVal}
     {updatedSlot : EnvSlot} {leafLoc : Location} {k : Nat} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     env' = env.update (LVal.base moved) updatedSlot →
@@ -10817,7 +10817,7 @@ theorem locReads_chain_leaf_conflict_or_writeProhibited_update_var_whenInitializ
 theorem borrowDependencyWhenInitialized_chain_leaf_update_var_writeProhibited
     {env env' : Env} {store : ProgramStore} {moved : LVal}
     {updatedSlot : EnvSlot} {leafLoc : Location} {k : Nat} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     env' = env.update (LVal.base moved) updatedSlot →
@@ -10865,7 +10865,7 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_update_var_not_writeProhibited
     {env env' : Env} {store : ProgramStore} {moved : LVal}
     {updatedSlot : EnvSlot} {leafLoc : Location} {k : Nat}
     {value : PartialValue} {partialTy : PartialTy} :
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     env' = env.update (LVal.base moved) updatedSlot →
@@ -11052,7 +11052,7 @@ theorem preservation_blockB_value_multistep_runtime_of_runtimeDrop
     {lifetime blockLifetime : Lifetime} {value finalValue : Value}
     {ty : Ty} :
     ValidRuntimeState store (.block blockLifetime [.val value]) →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     LifetimeChild lifetime blockLifetime →
     WellFormedEnv env blockLifetime →
     WellFormedTy env ty lifetime →
@@ -11242,8 +11242,7 @@ theorem preservation_blockB_value_multistep_runtime_of_runtimeDrop
                     exact hblockWell.1.1 x envSlot mutable target henvDropped
                       ⟨envSlot, henvDropped, hcontains⟩)⟩
               have hsafeDrop :
-                  FullSafeAbstraction store'
-                    (env.dropLifetime blockLifetime) :=
+                  store' ∼ₛ env.dropLifetime blockLifetime :=
                 dropPreservation_lifetime hsafe
                   hdropsLifetime'
                   (dropLifetime_domain_equiv_of_ownerTargetsHeap_whenInitialized
@@ -11284,7 +11283,7 @@ theorem preservation_move_deref_box_multistep_runtime
     {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {source : LVal} {finalValue : Value} {ty : Ty} :
-    store ∼ env₁ →
+    store ∼ₛ env₁ →
     ValidRuntimeState store (.move source.deref) →
     LValTyping env₁ source (.box (.ty ty)) valueLifetime →
     ¬ WriteProhibited env₁ source.deref →
@@ -11491,10 +11490,8 @@ theorem preservation_move_deref_box_multistep_runtime
                     by simpa [owningRef] using hsourceSlot⟩
                 exact hheap ownerLocation hownsLeaf
               have hsafeFinal :
-                  FullSafeAbstraction
-                    (store.update ownerLocation
-                      { ownerSlot with value := .undef })
-                    env₂ := by
+                  (store.update ownerLocation
+                    { ownerSlot with value := .undef }) ∼ₛ env₂ := by
                 refine fullSafeAbstraction_update_var_partial_of_preserved
                   hmoveSlotBase hrootSlotFinal hrootValidFinalFull
                   (by simpa [LVal.base] using henv₂) ?domainMove
@@ -11578,7 +11575,7 @@ theorem preservation_move_deref_boxFull_multistep_runtime
     {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {source : LVal} {finalValue : Value} {ty : Ty} :
-    store ∼ env₁ →
+    store ∼ₛ env₁ →
     ValidRuntimeState store (.move source.deref) →
     LValTyping env₁ source (.ty (.box ty)) valueLifetime →
     ¬ WriteProhibited env₁ source.deref →
@@ -11788,10 +11785,8 @@ theorem preservation_move_deref_boxFull_multistep_runtime
                     by simpa [owningRef] using hsourceSlot⟩
                 exact hheap ownerLocation hownsLeaf
               have hsafeFinal :
-                  FullSafeAbstraction
-                    (store.update ownerLocation
-                      { ownerSlot with value := .undef })
-                    env₂ := by
+                  (store.update ownerLocation
+                    { ownerSlot with value := .undef }) ∼ₛ env₂ := by
                 refine fullSafeAbstraction_update_var_partial_of_preserved
                   hmoveSlotBase hrootSlotFinal hrootValidFinalFull
                   (by simpa [LVal.base] using henv₂) ?domainMove
@@ -11878,7 +11873,7 @@ private theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_fr
     ContainedBorrowsWellFormed env →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign source.deref (.val value)) →
     LValTyping env source (.box oldTy) targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -12058,7 +12053,7 @@ private theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_fr
           ⟨sourceLocation, sourceLifetime,
             by simpa [owningRef] using hsourceSlot⟩
         exact hheap ownerLocation hownsLeaf
-      have hsafeWrite : FullSafeAbstraction writtenStore env' := by
+      have hsafeWrite : writtenStore ∼ₛ env' := by
         refine fullSafeAbstraction_update_var_partial_of_preserved
           henvBase hrootSlotFinal hrootValidFinalFull henv' ?domainWrite
           ?preserveWrite
@@ -12161,7 +12156,7 @@ private theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_fr
         drops_storeOwnerTargetsHeap hdrops hwrittenHeap
       have hrootFinal : HeapSlotsRootLifetime store' :=
         drops_heapSlotsRootLifetime hdrops hrootWrite
-      have hsafeFinal : FullSafeAbstraction store' env' :=
+      have hsafeFinal : store' ∼ₛ env' :=
         fullSafeAbstraction_drops_of_orphaned_values_early
           hwellOut hsafeWrite hwrittenValidStore hwrittenHeap hdropValuesHeap
           hdropOwnersOrphaned hdrops
@@ -12178,7 +12173,7 @@ private theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_o
     ContainedBorrowsWellFormed env →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign source.deref (.val value)) →
     LValTyping env source (.ty (.box oldTy)) targetLifetime →
     ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
@@ -12373,7 +12368,7 @@ private theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_o
           ⟨sourceLocation, sourceLifetime,
             by simpa [owningRef] using hsourceSlot⟩
         exact hheap ownerLocation hownsLeaf
-      have hsafeWrite : FullSafeAbstraction writtenStore env' := by
+      have hsafeWrite : writtenStore ∼ₛ env' := by
         refine fullSafeAbstraction_update_var_partial_of_preserved
           henvBase hrootSlotFinal hrootValidFinalFull henv' ?domainWrite
           ?preserveWrite
@@ -12476,7 +12471,7 @@ private theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_o
         drops_storeOwnerTargetsHeap hdrops hwrittenHeap
       have hrootFinal : HeapSlotsRootLifetime store' :=
         drops_heapSlotsRootLifetime hdrops hrootWrite
-      have hsafeFinal : FullSafeAbstraction store' env' :=
+      have hsafeFinal : store' ∼ₛ env' :=
         fullSafeAbstraction_drops_of_orphaned_values_early
           hwellOut hsafeWrite hwrittenValidStore hwrittenHeap hdropValuesHeap
           hdropOwnersOrphaned hdrops
@@ -12493,7 +12488,7 @@ private theorem preservation_assign_deref_box_step_runtime_whenInitialized_of_we
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign source.deref (.val value)) →
     LValTyping env source (.box oldTy) targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -12662,7 +12657,7 @@ private theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_o
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign source.deref (.val value)) →
     LValTyping env source (.ty (.box oldTy)) targetLifetime →
     ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
@@ -12850,7 +12845,7 @@ private theorem preservation_assign_deref_boxFull_step_runtime_whenInitialized_o
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign source.deref (.val value)) →
     LValTyping env source (.ty (.box oldTy)) sourceLifetime →
     ShapeCompatible env (.ty oldTy) (.ty rhsTy) →
@@ -12904,7 +12899,7 @@ private theorem preservation_assign_pathSelect_step_runtime_whenInitialized_of_f
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lhs (.val value)) →
     LValTyping env lhs oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -13553,7 +13548,7 @@ inductive HopsTo (env env₃ : Env) : LVal → LVal → Prop where
 
 theorem HopsTo.locReads_ne_of_links_clean
     {env env₃ : Env} {store : ProgramStore} {leaf : Location}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hcbwf : ContainedBorrowsWellFormed env) :
     ∀ {lv final : LVal},
       HopsTo env env₃ lv final →
@@ -13633,7 +13628,7 @@ theorem edge_into_final_base_eq
 
 theorem HopsTo.tail_target_locReads_ne
     {env env₃ : Env} {store : ProgramStore} {leaf : Location}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hcbwf : ContainedBorrowsWellFormed env)
     {target final : LVal} {path' : Path}
     (hhops : HopsTo env env₃ (prependPath path' target) final)
@@ -13660,7 +13655,7 @@ theorem HopsTo.tail_target_locReads_ne
 hop annotation itself, so the tail read-exclusion applies to its target. -/
 theorem HopsTo.source_entry_tail_root_locReads_ne
     {env env₃ : Env} {store : ProgramStore} {leaf : Location}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hcbwf : ContainedBorrowsWellFormed env)
     (hborrowSafe : BorrowSafeEnv env)
     {tailRoot target final : LVal} {path' : Path}
@@ -13856,7 +13851,7 @@ theorem clean_hop_link_of_guarded_leaf
     {env env₃ nested : Env} {store : ProgramStore} {lhs finalLhs : LVal}
     {rhsTy : Ty} {bslotG : EnvSlot} {graftTy leafTy : PartialTy}
     {leaf : Location} {k : Nat} {rootSlotF : EnvSlot}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (htySafe : TyBorrowSafeAgainstEnv env rhsTy)
@@ -13997,7 +13992,7 @@ def SelectFinalPackage (store : ProgramStore) (env env₃ : Env)
 theorem EnvWrite.select_final
     {store : ProgramStore} {env env₃ : Env} {lhsTop : LVal}
     {rhsTy : Ty} {oldTy : PartialTy} {targetLifetime : Lifetime}
-    (hsafeStore : FullSafeAbstraction store env)
+    (hsafeStore : store ∼ₛ env)
     (hcbwf : ContainedBorrowsWellFormed env)
     (hsafeB : BorrowSafeEnv env)
     (hnotWriteTop : ¬ WriteProhibited env₃ lhsTop)
@@ -14336,7 +14331,7 @@ changed slot, then the lvalue's base is itself on the source write chain. -/
 theorem lval_loc_chain_protected_base_on_chain
     {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
     {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14503,7 +14498,7 @@ theorem locReads_chain_protected_base_on_chain
     {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
     {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
     {leafLoc : Location}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14565,7 +14560,7 @@ theorem borrowDependencyWhenInitialized_chain_leaf_ne_of_target_outside
     {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
     {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
     {leafLoc : Location}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14735,7 +14730,7 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_target_outside
     {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
     {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
     {leafLoc : Location} {value : PartialValue} {partialTy : PartialTy}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14808,7 +14803,7 @@ theorem borrowDependencyWhenInitialized_chain_leaf_ne_of_outside_chain
     {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
     {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
     {leafLoc : Location}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14868,7 +14863,7 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_outside_chain
     {env env₃ : Env} {store : ProgramStore} {lhs : LVal} {rhsTy : Ty}
     {b : Name} {bslot : EnvSlot} {graftTy : PartialTy}
     {leafLoc : Location} {value : PartialValue} {partialTy : PartialTy}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14942,7 +14937,7 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_stored_outside_chain
     {b y : Name} {bslot : EnvSlot} {graftTy : PartialTy}
     {leafLoc : Location} {k : Nat}
     {otherEnvSlot : EnvSlot} {oldValue : PartialValue}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hsafeEnv : BorrowSafeEnv env)
@@ -14988,7 +14983,7 @@ theorem reachesWhenInitialized_select_final_rhs_ne_leaf
     {lhsTop finalLhs : LVal} {rhsTy : Ty} {oldTy leafTy : PartialTy}
     {targetLifetime : Lifetime} {rootSlot : EnvSlot}
     {value : Value} {leafLoc : Location} {k : Nat}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hborrowSafe : BorrowSafeEnv env)
@@ -15058,7 +15053,7 @@ theorem reachesWhenInitialized_select_final_stored_outside_ne_leaf
     {lhsTop finalLhs : LVal} {rhsTy : Ty} {leafTy : PartialTy}
     {rootSlot otherEnvSlot : EnvSlot} {oldValue : PartialValue}
     {y : Name} {leafLoc : Location} {k : Nat}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hborrowSafe : BorrowSafeEnv env)
@@ -15239,7 +15234,7 @@ theorem source_entry_target_guard_of_select_final_locReads
     {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
     {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
     {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15361,7 +15356,7 @@ theorem source_entry_select_final_outside_locReads_ne
     {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
     {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
     {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15401,7 +15396,7 @@ theorem source_entry_select_final_hops_suffix_locReads_ne
     {lhsTop finalLhs target : LVal} {rhsTy : Ty}
     {rootSlot : EnvSlot} {leafTy : PartialTy}
     {leafLoc : Location} {k : Nat}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15474,7 +15469,7 @@ theorem source_entry_select_final_prefix_locReads_ne
     {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
     {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
     {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15520,7 +15515,7 @@ theorem source_entry_select_final_live_of_not_writeProhibited_final_locReads_ne
     {lhsTop lv finalLhs target : LVal} {rhsTy : Ty}
     {leafTy : PartialTy} {rootSlot : EnvSlot}
     {leafLoc : Location} {k : Nat} {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15583,7 +15578,7 @@ theorem source_entry_select_final_live_of_not_writeProhibited_nested_final_locRe
     {lhsTop lv finalLhs target : LVal} {rhsTy : Ty}
     {leafTy : PartialTy} {rootSlot : EnvSlot}
     {leafLoc : Location} {k : Nat} {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hborrowSafe : BorrowSafeEnv env)
@@ -15644,7 +15639,7 @@ theorem source_entry_select_final_live_not_tail_locReads_ne
     {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
     {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
     {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15742,7 +15737,7 @@ theorem source_entry_select_final_live_of_tail_frame_locReads_ne
     {oldTy leafTy : PartialTy} {targetLifetime : Lifetime}
     {rootSlot : EnvSlot} {leafLoc : Location} {k : Nat}
     {mutable : Bool} {y : Name}
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15803,7 +15798,7 @@ theorem source_entry_select_final_tail_linearized_locReads_ne
     {finalLhs target : LVal} {leafLoc : Location} {k : Nat}
     {mutable : Bool} {y : Name} {φ : Name → Nat}
     (hφ : LinearizedBy φ env)
-    (hsafe : FullSafeAbstraction store env)
+    (hsafe : store ∼ₛ env)
     (hvalidStore : ValidStore store)
     (hheap : StoreOwnerTargetsHeap store)
     (hcbwf : ContainedBorrowsWellFormed env)
@@ -15855,7 +15850,7 @@ theorem preservation_assign_selected_final_step_runtime
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lv (.val value)) →
     EnvWrite env lhsTop rhsTy env₃ →
     LValTyping env lhsTop oldTy targetLifetime →
@@ -15995,7 +15990,7 @@ theorem preservation_assign_selected_final_step_runtime_of_tail_frame
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lv (.val value)) →
     EnvWrite env lhsTop rhsTy env₃ →
     LValTyping env lhsTop oldTy targetLifetime →
@@ -16134,7 +16129,7 @@ theorem preservation_assign_step_runtime_whenInitialized_of_tail_frame
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lhs (.val value)) →
     LValTyping env lhs oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -16222,7 +16217,7 @@ theorem preservation_assign_step_runtime_whenInitialized_of_linearized
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lhs (.val value)) →
     LValTyping env lhs oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -16266,7 +16261,7 @@ theorem preservation_assign_step_runtime_of_tail_frame
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lhs (.val value)) →
     LValTyping env lhs oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -16316,7 +16311,7 @@ theorem preservation_assign_step_runtime_of_linearized
     WellFormedEnv env lifetime →
     BorrowSafeEnv env →
     TyBorrowSafeAgainstEnv env rhsTy →
-    FullSafeAbstraction store env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign lhs (.val value)) →
     LValTyping env lhs oldTy targetLifetime →
     ShapeCompatible env oldTy (.ty rhsTy) →
@@ -16352,7 +16347,7 @@ theorem preservation_bounded
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ∼ env₁ →
+    store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     FullTerminalStateSafe finalStore finalValue env₂ ty := by
@@ -16376,7 +16371,7 @@ theorem preservation_bounded
         BorrowSafeEnv env →
         Env.FiniteSupport env →
         Linearizable env →
-        store ∼ env →
+        store ∼ₛ env →
         MultiStep store lifetime term finalStore (.val finalValue) →
         FullTerminalStateSafe finalStore finalValue env₂ ty)
     (motive_2 := fun env currentTyping blockLifetime terms ty env₂ _ =>
@@ -16391,7 +16386,7 @@ theorem preservation_bounded
         BorrowSafeEnv env →
         Env.FiniteSupport env →
         Linearizable env →
-        store ∼ env →
+        store ∼ₛ env →
         WellFormedTy env₂ ty outerLifetime →
         MultiStep store outerLifetime (.block blockLifetime terms)
           finalStore (.val finalValue) →
@@ -16633,7 +16628,7 @@ theorem preservation_bounded
                 (.block blockLifetime (next :: restTail)) :=
             validRuntimeState_seq_step hvalueBlockValid hseqStep
           have hsafeTailAfter :
-              storeAfterDrop ∼ _env₂ :=
+              storeAfterDrop ∼ₛ _env₂ :=
             fullSafeAbstraction_seq_value_drop hterminalHead.2.1
               hvalueBlockValid hwellInner hdrops
           have htailStoreTyping :
@@ -16668,7 +16663,7 @@ theorem preservation
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ∼ env₁ →
+    store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     FullTerminalStateSafe finalStore finalValue env₂ ty := by
@@ -16697,7 +16692,7 @@ theorem lemma_4_11_preservation
     (hborrowSafe : BorrowSafeEnv env₁)
     (hfinite : Env.FiniteSupport env₁)
     (hlinear : Linearizable env₁)
-    (hsafe : store ∼ env₁)
+    (hsafe : store ∼ₛ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     FullTerminalStateSafe finalStore finalValue env₂ ty :=
