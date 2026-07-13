@@ -1060,12 +1060,6 @@ theorem validPartialValueSkeleton_erase_of_not_owner_reaches
   | borrow =>
       intro _howners
       exact ValidPartialValueSkeleton.borrow
-  | undefOf hinner hstrength ih =>
-      intro howners
-      exact ValidPartialValueSkeleton.undefOf
-        (ih (fun location hreach =>
-          howners location (OwnerReaches.undefOf hinner hstrength hreach)))
-        hstrength
   | box hslot _hinner ih =>
       intro howners
       rename_i location slot inner
@@ -1106,13 +1100,6 @@ theorem validPartialValue_erase_of_not_reaches
   | undef =>
       intro _hreach
       exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_erase_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location (Reaches.undefOf hinner hstrength howner)))
-        hstrength
   | borrow hloc =>
       intro hreach
       refine ValidPartialValue.borrow ?_
@@ -1159,13 +1146,6 @@ theorem validPartialValueWhenInitialized_erase_of_not_reaches
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_erase_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location (Reaches.undefOf hinner hstrength howner)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -1205,9 +1185,6 @@ theorem ownerReaches_erase_to_store {store : ProgramStore}
     OwnerReaches store value ty location := by
   intro hreach
   induction hreach with
-  | undefOf hvalid hstrength _hinner ih =>
-      exact OwnerReaches.undefOf
-        (validPartialValueSkeleton_erase_to_store hvalid) hstrength ih
   | boxHere hslot =>
       exact OwnerReaches.boxHere (slotAt_of_erase_slotAt hslot)
   | boxInner hslot _hinner ih =>
@@ -1224,11 +1201,6 @@ theorem reaches_erase_to_store {store : ProgramStore}
     Reaches store value ty location := by
   intro hreach
   induction hreach with
-  | undefOf hvalid hstrength hinner =>
-      exact Reaches.undefOf
-        (validPartialValueSkeleton_erase_to_store hvalid)
-        hstrength
-        (ownerReaches_erase_to_store hinner)
   | boxHere hslot =>
       exact Reaches.boxHere (slotAt_of_erase_slotAt hslot)
   | boxInner hslot _hinner ih =>
@@ -1249,8 +1221,6 @@ theorem store_owns_of_ownerReaches_stored {store : ProgramStore}
     ProgramStore.Owns store location := by
   intro hstored hreach
   induction hreach generalizing storage lifetime with
-  | undefOf _hvalid _hstrength _hinner ih =>
-      exact ih hstored
   | boxHere =>
       rename_i ownerLocation _slot _inner hslot
       exact ⟨storage, lifetime, by
@@ -1622,12 +1592,6 @@ theorem BorrowDependencyWhenInitialized.protectedBySomeBase
 annotations intentionally contribute no runtime read dependencies. -/
 inductive ReachesWhenInitialized (env : Env) (store : ProgramStore) :
     PartialValue → PartialTy → Location → Prop where
-  | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty}
-      {location : Location} :
-      ValidPartialValueSkeleton store value oldTy →
-      PartialTyStrengthens oldTy (.undef ty) →
-      OwnerReaches store value oldTy location →
-      ReachesWhenInitialized env store value (.undef ty) location
   | boxHere {location : Location} {slot : StoreSlot} {inner : PartialTy} :
       store.slotAt location = some slot →
       ReachesWhenInitialized env store
@@ -1667,10 +1631,6 @@ theorem reachesWhenInitialized_erase_to_store {env : Env}
     ReachesWhenInitialized env store value ty location := by
   intro hreach
   induction hreach with
-  | undefOf hvalid hstrength hinner =>
-      exact ReachesWhenInitialized.undefOf
-        (validPartialValueSkeleton_erase_to_store hvalid) hstrength
-        (ownerReaches_erase_to_store hinner)
   | boxHere hslot =>
       exact ReachesWhenInitialized.boxHere (slotAt_of_erase_slotAt hslot)
   | boxInner hslot _hinner ih =>
@@ -1701,14 +1661,6 @@ theorem validPartialValueWhenInitialized_erase_of_not_live_reaches {env : Env}
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_erase_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location
-              (ReachesWhenInitialized.undefOf hinner hstrength howner)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -1760,14 +1712,6 @@ theorem validPartialValueWhenInitialized_update_of_not_live_reaches {env : Env}
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (RuntimeFrame.validPartialValueSkeleton_update_of_not_owner_reaches hinner
-          (fun location howner =>
-            hreach location
-              (ReachesWhenInitialized.undefOf hinner hstrength howner)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -1982,14 +1926,6 @@ theorem reachesWhenInitialized_var_ne_of_stored_not_writeProhibited
       location ≠ VariableProjection x := by
   intro hsafe hheap hstored hvalid hcontains hnotWrite location hreach
   induction hreach generalizing storage holder lifetime with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      have howns :=
-        RuntimeFrame.store_owns_of_ownerReaches_stored hstored
-          (OwnerReaches.undefOf hskel hstrength howner)
-      rcases hheap _ howns with ⟨address, hheapLocation⟩
-      rw [hlocation] at hheapLocation
-      cases hheapLocation
   | boxHere hslot =>
       intro hlocation
       rename_i ownedLocation ownedSlot inner
@@ -2096,8 +2032,6 @@ theorem ReachesWhenInitialized.owner_or_borrow {env : Env}
         BorrowDependencyWhenInitialized env store value partialTy location := by
   intro value partialTy location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      exact Or.inl (OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       exact Or.inl (OwnerReaches.boxHere hslot)
   | boxInner hslot _hinner ih =>
@@ -2151,8 +2085,6 @@ theorem ownerReaches_ne_var_of_heap
     location ≠ VariableProjection x := by
   intro hheap hvalueHeap hreach
   induction hreach with
-  | undefOf _hskel _hstrength _howner ih =>
-      exact ih hvalueHeap
   | boxHere hslot =>
       intro hloc
       have hvalueHeapVar :
@@ -2336,8 +2268,6 @@ theorem validPartialValueWhenInitialized_envWrite_var_of_no_write
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | @borrowLive location mutable target _hinitialized hloc =>
       by_cases htarget : TargetInitialized env' target
       · exact ValidPartialValueWhenInitialized.borrowLive htarget hloc
@@ -2959,12 +2889,6 @@ theorem dropsAvoids_of_ownerReaches_stored
     DropsAvoids store values location := by
   intro hdrops hvalidStore hstored havoidStorage hdisjoint hreach
   induction hreach generalizing storage lifetime with
-  | undefOf _hvalid _hstrength _hinner ih =>
-      exact ih hstored havoidStorage (by
-        intro reached howner dropValue hmem howned
-        exact hdisjoint reached
-          (OwnerReaches.undefOf _hvalid _hstrength howner)
-          dropValue hmem howned)
   | boxHere hslot =>
       rename_i ownerLocation _slot _inner
       have hownsAt :
@@ -3045,10 +2969,6 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
   intro hdrops hwellFormed hsafe hvalidStore hheap hvaluesHeap hstored
     hborrows hvalid havoidStorage hownerDisjoint hprotectedDisjoint hreach
   induction hreach generalizing storage lifetime with
-  | undefOf hskel hstrength howner =>
-      exact dropsAvoids_of_ownerReaches_stored hdrops hvalidStore hstored
-        havoidStorage hownerDisjoint
-        (OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       exact dropsAvoids_of_ownerReaches_stored hdrops hvalidStore hstored
         havoidStorage hownerDisjoint (OwnerReaches.boxHere hslot)
@@ -3123,10 +3043,6 @@ theorem dropsAvoids_of_reaches_stored_validPartialValueWhenInitialized
   intro hdrops hsafe hvalidStore hheap hvaluesHeap hstored hvalid
     havoidStorage hownerDisjoint hdependencyFrame hreach
   induction hreach generalizing storage lifetime with
-  | undefOf hskel hstrength howner =>
-      exact dropsAvoids_of_ownerReaches_stored hdrops hvalidStore hstored
-        havoidStorage hownerDisjoint
-        (OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       exact dropsAvoids_of_ownerReaches_stored hdrops hvalidStore hstored
         havoidStorage hownerDisjoint (OwnerReaches.boxHere hslot)
@@ -3203,10 +3119,6 @@ theorem dropsAvoids_of_reaches_stored_validPartialValueWhenInitialized_of_frames
   intro hdrops hvalidStore hstored hvalid havoidStorage hownerDisjoint
     hdependencyFrame hreach
   induction hreach generalizing storage lifetime with
-  | undefOf hskel hstrength howner =>
-      exact dropsAvoids_of_ownerReaches_stored hdrops hvalidStore hstored
-        havoidStorage hownerDisjoint
-        (OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       exact dropsAvoids_of_ownerReaches_stored hdrops hvalidStore hstored
         havoidStorage hownerDisjoint (OwnerReaches.boxHere hslot)
@@ -4177,8 +4089,6 @@ theorem ValidPartialValueWhenInitialized.update_fresh_env_of_partialTyBorrows
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | borrowLive hinitialized hloc =>
       rcases hinitialized with ⟨targetTy, targetLifetime, htarget⟩
       exact ValidPartialValueWhenInitialized.borrowLive
@@ -6833,8 +6743,6 @@ theorem validPartialValueWhenInitialized_envWrite_of_result_contains
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | borrowLive hinitialized hloc =>
       exact ValidPartialValueWhenInitialized.borrowLive
         (TargetInitialized.envWrite hcbwf hsafe htySafe hwrite hlv hshape
@@ -9941,8 +9849,6 @@ theorem ownerReaches_ownsChain_stored {store : ProgramStore} :
       ∃ n, OwnsChain store storage (n + 1) ℓ := by
   intro value partialTy ℓ storage lifetime hstored hreach
   induction hreach generalizing storage lifetime with
-  | undefOf _hskel _hstrength _howner ih =>
-      exact ih hstored
   | boxHere hslot =>
       exact ⟨0, OwnsChain.succ OwnsChain.zero
         ⟨lifetime, by simpa [owningRef] using hstored⟩⟩
@@ -10506,11 +10412,6 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_no_ownerReaches
   intro hsafe hvalidStore hheap hleafChain hcontains hnotWrite hownerNoReach
     location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      exact hownerNoReach
-        (by simpa [hlocation] using
-          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       intro hlocation
       exact hownerNoReach
@@ -10881,11 +10782,6 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_update_var_not_writeProhibited
   intro hsafe hvalidStore hheap henv' hnotWrite hleafChain hcontains
     hownerNoReach location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      exact hownerNoReach
-        (by simpa [hlocation] using
-          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       intro hlocation
       exact hownerNoReach
@@ -10943,8 +10839,6 @@ theorem ownerReaches_ownsChain_value {store : ProgramStore} :
   intro value partialTy ℓ hreach
   generalize hpv : (.value value : PartialValue) = rootValue at hreach
   induction hreach generalizing value with
-  | undefOf _hskel _hstrength _howner ih =>
-      exact ih hpv
   | boxHere hslot =>
       cases hpv
       exact ⟨_, 0, by
@@ -14626,11 +14520,6 @@ theorem reachesWhenInitialized_ne_of_borrow_targets_locReads_ne
       location ≠ leafLoc := by
   intro location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      exact hownerNoReach
-        (by simpa [hlocation] using
-          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       intro hlocation
       exact hownerNoReach
@@ -14684,11 +14573,6 @@ theorem reachesWhenInitialized_ne_of_live_borrow_targets_locReads_ne
       location ≠ leafLoc := by
   intro location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      exact hownerNoReach
-        (by simpa [hlocation] using
-          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       intro hlocation
       exact hownerNoReach
@@ -14753,11 +14637,6 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_target_outside
       location ≠ leafLoc := by
   intro location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      exact hownerNoReach
-        (by simpa [hlocation] using
-          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       intro hlocation
       exact hownerNoReach
@@ -14887,11 +14766,6 @@ theorem reachesWhenInitialized_chain_leaf_ne_of_outside_chain
       location ≠ leafLoc := by
   intro location hreach
   induction hreach with
-  | undefOf hskel hstrength howner =>
-      intro hlocation
-      exact hownerNoReach
-        (by simpa [hlocation] using
-          RuntimeFrame.OwnerReaches.undefOf hskel hstrength howner)
   | boxHere hslot =>
       intro hlocation
       exact hownerNoReach

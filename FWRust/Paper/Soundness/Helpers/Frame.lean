@@ -106,11 +106,6 @@ theorem locReads_erase_to_store {store : ProgramStore}
 
 inductive OwnerReaches (store : ProgramStore) :
     PartialValue → PartialTy → Location → Prop where
-  | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty} {ℓ : Location} :
-      ValidPartialValueSkeleton store value oldTy →
-      PartialTyStrengthens oldTy (.undef ty) →
-      OwnerReaches store value oldTy ℓ →
-      OwnerReaches store value (.undef ty) ℓ
   | boxHere {location : Location} {slot : StoreSlot} {inner : PartialTy} :
       store.slotAt location = some slot →
       OwnerReaches store (.value (.ref { location := location, owner := true }))
@@ -134,11 +129,6 @@ inductive OwnerReaches (store : ProgramStore) :
 
 inductive Reaches (store : ProgramStore) :
     PartialValue → PartialTy → Location → Prop where
-  | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty} {ℓ : Location} :
-      ValidPartialValueSkeleton store value oldTy →
-      PartialTyStrengthens oldTy (.undef ty) →
-      OwnerReaches store value oldTy ℓ →
-      Reaches store value (.undef ty) ℓ
   | boxHere {location : Location} {slot : StoreSlot} {inner : PartialTy} :
       store.slotAt location = some slot →
       Reaches store (.value (.ref { location := location, owner := true }))
@@ -171,7 +161,6 @@ theorem OwnerReaches.reaches {store : ProgramStore}
     Reaches store value ty location := by
   intro h
   induction h with
-  | undefOf hvalid hstrength _ ih => exact Reaches.undefOf hvalid hstrength (by assumption)
   | boxHere hslot => exact Reaches.boxHere hslot
   | boxInner hslot _ ih => exact Reaches.boxInner hslot ih
   | boxFullHere hslot => exact Reaches.boxFullHere hslot
@@ -189,11 +178,6 @@ theorem validPartialValueSkeleton_update_of_not_owner_reaches {store : ProgramSt
   | int => intro _; exact ValidPartialValueSkeleton.int
   | undef => intro _; exact ValidPartialValueSkeleton.undef
   | borrow => intro _; exact ValidPartialValueSkeleton.borrow
-  | undefOf hinner hstrength ih =>
-      intro howners
-      exact ValidPartialValueSkeleton.undefOf
-        (ih (fun ℓ hℓ => howners ℓ (OwnerReaches.undefOf hinner hstrength hℓ)))
-        hstrength
   | box hslot _hinner ih =>
       intro howners
       rename_i location slot inner
@@ -222,12 +206,6 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
   | undef => intro _; exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_update_of_not_owner_reaches hinner
-          (fun ℓ hℓ => hreach ℓ (Reaches.undefOf hinner hstrength hℓ)))
-        hstrength
   | borrow hloc =>
       intro hreach
       refine ValidPartialValue.borrow ?_
@@ -268,12 +246,6 @@ theorem validPartialValueWhenInitialized_update_of_not_reaches {env : Env}
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_update_of_not_owner_reaches hinner
-          (fun ℓ hℓ => hreach ℓ (Reaches.undefOf hinner hstrength hℓ)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -317,7 +289,6 @@ theorem validPartialValueSkeleton_erase_to_store {store : ProgramStore}
   | int => exact ValidPartialValueSkeleton.int
   | undef => exact ValidPartialValueSkeleton.undef
   | borrow => exact ValidPartialValueSkeleton.borrow
-  | undefOf hinner hstrength ih => exact ValidPartialValueSkeleton.undefOf ih hstrength
   | box hslot _ ih =>
       exact ValidPartialValueSkeleton.box (slotAt_of_erase_slotAt hslot) ih
   | boxFull hslot _ ih =>
@@ -332,9 +303,6 @@ theorem validPartialValue_erase_to_store {store : ProgramStore}
   | unit => exact ValidPartialValue.unit
   | int => exact ValidPartialValue.int
   | undef => exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_erase_to_store hinner) hstrength
   | borrow hloc =>
       exact ValidPartialValue.borrow (loc_erase_some_to_store hloc)
   | box hslot _ ih =>
