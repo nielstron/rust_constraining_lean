@@ -32,6 +32,10 @@ ATOM_TYPES = {
 
 PARTIAL_ATOMS = {
     "ident": ("Name", "PartialName", "CompletesName"),
+    # Integer tokens can be observed before all of their digits have been
+    # decoded.  Keep their spelling, rather than prematurely converting the
+    # frontier to an `Int`, so realization can require lexical extension.
+    "num": ("Int", "PartialInt", "CompletesInt"),
 }
 
 
@@ -543,6 +547,17 @@ def render_rule(rule: Rule) -> list[str]:
         return lines
 
     if rule.index is None:
+        # The paper folds term prefixes that contain only keywords into its
+        # unrestricted hole.  We retain the generated parser states (they are
+        # useful to a decoder), but give them the same realization semantics:
+        # any complete term may extend such a state.
+        if prod.target_cat == "cterm":
+            partial_src = partial_app(partial, rule.state_name, rule.fields)
+            return [
+                f"  | {prod.name}_{rule.state_name} {{completion : {complete}}} :",
+                f"      {rel} ({partial_src}) completion",
+            ]
+
         names: dict[str, str] = {}
         binders = field_elems_after_start(prod)
         premises: list[str] = []
@@ -605,10 +620,11 @@ def render_list_relation(cat: str) -> list[str]:
         f"inductive {rel} : {partial} → {complete} → Prop where",
         "  | done {xs} :",
         f"      {rel} ({partial}.done xs) xs",
-        "  | cutoff {xs} :",
-        f"      {rel} {partial}.cutoff xs",
-        f"  | elemsDone {{pre suffix : {complete}}} :",
-        f"      {rel} ({partial}.elems pre none) (pre ++ suffix)",
+        f"  | cutoff {{frontierCompletion : {item_complete}}} {{suffix : {complete}}} :",
+        f"      {rel} {partial}.cutoff (frontierCompletion :: suffix)",
+        f"  | elemsDone {{pre suffix : {complete}}} {{frontierCompletion : {item_complete}}} :",
+        f"      {rel} ({partial}.elems pre none)",
+        "        (pre ++ frontierCompletion :: suffix)",
         f"  | elemsTail {{pre suffix : {complete}}} {{frontier : {item_partial}}}",
         f"      {{frontierCompletion : {item_complete}}} :",
         f"      {item_rel} frontier frontierCompletion →",
@@ -695,6 +711,9 @@ def render_generated() -> str:
     validate_generated_metadata(productions, metadata, rules)
 
     lines: list[str] = [
+        "/-- The already-decoded lexical prefix of an integer literal. -/",
+        "abbrev PartialInt := String",
+        "",
         "inductive PartialName where",
         "  | cutoff",
         "  | done (x : Name)",
@@ -718,12 +737,59 @@ def render_generated() -> str:
             "",
             "abbrev PartialProgram := PartialTerm",
             "",
+            "/-- The digit language accepted after a numeral base prefix.",
+            "Underscores may separate digits but cannot finish a complete token. -/",
+            "private def numTokenDigits (isDigit : Char → Bool)",
+            "    (chars : List Char) : Bool :=",
+            "  chars.all (fun c => isDigit c || c == '_') &&",
+            "    match chars.getLast? with",
+            "    | some last => isDigit last",
+            "    | none => false",
+            "",
+            "private def asciiHexDigit (c : Char) : Bool :=",
+            "  ('0' ≤ c && c ≤ '9') || ('a' ≤ c && c ≤ 'f') ||",
+            "    ('A' ≤ c && c ≤ 'F')",
+            "",
+            "/-- Surface spellings accepted by the complete facade's Lean `num` atom. -/",
+            "private def validNumToken (spelling : String) : Bool :=",
+            "  match spelling.toList with",
+            "  | '0' :: 'x' :: rest | '0' :: 'X' :: rest =>",
+            "      numTokenDigits asciiHexDigit rest",
+            "  | '0' :: 'b' :: rest | '0' :: 'B' :: rest =>",
+            "      numTokenDigits (fun c => c == '0' || c == '1') rest",
+            "  | '0' :: 'o' :: rest | '0' :: 'O' :: rest =>",
+            "      numTokenDigits (fun c => '0' ≤ c && c ≤ '7') rest",
+            "  | chars@(first :: _) =>",
+            "      first.isDigit && numTokenDigits (fun c => c.isDigit) chars",
+            "  | [] => false",
+            "",
+            "/-- Decode exactly the valid token spellings above.  Lean's stock",
+            "decoder omits the lexer's decimal `0_...` edge, so decimal",
+            "underscores are normalized before calling `String.toNat?`. -/",
+            "private def decodeNumToken? (spelling : String) : Option Nat :=",
+            "  match spelling.toList with",
+            "  | '0' :: 'x' :: _ | '0' :: 'X' :: _",
+            "  | '0' :: 'b' :: _ | '0' :: 'B' :: _",
+            "  | '0' :: 'o' :: _ | '0' :: 'O' :: _ =>",
+            "      Lean.Syntax.decodeNatLitVal? spelling",
+            "  | chars =>",
+            "      (String.ofList (chars.filter (fun c => c != '_'))).toNat?",
+            "",
+            "/-- An integer literal realizes a `num`-token prefix when appending",
+            "some suffix forms a valid Lean numeral, embedded into `Int`. -/",
+            "def CompletesInt (decoded : PartialInt) (value : Int) : Prop :=",
+            "  ∃ suffix completed,",
+            "    validNumToken (decoded ++ suffix) = true ∧",
+            "      decodeNumToken? (decoded ++ suffix) = some completed ∧",
+            "      value = Int.ofNat completed",
+            "",
             "inductive CompletesName : PartialName → Name → Prop where",
             "  | done {x} :",
             "      CompletesName (PartialName.done x) x",
             "  | cutoff {x} :",
             "      CompletesName PartialName.cutoff x",
             "  | prefix {x y} :",
+            "      x.isPrefixOf y = true →",
             "      CompletesName (PartialName.prefix x) y",
             "",
             "mutual",

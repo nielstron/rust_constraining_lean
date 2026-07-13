@@ -1,4 +1,4 @@
-import FWRust.Paper.Soundness.Lemma_4_11_Preservation
+import FWRust.Paper.Soundness.Appendix9.Lemma_9_8_AliasPreservation
 
 /-!
 # Lemma 9.9 (Value Preservation)
@@ -6,9 +6,11 @@ import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then the final
 > value is abstracted by the result type: `S₂ ▷ v ∼ T`.
 
-Status: proved as the value-validity projection of Preservation (Lemma 4.11).
-The file also exposes representative redex-level frame lemmas for move/value
-cases.
+The multistep theorem remains a value-validity projection of Preservation
+(Lemma 4.11).  The one-step theorem instead projects the independent shared
+terminal-redex proof in Lemma 9.8, which accepts already evaluated runtime
+values and uses no finite-support premise.  The file also exposes representative
+redex-level frame lemmas for move/value cases.
 -/
 
 namespace FWRust.Paper.Soundness
@@ -37,6 +39,43 @@ theorem lemma_9_9_valuePreservation
       hsafe htyping hmulti
     exact (lemma_4_11_preservation hsource hvalid hstoreTyping hwellFormed
       hborrowSafe hfinite hlinear hsafe htyping hmulti).2.2
+
+/--
+The Appendix 9.9 one-step conclusion, exposed as the value projection of
+`appendix_9_oneStep_fullPreservation_of_runtime_invariants`, not of the global
+source-term theorem.  `RuntimeRedexBorrowSafe` supplies the assignment-only
+static fact that runtime validity and store typing do not record.
+-/
+theorem lemma_9_9_valuePreservation_oneStep_of_runtime_invariants
+    {store finalStore : ProgramStore} {env₁ env₂ : Env}
+    {typing : StoreTyping} {lifetime : Lifetime} {term : Term}
+    {ty : Ty} {finalValue : Value}
+    (hvalid : ValidRuntimeState store term)
+    (hstoreTyping : ValidStoreTyping store term typing)
+    (hwellFormed : WellFormedEnv env₁ lifetime)
+    (hborrowSafe : BorrowSafeEnv env₁)
+    (hredexBorrowSafe : RuntimeRedexBorrowSafe env₁ typing term)
+    (hlinear : Linearizable env₁)
+    (hsafe : store ≈ₛ env₁)
+    (htyping : TermTyping env₁ typing lifetime term ty env₂)
+    (hstep : Step store lifetime term finalStore (.val finalValue)) :
+    ValidValue finalStore finalValue ty := by
+  exact
+    (appendix_9_oneStep_fullPreservation_of_runtime_invariants hvalid
+      hstoreTyping hwellFormed hborrowSafe hredexBorrowSafe hlinear hsafe
+      htyping hstep).2.2
+
+/-- Source-initial one-step value preservation with all extra invariants derived. -/
+theorem lemma_9_9_valuePreservation_oneStep_empty
+    {finalStore : ProgramStore} {env₂ : Env} {lifetime : Lifetime}
+    {term : Term} {ty : Ty} {finalValue : Value}
+    (htyping :
+      TermTyping Env.empty StoreTyping.empty lifetime term ty env₂)
+    (hstep :
+      Step ProgramStore.empty lifetime term finalStore (.val finalValue)) :
+    ValidValue finalStore finalValue ty := by
+  exact (emptyInitial_preservation htyping
+    (MultiStep.trans hstep MultiStep.refl)).2.2
 
 /--
 Appendix 9.9, `R-Move` post-write value preservation under the concrete frame

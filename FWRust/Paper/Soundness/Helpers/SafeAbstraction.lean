@@ -14,7 +14,11 @@ open Core
 /-! ## Section 4.2: Safe Abstractions -/
 
 /--
-Definition 4.4, valid type/value abstraction `S ⊢ v⊥ ∼ T̃`.
+Auxiliary runtime-shape relation used by ownership/frame proofs.
+
+Unlike Definition 4.4, this intentionally forgets the location equation for a
+borrow and can retain the pre-move shape under an `undef` shadow.  It is never
+used directly by either safe-abstraction predicate.
 -/
 inductive ValidPartialValueSkeleton : ProgramStore → PartialValue → PartialTy → Prop where
   | unit {store : ProgramStore} :
@@ -48,6 +52,7 @@ inductive ValidPartialValueSkeleton : ProgramStore → PartialValue → PartialT
       PartialTyStrengthens oldTy (.undef ty) →
       ValidPartialValueSkeleton store value (.undef ty)
 
+/-- Definition 4.4, valid type/value abstraction `S ⊢ v⊥ ∼ T̃`. -/
 inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Prop where
   /-- V-Unit. -/
   | unit {store : ProgramStore} :
@@ -58,17 +63,6 @@ inductive ValidPartialValue : ProgramStore → PartialValue → PartialTy → Pr
   /-- V-Undef. -/
   | undef {store : ProgramStore} {ty : Ty} :
       ValidPartialValue store .undef (.undef ty)
-  /--
-  V-Undef-live.  A statically moved-out partial type may still correspond to a
-  concrete runtime value.  The constructor records skeleton validity at a
-  pre-move partial type and a strengthening from that type to the carried
-  `undef` shadow.
-  -/
-  | undefOf {store : ProgramStore} {value : PartialValue}
-      {oldTy : PartialTy} {ty : Ty} :
-      ValidPartialValueSkeleton store value oldTy →
-      PartialTyStrengthens oldTy (.undef ty) →
-      ValidPartialValue store value (.undef ty)
   /-- V-Borrow. -/
   | borrow {store : ProgramStore} {location : Location} {mutable : Bool}
       {target : LVal} :
@@ -100,14 +94,13 @@ notation:50 store:51 " ⊢ " value:51 " ∼ " ty:51 =>
   ValidPartialValue store value ty
 
 /--
-Runtime value validity for environments that may contain stale loan
-annotations.
+Internal proof-staging validity for environments with stale loan annotations.
 
-For initialized borrow targets this is the ordinary `ValidPartialValue`
-obligation: the reference must resolve through the static target.  If the target
-is not initialized, the borrow annotation is only a protection token; runtime
-validity records the value shape but does not require target resolution that
-typing cannot use.
+Live borrows retain Definition 4.4's location equation.  A stale annotation is
+only a conservative protection token, so this auxiliary relation deliberately
+forgets its runtime location.  Paper-facing results use `ValidPartialValue` and
+`FullSafeAbstraction`; conversion back is proved under full borrow
+well-formedness below.
 -/
 def TargetInitialized (env : Env) (target : LVal) : Prop :=
   ∃ targetTy targetLifetime,
@@ -121,10 +114,6 @@ inductive ValidPartialValueWhenInitialized (env : Env) (store : ProgramStore) :
       ValidPartialValueWhenInitialized env store (.value (.int value)) (.ty .int)
   | undef {ty : Ty} :
       ValidPartialValueWhenInitialized env store .undef (.undef ty)
-  | undefOf {value : PartialValue} {oldTy : PartialTy} {ty : Ty} :
-      ValidPartialValueSkeleton store value oldTy →
-      PartialTyStrengthens oldTy (.undef ty) →
-      ValidPartialValueWhenInitialized env store value (.undef ty)
   | borrowLive {location : Location} {mutable : Bool} {target : LVal} :
       TargetInitialized env target →
       store.loc target = some location →
@@ -158,8 +147,6 @@ theorem ValidPartialValue.whenInitialized {env : Env} {store : ProgramStore}
   | unit => exact ValidPartialValueWhenInitialized.unit
   | int => exact ValidPartialValueWhenInitialized.int
   | undef => exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | @borrow location mutable target hloc =>
       by_cases hinitialized : TargetInitialized env target
       · exact ValidPartialValueWhenInitialized.borrowLive
@@ -172,6 +159,11 @@ theorem ValidPartialValue.whenInitialized {env : Env} {store : ProgramStore}
   | boxFull hslot _hinner ih =>
       exact ValidPartialValueWhenInitialized.boxFull hslot ih
 
+/--
+Recover Definition 4.4 from the internal staging relation.  Full borrow
+well-formedness makes every contained borrow target initialized, so the relaxed
+stale case is impossible.
+-/
 theorem ValidPartialValueWhenInitialized.toFull_of_borrowsWellFormed
     {env : Env} {store : ProgramStore} {value : PartialValue}
     {partialTy : PartialTy} :
@@ -190,10 +182,7 @@ theorem ValidPartialValueWhenInitialized.toFull_of_borrowsWellFormed
   | undef =>
       intro _slotLifetime _hwell
       exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      intro _slotLifetime _hwell
-      exact ValidPartialValue.undefOf hinner hstrength
-  | @borrowLive location mutable target hinitialized hloc =>
+  | @borrowLive location mutable target _hinitialized hloc =>
       intro _slotLifetime _hwell
       exact ValidPartialValue.borrow hloc
   | @borrowStale location mutable target hstale =>
@@ -228,8 +217,6 @@ theorem ValidPartialValueWhenInitialized.skeleton {env : Env}
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
   | undef => exact ValidPartialValueSkeleton.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueSkeleton.undefOf hinner hstrength
   | borrowLive _hinitialized _hloc =>
       exact ValidPartialValueSkeleton.borrow
   | borrowStale _hstale =>
@@ -248,8 +235,6 @@ theorem ValidPartialValue.skeleton {store : ProgramStore}
   | unit => exact ValidPartialValueSkeleton.unit
   | int => exact ValidPartialValueSkeleton.int
   | undef => exact ValidPartialValueSkeleton.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueSkeleton.undefOf hinner hstrength
   | borrow =>
       exact ValidPartialValueSkeleton.borrow
   | box hslot _hinner ih =>
@@ -527,160 +512,104 @@ theorem partialTyStrengthens_trans_safe {left middle right : PartialTy} :
               exact PartialTyStrengthens.boxIntoUndef
                 (ih (PartialTyStrengthens.undefLeft hbox))
 
-theorem validPartialValue_strengthen {store : ProgramStore}
-    {value : PartialValue} {oldTy newTy : PartialTy} :
-    ValidPartialValue store value oldTy →
-    PartialTyStrengthens oldTy newTy →
-    ValidPartialValue store value newTy := by
-  intro hvalid
-  induction hvalid generalizing newTy with
-  | unit =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.unit
-      | intoUndef hinner =>
-          exact ValidPartialValue.undefOf ValidPartialValueSkeleton.unit
-            (PartialTyStrengthens.intoUndef hinner)
-  | int =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.int
-      | intoUndef hinner =>
-          exact ValidPartialValue.undefOf ValidPartialValueSkeleton.int
-            (PartialTyStrengthens.intoUndef hinner)
-  | undef =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.undef
-      | undefLeft _ => exact ValidPartialValue.undef
-  | borrow hloc =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.borrow hloc
-      | intoUndef hinner =>
-          exact ValidPartialValue.undefOf
-            ValidPartialValueSkeleton.borrow
-            (PartialTyStrengthens.intoUndef hinner)
-  | box hslot _hinner ih =>
-      intro hstrength
-      cases hstrength with
-      | reflex =>
-          exact ValidPartialValue.box hslot _hinner
-      | box hinnerStrength =>
-          exact ValidPartialValue.box hslot (ih hinnerStrength)
-      | boxIntoUndef hinner =>
-          exact ValidPartialValue.undefOf
-            (ValidPartialValueSkeleton.box hslot _hinner.skeleton)
-            (PartialTyStrengthens.boxIntoUndef hinner)
-  | boxFull hslot hinner ih =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.boxFull hslot hinner
-      | tyBox hinnerStrength =>
-          exact ValidPartialValue.boxFull hslot (ih hinnerStrength)
-      | intoUndef htoUndef =>
-          exact ValidPartialValue.undefOf
-            (ValidPartialValueSkeleton.boxFull hslot hinner.skeleton)
-            (PartialTyStrengthens.intoUndef htoUndef)
-  | undefOf hinner htoUndef =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValue.undefOf hinner htoUndef
-      | undefLeft hinnerStrength =>
-          exact ValidPartialValue.undefOf hinner
-            (partialTyStrengthens_trans_safe htoUndef
-              (PartialTyStrengthens.undefLeft hinnerStrength))
-
 theorem validPartialValue_strengthen_sameShape {store : ProgramStore}
     {value : PartialValue} {oldTy newTy : PartialTy} :
     ValidPartialValue store value oldTy →
     PartialTyStrengthens oldTy newTy →
     PartialTy.sameShape oldTy newTy →
     ValidPartialValue store value newTy := by
-  intro hvalid hstrength _hshape
-  exact validPartialValue_strengthen hvalid hstrength
+  intro hvalid
+  induction hvalid generalizing newTy with
+  | unit =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.unit
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | int =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.int
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | undef =>
+      intro hstrength _hshape
+      cases hstrength <;> exact ValidPartialValue.undef
+  | borrow hloc =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.borrow hloc
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | box hslot hinner ih =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.box hslot hinner
+      | box hinnerStrength =>
+          exact ValidPartialValue.box hslot
+            (ih hinnerStrength (by simpa [PartialTy.sameShape] using hshape))
+      | boxIntoUndef _ => simp [PartialTy.sameShape] at hshape
+  | boxFull hslot hinner ih =>
+      intro hstrength hshape
+      cases hstrength with
+      | reflex => exact ValidPartialValue.boxFull hslot hinner
+      | tyBox hinnerStrength =>
+          exact ValidPartialValue.boxFull hslot
+            (ih hinnerStrength (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape))
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
 
-theorem validPartialValueWhenInitialized_strengthen {env : Env}
+theorem validPartialValueWhenInitialized_strengthen_sameShape {env : Env}
     {store : ProgramStore} {value : PartialValue} {oldTy newTy : PartialTy} :
     ValidPartialValueWhenInitialized env store value oldTy →
     PartialTyStrengthens oldTy newTy →
+    PartialTy.sameShape oldTy newTy →
     ValidPartialValueWhenInitialized env store value newTy := by
   intro hvalid
   induction hvalid generalizing newTy with
   | unit =>
-      intro hstrength
+      intro hstrength hshape
       cases hstrength with
       | reflex => exact ValidPartialValueWhenInitialized.unit
-      | intoUndef hinner =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            ValidPartialValueSkeleton.unit
-            (PartialTyStrengthens.intoUndef hinner)
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | int =>
-      intro hstrength
+      intro hstrength hshape
       cases hstrength with
       | reflex => exact ValidPartialValueWhenInitialized.int
-      | intoUndef hinner =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            ValidPartialValueSkeleton.int
-            (PartialTyStrengthens.intoUndef hinner)
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | undef =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValueWhenInitialized.undef
-      | undefLeft _ => exact ValidPartialValueWhenInitialized.undef
+      intro hstrength _hshape
+      cases hstrength <;> exact ValidPartialValueWhenInitialized.undef
   | @borrowLive location mutable target hinitialized hloc =>
-      intro hstrength
+      intro hstrength hshape
       cases hstrength with
       | reflex =>
           exact ValidPartialValueWhenInitialized.borrowLive
             hinitialized hloc
-      | intoUndef hinner =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            ValidPartialValueSkeleton.borrow
-            (PartialTyStrengthens.intoUndef hinner)
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
   | @borrowStale location mutable target hstale =>
-      intro hstrength
+      intro hstrength hshape
       cases hstrength with
       | reflex =>
           exact ValidPartialValueWhenInitialized.borrowStale
             (location := location) (mutable := mutable)
             (target := target) hstale
-      | intoUndef hinner =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            ValidPartialValueSkeleton.borrow
-            (PartialTyStrengthens.intoUndef hinner)
-  | box hslot _hinner ih =>
-      intro hstrength
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
+  | box hslot hinner ih =>
+      intro hstrength hshape
       cases hstrength with
       | reflex =>
-          exact ValidPartialValueWhenInitialized.box hslot _hinner
+          exact ValidPartialValueWhenInitialized.box hslot hinner
       | box hinnerStrength =>
           exact ValidPartialValueWhenInitialized.box hslot
-            (ih hinnerStrength)
-      | boxIntoUndef hinner =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            (ValidPartialValueSkeleton.box hslot _hinner.skeleton)
-            (PartialTyStrengthens.boxIntoUndef hinner)
+            (ih hinnerStrength (by simpa [PartialTy.sameShape] using hshape))
+      | boxIntoUndef _ => simp [PartialTy.sameShape] at hshape
   | boxFull hslot hinner ih =>
-      intro hstrength
+      intro hstrength hshape
       cases hstrength with
       | reflex =>
           exact ValidPartialValueWhenInitialized.boxFull hslot hinner
       | tyBox hinnerStrength =>
           exact ValidPartialValueWhenInitialized.boxFull hslot
-            (ih hinnerStrength)
-      | intoUndef htoUndef =>
-          exact ValidPartialValueWhenInitialized.undefOf
-            (ValidPartialValueSkeleton.boxFull hslot hinner.skeleton)
-            (PartialTyStrengthens.intoUndef htoUndef)
-  | undefOf hinner htoUndef =>
-      intro hstrength
-      cases hstrength with
-      | reflex => exact ValidPartialValueWhenInitialized.undefOf hinner htoUndef
-      | undefLeft hinnerStrength =>
-          exact ValidPartialValueWhenInitialized.undefOf hinner
-            (partialTyStrengthens_trans_safe htoUndef
-              (PartialTyStrengthens.undefLeft hinnerStrength))
+            (ih hinnerStrength
+              (by simpa [PartialTy.sameShape, Ty.sameShape] using hshape))
+      | intoUndef _ => simp [PartialTy.sameShape] at hshape
 
 /--
 Definition 4.5, valid store typing `S ▷ t ⊢ σ`.
@@ -824,12 +753,6 @@ theorem validPartialValue_nonOwner_of_envShape {store : ProgramStore}
       · cases hint
       · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
         cases hborrow
-  | undefOf =>
-      rcases hshape with hunit | hint | hborrow
-      · cases hunit
-      · cases hint
-      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
-        cases hborrow
   | borrow =>
       exact partialValueNonOwner_borrowed _
   | box =>
@@ -858,12 +781,6 @@ theorem validPartialValueWhenInitialized_nonOwner_of_envShape {env : Env}
   | int =>
       exact partialValueNonOwner_int _
   | undef =>
-      rcases hshape with hunit | hint | hborrow
-      · cases hunit
-      · cases hint
-      · rcases hborrow with ⟨_mutable, _targets, hborrow⟩
-        cases hborrow
-  | undefOf =>
       rcases hshape with hunit | hint | hborrow
       · cases hunit
       · cases hint
@@ -920,8 +837,6 @@ theorem validPartialValueWhenInitialized_owningLocation_allocated
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | undef =>
       simp [partialValueOwningLocations] at hmem
-  | undefOf hinner _hstrength =>
-      exact validPartialValueSkeleton_owningLocation_allocated hinner hmem
   | borrowLive =>
       simp [partialValueOwningLocations, valueOwningLocations, valueOwnedLocation?] at hmem
   | borrowStale =>
@@ -1105,9 +1020,9 @@ def FullSafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
 infix:50 " ≈ₛ " => FullSafeAbstraction
 
 /--
-Safe abstraction for environments with stale loan annotations.  Domain and
-lifetime agreement are unchanged; the slot value relation is weakened only at
-borrow annotations whose target is not currently initialized.
+Internal safe-abstraction invariant used while stale loan annotations may be
+present.  It is weaker than paper Definition 4.7 only for stale borrow
+locations.  `FullSafeAbstraction` above is the paper-facing definition.
 -/
 def SafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
   (∀ x, (∃ slot, store.slotAt (VariableProjection x) = some slot) ↔
@@ -1151,6 +1066,8 @@ theorem FullSafeAbstraction.transport_pointwise
       simpa [heq x] using hslot
     exact hsafe.2 x envSlot hsourceSlot
 
+/-- Recover paper Definition 4.7 once all contained borrow targets are fully
+well formed; the only relaxed internal case is then impossible. -/
 theorem SafeAbstraction.full_of_containedBorrowsWellFormed
     {store : ProgramStore} {env : Env} :
     ContainedBorrowsWellFormed env →
@@ -1293,12 +1210,19 @@ theorem safeAbstraction_transport_sameShape {store : ProgramStore}
     · simpa [hlife] using hstore
     · exact validPartialValue_strengthen_sameShape hvalid hstrength hshape
 
+/-- Strict Definition 4.7 transports only across same-shape strengthening.
+Changing a defined shape into `undef` also requires the runtime value to have
+been replaced by `.undef`, as required by V-Undef. -/
 theorem safeAbstraction_transport_strengthening {store : ProgramStore}
     {env result : Env} :
     store ≈ₛ env →
     EnvStrengthens env result →
+    (∀ x sourceSlot resultSlot,
+      env.slotAt x = some sourceSlot →
+      result.slotAt x = some resultSlot →
+      PartialTy.sameShape sourceSlot.ty resultSlot.ty) →
     store ≈ₛ result := by
-  intro hsafe hstrength
+  intro hsafe hstrength hsameShape
   refine fullSafeAbstraction_of_domain_and_slots ?domain ?slots
   · intro x
     constructor
@@ -1328,7 +1252,8 @@ theorem safeAbstraction_transport_strengthening {store : ProgramStore}
         rcases hsafe.2 x sourceSlot hsource with
           ⟨value, hstore, hvalid⟩
         exact ⟨value, by simpa [hx.1] using hstore,
-          validPartialValue_strengthen hvalid hx.2⟩
+          validPartialValue_strengthen_sameShape hvalid hx.2
+            (hsameShape x sourceSlot resultSlot hsource hresult)⟩
 
 theorem validPartialValueWhenInitialized_transport_env
     {env result : Env} {store : ProgramStore}
@@ -1346,8 +1271,6 @@ theorem validPartialValueWhenInitialized_transport_env
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf hinner hstrength
   | @borrowLive location mutable target _hinitialized hloc =>
       by_cases hresultInitialized : TargetInitialized result target
       · exact ValidPartialValueWhenInitialized.borrowLive
@@ -1374,8 +1297,12 @@ theorem safeAbstractionWhenInitialized_transport_strengthening
       TargetInitialized env target) →
     SafeAbstraction store env →
     EnvStrengthens env result →
+    (∀ x sourceSlot resultSlot,
+      env.slotAt x = some sourceSlot →
+      result.slotAt x = some resultSlot →
+      PartialTy.sameShape sourceSlot.ty resultSlot.ty) →
     SafeAbstraction store result := by
-  intro hinitBack hsafe hstrength
+  intro hinitBack hsafe hstrength hsameShape
   refine safeAbstractionWhenInitialized_of_domain_and_slots ?domain ?slots
   · intro x
     constructor
@@ -1408,7 +1335,8 @@ theorem safeAbstractionWhenInitialized_transport_strengthening
             ValidPartialValueWhenInitialized result store value sourceSlot.ty :=
           validPartialValueWhenInitialized_transport_env hinitBack hvalid
         exact ⟨value, by simpa [hx.1] using hstore,
-          validPartialValueWhenInitialized_strengthen hvalidResultEnv hx.2⟩
+          validPartialValueWhenInitialized_strengthen_sameShape hvalidResultEnv hx.2
+            (hsameShape x sourceSlot resultSlot hsource hresult)⟩
 
 theorem safeAbstraction_env_no_lifetime_of_store_no_lifetime {store : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
@@ -2181,9 +2109,6 @@ theorem validPartialValue_update_of_fresh {store : ProgramStore}
       exact ValidPartialValue.int
   | undef =>
       exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_update_of_fresh hfresh hinner) hstrength
   | borrow hloc =>
       exact ValidPartialValue.borrow (loc_update_of_loc hfresh hloc)
   | box hslot _hinner ih =>
@@ -2207,9 +2132,6 @@ theorem validPartialValueWhenInitialized_update_of_fresh {env : Env}
       exact ValidPartialValueWhenInitialized.int
   | undef =>
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_update_of_fresh hfresh hinner) hstrength
   | borrowLive hinitialized hloc =>
       exact ValidPartialValueWhenInitialized.borrowLive hinitialized
         (loc_update_of_loc hfresh hloc)
@@ -2317,9 +2239,6 @@ theorem validPartialValue_declare {store : ProgramStore} {x : Name}
       exact ValidPartialValue.int
   | undef =>
       exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_declare hfresh hinner) hstrength
   | borrow hloc =>
       exact ValidPartialValue.borrow (loc_declare_of_loc hfresh hloc)
   | box hslot _hinner ih =>

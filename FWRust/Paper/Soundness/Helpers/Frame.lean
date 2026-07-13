@@ -222,12 +222,6 @@ theorem validPartialValue_update_of_not_reaches {store : ProgramStore}
   | unit => intro _; exact ValidPartialValue.unit
   | int => intro _; exact ValidPartialValue.int
   | undef => intro _; exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_update_of_not_owner_reaches hinner
-          (fun ℓ hℓ => hreach ℓ (Reaches.undefOf hinner hstrength hℓ)))
-        hstrength
   | borrow hloc =>
       intro hreach
       refine ValidPartialValue.borrow ?_
@@ -268,12 +262,6 @@ theorem validPartialValueWhenInitialized_update_of_not_reaches {env : Env}
   | undef =>
       intro _hreach
       exact ValidPartialValueWhenInitialized.undef
-  | undefOf hinner hstrength =>
-      intro hreach
-      exact ValidPartialValueWhenInitialized.undefOf
-        (validPartialValueSkeleton_update_of_not_owner_reaches hinner
-          (fun ℓ hℓ => hreach ℓ (Reaches.undefOf hinner hstrength hℓ)))
-        hstrength
   | borrowLive hinitialized hloc =>
       intro hreach
       refine ValidPartialValueWhenInitialized.borrowLive hinitialized ?_
@@ -332,9 +320,6 @@ theorem validPartialValue_erase_to_store {store : ProgramStore}
   | unit => exact ValidPartialValue.unit
   | int => exact ValidPartialValue.int
   | undef => exact ValidPartialValue.undef
-  | undefOf hinner hstrength =>
-      exact ValidPartialValue.undefOf
-        (validPartialValueSkeleton_erase_to_store hinner) hstrength
   | borrow hloc =>
       exact ValidPartialValue.borrow (loc_erase_some_to_store hloc)
   | box hslot _ ih =>
