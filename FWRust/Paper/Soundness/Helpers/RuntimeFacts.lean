@@ -68,7 +68,7 @@ theorem PartialTyStrengthens.tyBox_rebox {sourceTy : Ty} {updatedTy : PartialTy}
 theorem safeStrengthening {store : ProgramStore} {env : Env}
     {lifetime : Lifetime} {left right : Ty} {value : Value} :
     WellFormedEnv env lifetime →
-    store ≈ₛ env →
+    store ∼ env →
     PartialTyStrengthens (.ty left) (.ty right) →
     ValidValue store value left →
     ValidValue store value right := by
@@ -171,9 +171,9 @@ theorem preservation_refl_value {store : ProgramStore} {env env₂ : Env}
     {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ty : Ty} :
     ValidState store (.val value) →
     ValidStoreTyping store (.val value) typing →
-    store ≈ₛ env →
+    store ∼ env →
     TermTyping env typing lifetime (.val value) ty env₂ →
-    ValidState store (.val value) ∧ store ≈ₛ env₂ ∧ ValidValue store value ty := by
+    ValidState store (.val value) ∧ store ∼ env₂ ∧ ValidValue store value ty := by
   intro hvalidState hvalidStoreTyping hsafe htyping
   rcases valuePreservation_value hvalidStoreTyping htyping with
     ⟨hvalidValue, henv⟩
@@ -184,9 +184,9 @@ theorem preservation_refl_runtime_value {store : ProgramStore} {env env₂ : Env
     {typing : StoreTyping} {lifetime : Lifetime} {value : Value} {ty : Ty} :
     ValidRuntimeState store (.val value) →
     ValidStoreTyping store (.val value) typing →
-    store ≈ₛ env →
+    store ∼ env →
     TermTyping env typing lifetime (.val value) ty env₂ →
-    ValidRuntimeState store (.val value) ∧ store ≈ₛ env₂ ∧
+    ValidRuntimeState store (.val value) ∧ store ∼ env₂ ∧
       ValidValue store value ty := by
   intro hvalidRuntime hvalidStoreTyping hsafe htyping
   rcases preservation_refl_value hvalidRuntime.1 hvalidStoreTyping hsafe htyping with
@@ -203,10 +203,10 @@ theorem preservation_multistep_runtime_value {store finalStore : ProgramStore}
     {value finalValue : Value} {ty : Ty} :
     ValidRuntimeState store (.val value) →
     ValidStoreTyping store (.val value) typing →
-    store ≈ₛ env →
+    store ∼ env →
     TermTyping env typing lifetime (.val value) ty env₂ →
     MultiStep store lifetime (.val value) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env₂ ∧
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ env₂ ∧
       ValidValue finalStore finalValue ty := by
   intro hvalidRuntime hvalidStoreTyping hsafe htyping hmulti
   rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
@@ -254,9 +254,9 @@ theorem preservation_multistep_runtime_value_whenInitialized
 
 theorem preservation_value_tail_runtime {store finalStore : ProgramStore}
     {env : Env} {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
-    ValidRuntimeState store (.val value) ∧ store ≈ₛ env ∧ ValidValue store value ty →
+    ValidRuntimeState store (.val value) ∧ store ∼ env ∧ ValidValue store value ty →
     MultiStep store lifetime (.val value) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env ∧
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ env ∧
       ValidValue finalStore finalValue ty := by
   intro hpreserved hmulti
   rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
@@ -267,9 +267,9 @@ theorem preservation_value_tail_runtime {store finalStore : ProgramStore}
 
 theorem preservation_value_tail_runtime_full {store finalStore : ProgramStore}
     {env : Env} {lifetime : Lifetime} {value finalValue : Value} {ty : Ty} :
-    ValidRuntimeState store (.val value) ∧ store ≈ₛ env ∧ ValidValue store value ty →
+    ValidRuntimeState store (.val value) ∧ store ∼ env ∧ ValidValue store value ty →
     MultiStep store lifetime (.val value) finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env ∧
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ env ∧
       ValidValue finalStore finalValue ty := by
   intro hpreserved hmulti
   rcases multistep_value_inv hmulti with ⟨hstore, hterm⟩
@@ -331,15 +331,15 @@ theorem preservation_runtime_multistep_of_step_to_value
       ∃ value, term' = .val value) →
     (∀ store' value,
       Step store lifetime term store' (.val value) →
-      ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env ∧
+      ValidRuntimeState store' (.val value) ∧ store' ∼ env ∧
         ValidValue store' value ty) →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env ∧
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ env ∧
       ValidValue finalStore finalValue ty := by
   intro hnotTerminal hstepValue hstepPreserve hmulti
   exact preservation_multistep_of_step_to_value
     (Result := fun store' value =>
-      ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env ∧
+      ValidRuntimeState store' (.val value) ∧ store' ∼ env ∧
         ValidValue store' value ty)
     hnotTerminal hstepValue hstepPreserve
     (by
@@ -356,15 +356,15 @@ theorem preservation_runtime_multistep_of_step_to_value_full
       ∃ value, term' = .val value) →
     (∀ store' value,
       Step store lifetime term store' (.val value) →
-      ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env ∧
+      ValidRuntimeState store' (.val value) ∧ store' ∼ env ∧
         ValidValue store' value ty) →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ≈ₛ env ∧
+    ValidRuntimeState finalStore (.val finalValue) ∧ finalStore ∼ env ∧
       ValidValue finalStore finalValue ty := by
   intro hnotTerminal hstepValue hstepPreserve hmulti
   exact preservation_multistep_of_step_to_value
     (Result := fun store' value =>
-      ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env ∧
+      ValidRuntimeState store' (.val value) ∧ store' ∼ env ∧
         ValidValue store' value ty)
     hnotTerminal hstepValue hstepPreserve
     (by
@@ -831,7 +831,7 @@ theorem runtimeCoherent_of_coherent_safe {store : ProgramStore} {env : Env} :
 theorem lvalTyping_allocated_location {store : ProgramStore} {env : Env}
     {current : Lifetime} {lv : LVal} {ty : PartialTy} {lifetime : Lifetime} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ env →
     LValTyping env lv ty lifetime →
     LValAllocatedLocation store lv := by
   intro _hwellFormed hsafe htyping

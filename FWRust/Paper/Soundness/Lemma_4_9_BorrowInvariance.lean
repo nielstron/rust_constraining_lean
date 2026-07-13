@@ -74,8 +74,8 @@ theorem EnvSameShapeStrengthening.trans {first second third : Env} :
 theorem EnvSameShapeStrengthening.safe
     {store : ProgramStore} {source result : Env} :
     EnvSameShapeStrengthening source result →
-    store ≈ₛ source →
-    store ≈ₛ result := by
+    store ∼ source →
+    store ∼ result := by
   intro hmap hsafe
   exact fullSafeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
 

@@ -2,7 +2,7 @@
 
 Terminology: the original paper defines one safe-abstraction relation
 (Definition 4.7).  The mechanization names that relation `FullSafeAbstraction`
-(notation `≈ₛ`), and all safe-abstraction premises and conclusions use it;
+(notation `∼`), and all safe-abstraction premises and conclusions use it;
 there is no separate weaker safe-abstraction relation in the formalization.
 
 ### 1. Rule premises relative to the printed figures

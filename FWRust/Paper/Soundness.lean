@@ -30,7 +30,7 @@ In brief:
   intentionally `Strike`-based and therefore cannot move out through borrowed
   references, matching Definition 3.18;
 * safe-abstraction interface: the paper's sole Definition 4.7 relation is
-  `FullSafeAbstraction` (notation `≈ₛ`), and all paper-facing statements use it;
+  `FullSafeAbstraction` (notation `∼`), and all paper-facing statements use it;
 * theorem interface: the local safety statement is `progress_runtime_step`;
 * repairs/strengthenings: the abstract `ProgramStore` exposes progress
   totality as `OperationalStoreProgress`, declaration and assignment carry the

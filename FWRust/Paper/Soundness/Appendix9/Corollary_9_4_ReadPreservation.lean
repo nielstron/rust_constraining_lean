@@ -19,7 +19,7 @@ theorem corollary_9_4_readPreservation
     {store : ProgramStore} {env : Env} {current : Lifetime}
     {lv : LVal} {ty : Ty} {lifetime : Lifetime}
     (hwellFormed : WellFormedEnv env current)
-    (hsafe : store ≈ₛ env)
+    (hsafe : store ∼ env)
     (htyping : LValTyping env lv (.ty ty) lifetime) :
     ∃ value slot,
       store.read lv = some slot ∧

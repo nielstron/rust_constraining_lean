@@ -42,7 +42,7 @@ theorem lemma_9_10_storePreservation
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     FullSafeAbstraction finalStore env₂ := by
@@ -61,7 +61,7 @@ theorem lemma_9_10_assign_var_envShape_frame
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
-    store ≈ₛ env →
+    store ∼ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) ty env' →
@@ -80,7 +80,7 @@ theorem lemma_9_10_assign_var_envShape_frame
         some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue otherEnvSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ≈ₛ env' ∧
+    ValidRuntimeState store' (.val .unit) ∧ store' ∼ env' ∧
       ValidValue store' .unit .unit :=
   preservation_assign_var_envShape_step_runtime_of_frames (lifetime := lifetime)
 
@@ -92,7 +92,7 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
     WellFormedEnv env₁ current →
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -107,7 +107,7 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue envSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env₂ ∧
+    ValidRuntimeState store' (.val value) ∧ store' ∼ env₂ ∧
       ValidValue store' value ty := by
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
     hvalueFrame hotherFrames

@@ -1316,7 +1316,7 @@ end ProtectedByBase
 theorem lval_loc_protectedBySomeBase {store : ProgramStore}
     {env : Env} {current : Lifetime} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ env →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
       {location : Location},
       LValTyping env lv partialTy lifetime →
@@ -1388,7 +1388,7 @@ theorem lval_loc_protectedBySomeBase {store : ProgramStore}
 theorem locReads_protectedBySomeBase {store : ProgramStore}
     {env : Env} {current : Lifetime} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ env →
     ∀ {lv : LVal} {partialTy : PartialTy} {lifetime : Lifetime}
       {location : Location},
       LValTyping env lv partialTy lifetime →
@@ -1553,7 +1553,7 @@ inductive BorrowDependency (store : ProgramStore) :
 theorem BorrowDependency.protectedBySomeBase
     {env : Env} {store : ProgramStore} {current slotLifetime : Lifetime} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ env →
     ∀ {value : PartialValue} {partialTy : PartialTy}
       {dependency : Location},
       PartialTyBorrowsWellFormedInSlot env slotLifetime partialTy →
@@ -2627,7 +2627,7 @@ theorem preservation_move_var_multistep_runtime_of_wellFormed
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {x : Name} {finalValue : Value} {ty : Ty} :
     WellFormedEnv env₁ lifetime →
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -2897,7 +2897,7 @@ theorem dropsAvoids_of_borrowDependency_unprotected_values
     {partialTy : PartialTy} {dependency : Location} :
     Drops store values store' →
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
@@ -3025,7 +3025,7 @@ theorem dropsAvoids_of_reaches_stored_validPartialValue
     {lifetime slotLifetime current : Lifetime} :
     Drops store values store' →
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ env →
     ValidStore store →
     StoreOwnerTargetsHeap store →
     (∀ value, value ∈ values → PartialValueOwnerTargetsHeap value) →
@@ -3423,11 +3423,11 @@ theorem fullSafeAbstraction_seq_value_drop
     {store store' : ProgramStore} {env : Env}
     {blockLifetime : Lifetime} {value : Value} {next : Term}
     {rest : List Term} :
-    store ≈ₛ env →
+    store ∼ env →
     ValidRuntimeState store (.block blockLifetime (.val value :: next :: rest)) →
     WellFormedEnv env blockLifetime →
     Drops store [.value value] store' →
-    store' ≈ₛ env := by
+    store' ∼ env := by
   intro hsafe hvalidRuntime hwellFormed hdrops
   have hvalueHeap : PartialValueOwnerTargetsHeap (.value value) :=
     ValueOwnerTargetsHeap.partial
@@ -11284,7 +11284,7 @@ theorem preservation_move_deref_box_multistep_runtime
     {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {source : LVal} {finalValue : Value} {ty : Ty} :
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     ValidRuntimeState store (.move source.deref) →
     LValTyping env₁ source (.box (.ty ty)) valueLifetime →
     ¬ WriteProhibited env₁ source.deref →
@@ -11578,7 +11578,7 @@ theorem preservation_move_deref_boxFull_multistep_runtime
     {store finalStore : ProgramStore} {env₁ env₂ : Env}
     {typing : StoreTyping} {lifetime valueLifetime : Lifetime}
     {source : LVal} {finalValue : Value} {ty : Ty} :
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     ValidRuntimeState store (.move source.deref) →
     LValTyping env₁ source (.ty (.box ty)) valueLifetime →
     ¬ WriteProhibited env₁ source.deref →
@@ -16352,7 +16352,7 @@ theorem preservation_bounded
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     FullTerminalStateSafe finalStore finalValue env₂ ty := by
@@ -16376,7 +16376,7 @@ theorem preservation_bounded
         BorrowSafeEnv env →
         Env.FiniteSupport env →
         Linearizable env →
-        store ≈ₛ env →
+        store ∼ env →
         MultiStep store lifetime term finalStore (.val finalValue) →
         FullTerminalStateSafe finalStore finalValue env₂ ty)
     (motive_2 := fun env currentTyping blockLifetime terms ty env₂ _ =>
@@ -16391,7 +16391,7 @@ theorem preservation_bounded
         BorrowSafeEnv env →
         Env.FiniteSupport env →
         Linearizable env →
-        store ≈ₛ env →
+        store ∼ env →
         WellFormedTy env₂ ty outerLifetime →
         MultiStep store outerLifetime (.block blockLifetime terms)
           finalStore (.val finalValue) →
@@ -16633,7 +16633,7 @@ theorem preservation_bounded
                 (.block blockLifetime (next :: restTail)) :=
             validRuntimeState_seq_step hvalueBlockValid hseqStep
           have hsafeTailAfter :
-              storeAfterDrop ≈ₛ _env₂ :=
+              storeAfterDrop ∼ _env₂ :=
             fullSafeAbstraction_seq_value_drop hterminalHead.2.1
               hvalueBlockValid hwellInner hdrops
           have htailStoreTyping :
@@ -16668,7 +16668,7 @@ theorem preservation
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     FullTerminalStateSafe finalStore finalValue env₂ ty := by
@@ -16697,7 +16697,7 @@ theorem lemma_4_11_preservation
     (hborrowSafe : BorrowSafeEnv env₁)
     (hfinite : Env.FiniteSupport env₁)
     (hlinear : Linearizable env₁)
-    (hsafe : store ≈ₛ env₁)
+    (hsafe : store ∼ env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
     (hmulti : MultiStep store lifetime term finalStore (.val finalValue)) :
     FullTerminalStateSafe finalStore finalValue env₂ ty :=

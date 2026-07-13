@@ -1086,7 +1086,7 @@ def VariableProjection (name : Name) : Location :=
   .var name
 
 /--
-Definition 4.7, safe abstraction `S ≈ₛ Γ`.
+Definition 4.7, safe abstraction `S ∼ Γ`.
 
 Heap locations are intentionally ignored in the domain agreement, as in the
 paper.  Because stores and environments are abstract partial maps, domain
@@ -1102,13 +1102,13 @@ def FullSafeAbstraction (store : ProgramStore) (env : Env) : Prop :=
         some (StoreSlot.mk value envSlot.lifetime) ∧
       ValidPartialValue store value envSlot.ty
 
-infix:50 " ≈ₛ " => FullSafeAbstraction
+infix:50 " ∼ " => FullSafeAbstraction
 
 theorem FullSafeAbstraction.transport_pointwise
     {store : ProgramStore} {env result : Env}
     (heq : ∀ y, result.slotAt y = env.slotAt y) :
-    store ≈ₛ env →
-    store ≈ₛ result := by
+    store ∼ env →
+    store ∼ result := by
   intro hsafe
   constructor
   · intro x
@@ -1127,7 +1127,7 @@ theorem FullSafeAbstraction.transport_pointwise
 theorem FullSafeAbstraction.borrow_value_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {target : LVal}
     {location : Location} :
-    store ≈ₛ env →
+    store ∼ env →
     env.slotAt x =
       some { ty := .ty (.borrow mutable target), lifetime := lifetime } →
     store.slotAt (VariableProjection x) =
@@ -1151,7 +1151,7 @@ theorem FullSafeAbstraction.borrow_value_target {store : ProgramStore} {env : En
 theorem FullSafeAbstraction.borrow_read_target {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {mutable : Bool} {target : LVal}
     {location : Location} :
-    store ≈ₛ env →
+    store ∼ env →
     env.slotAt x =
       some { ty := .ty (.borrow mutable target), lifetime := lifetime } →
     store.read (.var x) =
@@ -1171,7 +1171,7 @@ theorem fullSafeAbstraction_of_domain_and_slots {store : ProgramStore} {env : En
         store.slotAt (VariableProjection x) =
           some { value := value, lifetime := envSlot.lifetime } ∧
         ValidPartialValue store value envSlot.ty) →
-    store ≈ₛ env := by
+    store ∼ env := by
   intro hdomain hslots
   exact ⟨hdomain, hslots⟩
 
@@ -1185,7 +1185,7 @@ two slot maps provide exact domain agreement.
 -/
 theorem fullSafeAbstraction_transport_sameShape {store : ProgramStore}
     {env result : Env} :
-    store ≈ₛ env →
+    store ∼ env →
     (∀ x resultSlot,
       result.slotAt x = some resultSlot →
       ∃ sourceSlot,
@@ -1198,7 +1198,7 @@ theorem fullSafeAbstraction_transport_sameShape {store : ProgramStore}
       ∃ resultSlot,
         result.slotAt x = some resultSlot ∧
           sourceSlot.lifetime = resultSlot.lifetime) →
-    store ≈ₛ result := by
+    store ∼ result := by
   intro hsafe hback hfwd
   refine fullSafeAbstraction_of_domain_and_slots ?domain ?slots
   · intro x
@@ -1223,9 +1223,9 @@ theorem fullSafeAbstraction_transport_sameShape {store : ProgramStore}
 
 theorem fullSafeAbstraction_transport_strengthening {store : ProgramStore}
     {env result : Env} :
-    store ≈ₛ env →
+    store ∼ env →
     EnvStrengthens env result →
-    store ≈ₛ result := by
+    store ∼ result := by
   intro hsafe hstrength
   refine fullSafeAbstraction_of_domain_and_slots ?domain ?slots
   · intro x
@@ -1297,7 +1297,7 @@ theorem validPartialValueWhenInitialized_transport_env
 
 theorem fullSafeAbstraction_env_no_lifetime_of_store_no_lifetime {store : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
-    store ≈ₛ env →
+    store ∼ env →
     (∀ location slot,
       store.slotAt location = some slot →
       slot.lifetime ≠ lifetime) →
@@ -1329,12 +1329,12 @@ then `drop(S, m)` and `drop(Γ, m)` are both no-ops.
 -/
 theorem fullSafeAbstraction_dropsLifetime_no_slots {store store' : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
-    store ≈ₛ env →
+    store ∼ env →
     (∀ location slot,
       store.slotAt location = some slot →
       slot.lifetime ≠ lifetime) →
     DropsLifetime store lifetime store' →
-    store' ≈ₛ env.dropLifetime lifetime := by
+    store' ∼ env.dropLifetime lifetime := by
   intro hsafe hnoStore hdrops
   have hstore : store' = store := dropsLifetime_no_slots_eq hnoStore hdrops
   have henv : env.dropLifetime lifetime = env :=
@@ -1405,7 +1405,7 @@ theorem fullSafeAbstraction_dropLifetime_of_preserved
         store'.slotAt (VariableProjection x) =
           some { value := value, lifetime := envSlot.lifetime } ∧
         ValidPartialValue store' value envSlot.ty) →
-    store' ≈ₛ env.dropLifetime lifetime := by
+    store' ∼ env.dropLifetime lifetime := by
   intro hdomain hpreserve
   constructor
   · exact hdomain
@@ -1423,7 +1423,7 @@ with Definition 3.20's environment drop.
 -/
 theorem dropPreservation_lifetime {store store' : ProgramStore}
     {env : Env} {lifetime : Lifetime} :
-    store ≈ₛ env →
+    store ∼ env →
     DropsLifetime store lifetime store' →
     (∀ x,
       (∃ slot, store'.slotAt (VariableProjection x) = some slot) ↔
@@ -1435,13 +1435,13 @@ theorem dropPreservation_lifetime {store store' : ProgramStore}
         store'.slotAt (VariableProjection x) =
           some { value := value, lifetime := envSlot.lifetime } ∧
         ValidPartialValue store' value envSlot.ty) →
-    store' ≈ₛ env.dropLifetime lifetime := by
+    store' ∼ env.dropLifetime lifetime := by
   intro _hsafe _hdrops hdomain hpreserve
   exact fullSafeAbstraction_dropLifetime_of_preserved hdomain hpreserve
 
 theorem dropLifetime_envDomain_of_storeSurvivor {store store' : ProgramStore}
     {env : Env} {lifetime : Lifetime} {x : Name} :
-    store ≈ₛ env →
+    store ∼ env →
     DropsLifetime store lifetime store' →
     (∀ slot,
       store'.slotAt (VariableProjection x) = some slot →
@@ -1465,7 +1465,7 @@ theorem dropLifetime_envDomain_of_storeSurvivor {store store' : ProgramStore}
 
 theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} {x : Name} :
-    store ≈ₛ env →
+    store ∼ env →
     DropsLifetime store lifetime store' →
     StoreOwnerTargetsHeap store →
     (∃ envSlot, (env.dropLifetime lifetime).slotAt x = some envSlot) →
@@ -1485,7 +1485,7 @@ theorem dropLifetime_storeDomain_of_envSurvivor_of_ownerTargetsHeap
 
 theorem dropLifetime_domain_equiv_of_ownerTargetsHeap
     {store store' : ProgramStore} {env : Env} {lifetime : Lifetime} :
-    store ≈ₛ env →
+    store ∼ env →
     DropsLifetime store lifetime store' →
     StoreOwnerTargetsHeap store →
     ∀ x,
@@ -1515,7 +1515,7 @@ theorem dropLifetime_domain_equiv_of_ownerTargetsHeap
   exact ⟨.unit, ValueTyping.unit, ValidPartialValue.unit⟩
 
 @[simp] theorem fullSafeAbstraction_empty :
-    ProgramStore.empty ≈ₛ Env.empty := by
+    ProgramStore.empty ∼ Env.empty := by
   constructor
   · intro x
     constructor
@@ -1530,7 +1530,7 @@ theorem dropLifetime_domain_equiv_of_ownerTargetsHeap
 
 theorem fullSafeAbstraction_store_fresh_var {store : ProgramStore} {env : Env}
     {x : Name} :
-    store ≈ₛ env →
+    store ∼ env →
     env.fresh x →
     store.fresh (VariableProjection x) := by
   intro hsafe hfresh
@@ -1546,7 +1546,7 @@ theorem fullSafeAbstraction_store_fresh_var {store : ProgramStore} {env : Env}
 
 theorem fullSafeAbstraction_var_read_nonOwner_of_envShape {store : ProgramStore}
     {env : Env} {x : Name} {envSlot : EnvSlot} {oldSlot : StoreSlot} :
-    store ≈ₛ env →
+    store ∼ env →
     env.slotAt x = some envSlot →
     store.read (.var x) = some oldSlot →
     (envSlot.ty = .ty .unit ∨ envSlot.ty = .ty .int ∨
@@ -1619,7 +1619,7 @@ theorem fullSafeAbstraction_update_var_of_preserved {store' : ProgramStore}
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ≈ₛ env' := by
+    store' ∼ env' := by
   intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
   subst henv'
   constructor
@@ -1679,7 +1679,7 @@ theorem fullSafeAbstraction_update_var_partial_of_preserved {store' : ProgramSto
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ≈ₛ env' := by
+    store' ∼ env' := by
   intro henvX hstoreX hnewValid henv' hdomainOther hpreserveOther
   subst henv'
   constructor
@@ -1738,7 +1738,7 @@ theorem storePreservation_assign_var_of_preserved
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ≈ₛ env' := by
+    store' ∼ env' := by
   intro henvX hwriteEnv hruntimeX hlifetime hwriteStore hnewValid
     hdomainOther hpreserveOther
   have henv' :
@@ -1770,7 +1770,7 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
-    store ≈ₛ env →
+    store ∼ env →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) ty env' →
     PartialValueNonOwner oldSlot.value →
@@ -1785,7 +1785,7 @@ theorem storePreservation_assign_var_old_nonOwner_of_preserved
         store'.slotAt (VariableProjection y) =
           some { value := oldValue, lifetime := otherEnvSlot.lifetime } ∧
         ValidPartialValue store' oldValue otherEnvSlot.ty) →
-    store' ≈ₛ env' := by
+    store' ∼ env' := by
   intro hsafe henvX hwriteEnv hnonOwner hread hwrite hdrops hnewValid hpreserveOther
   have hdropEq : store' = storeAfterWrite :=
     drops_partialValue_nonOwner_eq hnonOwner hdrops
@@ -2081,7 +2081,7 @@ already represented by `Γ`; it is discharged by later store-monotonicity lemmas
 -/
 theorem fullSafeAbstraction_declare {store : ProgramStore} {env : Env}
     {x : Name} {lifetime : Lifetime} {value : Value} {ty : Ty} :
-    store ≈ₛ env →
+    store ∼ env →
     env.fresh x →
     ValidPartialValue (store.declare x lifetime value) (.value value) (.ty ty) →
     (∀ y envSlot oldValue,
@@ -2090,7 +2090,7 @@ theorem fullSafeAbstraction_declare {store : ProgramStore} {env : Env}
       store.slotAt (VariableProjection y) =
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ValidPartialValue (store.declare x lifetime value) oldValue envSlot.ty) →
-    store.declare x lifetime value ≈ₛ
+    store.declare x lifetime value ∼
       env.update x { ty := .ty ty, lifetime := lifetime } := by
   intro hsafe hfresh hnewValid hpreserveOld
   constructor
@@ -2148,7 +2148,7 @@ path-stability obligation for variables other than `x`.
 -/
 theorem fullSafeAbstraction_move_var {store : ProgramStore} {env : Env}
     {x : Name} {slot : EnvSlot} {ty : Ty} {oldValue : PartialValue} :
-    store ≈ₛ env →
+    store ∼ env →
     env.slotAt x = some slot →
     slot.ty = .ty ty →
     store.slotAt (VariableProjection x) =
@@ -2162,7 +2162,7 @@ theorem fullSafeAbstraction_move_var {store : ProgramStore} {env : Env}
         (store.update (VariableProjection x)
           { value := .undef, lifetime := slot.lifetime })
         value envSlot.ty) →
-    store.update (VariableProjection x) { value := .undef, lifetime := slot.lifetime } ≈ₛ
+    store.update (VariableProjection x) { value := .undef, lifetime := slot.lifetime } ∼
       env.update x { slot with ty := .undef ty } := by
   intro hsafe henv hty hstoreSlot hpreserveOld
   constructor
@@ -2212,7 +2212,7 @@ theorem fullSafeAbstraction_move_var {store : ProgramStore} {env : Env}
 theorem storePreservation_move_var_step {store store' : ProgramStore}
     {env₁ env₂ : Env} {lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
-    store ≈ₛ env₁ →
+    store ∼ env₁ →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
     Step store lifetime (.move (.var x)) store' (.val value) →
@@ -2222,7 +2222,7 @@ theorem storePreservation_move_var_step {store store' : ProgramStore}
       store.slotAt (VariableProjection y) =
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ValidPartialValue store' oldValue envSlot.ty) →
-    store' ≈ₛ env₂ := by
+    store' ∼ env₂ := by
   intro hsafe henvSlot hmove hstep hpreserveOld
   cases hstep with
   | move _hread hwrite =>
@@ -2311,8 +2311,8 @@ theorem validValueWhenInitialized_boxAt_ref {env : Env} {store : ProgramStore}
 theorem fullSafeAbstraction_boxAt {store : ProgramStore} {env : Env}
     {address : Nat} {value : Value} :
     store.fresh (.heap address) →
-    store ≈ₛ env →
-    (store.boxAt address value).1 ≈ₛ env := by
+    store ∼ env →
+    (store.boxAt address value).1 ∼ env := by
   intro hfresh hsafe
   constructor
   · intro x

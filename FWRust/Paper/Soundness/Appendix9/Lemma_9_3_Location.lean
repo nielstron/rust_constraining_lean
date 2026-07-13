@@ -8,7 +8,7 @@ import FWRust.Paper.Soundness.Helpers.BorrowSafety
 > `loc(S, w)` is defined (and reads/writes through `w` are well defined).
 
 The paper's sole safe-abstraction premise is mechanized below as
-`FullSafeAbstraction` (notation `≈ₛ`).
+`FullSafeAbstraction` (notation `∼`).
 
 Status: mechanized as the location-availability facts feeding
 `readPreservation`/`progress`; see `lvalTyping_allocated_location` and
@@ -26,7 +26,7 @@ theorem lemma_9_3_location
     {store : ProgramStore} {env : Env} {current : Lifetime}
     {lv : LVal} {ty : Ty} {lifetime : Lifetime}
     (hwellFormed : WellFormedEnv env current)
-    (hsafe : store ≈ₛ env)
+    (hsafe : store ∼ env)
     (htyping : LValTyping env lv (.ty ty) lifetime) :
     ∃ location slot,
       store.loc lv = some location ∧ store.slotAt location = some slot :=
