@@ -7,6 +7,9 @@ import FWRust.Paper.Soundness.Helpers.BorrowSafety
 > `S ∼ Γ`; let `T₁, T₂` be types where `T₁ ⊑ T₂`; and let `v` be a value.  If
 > `S ⊢ v ∼ T₁` then `S ⊢ v ∼ T₂`.
 
+The paper's sole safe-abstraction premise is mechanized below as
+`FullSafeAbstraction` (notation `≈ₛ`).
+
 Status: **fully proven** (`safeStrengthening`).
 -/
 
@@ -18,7 +21,7 @@ theorem lemma_9_1_safeStrengthening
     {store : ProgramStore} {env : Env} {lifetime : Lifetime}
     {left right : Ty} {value : Value}
     (hwellFormed : WellFormedEnv env lifetime)
-    (hsafe : store ∼ₛ env)
+    (hsafe : store ≈ₛ env)
     (hstrength : PartialTyStrengthens (.ty left) (.ty right))
     (hvalid : ValidValue store value left) :
     ValidValue store value right :=

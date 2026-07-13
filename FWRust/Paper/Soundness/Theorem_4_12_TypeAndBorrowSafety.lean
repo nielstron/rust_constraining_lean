@@ -323,7 +323,7 @@ theorem terminatesAsValue_bounded
           validRuntimeState_seq_step hvalueBlockValid hseqStep
         have hsafeTailAfter :
             storeAfterDrop ≈ₛ _env₂ :=
-          safeAbstraction_seq_value_drop hterminalHead.2.1
+          fullSafeAbstraction_seq_value_drop hterminalHead.2.1
             hvalueBlockValid hwellInner hdrops
         have htailStoreTyping :
             ValidStoreTyping storeAfterDrop
@@ -397,7 +397,7 @@ theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
       ProgressResult store lifetime term := by
     intro hvalidRuntime hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htypable
     rcases htypable with ⟨env₂, ty, htyping⟩
-    exact progress_typing_of_safe hvalidStoreTyping hslotsOutlive hsafe
+    exact progress_typing hvalidStoreTyping hslotsOutlive hsafe
       hstoreProgress htyping
 
 /--

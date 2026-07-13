@@ -18,7 +18,7 @@ Preservation (Lemma 4.11).  Mechanized support:
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
 * block `R-BlockB` — via Lemma 9.5
-  (`preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`) for terminal
+  (`preservation_blockB_value_multistep_runtime_of_runtimeDrop`) for terminal
   value blocks.
 
 The theorem below derives the store-preservation projection from Lemma 4.11.
@@ -29,8 +29,8 @@ namespace FWRust.Paper.Soundness
 open FWRust.Paper FWRust.Core
 
 /--
-Appendix 9.10, Store Preservation: the safe-abstraction projection of
-Lemma 4.11.
+Appendix 9.10, Store Preservation: the `FullSafeAbstraction` projection of
+Lemma 4.11.  This is the paper's sole safe-abstraction relation.
 -/
 theorem lemma_9_10_storePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
@@ -52,9 +52,10 @@ theorem lemma_9_10_storePreservation
       hborrowSafe hfinite hlinear hsafe htyping hmulti).2.1
 
 /--
-Appendix 9.10, direct-variable assignment store preservation under the concrete
-frame conditions used to keep the RHS and unaffected variables valid after the
-runtime write to `x` and the subsequent cleanup drop of the overwritten value.
+Appendix 9.10, direct-variable assignment full-safe-abstraction preservation
+under the concrete frame conditions used to keep the RHS and unaffected
+variables valid after the runtime write to `x` and the subsequent cleanup drop
+of the overwritten value.
 -/
 theorem lemma_9_10_assign_var_envShape_frame
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
@@ -79,7 +80,7 @@ theorem lemma_9_10_assign_var_envShape_frame
         some { value := oldValue, lifetime := otherEnvSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue otherEnvSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val .unit) ∧ store' ∼ₛ env' ∧
+    ValidRuntimeState store' (.val .unit) ∧ store' ≈ₛ env' ∧
       ValidValue store' .unit .unit :=
   preservation_assign_var_envShape_step_runtime_of_frames (lifetime := lifetime)
 

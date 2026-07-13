@@ -30,9 +30,10 @@ Theorems 5.3 and 5.7 are mechanized conditional on a premise that encodes the ex
 
 | Claim by Pearce (2021) | Lean declaration |
 | --- | --- |
-| Lemma 4.9, Borrow Invariance | [`FWRust.Paper.typingPreservesWellFormed_of_sourceTerm`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean#L7347) |
-| Lemma 4.10, Progress | [`FWRust.Paper.Soundness.lemma_4_10_progress`](FWRust/Paper/Soundness/Lemma_4_10_Progress.lean#L1285) |
-| Lemma 4.11, Preservation | [`FWRust.Paper.Soundness.lemma_4_11_preservation`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean#L17070) |
+| Definition 4.7, Safe Abstraction | [`FWRust.Paper.FullSafeAbstraction`](FWRust/Paper/Soundness/Helpers/SafeAbstraction.lean#L1095) |
+| Lemma 4.9, Borrow Invariance | [`FWRust.Paper.typingPreservesWellFormed_of_sourceTerm`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean#L7086) |
+| Lemma 4.10, Progress | [`FWRust.Paper.Soundness.lemma_4_10_progress`](FWRust/Paper/Soundness/Lemma_4_10_Progress.lean#L1146) |
+| Lemma 4.11, Preservation | [`FWRust.Paper.Soundness.lemma_4_11_preservation`](FWRust/Paper/Soundness/Lemma_4_11_Preservation.lean#L16689) |
 | Theorem 4.12, Type and Borrow Safety | [`FWRust.Paper.Soundness.theorem_4_12_typeAndBorrowSafety_total`](FWRust/Paper/Soundness/Theorem_4_12_TypeAndBorrowSafety.lean#L536) |
 | Corollary 4.14, Borrow Safety | [`FWRust.Paper.Soundness.corollary_4_14_borrowSafety`](FWRust/Paper/Soundness/Corollary_4_14_BorrowSafety.lean#L39) |
 

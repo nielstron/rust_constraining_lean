@@ -1,5 +1,10 @@
 # Differences between the Lean formalization and the published FR papers
 
+Terminology: the original paper defines one safe-abstraction relation
+(Definition 4.7).  The mechanization names that relation `FullSafeAbstraction`
+(notation `≈ₛ`), and all safe-abstraction premises and conclusions use it;
+there is no separate weaker safe-abstraction relation in the formalization.
+
 ### 1. Rule premises relative to the printed figures
 
 Borrows are single-target (the follow-up paper's grammar): without
