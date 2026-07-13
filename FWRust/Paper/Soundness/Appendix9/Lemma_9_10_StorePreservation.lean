@@ -6,7 +6,7 @@ import FWRust.Paper.Soundness.Lemma_4_11_Preservation
 > Let `S₁ ▷ t` be a valid state and `S₂ ▷ v` a terminal state; … then `S₂ ∼ Γ₂`
 > (the final store is safely abstracted by the result environment).
 
-Status: proved as the `FullSafeAbstraction finalStore env₂` projection of
+Status: proved as the `finalStore ∼ₛ env₂` projection of
 Preservation (Lemma 4.11).  Mechanized support:
 
 * box/declare base cases — `preservation_box_context_terminal_multistep_runtime`,
@@ -18,7 +18,7 @@ Preservation (Lemma 4.11).  Mechanized support:
   derives the moved value and surviving slots from the same concrete frame
   condition shape;
 * block `R-BlockB` — via Lemma 9.5
-  (`preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop`) for terminal
+  (`preservation_blockB_value_multistep_runtime_of_runtimeDrop`) for terminal
   value blocks.
 
 The theorem below derives the store-preservation projection from Lemma 4.11.
@@ -29,8 +29,8 @@ namespace FWRust.Paper.Soundness
 open FWRust.Paper FWRust.Core
 
 /--
-Appendix 9.10, Store Preservation: the safe-abstraction projection of
-Lemma 4.11.
+Appendix 9.10, Store Preservation: the `FullSafeAbstraction` projection of
+Lemma 4.11.  This is the paper's sole safe-abstraction relation.
 -/
 theorem lemma_9_10_storePreservation
     {store finalStore : ProgramStore} {env₁ env₂ : Env} {typing : StoreTyping}
@@ -42,25 +42,26 @@ theorem lemma_9_10_storePreservation
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
-    FullSafeAbstraction finalStore env₂ := by
+    finalStore ∼ₛ env₂ := by
     intro hsource hvalid hstoreTyping hwellFormed hborrowSafe hfinite hlinear
       hsafe htyping hmulti
     exact (lemma_4_11_preservation hsource hvalid hstoreTyping hwellFormed
       hborrowSafe hfinite hlinear hsafe htyping hmulti).2.1
 
 /--
-Appendix 9.10, direct-variable assignment store preservation under the concrete
-frame conditions used to keep the RHS and unaffected variables valid after the
-runtime write to `x` and the subsequent cleanup drop of the overwritten value.
+Appendix 9.10, direct-variable assignment full-safe-abstraction preservation
+under the concrete frame conditions used to keep the RHS and unaffected
+variables valid after the runtime write to `x` and the subsequent cleanup drop
+of the overwritten value.
 -/
 theorem lemma_9_10_assign_var_envShape_frame
     {store storeAfterWrite store' : ProgramStore} {env env' : Env}
     {lifetime : Lifetime} {x : Name} {oldSlot : StoreSlot} {envSlot : EnvSlot}
     {value : Value} {ty : Ty} :
-    store ≈ₛ env →
+    store ∼ₛ env →
     ValidRuntimeState store (.assign (.var x) (.val value)) →
     env.slotAt x = some envSlot →
     EnvWrite env (.var x) ty env' →
@@ -91,7 +92,7 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
     {env₁ env₂ : Env} {typing : StoreTyping} {current lifetime valueLifetime : Lifetime}
     {x : Name} {value : Value} {ty : Ty} :
     WellFormedEnv env₁ current →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     ValidRuntimeState store (.move (.var x)) →
     env₁.slotAt x = some { ty := .ty ty, lifetime := valueLifetime } →
     EnvMove env₁ (.var x) env₂ →
@@ -106,7 +107,7 @@ theorem lemma_9_10_move_var_frame {store store' : ProgramStore}
         some { value := oldValue, lifetime := envSlot.lifetime } →
       ∀ ℓ, RuntimeFrame.Reaches store oldValue envSlot.ty ℓ →
         ℓ ≠ VariableProjection x) →
-    ValidRuntimeState store' (.val value) ∧ store' ≈ₛ env₂ ∧
+    ValidRuntimeState store' (.val value) ∧ store' ∼ₛ env₂ ∧
       ValidValue store' value ty := by
   intro hwellFormed hsafe hvalidRuntime henvSlot hmove htyping hstep
     hvalueFrame hotherFrames

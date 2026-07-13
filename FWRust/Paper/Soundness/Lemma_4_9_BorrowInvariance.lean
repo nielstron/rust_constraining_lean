@@ -14,35 +14,8 @@ open Core
 def FullTerminalStateSafe (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) :
     Prop :=
   ValidRuntimeState store (.val value) ∧
-    FullSafeAbstraction store env ∧
-    ValidValue store value ty
-
-def TerminalStateSafe
-    (store : ProgramStore) (value : Value) (env : Env) (ty : Ty) : Prop :=
-  ValidRuntimeState store (.val value) ∧
     store ∼ₛ env ∧
-    ValidPartialValueWhenInitialized env store (.value value) (.ty ty)
-
-theorem FullTerminalStateSafe.whenInitialized {store : ProgramStore}
-    {value : Value} {env : Env} {ty : Ty} :
-    FullTerminalStateSafe store value env ty →
-    TerminalStateSafe store value env ty := by
-  intro hterminal
-  exact ⟨hterminal.1, hterminal.2.1.whenInitialized,
-    hterminal.2.2.whenInitialized⟩
-
-theorem TerminalStateSafe.full_of_wellFormed {store : ProgramStore}
-    {value : Value} {env : Env} {ty : Ty} {lifetime : Lifetime} :
-    TerminalStateSafe store value env ty →
-    WellFormedEnv env lifetime →
-    WellFormedTy env ty lifetime →
-    FullTerminalStateSafe store value env ty := by
-  intro hterminal hwell hwellTy
-  exact ⟨hterminal.1,
-    SafeAbstraction.full_of_containedBorrowsWellFormed hwell.1
-      hterminal.2.1,
-    hterminal.2.2.toFull_of_borrowsWellFormed
-      (PartialTyBorrowsWellFormedInSlot.of_wellFormedTy hwellTy)⟩
+    ValidValue store value ty
 
 theorem FullTerminalStateSafe.transport_env_pointwise
     {store : ProgramStore} {value : Value} {env result : Env} {ty : Ty}
@@ -101,10 +74,10 @@ theorem EnvSameShapeStrengthening.trans {first second third : Env} :
 theorem EnvSameShapeStrengthening.safe
     {store : ProgramStore} {source result : Env} :
     EnvSameShapeStrengthening source result →
-    store ≈ₛ source →
-    store ≈ₛ result := by
+    store ∼ₛ source →
+    store ∼ₛ result := by
   intro hmap hsafe
-  exact safeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
+  exact fullSafeAbstraction_transport_sameShape hsafe hmap.1 hmap.2
 
 theorem EnvSameShapeStrengthening.update_result_strengthening
     {source result : Env} {x : Name} {sourceSlot resultSlot : EnvSlot} :

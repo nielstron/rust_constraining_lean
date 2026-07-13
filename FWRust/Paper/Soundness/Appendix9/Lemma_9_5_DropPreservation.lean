@@ -14,10 +14,10 @@ validity package:
   validity;
 * `dropsLifetime_storeOwnersAllocated`, `drops_storeOwnersAllocated_of_disjoint`
   — owner-allocation is preserved under the lifetime-disjointness side condition;
-* `preservation_blockB_value_multistep_runtime_whenInitialized_of_runtimeDrop` — the
+* `preservation_blockB_value_multistep_runtime_of_runtimeDrop` — the
   recursive lifetime-drop preservation used by Preservation for terminal value
   blocks;
-* `safeAbstraction_seq_value_drop` — safe-abstraction preservation for
+* `fullSafeAbstraction_seq_value_drop` — safe-abstraction preservation for
   recursive drops of non-final sequence temporaries;
 * `lemma_9_5_value_drops_frame` — recursive value drops preserve a value
   abstraction when the drop avoids every reached location.

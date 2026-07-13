@@ -29,7 +29,7 @@ theorem lemma_9_9_valuePreservation
     BorrowSafeEnv env₁ →
     Env.FiniteSupport env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     TermTyping env₁ typing lifetime term ty env₂ →
     MultiStep store lifetime term finalStore (.val finalValue) →
     ValidValue finalStore finalValue ty := by
@@ -47,7 +47,7 @@ theorem lemma_9_9_move_postwrite_frame {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} {ty : Ty} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ₛ env →
     TermTyping env typing lifetime (.move lv) ty env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     (∀ updated slot,
@@ -62,7 +62,7 @@ theorem lemma_9_9_move_unit_postwrite {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ₛ env →
     TermTyping env typing lifetime (.move lv) .unit env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .unit :=
@@ -73,7 +73,7 @@ theorem lemma_9_9_move_int_postwrite {store store' : ProgramStore}
     {env env₂ : Env} {typing : StoreTyping} {current lifetime : Lifetime}
     {lv : LVal} {value : Value} :
     WellFormedEnv env current →
-    store ≈ₛ env →
+    store ∼ₛ env →
     TermTyping env typing lifetime (.move lv) .int env₂ →
     Step store lifetime (.move lv) store' (.val value) →
     ValidValue store' value .int :=

@@ -165,7 +165,7 @@ theorem sourceInitialSoundnessHypotheses {term : Term} {lifetime : Lifetime} :
     SourceTerm term →
     ValidState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ≈ₛ Env.empty ∧
+    ProgramStore.empty ∼ₛ Env.empty ∧
     WellFormedEnv Env.empty lifetime ∧
     OperationalStoreProgress ProgramStore.empty := by
   intro hsource
@@ -183,7 +183,7 @@ theorem sourceInitialRuntimeSoundnessHypotheses {term : Term} {lifetime : Lifeti
     SourceTerm term →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-    ProgramStore.empty ≈ₛ Env.empty ∧
+    ProgramStore.empty ∼ₛ Env.empty ∧
     WellFormedEnv Env.empty lifetime ∧
     OperationalStoreProgress ProgramStore.empty := by
   intro hsource
@@ -208,7 +208,7 @@ theorem emptyInitialRuntimeSoundnessHypotheses_of_typing {env₂ : Env}
     TermTyping Env.empty StoreTyping.empty lifetime term ty env₂ →
     ValidRuntimeState ProgramStore.empty term ∧
     ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-      ProgramStore.empty ≈ₛ Env.empty ∧
+      ProgramStore.empty ∼ₛ Env.empty ∧
       (∀ lifetime, WellFormedEnv Env.empty lifetime) ∧
       OperationalStoreProgress ProgramStore.empty ∧
       (∀ env lifetime, StoreTypingRefsWellFormed env StoreTyping.empty lifetime) := by
@@ -230,7 +230,7 @@ theorem emptyInitialInvariantPackage_of_typing {env₂ : Env}
     SourceTerm term ∧
       ValidRuntimeState ProgramStore.empty term ∧
       ValidStoreTyping ProgramStore.empty term StoreTyping.empty ∧
-      ProgramStore.empty ≈ₛ Env.empty ∧
+      ProgramStore.empty ∼ₛ Env.empty ∧
       ProgramStore.empty.FiniteSupport ∧
       StaticInvariantPackage Env.empty lifetime ∧
       StaticInvariantPackage env₂ lifetime ∧
@@ -425,19 +425,14 @@ theorem sourceInitial_blockB_value_multistep_preservation
     exact hsource
   rcases preservation_blockB_value_multistep_runtime_no_slots
     (sourceInitialRuntimeState_valid hsourceTerm)
-    safeAbstraction_empty
+    fullSafeAbstraction_empty
     htyping
     (empty_no_lifetime_slots blockLifetime)
     (sourceValue_validValue_of_empty_valueTyping hsource
       (blockValueTyping_valueTyping htyping))
     hmulti with
     ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
-    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
-  exact ⟨hvalidFinal,
-    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
-      hsafeFinal,
-    hvalueFinal⟩
+  exact ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
 
 /--
 **Lemma 4.11.** Source-initial multistep preservation for `box v` with a
@@ -459,17 +454,12 @@ theorem sourceInitial_box_value_multistep_preservation
   rcases preservation_box_multistep_runtime
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
       (term := .box (.val value)) hsourceTerm)
-    safeAbstraction_empty
+    fullSafeAbstraction_empty
     (sourceInitialRuntimeState_valid hsourceTerm)
     htyping
     hmulti with
     ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
-    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
-  exact ⟨hvalidFinal,
-    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
-      hsafeFinal,
-    hvalueFinal⟩
+  exact ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
 
 /--
 **Lemma 4.11.** Source-initial multistep preservation for `let mut x = v` with a
@@ -497,12 +487,7 @@ theorem sourceInitial_declare_value_multistep_preservation
     htyping
     hmulti with
     ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
-    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
-  exact ⟨hvalidFinal,
-    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
-      hsafeFinal,
-    hvalueFinal⟩
+  exact ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
 
 /--
 **Lemma 4.11.** Source-level terminal preservation base case, where the program
@@ -525,16 +510,11 @@ theorem sourceInitial_multistep_value_preservation
     (sourceInitialRuntimeState_valid hsourceTerm)
     (sourceTerm_validStoreTyping_empty (store := ProgramStore.empty)
       (term := .val value) hsourceTerm)
-    safeAbstraction_empty
+    fullSafeAbstraction_empty
     htyping
     hmulti with
     ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
-  have hwellOut := typingPreservesWellFormed_of_sourceTerm hsourceTerm
-    (wellFormedEnv_empty lifetime) borrowSafeEnv_empty htyping
-  exact ⟨hvalidFinal,
-    SafeAbstraction.full_of_containedBorrowsWellFormed hwellOut.1.1
-      hsafeFinal,
-    hvalueFinal⟩
+  exact ⟨hvalidFinal, hsafeFinal, hvalueFinal⟩
 
 /-- **Lemma 4.9.** Source-initial borrow invariance through the rule-carried route. -/
 theorem sourceInitial_borrowInvariance_full {term : Term} {env₂ : Env}

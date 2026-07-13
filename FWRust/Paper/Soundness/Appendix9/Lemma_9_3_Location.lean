@@ -7,6 +7,9 @@ import FWRust.Paper.Soundness.Helpers.BorrowSafety
 > `S ∼ Γ`; let `w` be an lval and `T̃` a partial type.  If `Γ ⊢ w : T̃^m` then
 > `loc(S, w)` is defined (and reads/writes through `w` are well defined).
 
+The paper's sole safe-abstraction premise is mechanized below as
+`FullSafeAbstraction` (notation `∼ₛ`).
+
 Status: mechanized as the location-availability facts feeding
 `readPreservation`/`progress`; see `lvalTyping_allocated_location` and
 `readPreservation_of_location` in `FWRust.Paper.Soundness`.  The end-to-end
@@ -17,8 +20,8 @@ namespace FWRust.Paper.Soundness
 
 open FWRust.Paper FWRust.Core
 
-/-- Lemma 9.3, location availability for a typed lval (proven): `loc(S, w)` is
-defined and points to an allocated slot. -/
+/-- Lemma 9.3, location availability from `FullSafeAbstraction` for a typed
+lval (proven): `loc(S, w)` is defined and points to an allocated slot. -/
 theorem lemma_9_3_location
     {store : ProgramStore} {env : Env} {current : Lifetime}
     {lv : LVal} {ty : Ty} {lifetime : Lifetime}

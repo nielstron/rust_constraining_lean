@@ -7,6 +7,9 @@ import FWRust.Paper.Soundness.Helpers.BorrowSafety
 > `S ∼ Γ`; let `T₁, T₂` be types where `T₁ ⊑ T₂`; and let `v` be a value.  If
 > `S ⊢ v ∼ T₁` then `S ⊢ v ∼ T₂`.
 
+The paper's sole safe-abstraction premise is mechanized below as
+`FullSafeAbstraction` (notation `∼ₛ`).
+
 Status: **fully proven** (`safeStrengthening`).
 -/
 

@@ -39,7 +39,7 @@ def TerminatesAsValue (store : ProgramStore) (lifetime : Lifetime) (term : Term)
 theorem Env.FiniteSupport.of_fullSafeAbstraction {store : ProgramStore}
     {env : Env} :
     store.FiniteSupport →
-    store ≈ₛ env →
+    store ∼ₛ env →
     env.FiniteSupport := by
   rintro ⟨support, hsupport⟩ hsafe
   let envSupport : Finset Name :=
@@ -74,7 +74,7 @@ theorem terminatesAsValue_bounded
     WellFormedEnv env₁ lifetime →
     BorrowSafeEnv env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term := by
@@ -96,7 +96,7 @@ theorem terminatesAsValue_bounded
         WellFormedEnv env lifetime →
         BorrowSafeEnv env →
         Linearizable env →
-        store ≈ₛ env →
+        store ∼ₛ env →
         store.FiniteSupport →
         TerminatesAsValue store lifetime term)
     (motive_2 := fun env currentTyping blockLifetime terms _ty _env₂ _ =>
@@ -109,7 +109,7 @@ theorem terminatesAsValue_bounded
         WellFormedEnv env blockLifetime →
         BorrowSafeEnv env →
         Linearizable env →
-        store ≈ₛ env →
+        store ∼ₛ env →
         store.FiniteSupport →
         TerminatesAsValue store outerLifetime (.block blockLifetime terms))
     ?const ?copy ?move ?mutBorrow ?immBorrow ?box ?block
@@ -322,8 +322,8 @@ theorem terminatesAsValue_bounded
               (.block blockLifetime (next :: restTail)) :=
           validRuntimeState_seq_step hvalueBlockValid hseqStep
         have hsafeTailAfter :
-            storeAfterDrop ≈ₛ _env₂ :=
-          safeAbstraction_seq_value_drop hterminalHead.2.1
+            storeAfterDrop ∼ₛ _env₂ :=
+          fullSafeAbstraction_seq_value_drop hterminalHead.2.1
             hvalueBlockValid hwellInner hdrops
         have htailStoreTyping :
             ValidStoreTyping storeAfterDrop
@@ -351,7 +351,7 @@ theorem terminatesAsValue {store : ProgramStore} {env₁ env₂ : Env}
     WellFormedEnv env₁ lifetime →
     BorrowSafeEnv env₁ →
     Linearizable env₁ →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     store.FiniteSupport →
     TermTyping env₁ typing lifetime term ty env₂ →
     TerminatesAsValue store lifetime term := by
@@ -372,7 +372,7 @@ theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     OperationalStoreProgress store →
     TermTyping env₁ typing lifetime term ty env₂ →
   ProgressResult store lifetime term := by
@@ -391,13 +391,13 @@ theorem typeAndBorrowProgress {store : ProgramStore} {env₁ env₂ : Env}
       ValidRuntimeState store term →
       ValidStoreTyping store term typing →
       EnvSlotsOutlive env₁ lifetime →
-      store ≈ₛ env₁ →
+      store ∼ₛ env₁ →
       OperationalStoreProgress store →
       (∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) →
       ProgressResult store lifetime term := by
     intro hvalidRuntime hvalidStoreTyping hslotsOutlive hsafe hstoreProgress htypable
     rcases htypable with ⟨env₂, ty, htyping⟩
-    exact progress_typing_of_safe hvalidStoreTyping hslotsOutlive hsafe
+    exact progress_typing hvalidStoreTyping hslotsOutlive hsafe
       hstoreProgress htyping
 
 /--
@@ -414,7 +414,7 @@ theorem typeAndBorrowSafety_of_preservation
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     OperationalStoreProgress store →
       TermTyping env₁ typing lifetime term ty env₂ →
       (∀ finalStore finalValue,
@@ -443,7 +443,7 @@ theorem typeAndBorrowSafety {store : ProgramStore} {env₁ env₂ : Env}
     ValidRuntimeState store term →
     ValidStoreTyping store term typing →
     WellFormedEnv env₁ lifetime →
-    store ≈ₛ env₁ →
+    store ∼ₛ env₁ →
     OperationalStoreProgress store →
       TermTyping env₁ typing lifetime term ty env₂ →
       (∀ finalStore finalValue,
@@ -475,7 +475,7 @@ theorem theorem_4_12_typeAndBorrowProgress
       (hvalid : ValidRuntimeState store term)
       (hstoreTyping : ValidStoreTyping store term typing)
       (hwellFormed : WellFormedEnv env₁ lifetime)
-      (hsafe : store ≈ₛ env₁)
+      (hsafe : store ∼ₛ env₁)
       (hstore : OperationalStoreProgress store)
     (htyping : ∃ env₂ ty, TermTyping env₁ typing lifetime term ty env₂) :
     ProgressResult store lifetime term :=
@@ -494,7 +494,7 @@ theorem theorem_4_12_typeAndBorrowStep
       (hvalid : ValidRuntimeState store term)
       (hstoreTyping : ValidStoreTyping store term typing)
       (hwellFormed : WellFormedEnv env₁ lifetime)
-      (hsafe : store ≈ₛ env₁)
+      (hsafe : store ∼ₛ env₁)
       (hstore : OperationalStoreProgress store)
       (htyping : TermTyping env₁ typing lifetime term ty env₂)
       (hnotTerminal : ¬ Terminal term) :
@@ -512,7 +512,7 @@ theorem theorem_4_12_typeAndBorrowSafety
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hborrowSafe : BorrowSafeEnv env₁)
-    (hsafe : store ≈ₛ env₁)
+    (hsafe : store ∼ₛ env₁)
     (hfinite : store.FiniteSupport)
     (hlinear : Linearizable env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂)
@@ -541,7 +541,7 @@ theorem theorem_4_12_typeAndBorrowSafety_total
     (hstoreTyping : ValidStoreTyping store term typing)
     (hwellFormed : WellFormedEnv env₁ lifetime)
     (hborrowSafe : BorrowSafeEnv env₁)
-    (hsafe : store ≈ₛ env₁)
+    (hsafe : store ∼ₛ env₁)
     (hfinite : store.FiniteSupport)
     (hlinear : Linearizable env₁)
     (htyping : TermTyping env₁ typing lifetime term ty env₂) :
