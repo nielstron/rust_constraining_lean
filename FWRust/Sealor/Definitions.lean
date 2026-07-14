@@ -16,7 +16,7 @@ def Completable
     (p : Partial) : Prop :=
   ∃ c, Completes p c ∧ L c
 
-def Conservative
+def SealorComplete
     (L : Complete → Prop)
     (Completes : Partial → Complete → Prop)
     (sealFn : Partial → Complete) : Prop :=
@@ -90,12 +90,12 @@ def SealorPrefixChecker
     (p : Partial) : Prop :=
   checker (sealFn p)
 
-theorem conservative_sealors_give_complete_prefix_checkers
+theorem sealor_completeness_lifts_to_prefix_checkers
     {L : Complete → Prop}
     {Completes : Partial → Complete → Prop}
     {sealFn : Partial → Complete}
     {checker : Complete → Prop}
-    (hSeal : Conservative L Completes sealFn)
+    (hSeal : SealorComplete L Completes sealFn)
     (hChecker : CheckerComplete L checker) :
     PrefixCheckerComplete L Completes
       (SealorPrefixChecker checker sealFn) := by
@@ -120,11 +120,11 @@ theorem sealor_soundness_lifts_to_prefix_checkers
   intro p hClass hAccepted
   exact hSeal p hClass (hChecker (sealFn p) hAccepted)
 
-theorem conservative_accepts_all_completable_sealings
+theorem sealor_complete_accepts_all_completable_sealings
     {L : Complete → Prop}
     {Completes : Partial → Complete → Prop}
     {sealFn : Partial → Complete}
-    (hSeal : Conservative L Completes sealFn) :
+    (hSeal : SealorComplete L Completes sealFn) :
     ∀ p, Completable L Completes p → L (sealFn p) := by
   intro p hp
   rcases hp with ⟨c, hCompletes, hValid⟩
