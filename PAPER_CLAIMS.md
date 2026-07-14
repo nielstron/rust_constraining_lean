@@ -8,9 +8,9 @@ This file contains a mapping between claims in our work and claims of Pearce (20
 | --- | --- |
 | Definition 3.1, sealor completeness | [`ConservativeSealor.SealorComplete`](FWRust/Sealor/Definitions.lean#L19) |
 | Definition 3.1, prefixes admitting a valid continuation | [`ConservativeSealor.Completable`](FWRust/Sealor/Definitions.lean#L13) |
-| Definition 3.1, selective soundness | [`ConservativeSealor.SealorSoundOn`](FWRust/Sealor/Definitions.lean#L55) |
+| Definition 3.1, selective soundness | [`ConservativeSealor.SealorSoundOn`](FWRust/Sealor/Definitions.lean#L73) |
 | Theorem 3.2, completeness lifts to the generative compiler | [`ConservativeSealor.sealor_completeness_lifts_to_prefix_checkers`](FWRust/Sealor/Definitions.lean#L93) |
-| Theorem 3.2, soundness lifts to the generative compiler | [`ConservativeSealor.sealor_soundness_lifts_to_prefix_checkers`](FWRust/Sealor/Definitions.lean#L92) |
+| Theorem 3.2, soundness lifts to the generative compiler | [`ConservativeSealor.sealor_soundness_lifts_to_prefix_checkers`](FWRust/Sealor/Definitions.lean#L110) |
 
 ## FR sealor
 

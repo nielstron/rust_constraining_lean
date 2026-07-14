@@ -24,10 +24,10 @@ mutual
 
 /-- Seal a partial expression in value position (`ast_copier.visit_expr`). -/
 def sealTerm (currentLifetime : Lifetime) : PartialTerm → Term
-  | Generated.PartialTerm.cutoff => epsilonTerm
-  | Generated.PartialTerm.done term => term
-  | Generated.PartialTerm.intN _ => epsilonTerm
-  | Generated.PartialTerm.blockTerms lifetime terms =>
+  | PartialTerm.cutoff => epsilonTerm
+  | PartialTerm.done term => term
+  | PartialTerm.intN _ => epsilonTerm
+  | PartialTerm.blockTerms lifetime terms =>
       CompleteDsl.block lifetime (sealTerms lifetime terms)
   | frontier =>
       (sealTermStmts currentLifetime frontier).headD epsilonTerm
@@ -38,27 +38,27 @@ termination_by p => (sizeOf p, 1)
 still constrain later checking, but do not rebuild constraining parents around
 partial frontiers. -/
 def sealTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
-  | Generated.PartialTerm.cutoff => []
-  | Generated.PartialTerm.done term => [term]
-  | Generated.PartialTerm.intN _ => []
-  | Generated.PartialTerm.blockStart => []
-  | Generated.PartialTerm.blockTerms lifetime terms =>
+  | PartialTerm.cutoff => []
+  | PartialTerm.done term => [term]
+  | PartialTerm.intN _ => []
+  | PartialTerm.blockStart => []
+  | PartialTerm.blockTerms lifetime terms =>
       [CompleteDsl.block lifetime (sealTerms lifetime terms)]
-  | Generated.PartialTerm.letMutStart => []
-  | Generated.PartialTerm.letMutName _ => []
-  | Generated.PartialTerm.letMutRhs _ term =>
+  | PartialTerm.letMutStart => []
+  | PartialTerm.letMutName _ => []
+  | PartialTerm.letMutRhs _ term =>
       sealTermStmts currentLifetime term
-  | Generated.PartialTerm.lvalStart _ => []
-  | Generated.PartialTerm.assignRhs _ rhs =>
+  | PartialTerm.lvalStart _ => []
+  | PartialTerm.assignRhs _ rhs =>
       sealTermStmts currentLifetime rhs
-  | Generated.PartialTerm.boxStart => []
-  | Generated.PartialTerm.boxOperand operand =>
+  | PartialTerm.boxStart => []
+  | PartialTerm.boxOperand operand =>
       sealTermStmts currentLifetime operand
-  | Generated.PartialTerm.tokenAmpStart => []
-  | Generated.PartialTerm.borrowSharedOperand _ => []
-  | Generated.PartialTerm.borrowMutOperand _ => []
-  | Generated.PartialTerm.copyStart => []
-  | Generated.PartialTerm.copyOperand _ => []
+  | PartialTerm.tokenAmpStart => []
+  | PartialTerm.borrowSharedOperand _ => []
+  | PartialTerm.borrowMutOperand _ => []
+  | PartialTerm.copyStart => []
+  | PartialTerm.copyOperand _ => []
 termination_by p => (sizeOf p, 0)
 
 /-- Seal a block-body frontier (`ast_copier.visit_stmts`), preserving the
@@ -66,11 +66,11 @@ complete statement prefix and sealing the single partial tail.
 Incomplete bodies are closed with `epsilonTerm`, the core replacement for the
 old `missing` placeholder. -/
 def sealTerms (currentLifetime : Lifetime) : PartialTerms → List Term
-  | Generated.PartialTerms.cutoff => [epsilonTerm, epsilonTerm]
-  | Generated.PartialTerms.done xs => xs
-  | Generated.PartialTerms.elems pre none =>
+  | PartialTerms.cutoff => [epsilonTerm, epsilonTerm]
+  | PartialTerms.done xs => xs
+  | PartialTerms.elems pre none =>
       pre ++ [epsilonTerm, epsilonTerm]
-  | Generated.PartialTerms.elems pre (some tail) =>
+  | PartialTerms.elems pre (some tail) =>
       pre ++ [sealTerm currentLifetime tail, epsilonTerm]
 termination_by ps => (sizeOf ps, 0)
 
@@ -339,8 +339,8 @@ open FWRust.Paper
 /-- Partial programs exactly at a completed block-statement boundary. -/
 def CompletedStatementBoundary (partialProgram : PartialProgram) : Prop :=
   ∃ lifetime pre,
-    partialProgram = Generated.PartialTerm.blockTerms lifetime
-      (Generated.PartialTerms.elems pre none)
+    partialProgram = PartialTerm.blockTerms lifetime
+      (PartialTerms.elems pre none)
 
 /--
 At a block-body statement boundary, the sealed block is one generated
@@ -349,14 +349,14 @@ completion of the partial block.
 theorem sealProgram_completedStatementBoundary_completes
     {lifetime : Lifetime} {pre : List Term} :
     CompletesProgram
-      (Generated.PartialTerm.blockTerms lifetime
-        (Generated.PartialTerms.elems pre none))
+      (PartialTerm.blockTerms lifetime
+        (PartialTerms.elems pre none))
       (sealProgram
-        (Generated.PartialTerm.blockTerms lifetime
-          (Generated.PartialTerms.elems pre none))) := by
+        (PartialTerm.blockTerms lifetime
+          (PartialTerms.elems pre none))) := by
   simpa [CompletesProgram, sealProgram, sealTerm, sealTerms] using
-      (Generated.CompletesTerm.ctermBlock_blockTerms
-      (Generated.CompletesTerms.elemsDone
+      (CompletesTerm.ctermBlock_blockTerms
+      (CompletesTerms.elemsDone
         (pre := pre) (suffix := [epsilonTerm, epsilonTerm])))
 
 /-- Paper-level statement-boundary soundness for arbitrary typing environments,
@@ -367,12 +367,12 @@ theorem sealProgram_completedStatementBoundary_sound_general
     {env result : Env} {typing : StoreTyping} {ty : Ty}
     (hSealed : TermTyping env typing currentLifetime
       (sealProgram
-        (Generated.PartialTerm.blockTerms blockLifetime
-          (Generated.PartialTerms.elems pre none))) ty result) :
+        (PartialTerm.blockTerms blockLifetime
+          (PartialTerms.elems pre none))) ty result) :
     ∃ completion completionTy completionResult,
       CompletesProgram
-        (Generated.PartialTerm.blockTerms blockLifetime
-          (Generated.PartialTerms.elems pre none)) completion ∧
+        (PartialTerm.blockTerms blockLifetime
+          (PartialTerms.elems pre none)) completion ∧
       TermTyping env typing currentLifetime completion completionTy
         completionResult := by
   exact ⟨_, ty, result,
@@ -386,11 +386,11 @@ theorem sealProgram_completedStatementBoundary_sound
     {lifetime : Lifetime} {pre : List Term}
     (hSealed : ProgramWellTyped
       (sealProgram
-        (Generated.PartialTerm.blockTerms lifetime
-          (Generated.PartialTerms.elems pre none)))) :
+        (PartialTerm.blockTerms lifetime
+          (PartialTerms.elems pre none)))) :
     Completable ProgramWellTyped CompletesProgram
-      (Generated.PartialTerm.blockTerms lifetime
-        (Generated.PartialTerms.elems pre none)) := by
+      (PartialTerm.blockTerms lifetime
+        (PartialTerms.elems pre none)) := by
   exact ⟨_,
     sealProgram_completedStatementBoundary_completes,
     hSealed⟩
