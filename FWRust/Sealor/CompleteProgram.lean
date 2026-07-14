@@ -16,7 +16,7 @@ abbrev Reference := FWRust.Core.Reference
 abbrev Term := FWRust.Core.Term
 abbrev Program := Term
 
-namespace CompleteDsl
+namespace CompleteProgram
 
 def tyUnit : Ty := .unit
 def tyInt : Ty := .int
@@ -41,6 +41,6 @@ def borrow (mutable : Bool) (operand : LVal) : Term :=
 def move (operand : LVal) : Term := .move operand
 def copy (operand : LVal) : Term := .copy operand
 
-end CompleteDsl
+end CompleteProgram
 
 end ConservativeSealor

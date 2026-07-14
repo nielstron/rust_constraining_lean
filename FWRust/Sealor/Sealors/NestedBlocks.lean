@@ -28,7 +28,7 @@ def sealTerm (currentLifetime : Lifetime) : PartialTerm → Term
   | PartialTerm.done term => term
   | PartialTerm.intN _ => epsilonTerm
   | PartialTerm.blockTerms lifetime terms =>
-      CompleteDsl.block lifetime (sealTerms lifetime terms)
+      CompleteProgram.block lifetime (sealTerms lifetime terms)
   | frontier =>
       (sealTermStmts currentLifetime frontier).headD epsilonTerm
 termination_by p => (sizeOf p, 1)
@@ -43,7 +43,7 @@ def sealTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | PartialTerm.intN _ => []
   | PartialTerm.blockStart => []
   | PartialTerm.blockTerms lifetime terms =>
-      [CompleteDsl.block lifetime (sealTerms lifetime terms)]
+      [CompleteProgram.block lifetime (sealTerms lifetime terms)]
   | PartialTerm.letMutStart => []
   | PartialTerm.letMutName _ => []
   | PartialTerm.letMutRhs _ term =>
