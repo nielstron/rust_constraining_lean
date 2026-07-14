@@ -24,4 +24,13 @@ theorem programWellTyped_complete :
   intro program hprogram
   exact hprogram
 
+theorem programWellTyped_sound :
+    CheckerSound ProgramWellTyped programWellTyped := by
+  intro program hprogram
+  exact hprogram
+
+theorem programWellTyped_exact :
+    CheckerExact ProgramWellTyped programWellTyped :=
+  ⟨programWellTyped_complete, programWellTyped_sound⟩
+
 end ConservativeSealor

@@ -85,12 +85,23 @@ end
 
 abbrev PartialProgram := PartialTerm
 
+/-- A generated name fragment realizes exactly the names whose text extends
+that fragment. -/
+def NamePrefix (fragment complete : Name) : Prop :=
+  String.isPrefixOf fragment complete = true
+
+/-- Prefixing for canonical decimal integer spellings. This intentionally does
+not model radix prefixes, digit separators, or other surface syntax. -/
+def DecimalIntPrefix (fragment complete : Int) : Prop :=
+  String.isPrefixOf fragment.repr complete.repr = true
+
 inductive CompletesName : PartialName → Name → Prop where
   | done {x} :
       CompletesName (PartialName.done x) x
   | cutoff {x} :
       CompletesName PartialName.cutoff x
   | prefix {x y} :
+      NamePrefix x y →
       CompletesName (PartialName.prefix x) y
 
 mutual
@@ -163,8 +174,9 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   | cutoff {x} :
       CompletesTerm PartialTerm.cutoff x
   -- partial syntax: `num ...`
-  | ctermInt_intN {n : Int} :
-      CompletesTerm (PartialTerm.intN n) (CompleteProgram.int n)
+  | ctermInt_intN {fragment completion : Int} :
+      DecimalIntPrefix fragment completion →
+      CompletesTerm (PartialTerm.intN fragment) (CompleteProgram.int completion)
   -- partial syntax: `block lifetime { term,* ...`
   | ctermBlock_blockTerms {lifetime : Lifetime} {terms : PartialTerms} {terms' : List Term} :
       CompletesTerms terms terms' →

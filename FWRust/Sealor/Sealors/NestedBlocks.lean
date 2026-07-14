@@ -310,12 +310,34 @@ theorem sealProgram_wellTyped_of_completion
   obtain ⟨ty', env', htyped'⟩ := sealTerm_typed hCompletion htyped
   exact ⟨ty', env', htyped'⟩
 
+/-- Corollary 5.2: the nested-block sealor is globally complete for partial
+syntax. -/
+theorem nestedBlocksSealor_complete :
+    SealorComplete ProgramWellTyped CompletesProgram sealProgram := by
+  intro p _hGlobal hp
+  rcases hp with ⟨full, hCompletion, hFull⟩
+  exact sealProgram_wellTyped_of_completion hCompletion hFull
+
 theorem nestedBlocksPrefixChecker_complete :
     PrefixCheckerComplete ProgramWellTyped CompletesProgram
       nestedBlocksPrefixChecker := by
-  intro p _ hp
-  rcases hp with ⟨full, hCompletion, hFull⟩
-  exact sealProgram_wellTyped_of_completion hCompletion hFull
+  exact sealor_completeness_lifts_to_prefix_checkers
+    (Class := fun _ => True) nestedBlocksSealor_complete
+    programWellTyped_complete
+
+/-- Theorem 5.3 at sealor level, conditional on the bridge from extendable
+strings to completable partial syntax. -/
+theorem nestedBlocksSealor_complete_on_strings
+    (parse : String → Option Program)
+    (decode : String → PartialProgram)
+    (hDecode : ∀ rawPrefix,
+      Completable ProgramWellTyped (StringExtensionCompletes parse) rawPrefix →
+      Completable ProgramWellTyped CompletesProgram (decode rawPrefix)) :
+    SealorComplete ProgramWellTyped (StringExtensionCompletes parse)
+      (fun rawPrefix => sealProgram (decode rawPrefix)) := by
+  intro rawPrefix _hGlobal hCompletable
+  exact nestedBlocksSealor_complete (decode rawPrefix) trivial
+    (hDecode rawPrefix hCompletable)
 
 /-- String-level global completeness, conditional only on the parser bridge
 from extendable strings to the partial-syntax realization relation. -/
@@ -327,8 +349,10 @@ theorem nestedBlocksPrefixChecker_complete_on_strings
       Completable ProgramWellTyped CompletesProgram (decode rawPrefix)) :
     PrefixCheckerComplete ProgramWellTyped (StringExtensionCompletes parse)
       (fun rawPrefix => nestedBlocksPrefixChecker (decode rawPrefix)) :=
-  partialSyntax_completeness_lifts_to_strings parse decode
-    nestedBlocksPrefixChecker_complete hDecode
+  sealor_completeness_lifts_to_prefix_checkers
+    (Class := fun _ => True)
+    (nestedBlocksSealor_complete_on_strings parse decode hDecode)
+    programWellTyped_complete
 
 end TypedSealing
 
@@ -395,13 +419,43 @@ theorem sealProgram_completedStatementBoundary_sound
     sealProgram_completedStatementBoundary_completes,
     hSealed⟩
 
+/-- Corollary 5.6 at sealor level: the nested-block sealor is sound on
+completed-statement boundaries. -/
+theorem nestedBlocksSealor_sound_on_completedStatementBoundaries :
+    SealorSoundOn CompletedStatementBoundary ProgramWellTyped
+      CompletesProgram sealProgram := by
+  intro partialProgram hBoundary hSealed
+  rcases hBoundary with ⟨lifetime, pre, rfl⟩
+  exact sealProgram_completedStatementBoundary_sound hSealed
+
 /-- The generated prefix checker is sound on completed statement boundaries. -/
 theorem nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries :
     PrefixCheckerSoundOn CompletedStatementBoundary ProgramWellTyped
       CompletesProgram nestedBlocksPrefixChecker := by
-  intro partialProgram hBoundary hAccepted
-  rcases hBoundary with ⟨lifetime, pre, rfl⟩
-  exact sealProgram_completedStatementBoundary_sound hAccepted
+  exact sealor_soundness_lifts_to_prefix_checkers
+    nestedBlocksSealor_sound_on_completedStatementBoundaries
+    programWellTyped_sound
+
+/-- Theorem 5.7 at sealor level, conditional on the statement-boundary and
+realization bridges from partial syntax to strings. -/
+theorem nestedBlocksSealor_sound_on_statementBoundary_strings
+    (parse : String → Option Program)
+    (decode : String → PartialProgram)
+    (StringStatementBoundary : String → Prop)
+    (hBoundary : ∀ rawPrefix,
+      StringStatementBoundary rawPrefix →
+      CompletedStatementBoundary (decode rawPrefix))
+    (hRealizes : ∀ rawPrefix complete,
+      CompletesProgram (decode rawPrefix) complete →
+      StringExtensionCompletes parse rawPrefix complete) :
+    SealorSoundOn StringStatementBoundary ProgramWellTyped
+      (StringExtensionCompletes parse)
+      (fun rawPrefix => sealProgram (decode rawPrefix)) := by
+  intro rawPrefix hStringBoundary hSealed
+  rcases nestedBlocksSealor_sound_on_completedStatementBoundaries
+      (decode rawPrefix) (hBoundary rawPrefix hStringBoundary) hSealed with
+    ⟨complete, hCompletes, hWellTyped⟩
+  exact ⟨complete, hRealizes rawPrefix complete hCompletes, hWellTyped⟩
 
 /-- String-level selective soundness, conditional on the parser bridge from
 partial-syntax realizations back to actual string extensions. -/
@@ -418,10 +472,77 @@ theorem nestedBlocksPrefixChecker_sound_on_statementBoundary_strings
     PrefixCheckerSoundOn StringStatementBoundary ProgramWellTyped
       (StringExtensionCompletes parse)
       (fun rawPrefix => nestedBlocksPrefixChecker (decode rawPrefix)) :=
-  partialSyntax_soundness_lifts_to_strings parse decode
-    StringStatementBoundary
-    nestedBlocksPrefixChecker_sound_on_completedStatementBoundaries
-    hBoundary hRealizes
+  sealor_soundness_lifts_to_prefix_checkers
+    (nestedBlocksSealor_sound_on_statementBoundary_strings
+      parse decode StringStatementBoundary hBoundary hRealizes)
+    programWellTyped_sound
+
+/-- The nested-block sealor is exact on partial-syntax statement boundaries. -/
+theorem nestedBlocksSealor_exact_on_completedStatementBoundaries :
+    SealorExactOn CompletedStatementBoundary ProgramWellTyped
+      CompletesProgram sealProgram := by
+  constructor
+  · intro partialProgram _hBoundary hCompletable
+    exact nestedBlocksSealor_complete partialProgram trivial hCompletable
+  · exact nestedBlocksSealor_sound_on_completedStatementBoundaries
+
+/-- The induced nested-block prefix checker is exact on partial-syntax
+statement boundaries. -/
+theorem nestedBlocksPrefixChecker_exact_on_completedStatementBoundaries :
+    PrefixCheckerExactOn CompletedStatementBoundary ProgramWellTyped
+      CompletesProgram nestedBlocksPrefixChecker := by
+  exact sealor_exactness_lifts_to_prefix_checkers
+    nestedBlocksSealor_exact_on_completedStatementBoundaries
+    programWellTyped_exact
+
+/-- Section 5 conclusion: the nested-block sealor is exact at string-level
+statement boundaries, conditional on the parser and decoder adequacy bridges
+used by Theorems 5.3 and 5.7. -/
+theorem nestedBlocksSealor_exact_on_statementBoundary_strings
+    (parse : String → Option Program)
+    (decode : String → PartialProgram)
+    (StringStatementBoundary : String → Prop)
+    (hDecode : ∀ rawPrefix,
+      Completable ProgramWellTyped (StringExtensionCompletes parse) rawPrefix →
+      Completable ProgramWellTyped CompletesProgram (decode rawPrefix))
+    (hBoundary : ∀ rawPrefix,
+      StringStatementBoundary rawPrefix →
+      CompletedStatementBoundary (decode rawPrefix))
+    (hRealizes : ∀ rawPrefix complete,
+      CompletesProgram (decode rawPrefix) complete →
+      StringExtensionCompletes parse rawPrefix complete) :
+    SealorExactOn StringStatementBoundary ProgramWellTyped
+      (StringExtensionCompletes parse)
+      (fun rawPrefix => sealProgram (decode rawPrefix)) := by
+  constructor
+  · intro rawPrefix _hBoundary hCompletable
+    exact nestedBlocksSealor_complete_on_strings parse decode hDecode
+      rawPrefix trivial hCompletable
+  · exact nestedBlocksSealor_sound_on_statementBoundary_strings
+      parse decode StringStatementBoundary hBoundary hRealizes
+
+/-- The induced generative compiler is exact at string-level statement
+boundaries under the same parser and decoder adequacy assumptions. -/
+theorem nestedBlocksPrefixChecker_exact_on_statementBoundary_strings
+    (parse : String → Option Program)
+    (decode : String → PartialProgram)
+    (StringStatementBoundary : String → Prop)
+    (hDecode : ∀ rawPrefix,
+      Completable ProgramWellTyped (StringExtensionCompletes parse) rawPrefix →
+      Completable ProgramWellTyped CompletesProgram (decode rawPrefix))
+    (hBoundary : ∀ rawPrefix,
+      StringStatementBoundary rawPrefix →
+      CompletedStatementBoundary (decode rawPrefix))
+    (hRealizes : ∀ rawPrefix complete,
+      CompletesProgram (decode rawPrefix) complete →
+      StringExtensionCompletes parse rawPrefix complete) :
+    PrefixCheckerExactOn StringStatementBoundary ProgramWellTyped
+      (StringExtensionCompletes parse)
+      (fun rawPrefix => nestedBlocksPrefixChecker (decode rawPrefix)) := by
+  exact sealor_exactness_lifts_to_prefix_checkers
+    (nestedBlocksSealor_exact_on_statementBoundary_strings
+      parse decode StringStatementBoundary hDecode hBoundary hRealizes)
+    programWellTyped_exact
 
 end StatementBoundary
 

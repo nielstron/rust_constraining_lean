@@ -16,11 +16,53 @@ def Completable
     (p : Partial) : Prop :=
   ∃ c, Completes p c ∧ L c
 
+/-- A sealor is complete on `Class` when sealing every completable partial input
+in that class produces a program in the target language. -/
+def SealorCompleteOn
+    (Class : Partial → Prop)
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (sealFn : Partial → Complete) : Prop :=
+  ∀ p, Class p → Completable L Completes p → L (sealFn p)
+
+/-- A sealor is globally complete when it is complete on all partial inputs. -/
 def SealorComplete
     (L : Complete → Prop)
     (Completes : Partial → Complete → Prop)
     (sealFn : Partial → Complete) : Prop :=
-  ∀ p, ¬ L (sealFn p) → ∀ c, Completes p c → ¬ L c
+  SealorCompleteOn (fun _ => True) L Completes sealFn
+
+/-- A sealor is sound on `Class` when a valid sealed program witnesses that
+the original partial input has a valid completion. -/
+def SealorSoundOn
+    (Class : Partial → Prop)
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (sealFn : Partial → Complete) : Prop :=
+  ∀ p, Class p → L (sealFn p) → Completable L Completes p
+
+/-- A sealor is globally sound when it is sound on all partial inputs. -/
+def SealorSound
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (sealFn : Partial → Complete) : Prop :=
+  SealorSoundOn (fun _ => True) L Completes sealFn
+
+/-- A sealor is exact on `Class` when it is both complete and sound there. -/
+def SealorExactOn
+    (Class : Partial → Prop)
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (sealFn : Partial → Complete) : Prop :=
+  SealorCompleteOn Class L Completes sealFn ∧
+    SealorSoundOn Class L Completes sealFn
+
+/-- A sealor is globally exact when it is exact on all partial inputs. -/
+def SealorExact
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (sealFn : Partial → Complete) : Prop :=
+  SealorExactOn (fun _ => True) L Completes sealFn
 
 def CheckerComplete
     (L : Complete → Prop)
@@ -34,6 +76,12 @@ def CheckerSound
     (L : Complete → Prop)
     (checker : Complete → Prop) : Prop :=
   ∀ c, checker c → L c
+
+/-- A complete-program checker is exact when it is both complete and sound. -/
+def CheckerExact
+    (L : Complete → Prop)
+    (checker : Complete → Prop) : Prop :=
+  CheckerComplete L checker ∧ CheckerSound L checker
 
 /-- A prefix checker is complete on `Class` when every completable partial input
 in that class is accepted. -/
@@ -53,6 +101,16 @@ def PrefixCheckerSoundOn
     (prefixChecker : Partial → Prop) : Prop :=
   ∀ p, Class p → prefixChecker p → Completable L Completes p
 
+/-- A prefix checker is exact on `Class` when it is both complete and sound
+there. -/
+def PrefixCheckerExactOn
+    (Class : Partial → Prop)
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (prefixChecker : Partial → Prop) : Prop :=
+  PrefixCheckerCompleteOn Class L Completes prefixChecker ∧
+    PrefixCheckerSoundOn Class L Completes prefixChecker
+
 /-- A prefix checker is globally complete when it is complete on all partial
 inputs. -/
 def PrefixCheckerComplete
@@ -68,14 +126,12 @@ def PrefixCheckerSound
     (prefixChecker : Partial → Prop) : Prop :=
   PrefixCheckerSoundOn (fun _ => True) L Completes prefixChecker
 
-/-- A sealor is sound on `Class` when a valid sealed program witnesses that
-the original partial input has a valid completion. -/
-def SealorSoundOn
-    (Class : Partial → Prop)
+/-- A prefix checker is globally exact when it is exact on all partial inputs. -/
+def PrefixCheckerExact
     (L : Complete → Prop)
     (Completes : Partial → Complete → Prop)
-    (sealFn : Partial → Complete) : Prop :=
-  ∀ p, Class p → L (sealFn p) → Completable L Completes p
+    (prefixChecker : Partial → Prop) : Prop :=
+  PrefixCheckerExactOn (fun _ => True) L Completes prefixChecker
 
 /-- A complete syntax tree extends a string when parsing the string with some
 appended suffix produces that tree. -/
@@ -91,19 +147,17 @@ def SealorPrefixChecker
   checker (sealFn p)
 
 theorem sealor_completeness_lifts_to_prefix_checkers
+    {Class : Partial → Prop}
     {L : Complete → Prop}
     {Completes : Partial → Complete → Prop}
     {sealFn : Partial → Complete}
     {checker : Complete → Prop}
-    (hSeal : SealorComplete L Completes sealFn)
+    (hSeal : SealorCompleteOn Class L Completes sealFn)
     (hChecker : CheckerComplete L checker) :
-    PrefixCheckerComplete L Completes
+    PrefixCheckerCompleteOn Class L Completes
       (SealorPrefixChecker checker sealFn) := by
-  intro p _ hp
-  rcases hp with ⟨c, hCompletes, hValid⟩
-  apply hChecker
-  exact Classical.byContradiction (fun hSealInvalid =>
-    hSeal p hSealInvalid c hCompletes hValid)
+  intro p hClass hp
+  exact hChecker (sealFn p) (hSeal p hClass hp)
 
 /-- The soundness direction of Theorem 3.2: sealor soundness and compiler
 soundness imply soundness of the induced generative compiler. -/
@@ -120,16 +174,20 @@ theorem sealor_soundness_lifts_to_prefix_checkers
   intro p hClass hAccepted
   exact hSeal p hClass (hChecker (sealFn p) hAccepted)
 
-theorem sealor_complete_accepts_all_completable_sealings
+/-- The combined consequence of Theorem 3.2: exactness of a sealor and the
+underlying checker imply exactness of the induced generative compiler. -/
+theorem sealor_exactness_lifts_to_prefix_checkers
+    {Class : Partial → Prop}
     {L : Complete → Prop}
     {Completes : Partial → Complete → Prop}
     {sealFn : Partial → Complete}
-    (hSeal : SealorComplete L Completes sealFn) :
-    ∀ p, Completable L Completes p → L (sealFn p) := by
-  intro p hp
-  rcases hp with ⟨c, hCompletes, hValid⟩
-  exact Classical.byContradiction (fun hSealInvalid =>
-    hSeal p hSealInvalid c hCompletes hValid)
+    {checker : Complete → Prop}
+    (hSeal : SealorExactOn Class L Completes sealFn)
+    (hChecker : CheckerExact L checker) :
+    PrefixCheckerExactOn Class L Completes
+      (SealorPrefixChecker checker sealFn) :=
+  ⟨sealor_completeness_lifts_to_prefix_checkers hSeal.1 hChecker.1,
+    sealor_soundness_lifts_to_prefix_checkers hSeal.2 hChecker.2⟩
 
 /-- The partial-syntax completeness theorem lifts to arbitrary strings once a
 decoder maps every string with a valid extension to a completable partial tree.

@@ -20,14 +20,15 @@ def emptyProgramSealor (_ : PartialProgram) : Program :=
 
 theorem emptyProgramSealor_complete :
     SealorComplete ProgramWellTyped CompletesProgram emptyProgramSealor := by
-  intro p hInvalid full _hCompletion hFull
-  exact hInvalid ⟨.unit, FWRust.Paper.Env.empty,
+  intro _p _hGlobal _hCompletable
+  exact ⟨.unit, FWRust.Paper.Env.empty,
     FWRust.Paper.TermTyping.const FWRust.Paper.ValueTyping.unit⟩
 
 theorem emptyProgramSealor_prefixChecker_complete :
     PrefixCheckerComplete ProgramWellTyped CompletesProgram
       (SealorPrefixChecker programWellTyped emptyProgramSealor) := by
   exact sealor_completeness_lifts_to_prefix_checkers
+    (Class := fun _ => True)
     emptyProgramSealor_complete
     programWellTyped_complete
 
