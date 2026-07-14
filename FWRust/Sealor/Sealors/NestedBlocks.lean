@@ -28,7 +28,7 @@ def sealTerm (currentLifetime : Lifetime) : PartialTerm → Term
   | Generated.PartialTerm.done term => term
   | Generated.PartialTerm.intN _ => epsilonTerm
   | Generated.PartialTerm.blockTerms lifetime terms =>
-      SyntaxCtor.ctermBlock_ctor lifetime (sealTerms lifetime terms)
+      CompleteDsl.block lifetime (sealTerms lifetime terms)
   | frontier =>
       (sealTermStmts currentLifetime frontier).headD epsilonTerm
 termination_by p => (sizeOf p, 1)
@@ -43,7 +43,7 @@ def sealTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | Generated.PartialTerm.intN _ => []
   | Generated.PartialTerm.blockStart => []
   | Generated.PartialTerm.blockTerms lifetime terms =>
-      [SyntaxCtor.ctermBlock_ctor lifetime (sealTerms lifetime terms)]
+      [CompleteDsl.block lifetime (sealTerms lifetime terms)]
   | Generated.PartialTerm.letMutStart => []
   | Generated.PartialTerm.letMutName _ => []
   | Generated.PartialTerm.letMutRhs _ term =>
@@ -318,7 +318,7 @@ theorem nestedBlocksPrefixChecker_complete :
   exact sealProgram_wellTyped_of_completion hCompletion hFull
 
 /-- String-level global completeness, conditional only on the parser bridge
-from extendable strings to the generated partial-syntax realization relation. -/
+from extendable strings to the partial-syntax realization relation. -/
 theorem nestedBlocksPrefixChecker_complete_on_strings
     (parse : String → Option Program)
     (decode : String → PartialProgram)

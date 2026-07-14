@@ -1,7 +1,7 @@
 import FWRust.Sealor.Generated.PartialProgram
 
 /-!
-Compatibility import for the generated partial-program grammar.
+Public facade for the partial-program grammar and completion relation.
 -/
 
 namespace ConservativeSealor

@@ -3,5 +3,5 @@ import FWRust.Sealor.Sealors.Empty
 import FWRust.Sealor.Sealors.NestedBlocks
 
 /-!
-Sealor machinery for generated partial FWRust frontiers.
+Sealor machinery for partial FWRust frontiers.
 -/
