@@ -35,11 +35,14 @@ def CheckerSound
     (checker : Complete → Prop) : Prop :=
   ∀ c, checker c → L c
 
-def PrefixCheckerComplete
+/-- A prefix checker is complete on `Class` when every completable partial input
+in that class is accepted. -/
+def PrefixCheckerCompleteOn
+    (Class : Partial → Prop)
     (L : Complete → Prop)
     (Completes : Partial → Complete → Prop)
     (prefixChecker : Partial → Prop) : Prop :=
-  ∀ p, Completable L Completes p → prefixChecker p
+  ∀ p, Class p → Completable L Completes p → prefixChecker p
 
 /-- A prefix checker is sound on `Class` when every accepted partial input in
 that class has a valid completion. -/
@@ -49,6 +52,21 @@ def PrefixCheckerSoundOn
     (Completes : Partial → Complete → Prop)
     (prefixChecker : Partial → Prop) : Prop :=
   ∀ p, Class p → prefixChecker p → Completable L Completes p
+
+/-- A prefix checker is globally complete when it is complete on all partial
+inputs. -/
+def PrefixCheckerComplete
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (prefixChecker : Partial → Prop) : Prop :=
+  PrefixCheckerCompleteOn (fun _ => True) L Completes prefixChecker
+
+/-- A prefix checker is globally sound when it is sound on all partial inputs. -/
+def PrefixCheckerSound
+    (L : Complete → Prop)
+    (Completes : Partial → Complete → Prop)
+    (prefixChecker : Partial → Prop) : Prop :=
+  PrefixCheckerSoundOn (fun _ => True) L Completes prefixChecker
 
 /-- A sealor is sound on `Class` when a valid sealed program witnesses that
 the original partial input has a valid completion. -/
@@ -81,7 +99,7 @@ theorem conservative_sealors_give_complete_prefix_checkers
     (hChecker : CheckerComplete L checker) :
     PrefixCheckerComplete L Completes
       (SealorPrefixChecker checker sealFn) := by
-  intro p hp
+  intro p _ hp
   rcases hp with ⟨c, hCompletes, hValid⟩
   apply hChecker
   exact Classical.byContradiction (fun hSealInvalid =>
@@ -128,8 +146,9 @@ theorem partialSyntax_completeness_lifts_to_strings
       Completable L Completes (decode rawPrefix)) :
     PrefixCheckerComplete L (StringExtensionCompletes parse)
       (fun rawPrefix => prefixChecker (decode rawPrefix)) := by
-  intro rawPrefix hCompletable
-  exact hPartial (decode rawPrefix) (hDecode rawPrefix hCompletable)
+  intro rawPrefix _ hCompletable
+  exact hPartial (decode rawPrefix) trivial
+    (hDecode rawPrefix hCompletable)
 
 /-- Partial-syntax soundness on a class lifts to strings when decoding preserves
 the class and every partial completion is realized by a string extension. -/

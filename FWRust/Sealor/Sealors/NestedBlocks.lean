@@ -313,7 +313,7 @@ theorem sealProgram_wellTyped_of_completion
 theorem nestedBlocksPrefixChecker_complete :
     PrefixCheckerComplete ProgramWellTyped CompletesProgram
       nestedBlocksPrefixChecker := by
-  intro p hp
+  intro p _ hp
   rcases hp with ⟨full, hCompletion, hFull⟩
   exact sealProgram_wellTyped_of_completion hCompletion hFull
 
