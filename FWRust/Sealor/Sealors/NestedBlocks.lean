@@ -5,18 +5,17 @@ A syntax-directed FWRust frontier sealor mirroring the expression/statement
 split in `../rust_constraining/constraining/src/ast_copier.rs`, specialized to
 the FWRust core syntax.
 
-The old sealor used a synthetic diverging `missing` term.  The current core
-calculus has no such term, so this version uses `epsilonTerm` (`()`) where an
-expression is required and omits unavailable statement-position fragments.
-Incomplete block-body frontiers are closed with a final `epsilonTerm`.  Partial
+The sealor uses `epsilonTerm` (`()`) where an expression is required and omits
+unavailable statement-position fragments. Incomplete block-body frontiers are
+closed with a final `epsilonTerm`. Partial
 assignment frontiers keep only the sealed RHS statement; the LHS is not
-rebuilt.  Integer frontiers and bare block-start frontiers are treated as
-unavailable fragments rather than as self-contained generated terms.
+rebuilt. Integer frontiers are unavailable fragments. Prefixes consisting only
+of keywords are represented by `PartialTerm.cutoff`, the paper's hole case.
 -/
 
 namespace ConservativeSealor
 
-/-- The core-calculus replacement for the old `missing` expression. -/
+/-- The well-typed placeholder for sealing unavailable expressions. -/
 abbrev epsilonTerm : Term :=
   .val .unit
 
@@ -41,30 +40,24 @@ def sealTermStmts (currentLifetime : Lifetime) : PartialTerm → List Term
   | PartialTerm.cutoff => []
   | PartialTerm.done term => [term]
   | PartialTerm.intN _ => []
-  | PartialTerm.blockStart => []
   | PartialTerm.blockTerms lifetime terms =>
       [CompleteProgram.block lifetime (sealTerms lifetime terms)]
-  | PartialTerm.letMutStart => []
   | PartialTerm.letMutName _ => []
   | PartialTerm.letMutRhs _ term =>
       sealTermStmts currentLifetime term
   | PartialTerm.lvalStart _ => []
   | PartialTerm.assignRhs _ rhs =>
       sealTermStmts currentLifetime rhs
-  | PartialTerm.boxStart => []
   | PartialTerm.boxOperand operand =>
       sealTermStmts currentLifetime operand
-  | PartialTerm.tokenAmpStart => []
   | PartialTerm.borrowSharedOperand _ => []
   | PartialTerm.borrowMutOperand _ => []
-  | PartialTerm.copyStart => []
   | PartialTerm.copyOperand _ => []
 termination_by p => (sizeOf p, 0)
 
 /-- Seal a block-body frontier (`ast_copier.visit_stmts`), preserving the
 complete statement prefix and sealing the single partial tail.
-Incomplete bodies are closed with `epsilonTerm`, the core replacement for the
-old `missing` placeholder. -/
+Incomplete bodies are closed with `epsilonTerm`. -/
 def sealTerms (currentLifetime : Lifetime) : PartialTerms → List Term
   | PartialTerms.cutoff => [epsilonTerm, epsilonTerm]
   | PartialTerms.done xs => xs
@@ -197,9 +190,6 @@ theorem sealTerm_typed {currentLifetime : Lifetime} {p : PartialTerm}
   case intN =>
       cases hcomp
       simp only [sealTerm]
-      exact ⟨.unit, env, epsilonTerm_typed⟩
-  case blockStart =>
-      simp only [sealTerm, sealTermStmts]
       exact ⟨.unit, env, epsilonTerm_typed⟩
   case blockTerms blockLifetime terms =>
       cases hcomp with

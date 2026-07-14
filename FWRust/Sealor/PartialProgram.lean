@@ -7,7 +7,6 @@ Partial FWRust syntax and its completion relation.
 namespace ConservativeSealor
 
 inductive PartialName where
-  | cutoff
   | done (x : Name)
   | prefix (x : Name)
   deriving Repr
@@ -20,33 +19,18 @@ inductive PartialTerms where
   | elems (pre : List Term) (tail : Option PartialTerm)
   deriving Repr
 
-inductive PartialTy where
-  | cutoff
-  | done (x : Ty)
-  -- partial syntax: `& lval ...`
-  | borrowSharedTargets (target : PartialLVal)
-  -- partial syntax: `& mut lval ...`
-  | borrowMutTargets (target : PartialLVal)
-  -- partial syntax: `box ty ...`
-  | boxElement (element : PartialTy)
-  -- partial syntax: `& ...`
-  | tokenAmpStart
-  -- partial syntax: `box ...`
-  | boxStart
-  deriving Repr
-
 inductive PartialLVal where
+  -- Nothing decoded at the lvalue frontier.
   | cutoff
   | done (x : LVal)
   -- partial syntax: `name ...`
   | varX (x : PartialName)
   -- partial syntax: `* lval ...`
   | derefOperand (operand : PartialLVal)
-  -- partial syntax: `* ...`
-  | derefStart
   deriving Repr
 
 inductive PartialTerm where
+  -- Nothing decoded at the term frontier, including keyword-only prefixes.
   | cutoff
   | done (x : Term)
   -- partial syntax: `num ...`
@@ -69,26 +53,16 @@ inductive PartialTerm where
   | borrowMutOperand (operand : PartialLVal)
   -- partial syntax: `copy lval ...`
   | copyOperand (operand : PartialLVal)
-  -- partial syntax: `block ...`
-  | blockStart
-  -- partial syntax: `let ...`
-  | letMutStart
-  -- partial syntax: `box ...`
-  | boxStart
-  -- partial syntax: `& ...`
-  | tokenAmpStart
-  -- partial syntax: `copy ...`
-  | copyStart
   deriving Repr
 
 end
 
 abbrev PartialProgram := PartialTerm
 
-/-- A generated name fragment realizes exactly the names whose text extends
-that fragment. -/
+/-- A nonempty generated name fragment realizes exactly the names whose text
+extends that fragment. -/
 def NamePrefix (fragment complete : Name) : Prop :=
-  String.isPrefixOf fragment complete = true
+  fragment ≠ "" ∧ String.isPrefixOf fragment complete = true
 
 /-- Prefixing for canonical decimal integer spellings. This intentionally does
 not model radix prefixes, digit separators, or other surface syntax. -/
@@ -98,8 +72,6 @@ def DecimalIntPrefix (fragment complete : Int) : Prop :=
 inductive CompletesName : PartialName → Name → Prop where
   | done {x} :
       CompletesName (PartialName.done x) x
-  | cutoff {x} :
-      CompletesName PartialName.cutoff x
   | prefix {x y} :
       NamePrefix x y →
       CompletesName (PartialName.prefix x) y
@@ -119,37 +91,6 @@ inductive CompletesTerms : PartialTerms → List Term → Prop where
       CompletesTerms (PartialTerms.elems pre (some frontier))
         (pre ++ frontierCompletion :: suffix)
 
-inductive CompletesTy : PartialTy → Ty → Prop where
-  | done {x} :
-      CompletesTy (PartialTy.done x) x
-  | cutoff {x} :
-      CompletesTy PartialTy.cutoff x
-  -- partial syntax: `& lval ...`
-  | ctyBorrowShared_borrowSharedTargets {target : PartialLVal} {target' : LVal} :
-      CompletesLVal target target' →
-      CompletesTy (PartialTy.borrowSharedTargets target)
-        (CompleteProgram.tyBorrow false target')
-  -- partial syntax: `& mut lval ...`
-  | ctyBorrowMut_borrowMutTargets {target : PartialLVal} {target' : LVal} :
-      CompletesLVal target target' →
-      CompletesTy (PartialTy.borrowMutTargets target)
-        (CompleteProgram.tyBorrow true target')
-  -- partial syntax: `box ty ...`
-  | ctyBox_boxElement {element : PartialTy} {element' : Ty} :
-      CompletesTy element element' →
-      CompletesTy (PartialTy.boxElement element) (CompleteProgram.tyBox element')
-  -- partial syntax: `& ...`
-  | ctyBorrowShared_tokenAmpStart {target : LVal} :
-      CompletesTy (PartialTy.tokenAmpStart)
-        (CompleteProgram.tyBorrow false target)
-  -- partial syntax: `& ...`
-  | ctyBorrowMut_tokenAmpStart {target : LVal} :
-      CompletesTy (PartialTy.tokenAmpStart)
-        (CompleteProgram.tyBorrow true target)
-  -- partial syntax: `box ...`
-  | ctyBox_boxStart {element : Ty} :
-      CompletesTy (PartialTy.boxStart) (CompleteProgram.tyBox element)
-
 inductive CompletesLVal : PartialLVal → LVal → Prop where
   | done {x} :
       CompletesLVal (PartialLVal.done x) x
@@ -164,9 +105,6 @@ inductive CompletesLVal : PartialLVal → LVal → Prop where
       CompletesLVal operand operand' →
       CompletesLVal (PartialLVal.derefOperand operand)
         (CompleteProgram.lvalDeref operand')
-  -- partial syntax: `* ...`
-  | clvalDeref_derefStart {operand : LVal} :
-      CompletesLVal (PartialLVal.derefStart) (CompleteProgram.lvalDeref operand)
 
 inductive CompletesTerm : PartialTerm → Term → Prop where
   | done {x} :
@@ -224,27 +162,6 @@ inductive CompletesTerm : PartialTerm → Term → Prop where
   | ctermCopy_copyOperand {operand : PartialLVal} {operand' : LVal} :
       CompletesLVal operand operand' →
       CompletesTerm (PartialTerm.copyOperand operand) (CompleteProgram.copy operand')
-  -- partial syntax: `block ...`
-  | ctermBlock_blockStart {lifetime : Lifetime} {terms : List Term} :
-      CompletesTerm (PartialTerm.blockStart) (CompleteProgram.block lifetime terms)
-  -- partial syntax: `let ...`
-  | ctermLetMut_letMutStart {name : Name} {initialiser : Term} :
-      CompletesTerm (PartialTerm.letMutStart)
-        (CompleteProgram.letMut name initialiser)
-  -- partial syntax: `box ...`
-  | ctermBox_boxStart {operand : Term} :
-      CompletesTerm (PartialTerm.boxStart) (CompleteProgram.box operand)
-  -- partial syntax: `& ...`
-  | ctermBorrowShared_tokenAmpStart {operand : LVal} :
-      CompletesTerm (PartialTerm.tokenAmpStart)
-        (CompleteProgram.borrow false operand)
-  -- partial syntax: `& ...`
-  | ctermBorrowMut_tokenAmpStart {operand : LVal} :
-      CompletesTerm (PartialTerm.tokenAmpStart)
-        (CompleteProgram.borrow true operand)
-  -- partial syntax: `copy ...`
-  | ctermCopy_copyStart {operand : LVal} :
-      CompletesTerm (PartialTerm.copyStart) (CompleteProgram.copy operand)
 
 end
 
